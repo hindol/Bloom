@@ -152,6 +152,14 @@ See [PICKER_SURFACES.md](PICKER_SURFACES.md) for detailed wireframes of each pic
 
 ---
 
+## File Info
+
+| Binding | Action |
+|---------|--------|
+| `Ctrl+G` | Show full file path, line count, and cursor position |
+
+---
+
 ## Bloom-Specific Vim Text Objects
 
 | Object | Syntax | Selects |

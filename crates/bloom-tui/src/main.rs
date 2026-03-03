@@ -338,6 +338,12 @@ impl EditorState {
             return;
         }
 
+        // Ctrl+G: show file info (Vim-style)
+        if key.code == KeyCode::Char('g') && key.modifiers.ctrl {
+            self.show_file_info();
+            return;
+        }
+
         // 1. Try keymap dispatcher (platform shortcuts, picker, quick-capture)
         let ctx = EditorContext {
             mode: self.vim.mode(),
@@ -916,6 +922,32 @@ impl EditorState {
         {
             self.notification = None;
         }
+    }
+
+    fn show_file_info(&mut self) {
+        let total_lines = self.buffer.text().len_lines();
+        let rope = self.buffer.text();
+        let cur_line = rope.char_to_line(
+            self.cursor
+                .min(self.buffer.len_chars().saturating_sub(1).max(0)),
+        );
+        let pct = if total_lines > 0 {
+            ((cur_line + 1) * 100) / total_lines
+        } else {
+            0
+        };
+        let dirty = if self.buffer.is_dirty() {
+            " [Modified]"
+        } else {
+            ""
+        };
+        self.notify(
+            format!(
+                "\"{}\" {total_lines} lines --{pct}%--{dirty}",
+                self.filename
+            ),
+            NotificationLevel::Info,
+        );
     }
 
     fn toggle_agenda(&mut self) {
