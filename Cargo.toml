@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/bloom-core",
+    "crates/bloom-tui",
+    "crates/bloom-gui",
+    "crates/bloom-mcp",
+    "crates/bloom-import",
+    "crates/bloom-test-harness",
+]

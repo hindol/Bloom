@@ -1,0 +1,85 @@
+use crossbeam::channel;
+use std::collections::HashMap;
+use std::fs;
+use std::io::Write;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+pub struct WriteRequest {
+    pub path: PathBuf,
+    pub content: String,
+}
+
+pub struct DiskWriter {
+    rx: channel::Receiver<WriteRequest>,
+    debounce_ms: u64,
+}
+
+impl DiskWriter {
+    pub fn new(debounce_ms: u64) -> (Self, channel::Sender<WriteRequest>) {
+        let (tx, rx) = channel::unbounded();
+        (Self { rx, debounce_ms }, tx)
+    }
+
+    /// Run on a dedicated OS thread. Debounces writes per path, then does
+    /// atomic write → fsync → rename.
+    pub fn start(self) {
+        let debounce = Duration::from_millis(self.debounce_ms);
+        // Track latest content and when we first saw a pending write for each path.
+        let mut pending: HashMap<PathBuf, (String, Instant)> = HashMap::new();
+
+        loop {
+            let timeout = pending
+                .values()
+                .map(|(_, t)| debounce.saturating_sub(t.elapsed()))
+                .min()
+                .unwrap_or(debounce);
+
+            match self.rx.recv_timeout(timeout) {
+                Ok(req) => {
+                    let entry = pending
+                        .entry(req.path)
+                        .or_insert_with(|| (String::new(), Instant::now()));
+                    entry.0 = req.content;
+                }
+                Err(channel::RecvTimeoutError::Timeout) => {}
+                Err(channel::RecvTimeoutError::Disconnected) => {
+                    // Flush remaining writes before exiting.
+                    for (path, (content, _)) in pending.drain() {
+                        let _ = atomic_write(&path, &content);
+                    }
+                    return;
+                }
+            }
+
+            // Flush any entries whose debounce window has elapsed.
+            let now = Instant::now();
+            let ready: Vec<PathBuf> = pending
+                .iter()
+                .filter(|(_, (_, t))| now.duration_since(*t) >= debounce)
+                .map(|(p, _)| p.clone())
+                .collect();
+
+            for path in ready {
+                if let Some((content, _)) = pending.remove(&path) {
+                    if let Err(e) = atomic_write(&path, &content) {
+                        tracing::error!("disk write failed for {}: {}", path.display(), e);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Write content to a temp file, fsync, then rename over the target.
+fn atomic_write(path: &PathBuf, content: &str) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension("tmp");
+    let mut file = fs::File::create(&tmp)?;
+    file.write_all(content.as_bytes())?;
+    file.sync_all()?;
+    fs::rename(&tmp, path)?;
+    Ok(())
+}

@@ -1,0 +1,8 @@
+[package]
+name = "bloom-import"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bloom-core = { path = "../bloom-core" }
+tracing = "0.1"

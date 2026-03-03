@@ -1,0 +1,9 @@
+[package]
+name = "bloom-test-harness"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bloom-core = { path = "../bloom-core" }
+tempfile = "3"
+insta = "1"

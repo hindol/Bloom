@@ -1,0 +1,103 @@
+use rusqlite::types::ToSql;
+
+use super::{Index, SearchFilters, SearchResult};
+
+impl Index {
+    pub fn search(&self, query: &str, filters: &SearchFilters) -> Vec<SearchResult> {
+        let mut sql = String::from(
+            "SELECT p.id, p.title, p.created, p.path, f.content, f.rank \
+             FROM pages_fts f \
+             JOIN pages p ON p.id = f.page_id \
+             WHERE pages_fts MATCH ?1",
+        );
+        let mut params: Vec<Box<dyn ToSql>> = vec![Box::new(query.to_string())];
+        let mut idx = 2;
+
+        for tag in &filters.tags {
+            sql.push_str(&format!(
+                " AND EXISTS (SELECT 1 FROM tags WHERE page_id = p.id AND tag = ?{})",
+                idx
+            ));
+            params.push(Box::new(tag.0.clone()));
+            idx += 1;
+        }
+
+        if let Some((start, end)) = &filters.date_range {
+            sql.push_str(&format!(
+                " AND p.created >= ?{} AND p.created <= ?{}",
+                idx,
+                idx + 1
+            ));
+            params.push(Box::new(start.to_string()));
+            params.push(Box::new(end.to_string()));
+            idx += 2;
+        }
+
+        if let Some(ref target) = filters.links_to {
+            sql.push_str(&format!(
+                " AND EXISTS (SELECT 1 FROM links WHERE from_page = p.id AND to_page = ?{})",
+                idx
+            ));
+            params.push(Box::new(target.to_hex()));
+            idx += 1;
+        }
+
+        if let Some(done) = filters.task_status {
+            sql.push_str(&format!(
+                " AND EXISTS (SELECT 1 FROM tasks WHERE page_id = p.id AND done = ?{})",
+                idx
+            ));
+            params.push(Box::new(done as i32));
+            idx += 1;
+        }
+
+        let _ = idx;
+        sql.push_str(" ORDER BY f.rank");
+
+        let mut stmt = match self.conn.prepare(&sql) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let param_refs: Vec<&dyn ToSql> = params.iter().map(|p| p.as_ref()).collect();
+
+        let rows: Vec<_> = match stmt.query_map(param_refs.as_slice(), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, f64>(5)?,
+            ))
+        }) {
+            Ok(r) => r.filter_map(|r| r.ok()).collect(),
+            Err(_) => return Vec::new(),
+        };
+
+        let query_lower = query.to_lowercase();
+        let mut results = Vec::new();
+
+        for (id, title, created, path, content, rank) in &rows {
+            let page_meta = self.row_to_page_meta(id, title, created, path);
+            let score = -rank;
+
+            for (line_num, line_text) in content.lines().enumerate() {
+                if line_text.to_lowercase().contains(&query_lower) {
+                    results.push(SearchResult {
+                        page: page_meta.clone(),
+                        line: line_num,
+                        line_text: line_text.to_string(),
+                        score,
+                    });
+                }
+            }
+        }
+
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        results
+    }
+}

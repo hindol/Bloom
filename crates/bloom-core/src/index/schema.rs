@@ -1,0 +1,55 @@
+use rusqlite::Connection;
+
+use crate::error::BloomError;
+
+pub(crate) fn create_tables(conn: &Connection) -> Result<(), BloomError> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS pages (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            created TEXT NOT NULL,
+            path TEXT NOT NULL UNIQUE
+        );
+
+        CREATE TABLE IF NOT EXISTS tags (
+            page_id TEXT NOT NULL,
+            tag TEXT NOT NULL,
+            PRIMARY KEY (page_id, tag),
+            FOREIGN KEY (page_id) REFERENCES pages(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS links (
+            from_page TEXT NOT NULL,
+            to_page TEXT NOT NULL,
+            display_hint TEXT,
+            section TEXT,
+            line INTEGER,
+            FOREIGN KEY (from_page) REFERENCES pages(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS tasks (
+            page_id TEXT NOT NULL,
+            line INTEGER NOT NULL,
+            text TEXT NOT NULL,
+            done INTEGER NOT NULL DEFAULT 0,
+            due_date TEXT,
+            start_date TEXT,
+            FOREIGN KEY (page_id) REFERENCES pages(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS block_ids (
+            page_id TEXT NOT NULL,
+            block_id TEXT NOT NULL,
+            line INTEGER NOT NULL,
+            PRIMARY KEY (page_id, block_id),
+            FOREIGN KEY (page_id) REFERENCES pages(id)
+        );
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
+            title, content, page_id UNINDEXED
+        );
+        ",
+    )
+    .map_err(|e| BloomError::IndexError(e.to_string()))
+}
