@@ -122,6 +122,110 @@ pub struct BloomEditor {
     quick_capture: Option<QuickCaptureState>,
     notifications: Vec<render::Notification>,
     viewport: render::Viewport,
+    wizard: Option<SetupWizardState>,
+    vault_root: Option<std::path::PathBuf>,
+}
+
+// ---------------------------------------------------------------------------
+// Setup wizard state machine
+// ---------------------------------------------------------------------------
+
+struct SetupWizardState {
+    step: WizardStep,
+    vault_path: String,
+    vault_path_cursor: usize,
+    import_choice: render::ImportChoice,
+    logseq_path: String,
+    logseq_path_cursor: usize,
+    import_progress: Option<render::ImportProgress>,
+    stats: render::WizardStats,
+    error: Option<String>,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum WizardStep {
+    Welcome,
+    ChooseVault,
+    ImportChoice,
+    ImportPath,
+    ImportRunning,
+    Complete,
+}
+
+impl SetupWizardState {
+    fn new() -> Self {
+        Self {
+            step: WizardStep::Welcome,
+            vault_path: default_vault_path(),
+            vault_path_cursor: default_vault_path().len(),
+            import_choice: render::ImportChoice::No,
+            logseq_path: String::new(),
+            logseq_path_cursor: 0,
+            import_progress: None,
+            stats: render::WizardStats {
+                pages: 0,
+                journals: 0,
+            },
+            error: None,
+        }
+    }
+
+    fn to_frame(&self) -> render::SetupWizardFrame {
+        render::SetupWizardFrame {
+            step: match self.step {
+                WizardStep::Welcome => render::SetupStep::Welcome,
+                WizardStep::ChooseVault => render::SetupStep::ChooseVaultLocation,
+                WizardStep::ImportChoice => render::SetupStep::ImportChoice,
+                WizardStep::ImportPath => render::SetupStep::ImportPath,
+                WizardStep::ImportRunning => render::SetupStep::ImportRunning,
+                WizardStep::Complete => render::SetupStep::Complete,
+            },
+            vault_path: self.vault_path.clone(),
+            vault_path_cursor: self.vault_path_cursor,
+            logseq_path: self.logseq_path.clone(),
+            logseq_path_cursor: self.logseq_path_cursor,
+            import_choice: self.import_choice,
+            import_progress: None, // Logseq import not yet implemented
+            stats: render::WizardStats {
+                pages: self.stats.pages,
+                journals: self.stats.journals,
+            },
+            error: self.error.clone(),
+        }
+    }
+}
+
+pub fn default_vault_path() -> String {
+    if let Some(home) = home_dir() {
+        let p = home.join(".bloom");
+        p.to_string_lossy().to_string()
+    } else {
+        ".bloom".to_string()
+    }
+}
+
+fn home_dir() -> Option<std::path::PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var("USERPROFILE")
+            .ok()
+            .map(std::path::PathBuf::from)
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var("HOME")
+            .ok()
+            .map(std::path::PathBuf::from)
+    }
+}
+
+fn expand_tilde(path: &str) -> String {
+    if path.starts_with("~/") || path == "~" {
+        if let Some(home) = home_dir() {
+            return path.replacen('~', &home.to_string_lossy(), 1);
+        }
+    }
+    path.to_string()
 }
 
 enum PickerState {
@@ -177,6 +281,8 @@ impl BloomEditor {
             quick_capture: None,
             notifications: Vec::new(),
             viewport: render::Viewport::new(24, 80),
+            wizard: None,
+            vault_root: None,
             config,
         })
     }
@@ -188,7 +294,25 @@ impl BloomEditor {
         self.journal = Some(journal::Journal::new(vault_root));
         let templates_dir = vault_root.join(".bloom").join("templates");
         self.template_engine = Some(template::TemplateEngine::new(&templates_dir));
+        self.vault_root = Some(vault_root.to_path_buf());
         Ok(())
+    }
+
+    /// Check if the setup wizard should run (no vault at default path).
+    pub fn needs_setup(&self) -> bool {
+        let default = default_vault_path();
+        let root = std::path::Path::new(&default);
+        !root.join(".bloom").join("config.toml").exists()
+    }
+
+    /// Start the setup wizard.
+    pub fn start_wizard(&mut self) {
+        self.wizard = Some(SetupWizardState::new());
+    }
+
+    /// Whether the wizard is currently active.
+    pub fn wizard_active(&self) -> bool {
+        self.wizard.is_some()
     }
 
     /// Perform startup according to config. Guarantees `active_page` is `Some` on return.
@@ -247,6 +371,11 @@ impl BloomEditor {
 
     /// Process a key event
     pub fn handle_key(&mut self, key: types::KeyEvent) -> Vec<keymap::dispatch::Action> {
+        // If wizard is active, route all keys there
+        if self.wizard.is_some() {
+            return self.handle_wizard_key(&key);
+        }
+
         // Check platform shortcuts first
         if let Some(action) = keymap::platform_shortcut(&key) {
             return vec![action];
@@ -328,6 +457,161 @@ impl BloomEditor {
         }
     }
 
+    fn handle_wizard_key(&mut self, key: &types::KeyEvent) -> Vec<keymap::dispatch::Action> {
+        use types::KeyCode;
+        // Ctrl+Q quits even during wizard
+        if key.modifiers.ctrl && key.code == KeyCode::Char('q') {
+            return vec![keymap::dispatch::Action::Quit];
+        }
+
+        let wiz = self.wizard.as_mut().unwrap();
+        wiz.error = None; // Clear error on any key
+
+        match wiz.step {
+            WizardStep::Welcome => match &key.code {
+                KeyCode::Enter => {
+                    wiz.step = WizardStep::ChooseVault;
+                }
+                _ => {}
+            },
+            WizardStep::ChooseVault => match &key.code {
+                KeyCode::Enter => {
+                    let path_str = expand_tilde(&wiz.vault_path);
+                    let root = std::path::PathBuf::from(&path_str);
+                    // Check if already initialized
+                    if root.join(".bloom").join("config.toml").exists() {
+                        // Existing vault — skip to complete
+                        wiz.step = WizardStep::Complete;
+                        wiz.vault_path = path_str;
+                    } else {
+                        // Try to create vault
+                        match vault::Vault::create(&root) {
+                            Ok(_) => {
+                                // Write minimal config.toml
+                                let config_path = root.join(".bloom").join("config.toml");
+                                let _ = std::fs::write(&config_path, "[startup]\nmode = \"Journal\"\n");
+                                wiz.vault_path = path_str;
+                                wiz.step = WizardStep::ImportChoice;
+                            }
+                            Err(e) => {
+                                wiz.error =
+                                    Some(format!("Cannot create directory: {}", e));
+                            }
+                        }
+                    }
+                }
+                KeyCode::Esc => {
+                    wiz.step = WizardStep::Welcome;
+                }
+                KeyCode::Char(c) => {
+                    let pos = wiz.vault_path_cursor;
+                    wiz.vault_path.insert(pos, *c);
+                    wiz.vault_path_cursor += 1;
+                }
+                KeyCode::Backspace => {
+                    if wiz.vault_path_cursor > 0 {
+                        wiz.vault_path_cursor -= 1;
+                        wiz.vault_path.remove(wiz.vault_path_cursor);
+                    }
+                }
+                KeyCode::Left => {
+                    wiz.vault_path_cursor = wiz.vault_path_cursor.saturating_sub(1);
+                }
+                KeyCode::Right => {
+                    wiz.vault_path_cursor =
+                        (wiz.vault_path_cursor + 1).min(wiz.vault_path.len());
+                }
+                KeyCode::Home => {
+                    wiz.vault_path_cursor = 0;
+                }
+                KeyCode::End => {
+                    wiz.vault_path_cursor = wiz.vault_path.len();
+                }
+                _ => {}
+            },
+            WizardStep::ImportChoice => match &key.code {
+                KeyCode::Enter => {
+                    if wiz.import_choice == render::ImportChoice::Yes {
+                        wiz.step = WizardStep::ImportPath;
+                    } else {
+                        wiz.step = WizardStep::Complete;
+                    }
+                }
+                KeyCode::Esc => {
+                    wiz.step = WizardStep::ChooseVault;
+                }
+                KeyCode::Up | KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('k') => {
+                    wiz.import_choice = match wiz.import_choice {
+                        render::ImportChoice::No => render::ImportChoice::Yes,
+                        render::ImportChoice::Yes => render::ImportChoice::No,
+                    };
+                }
+                _ => {}
+            },
+            WizardStep::ImportPath => match &key.code {
+                KeyCode::Enter => {
+                    let logseq_path = expand_tilde(&wiz.logseq_path);
+                    let lp = std::path::Path::new(&logseq_path);
+                    if !lp.join("pages").exists() && !lp.join("journals").exists() {
+                        wiz.error = Some(
+                            "Not a Logseq vault: missing pages/ directory".to_string(),
+                        );
+                    } else {
+                        // TODO: actual Logseq import (G13) — for now skip to Complete
+                        wiz.step = WizardStep::Complete;
+                    }
+                }
+                KeyCode::Esc => {
+                    wiz.step = WizardStep::ImportChoice;
+                }
+                KeyCode::Char(c) => {
+                    let pos = wiz.logseq_path_cursor;
+                    wiz.logseq_path.insert(pos, *c);
+                    wiz.logseq_path_cursor += 1;
+                }
+                KeyCode::Backspace => {
+                    if wiz.logseq_path_cursor > 0 {
+                        wiz.logseq_path_cursor -= 1;
+                        wiz.logseq_path.remove(wiz.logseq_path_cursor);
+                    }
+                }
+                KeyCode::Left => {
+                    wiz.logseq_path_cursor = wiz.logseq_path_cursor.saturating_sub(1);
+                }
+                KeyCode::Right => {
+                    wiz.logseq_path_cursor =
+                        (wiz.logseq_path_cursor + 1).min(wiz.logseq_path.len());
+                }
+                _ => {}
+            },
+            WizardStep::ImportRunning => {
+                // Non-interactive — import runs to completion
+            }
+            WizardStep::Complete => match &key.code {
+                KeyCode::Enter => {
+                    self.complete_wizard();
+                    return vec![keymap::dispatch::Action::Noop];
+                }
+                _ => {}
+            },
+        }
+
+        vec![keymap::dispatch::Action::Noop]
+    }
+
+    fn complete_wizard(&mut self) {
+        let vault_path = self
+            .wizard
+            .as_ref()
+            .map(|w| expand_tilde(&w.vault_path))
+            .unwrap_or_else(default_vault_path);
+        self.wizard = None;
+
+        let root = std::path::PathBuf::from(&vault_path);
+        let _ = self.init_vault(&root);
+        self.startup();
+    }
+
     fn translate_vim_action(
         &mut self,
         action: vim::VimAction,
@@ -378,6 +662,32 @@ impl BloomEditor {
 
     /// Produce the render frame
     pub fn render(&self) -> render::RenderFrame {
+        // If wizard is active, render wizard as a full-screen pane
+        if let Some(wiz) = &self.wizard {
+            return render::RenderFrame {
+                panes: vec![render::PaneFrame {
+                    id: types::PaneId(0),
+                    kind: render::PaneKind::SetupWizard(wiz.to_frame()),
+                    visible_lines: Vec::new(),
+                    cursor: render::CursorState::default(),
+                    scroll_offset: 0,
+                    is_active: true,
+                    title: String::new(),
+                    dirty: false,
+                    status_bar: render::StatusBar::default(),
+                }],
+                maximized: false,
+                hidden_pane_count: 0,
+                picker: None,
+                which_key: None,
+                command_line: None,
+                quick_capture: None,
+                date_picker: None,
+                dialog: None,
+                notification: None,
+            };
+        }
+
         let mut panes = Vec::new();
 
         for pane_id in self.window_mgr.all_pane_ids() {
@@ -752,6 +1062,149 @@ mod tests {
         editor.handle_key(KeyEvent::char('i'));
         let frame = editor.render();
         assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
+    }
+
+    // Wizard: starts at Welcome step
+    #[test]
+    fn test_wizard_starts_at_welcome() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        editor.start_wizard();
+        let frame = editor.render();
+        assert!(matches!(
+            frame.panes[0].kind,
+            render::PaneKind::SetupWizard(_)
+        ));
+        if let render::PaneKind::SetupWizard(sw) = &frame.panes[0].kind {
+            assert!(matches!(sw.step, render::SetupStep::Welcome));
+        }
+    }
+
+    // Wizard: Enter advances from Welcome to ChooseVault
+    #[test]
+    fn test_wizard_welcome_to_choose_vault() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        editor.start_wizard();
+        editor.handle_key(KeyEvent::enter());
+        let frame = editor.render();
+        if let render::PaneKind::SetupWizard(sw) = &frame.panes[0].kind {
+            assert!(matches!(sw.step, render::SetupStep::ChooseVaultLocation));
+            assert!(!sw.vault_path.is_empty()); // default path populated
+        } else {
+            panic!("expected wizard pane");
+        }
+    }
+
+    // Wizard: text input in vault path
+    #[test]
+    fn test_wizard_vault_path_input() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        editor.start_wizard();
+        editor.handle_key(KeyEvent::enter()); // → ChooseVault
+        // Clear and type a new path
+        // Use Ctrl+U-like approach: Home then type
+        editor.handle_key(KeyEvent {
+            code: KeyCode::Home,
+            modifiers: Modifiers::none(),
+        });
+        // Type 'x'
+        editor.handle_key(KeyEvent::char('x'));
+        let frame = editor.render();
+        if let render::PaneKind::SetupWizard(sw) = &frame.panes[0].kind {
+            assert!(sw.vault_path.starts_with('x'));
+        } else {
+            panic!("expected wizard pane");
+        }
+    }
+
+    // Wizard: Esc goes back from ChooseVault to Welcome
+    #[test]
+    fn test_wizard_esc_goes_back() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        editor.start_wizard();
+        editor.handle_key(KeyEvent::enter()); // → ChooseVault
+        editor.handle_key(KeyEvent::esc());   // → Welcome
+        let frame = editor.render();
+        if let render::PaneKind::SetupWizard(sw) = &frame.panes[0].kind {
+            assert!(matches!(sw.step, render::SetupStep::Welcome));
+        } else {
+            panic!("expected wizard pane");
+        }
+    }
+
+    // Wizard: import choice toggle
+    #[test]
+    fn test_wizard_import_choice_toggle() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        editor.start_wizard();
+        editor.handle_key(KeyEvent::enter()); // → ChooseVault
+
+        // Use a temp dir so vault creation succeeds
+        let dir = tempfile::TempDir::new().unwrap();
+        // Manually set the wizard path to the temp dir
+        if let Some(wiz) = &mut editor.wizard {
+            wiz.vault_path = dir.path().to_string_lossy().to_string();
+            wiz.vault_path_cursor = wiz.vault_path.len();
+        }
+        editor.handle_key(KeyEvent::enter()); // → ImportChoice
+
+        let frame = editor.render();
+        if let render::PaneKind::SetupWizard(sw) = &frame.panes[0].kind {
+            assert!(matches!(sw.step, render::SetupStep::ImportChoice));
+            assert_eq!(sw.import_choice, render::ImportChoice::No);
+        } else {
+            panic!("expected wizard pane");
+        }
+
+        // Toggle to Yes
+        editor.handle_key(KeyEvent::char('j'));
+        let frame = editor.render();
+        if let render::PaneKind::SetupWizard(sw) = &frame.panes[0].kind {
+            assert_eq!(sw.import_choice, render::ImportChoice::Yes);
+        } else {
+            panic!("expected wizard pane");
+        }
+    }
+
+    // Wizard: complete creates vault and opens journal
+    #[test]
+    fn test_wizard_complete_opens_journal() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        editor.start_wizard();
+        editor.handle_key(KeyEvent::enter()); // → ChooseVault
+
+        let dir = tempfile::TempDir::new().unwrap();
+        if let Some(wiz) = &mut editor.wizard {
+            wiz.vault_path = dir.path().to_string_lossy().to_string();
+            wiz.vault_path_cursor = wiz.vault_path.len();
+        }
+        editor.handle_key(KeyEvent::enter()); // → ImportChoice
+        editor.handle_key(KeyEvent::enter()); // → Complete (No import)
+        editor.handle_key(KeyEvent::enter()); // → Complete wizard
+
+        // Wizard should be gone, normal editor active
+        assert!(!editor.wizard_active());
+        let frame = editor.render();
+        assert!(!frame.panes.is_empty());
+        assert!(matches!(frame.panes[0].kind, render::PaneKind::Editor));
+        // Vault dirs should exist
+        assert!(dir.path().join("pages").exists());
+        assert!(dir.path().join("journal").exists());
+    }
+
+    // Wizard: Ctrl+Q quits during wizard
+    #[test]
+    fn test_wizard_ctrl_q_quits() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        editor.start_wizard();
+        let actions = editor.handle_key(KeyEvent::ctrl('q'));
+        assert!(actions.iter().any(|a| matches!(a, keymap::dispatch::Action::Quit)));
     }
 }
 

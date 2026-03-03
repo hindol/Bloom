@@ -108,12 +108,44 @@ pub struct TimelineEntryFrame {
 pub struct SetupWizardFrame {
     pub step: SetupStep,
     pub vault_path: String,
+    pub vault_path_cursor: usize,
+    pub logseq_path: String,
+    pub logseq_path_cursor: usize,
+    pub import_choice: ImportChoice,
+    pub import_progress: Option<ImportProgress>,
+    pub stats: WizardStats,
+    pub error: Option<String>,
 }
 
 pub enum SetupStep {
+    Welcome,
     ChooseVaultLocation,
-    ImportFromLogseq,
+    ImportChoice,
+    ImportPath,
+    ImportRunning,
     Complete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportChoice {
+    No,
+    Yes,
+}
+
+pub struct ImportProgress {
+    pub done: usize,
+    pub total: usize,
+    pub pages_imported: usize,
+    pub journals_imported: usize,
+    pub links_resolved: usize,
+    pub warnings: Vec<String>,
+    pub errors: Vec<String>,
+    pub finished: bool,
+}
+
+pub struct WizardStats {
+    pub pages: usize,
+    pub journals: usize,
 }
 
 // ---------------------------------------------------------------------------

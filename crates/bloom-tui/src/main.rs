@@ -6,6 +6,7 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use bloom_core::config::Config;
+use bloom_core::default_vault_path;
 use bloom_core::keymap::dispatch::Action;
 use bloom_core::BloomEditor;
 use crossterm::event::{self, Event, KeyEventKind};
@@ -41,8 +42,15 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
     let mut editor = BloomEditor::new(config)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{e:?}")))?;
 
-    // Startup: open initial buffer per config (default: today's journal)
-    editor.startup();
+    // First-run detection: show setup wizard if no vault exists
+    if editor.needs_setup() {
+        editor.start_wizard();
+    } else {
+        // Existing vault — initialize and startup normally
+        let vault_path = default_vault_path();
+        let _ = editor.init_vault(std::path::Path::new(&vault_path));
+        editor.startup();
+    }
 
     // Update viewport to terminal size
     let size = terminal.size()?;
