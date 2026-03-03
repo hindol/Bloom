@@ -1,36 +1,9 @@
 use crate::types::{PaneId, UndoNodeId};
 use chrono::NaiveDate;
-use std::ops::Range;
 use std::time::Instant;
 
-// Defined locally because `parser::highlight` is not yet implemented.
-// When it is, these should be re-exported from there instead.
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct StyledSpan {
-    pub range: Range<usize>,
-    pub style: Style,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Style {
-    Normal,
-    Heading { level: u8 },
-    Bold,
-    Italic,
-    Code,
-    CodeBlock,
-    Link,
-    Tag,
-    Timestamp,
-    BlockId,
-    ListMarker,
-    CheckboxUnchecked,
-    CheckboxChecked,
-    Frontmatter,
-    BrokenLink,
-    SyntaxNoise,
-}
+// Re-exported from parser::traits (shared between parser and render layers).
+pub use crate::parser::traits::{Style, StyledSpan};
 
 // ---------------------------------------------------------------------------
 // Top-level render frame

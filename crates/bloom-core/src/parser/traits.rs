@@ -76,7 +76,7 @@ pub struct ParsedBlockId {
 
 // --- Highlighting types ---
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StyledSpan {
     pub range: Range<usize>,
     pub style: Style,

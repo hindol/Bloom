@@ -436,16 +436,9 @@ impl BloomEditor {
                     code_fence_lang: None,
                 },
             );
-            let render_spans = spans
-                .into_iter()
-                .map(|s| render::StyledSpan {
-                    range: s.range,
-                    style: convert_style(s.style),
-                })
-                .collect();
             lines.push(render::RenderedLine {
                 line_number: line_idx,
-                spans: render_spans,
+                spans,
             });
         }
         lines
@@ -654,23 +647,5 @@ mod tests {
     }
 }
 
-fn convert_style(s: parser::traits::Style) -> render::Style {
-    match s {
-        parser::traits::Style::Normal => render::Style::Normal,
-        parser::traits::Style::Heading { level } => render::Style::Heading { level },
-        parser::traits::Style::Bold => render::Style::Bold,
-        parser::traits::Style::Italic => render::Style::Italic,
-        parser::traits::Style::Code => render::Style::Code,
-        parser::traits::Style::CodeBlock => render::Style::CodeBlock,
-        parser::traits::Style::Link => render::Style::Link,
-        parser::traits::Style::Tag => render::Style::Tag,
-        parser::traits::Style::Timestamp => render::Style::Timestamp,
-        parser::traits::Style::BlockId => render::Style::BlockId,
-        parser::traits::Style::ListMarker => render::Style::ListMarker,
-        parser::traits::Style::CheckboxUnchecked => render::Style::CheckboxUnchecked,
-        parser::traits::Style::CheckboxChecked => render::Style::CheckboxChecked,
-        parser::traits::Style::Frontmatter => render::Style::Frontmatter,
-        parser::traits::Style::BrokenLink => render::Style::BrokenLink,
-        parser::traits::Style::SyntaxNoise => render::Style::SyntaxNoise,
-    }
-}
+
+
