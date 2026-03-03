@@ -423,3 +423,4 @@ Single vault only for v1. Trivial to add later since each vault is a self-contai
 | [CRATE_STRUCTURE.md](CRATE_STRUCTURE.md) | Cargo workspace layout, crate responsibilities, bloom-core module structure, testing/debugging strategy |
 | [USE_CASES.md](USE_CASES.md) | 90 testable user scenarios across 14 categories, with goal traceability |
 | [API_SURFACES.md](API_SURFACES.md) | Module API signatures (traits, structs, methods) with UC→API call mapping |
+| [WINDOW_LAYOUTS.md](WINDOW_LAYOUTS.md) | Window split wireframes, navigation semantics, resize/swap/rotate, border rendering |
