@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn test_gitignore_content() {
         let content = Vault::gitignore_content();
-        assert!(content.contains(".bloom"));
+        assert!(content.contains(".index.db"));
     }
 }
 

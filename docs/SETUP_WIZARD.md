@@ -18,7 +18,7 @@ First Launch
          │
          ▼
 ┌─────────────────────┐
-│  Choose Vault Path  │  Default: ~/.bloom/
+│  Choose Vault Path  │  Default: ~/bloom/
 │  (Step 2)           │  Editable path input.
 └────────┬────────────┘
          │
@@ -44,7 +44,7 @@ First Launch
 **Rules:**
 - The wizard owns the full screen. No editor panes behind it.
 - Navigation: `Tab` / `Shift+Tab` to move between fields, `Enter` to confirm each step, `Esc` to go back one step (cannot exit on Step 1).
-- The wizard never appears again after completion. A `.bloom/config.toml` file in the vault marks it as initialized.
+- The wizard never appears again after completion. A `config.toml` file in the vault marks it as initialized.
 
 ---
 
@@ -92,7 +92,7 @@ First Launch
 │         This is where your notes, journal, and config         │
 │         will live. You can move it later.                     │
 │                                                               │
-│         Path: ~/.bloom/█                                      │
+│         Path: ~/bloom/█                                      │
 │                                                               │
 │                                                               │
 │                                                               │
@@ -116,9 +116,9 @@ First Launch
 | Nav hints | `faded` |
 
 **Behavior:**
-- Default value is `~/.bloom/`. Cursor starts at end of path.
+- Default value is `~/bloom/`. Cursor starts at end of path.
 - Standard text editing: `Backspace`, `Ctrl+U` clears, `Ctrl+A` / `Home` go to start.
-- `Enter` confirms. If the directory already exists and contains `.bloom/config.toml`, skip to Step 4 (vault already initialized).
+- `Enter` confirms. If the directory already exists and contains `config.toml`, skip to Step 4 (vault already initialized).
 - If the path is invalid or unwritable, show inline error in `critical`: `"Cannot create directory: permission denied"`.
 - `~` is expanded to the user's home directory.
 - `Tab` auto-completes path segments (filesystem completion).
@@ -265,7 +265,7 @@ After completion:
 │                                                               │
 │         Your vault is ready 🌱                                │
 │                                                               │
-│         Location:  ~/.bloom/                                  │
+│         Location:  ~/bloom/                                  │
 │         Pages:     128                                        │
 │         Journal:   4 entries                                  │
 │                                                               │
@@ -299,7 +299,7 @@ After completion:
 ## Returning User Detection
 
 The wizard does NOT appear if:
-1. `~/.bloom/config.toml` exists (vault already initialized), OR
+1. `~/bloom/config.toml` exists (vault already initialized), OR
 2. A `--vault` CLI argument was passed (explicit vault path)
 
 If the vault path exists but is missing expected subdirectories (`pages/`, `journal/`), Bloom creates them silently and proceeds — no wizard needed.

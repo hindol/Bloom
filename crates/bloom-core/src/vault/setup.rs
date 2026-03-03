@@ -8,7 +8,7 @@ use super::Vault;
 pub(crate) fn create_vault(root: &Path) -> Result<Vault, BloomError> {
     fs::create_dir_all(root.join("pages"))?;
     fs::create_dir_all(root.join("journal"))?;
-    fs::create_dir_all(root.join(".bloom"))?;
+    fs::create_dir_all(root.join("templates"))?;
     fs::create_dir_all(root.join("images"))?;
 
     // Write default .gitignore.

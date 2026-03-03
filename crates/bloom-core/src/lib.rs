@@ -202,10 +202,10 @@ impl SetupWizardState {
 
 pub fn default_vault_path() -> String {
     if let Some(home) = home_dir() {
-        let p = home.join(".bloom");
+        let p = home.join("bloom");
         p.to_string_lossy().to_string()
     } else {
-        ".bloom".to_string()
+        "bloom".to_string()
     }
 }
 
@@ -231,6 +231,16 @@ fn expand_tilde(path: &str) -> String {
         }
     }
     path.to_string()
+}
+
+/// Set the hidden file attribute on Windows.
+#[cfg(windows)]
+fn set_hidden_attribute(path: &std::path::Path) -> std::io::Result<()> {
+    std::process::Command::new("attrib")
+        .arg("+H")
+        .arg(path.as_os_str())
+        .output()?;
+    Ok(())
 }
 
 enum PickerState {
@@ -295,12 +305,19 @@ impl BloomEditor {
 
     /// Initialize with a vault path — sets up index, journal, template engine
     pub fn init_vault(&mut self, vault_root: &std::path::Path) -> Result<(), error::BloomError> {
-        let index_path = vault_root.join(".bloom").join("index.db");
+        let index_path = vault_root.join(".index.db");
         self.index = Some(index::Index::open(&index_path)?);
         self.journal = Some(journal::Journal::new(vault_root));
-        let templates_dir = vault_root.join(".bloom").join("templates");
+        let templates_dir = vault_root.join("templates");
         self.template_engine = Some(template::TemplateEngine::new(&templates_dir));
         self.vault_root = Some(vault_root.to_path_buf());
+
+        // Mark index file as hidden on Windows
+        #[cfg(windows)]
+        {
+            let _ = set_hidden_attribute(&index_path);
+        }
+
         Ok(())
     }
 
@@ -308,7 +325,7 @@ impl BloomEditor {
     pub fn needs_setup(&self) -> bool {
         let default = default_vault_path();
         let root = std::path::Path::new(&default);
-        !root.join(".bloom").join("config.toml").exists()
+        !root.join("config.toml").exists()
     }
 
     /// Start the setup wizard.
@@ -589,7 +606,7 @@ impl BloomEditor {
                     let path_str = expand_tilde(&wiz.vault_path);
                     let root = std::path::PathBuf::from(&path_str);
                     // Check if already initialized
-                    if root.join(".bloom").join("config.toml").exists() {
+                    if root.join("config.toml").exists() {
                         // Existing vault — skip to complete
                         wiz.step = WizardStep::Complete;
                         wiz.vault_path = path_str;
@@ -597,9 +614,8 @@ impl BloomEditor {
                         // Try to create vault
                         match vault::Vault::create(&root) {
                             Ok(_) => {
-                                // Write minimal config.toml
-                                let config_path = root.join(".bloom").join("config.toml");
-                                let _ = std::fs::write(&config_path, "[startup]\nmode = \"Journal\"\n");
+                                let config_path = root.join("config.toml");
+                                let _ = std::fs::write(&config_path, "# Bloom configuration\n# See docs for all options.\n\n[startup]\nmode = \"Journal\"\n");
                                 wiz.vault_path = path_str;
                                 wiz.step = WizardStep::ImportChoice;
                             }
