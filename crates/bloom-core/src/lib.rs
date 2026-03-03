@@ -754,15 +754,45 @@ impl BloomEditor {
             vim::VimAction::ModeChange(mode) => {
                 vec![keymap::dispatch::Action::ModeChange(mode)]
             }
-            vim::VimAction::Command(_cmd) => {
-                vec![keymap::dispatch::Action::Noop]
-            }
+            vim::VimAction::Command(cmd) => self.translate_ex_command(&cmd),
             vim::VimAction::Pending => vec![keymap::dispatch::Action::Noop],
             vim::VimAction::Unhandled => vec![keymap::dispatch::Action::Noop],
             vim::VimAction::Composite(actions) => actions
                 .into_iter()
                 .flat_map(|a| self.translate_vim_action(a))
                 .collect(),
+        }
+    }
+
+    fn translate_ex_command(&self, cmd: &str) -> Vec<keymap::dispatch::Action> {
+        let trimmed = cmd.trim();
+        match trimmed {
+            "q" | "quit" => vec![keymap::dispatch::Action::Quit],
+            "q!" | "quit!" => vec![keymap::dispatch::Action::Quit],
+            "w" | "write" => vec![keymap::dispatch::Action::Save],
+            "wq" | "x" => vec![
+                keymap::dispatch::Action::Save,
+                keymap::dispatch::Action::Quit,
+            ],
+            "wq!" | "x!" => vec![
+                keymap::dispatch::Action::Save,
+                keymap::dispatch::Action::Quit,
+            ],
+            "e" | "edit" => vec![keymap::dispatch::Action::OpenPicker(
+                keymap::dispatch::PickerKind::FindPage,
+            )],
+            "bd" | "bdelete" => vec![keymap::dispatch::Action::CloseWindow],
+            "sp" | "split" => vec![keymap::dispatch::Action::SplitWindow(
+                window::SplitDirection::Horizontal,
+            )],
+            "vs" | "vsplit" => vec![keymap::dispatch::Action::SplitWindow(
+                window::SplitDirection::Vertical,
+            )],
+            "rebuild-index" => vec![keymap::dispatch::Action::RebuildIndex],
+            _ => {
+                // Unknown command — noop
+                vec![keymap::dispatch::Action::Noop]
+            }
         }
     }
 
@@ -1436,6 +1466,47 @@ mod tests {
         editor.handle_key(KeyEvent::esc());     // Cancel
         let frame = editor.render();
         assert!(frame.which_key.is_none());
+    }
+
+    // :q quits
+    #[test]
+    fn test_colon_q_quits() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.handle_key(KeyEvent::char(':')); // enter command mode
+        editor.handle_key(KeyEvent::char('q'));
+        let actions = editor.handle_key(KeyEvent::enter());
+        assert!(actions.iter().any(|a| matches!(a, keymap::dispatch::Action::Quit)));
+    }
+
+    // :w saves
+    #[test]
+    fn test_colon_w_saves() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.handle_key(KeyEvent::char(':'));
+        editor.handle_key(KeyEvent::char('w'));
+        let actions = editor.handle_key(KeyEvent::enter());
+        assert!(actions.iter().any(|a| matches!(a, keymap::dispatch::Action::Save)));
+    }
+
+    // :wq saves and quits
+    #[test]
+    fn test_colon_wq_saves_and_quits() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.handle_key(KeyEvent::char(':'));
+        editor.handle_key(KeyEvent::char('w'));
+        editor.handle_key(KeyEvent::char('q'));
+        let actions = editor.handle_key(KeyEvent::enter());
+        assert!(actions.iter().any(|a| matches!(a, keymap::dispatch::Action::Save)));
+        assert!(actions.iter().any(|a| matches!(a, keymap::dispatch::Action::Quit)));
     }
 }
 
