@@ -191,6 +191,60 @@ impl BloomEditor {
         Ok(())
     }
 
+    /// Perform startup according to config. Guarantees `active_page` is `Some` on return.
+    pub fn startup(&mut self) {
+        match self.config.startup.mode {
+            config::StartupMode::Journal => self.open_journal_today(),
+            config::StartupMode::Restore => {
+                if self.restore_session().is_err() || self.active_page.is_none() {
+                    self.open_scratch_buffer();
+                }
+            }
+            config::StartupMode::Blank => self.open_scratch_buffer(),
+        }
+    }
+
+    fn open_journal_today(&mut self) {
+        let today = journal::Journal::today();
+        let title = today.format("%Y-%m-%d").to_string();
+
+        // If journal module is initialized, use its path; otherwise use a sensible default
+        let path = self
+            .journal
+            .as_ref()
+            .map(|j| j.path_for_date(today))
+            .unwrap_or_else(|| std::path::PathBuf::from(format!("journal/{}.md", title)));
+
+        // Read from disk if the file exists, otherwise generate default frontmatter
+        let content = if path.exists() {
+            std::fs::read_to_string(&path).unwrap_or_default()
+        } else {
+            let fm = parser::traits::Frontmatter {
+                id: None,
+                title: Some(title.clone()),
+                created: Some(today),
+                tags: vec![types::TagName("journal".to_string())],
+                extra: std::collections::HashMap::new(),
+            };
+            let mut s = self.parser.serialize_frontmatter(&fm);
+            s.push('\n');
+            s
+        };
+
+        let id = crate::uuid::generate_hex_id();
+        self.open_page_with_content(&id, &title, &path, &content);
+    }
+
+    fn open_scratch_buffer(&mut self) {
+        let id = crate::uuid::generate_hex_id();
+        self.open_page_with_content(
+            &id,
+            "[scratch]",
+            std::path::Path::new("[scratch]"),
+            "",
+        );
+    }
+
     /// Process a key event
     pub fn handle_key(&mut self, key: types::KeyEvent) -> Vec<keymap::dispatch::Action> {
         // Check platform shortcuts first
@@ -650,6 +704,54 @@ mod tests {
         editor.save_current().unwrap();
         let frame = editor.render();
         assert!(!frame.panes[0].dirty);
+    }
+
+    // Startup: Journal mode opens today's journal
+    #[test]
+    fn test_startup_journal_mode() {
+        let config = config::Config::defaults(); // default is Journal
+        let mut editor = BloomEditor::new(config).unwrap();
+        editor.startup();
+        let frame = editor.render();
+        assert!(!frame.panes.is_empty());
+        assert!(frame.panes[0].visible_lines.len() > 0 || frame.panes[0].title.contains("20"));
+        // Keys should work — enter insert mode
+        editor.handle_key(KeyEvent::char('i'));
+        let frame = editor.render();
+        assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
+    }
+
+    // Startup: Blank mode opens scratch buffer
+    #[test]
+    fn test_startup_blank_mode() {
+        let mut config = config::Config::defaults();
+        config.startup.mode = config::StartupMode::Blank;
+        let mut editor = BloomEditor::new(config).unwrap();
+        editor.startup();
+        let frame = editor.render();
+        assert!(!frame.panes.is_empty());
+        assert_eq!(frame.panes[0].title, "[scratch]");
+        // Keys should work
+        editor.handle_key(KeyEvent::char('i'));
+        let frame = editor.render();
+        assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
+    }
+
+    // Startup: Restore mode falls back to scratch when no session exists
+    #[test]
+    fn test_startup_restore_fallback() {
+        let mut config = config::Config::defaults();
+        config.startup.mode = config::StartupMode::Restore;
+        let mut editor = BloomEditor::new(config).unwrap();
+        editor.startup();
+        let frame = editor.render();
+        assert!(!frame.panes.is_empty());
+        // Falls back to scratch since restore_session is a stub
+        assert_eq!(frame.panes[0].title, "[scratch]");
+        // Keys should work
+        editor.handle_key(KeyEvent::char('i'));
+        let frame = editor.render();
+        assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
     }
 }
 

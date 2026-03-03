@@ -41,6 +41,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
     let mut editor = BloomEditor::new(config)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{e:?}")))?;
 
+    // Startup: open initial buffer per config (default: today's journal)
+    editor.startup();
+
     // Update viewport to terminal size
     let size = terminal.size()?;
     editor.resize(size.height as usize, size.width as usize);
