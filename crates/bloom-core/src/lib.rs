@@ -1007,10 +1007,26 @@ impl BloomEditor {
         if let Some(page_id) = &self.active_page {
             if let Some(buf) = self.buffer_mgr.get(page_id) {
                 let rope = buf.text();
-                let line =
-                    rope.char_to_line(self.cursor.min(rope.len_chars().saturating_sub(1)));
+                let len = rope.len_chars();
+                if len == 0 {
+                    return (0, 0);
+                }
+                // In insert mode, cursor can be at len_chars() (append position)
+                let clamped = if matches!(self.vim_state.mode(), vim::Mode::Insert) {
+                    self.cursor.min(len)
+                } else {
+                    self.cursor.min(len.saturating_sub(1))
+                };
+                if clamped == len {
+                    // Cursor at append position — find last line
+                    let last_line = rope.len_lines().saturating_sub(1);
+                    let line_start = rope.line_to_char(last_line);
+                    let col = clamped - line_start;
+                    return (last_line, col);
+                }
+                let line = rope.char_to_line(clamped);
                 let line_start = rope.line_to_char(line);
-                let col = self.cursor.saturating_sub(line_start);
+                let col = clamped - line_start;
                 return (line, col);
             }
         }
@@ -1215,6 +1231,62 @@ mod tests {
         // Still in insert mode
         let frame = editor.render();
         assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
+    }
+
+    // o opens a new line below and positions cursor correctly
+    #[test]
+    fn test_open_below() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello\nworld\n");
+        editor.handle_key(KeyEvent::char('o'));
+        // Should be in insert mode on a new line below "hello"
+        let frame = editor.render();
+        assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
+        assert_eq!(frame.panes[0].cursor.line, 1);
+        assert_eq!(frame.panes[0].cursor.column, 0);
+        // Type on the new line
+        editor.handle_key(KeyEvent::char('!'));
+        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let text = buf.text().to_string();
+        assert_eq!(text, "hello\n!\nworld\n");
+    }
+
+    // O opens a new line above and positions cursor correctly
+    #[test]
+    fn test_open_above() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello\nworld\n");
+        editor.handle_key(KeyEvent::char('O'));
+        let frame = editor.render();
+        assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
+        assert_eq!(frame.panes[0].cursor.line, 0);
+        assert_eq!(frame.panes[0].cursor.column, 0);
+        editor.handle_key(KeyEvent::char('!'));
+        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let text = buf.text().to_string();
+        assert_eq!(text, "!\nhello\nworld\n");
+    }
+
+    // o on last line without trailing newline
+    #[test]
+    fn test_open_below_no_trailing_newline() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.handle_key(KeyEvent::char('o'));
+        let frame = editor.render();
+        assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
+        assert_eq!(frame.panes[0].cursor.line, 1);
+        assert_eq!(frame.panes[0].cursor.column, 0);
+        editor.handle_key(KeyEvent::char('!'));
+        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let text = buf.text().to_string();
+        assert_eq!(text, "hello\n!");
     }
 
     // UC-14: Return to normal mode

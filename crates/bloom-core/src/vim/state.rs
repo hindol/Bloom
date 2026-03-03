@@ -581,20 +581,29 @@ impl VimState {
                 self.mode = Mode::Insert;
                 let rope = buffer.text();
                 let line_idx = rope.char_to_line(cursor);
-                let line = rope.line(line_idx);
-                let line_end = rope.line_to_char(line_idx) + line.len_chars();
-                let insert_pos = if line.len_chars() > 0
-                    && line.char(line.len_chars() - 1) == '\n'
-                {
-                    line_end
+                let next_line_start = if line_idx + 1 < rope.len_lines() {
+                    rope.line_to_char(line_idx + 1)
                 } else {
-                    line_end
+                    rope.len_chars()
                 };
+                // Insert \n at the start of the next line (or end of buffer).
+                // For lines ending with \n, this puts the new \n right after it.
+                // For a final line without \n, we first need to add a \n.
+                let (insert_pos, replacement, cursor_after) =
+                    if next_line_start == rope.len_chars()
+                        && (rope.len_chars() == 0
+                            || rope.char(rope.len_chars() - 1) != '\n')
+                    {
+                        // Last line has no trailing newline — insert \n + \n
+                        (next_line_start, "\n".to_string(), next_line_start + 1)
+                    } else {
+                        (next_line_start, "\n".to_string(), next_line_start)
+                    };
                 VimAction::Composite(vec![
                     VimAction::Edit(EditOp {
                         range: insert_pos..insert_pos,
-                        replacement: "\n".into(),
-                        cursor_after: insert_pos + 1,
+                        replacement,
+                        cursor_after,
                     }),
                     VimAction::ModeChange(Mode::Insert),
                 ])
