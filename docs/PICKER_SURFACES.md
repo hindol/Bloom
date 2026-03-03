@@ -445,3 +445,207 @@ Clear all filters:   Ctrl+Backspace
 Clear input:         Ctrl+U
 Top/bottom:          gg / G
 ```
+
+---
+
+## 11. Which-Key Popup — `SPC` + timeout / pending Vim key
+
+Not a picker — a bottom-anchored panel that appears after a brief timeout (~300ms) when a key prefix is pending. Provides progressive disclosure of available next keys.
+
+### Leader Which-Key (after `SPC`)
+
+**Step 1: User presses `SPC` and pauses**
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                                                              │
+│  # Text Editor Theory                                        │
+│                                                              │
+│  ## Rope Data Structure                                      │
+│  Ropes are O(log n) for inserts. They use balanced           │
+│  binary trees to represent text.                             │
+│                                                              │
+├── SPC ───────────────────────────────────────────────────────┤
+│                                                              │
+│  f  files         s  search        l  links        j journal │
+│  t  tags          a  agenda        n  new page     w windows │
+│  u  undo          r  refactor      i  insert       T toggles │
+│  b  buffers       h  help          ?  all commands            │
+│  SPC  commands (M-x)                                         │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Step 2: User presses `f` — drills into the `files` group**
+
+```
+├── SPC f ─────────────────────────────────────────────────────┤
+│                                                              │
+│  f  find page     r  rename        D  delete                 │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Step 3: User presses `f` again — `SPC f f` executes (Find Page picker opens)**
+
+| Element | Style |
+|---------|-------|
+| Panel position | Bottom of screen, above status bar |
+| `SPC` / `SPC f` header | `faded` prefix showing the keys typed so far |
+| Key character (`f`, `s`, etc.) | `strong` (bold) — the actionable key |
+| Description (`files`, `search`) | `foreground` — what it does |
+| Group vs action | Groups (contain sub-keys) show as label only; actions execute immediately |
+| Grid layout | Keys arranged in columns, max 4 columns wide, rows wrap as needed |
+| Timeout | Popup appears ~300ms after the pending key. Typing before timeout skips the popup — the key is processed normally. |
+
+### Vim Grammar Which-Key (after pending operator)
+
+**User presses `d` in Normal mode and pauses:**
+
+```
+├── d ─────────────────────────────────────────────────────────┤
+│                                                              │
+│  motions                          text objects               │
+│  w  word          b  back word    iw  inner word             │
+│  e  end of word   $  end of line  aw  around word            │
+│  0  start of line gg top of file  ip  inner paragraph        │
+│  j  line down     k  line up      ap  around paragraph       │
+│  G  end of file   %  matching     il  inner link             │
+│  f… find char     t… till char    al  around link             │
+│                                   i#  inner tag              │
+│  operators                        a#  around tag             │
+│  d  delete line (dd)              i@  inner timestamp        │
+│                                   ih  inner heading section  │
+│                                   ah  around heading section │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**User presses `c` (change) and pauses — similar layout:**
+
+```
+├── c ─────────────────────────────────────────────────────────┤
+│                                                              │
+│  motions                          text objects               │
+│  w  word          b  back word    iw  inner word             │
+│  e  end of word   $  end of line  aw  around word            │
+│  ...                              ...                        │
+│                                                              │
+│  operators                                                   │
+│  c  change line (cc)                                         │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+| Element | Style |
+|---------|-------|
+| Operator header (`d`, `c`) | `salient` — the pending operator |
+| Section labels (`motions`, `text objects`, `operators`) | `faded`, italic — category headers |
+| Key character | `strong` (bold) |
+| Description | `foreground` |
+| `…` suffix on `f` and `t` | Indicates another key follows (e.g., `fa` = find 'a') |
+| Bloom-specific objects | Highlighted subtly — `il`, `al`, `i#`, `a#`, `i@`, `ih`, `ah` appear alongside standard Vim objects |
+
+### Behavior
+
+- **No interaction required.** The popup is read-only. The user just presses the next key.
+- **Instant dismiss.** Any keypress closes the popup and processes the key. No Escape needed.
+- **Timeout only.** Popup ONLY appears after ~300ms of inactivity. Fast typists never see it — `SPC f f` typed quickly opens Find Page directly.
+- **Configurable timeout.** `which_key_timeout_ms = 300` in `config.toml`.
+- **Nested groups.** Leader which-key supports arbitrary depth: `SPC` → `w` → `=` (balance windows). Each level replaces the popup content.
+
+---
+
+## 12. Command Line — `:` mode
+
+Triggered by pressing `:` in Normal mode. A single-line input at the bottom of the screen (same position as Vim's command line). Supports tab completion.
+
+### Basic Command
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                                                              │
+│  (editor content undisturbed)                                │
+│                                                              │
+├──────────────────────────────────────────────────────────────┤
+│ :rebuild-index_                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Tab Completion
+
+**User types `:reb` and presses Tab:**
+
+```
+├──────────────────────────────────────────────────────────────┤
+│ :rebuild-index_                                              │
+│  rebuild-index    Rebuild the search index from scratch       │
+└──────────────────────────────────────────────────────────────┘
+```
+
+If multiple matches, Tab cycles through them:
+
+```
+├──────────────────────────────────────────────────────────────┤
+│ :theme_                                                      │
+│  theme            Switch or cycle themes                      │
+│  theme-reload     Reload theme from config                    │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Command with Arguments
+
+**`:theme` accepts a theme name. User types `:theme ` and presses Tab:**
+
+```
+├──────────────────────────────────────────────────────────────┤
+│ :theme bloom-dark_                                           │
+│  bloom-dark       bloom-dark-faded       bloom-light          │
+│  bloom-light-faded                                            │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Error Display
+
+**User types `:nonexistent` and presses Enter:**
+
+```
+├──────────────────────────────────────────────────────────────┤
+│ E: Unknown command: nonexistent                    :_        │
+└──────────────────────────────────────────────────────────────┘
+```
+
+Error message shown briefly (`critical` colour), then the command line closes.
+
+### Available Commands
+
+| Command | Arguments | Description |
+|---------|-----------|-------------|
+| `:rebuild-index` | — | Rebuild SQLite index from scratch |
+| `:theme` | `<name>?` | Switch theme (no arg = cycle) |
+| `:theme-reload` | — | Reload current theme from config |
+| `:import-logseq` | `<path>` | Import from Logseq directory |
+| `:set` | `<key> <value>` | Change a config setting for this session |
+| `:write` / `:w` | — | Save current buffer |
+| `:quit` / `:q` | — | Close current window |
+| `:wq` | — | Save and close |
+| `:qa` | — | Quit all windows |
+
+| Element | Style |
+|---------|-------|
+| `:` prompt | `faded` |
+| Command text | `foreground` |
+| Completion popup | `subtle` background, `foreground` text, highlighted match in `strong` |
+| Error message | `critical` foreground |
+| Position | Bottom of screen, replaces status bar while active |
+
+### Interaction
+
+| Binding | Action |
+|---------|--------|
+| `Enter` | Execute command |
+| `Escape` | Cancel, close command line |
+| `Tab` | Cycle through completions |
+| `Shift+Tab` | Cycle completions in reverse |
+| `↑` / `↓` | Command history (previous/next) |
+| `Ctrl+U` | Clear command line |

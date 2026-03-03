@@ -538,10 +538,66 @@ pub struct WhichKeyEntry {
 pub struct WhichKeyFrame {
     pub entries: Vec<WhichKeyEntry>,
     pub prefix: String,             // e.g., "SPC f" — what's been typed so far
+    pub context: WhichKeyContext,
+}
+
+pub enum WhichKeyContext {
+    /// Leader key sequence (SPC → ...).
+    Leader,
+    /// Pending Vim operator (d, c, y, >, <, = etc.).
+    /// Entries include both motions and text objects.
+    VimOperator { operator: String },
 }
 ```
 
 **Use cases served:** UC-87–UC-88 (which-key popups).
+
+### Command Line
+
+```rust
+/// Frame data for rendering the `:` command line.
+pub struct CommandLineFrame {
+    pub input: String,
+    pub cursor_pos: usize,
+    pub completions: Vec<Completion>,
+    pub selected_completion: Option<usize>,  // index into completions, if cycling
+    pub error: Option<String>,               // error message from last command
+}
+
+pub struct Completion {
+    pub text: String,              // the command or argument name
+    pub description: String,       // brief help text
+}
+
+/// Registry of all available `:` commands.
+pub struct CommandRegistry {
+    // internal: HashMap<String, CommandDef>
+}
+
+pub struct CommandDef {
+    pub name: String,
+    pub aliases: Vec<String>,       // e.g., "w" for "write", "q" for "quit"
+    pub description: String,
+    pub args: CommandArgs,
+}
+
+pub enum CommandArgs {
+    None,
+    Required(String),               // label, e.g., "<path>"
+    Optional(String),               // label, e.g., "<name>?"
+    Completable(fn() -> Vec<String>), // dynamic completions, e.g., theme names
+}
+
+impl CommandRegistry {
+    pub fn new() -> Self;
+    pub fn register(&mut self, def: CommandDef);
+    pub fn complete(&self, prefix: &str) -> Vec<Completion>;
+    pub fn complete_args(&self, command: &str, arg_prefix: &str) -> Vec<Completion>;
+    pub fn execute(&self, input: &str) -> Result<Action, String>;
+}
+```
+
+**Use cases served:** UC-20 (command mode), UC-74 (`:import-logseq`), UC-76 (`:rebuild-index`).
 
 ---
 
@@ -554,6 +610,7 @@ pub struct RenderFrame {
     pub status_bar: StatusBar,
     pub picker: Option<PickerFrame>,
     pub which_key: Option<WhichKeyFrame>,
+    pub command_line: Option<CommandLineFrame>,
     pub quick_capture: Option<QuickCaptureFrame>,
     pub date_picker: Option<DatePickerFrame>,
     pub dialog: Option<DialogFrame>,
