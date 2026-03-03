@@ -607,7 +607,8 @@ impl CommandRegistry {
 /// UI-agnostic snapshot of everything to draw. Produced by BloomEditor::render().
 pub struct RenderFrame {
     pub panes: Vec<PaneFrame>,
-    pub status_bar: StatusBar,
+    pub maximized: bool,
+    pub hidden_pane_count: usize,       // 0 when not maximized
     pub picker: Option<PickerFrame>,
     pub which_key: Option<WhichKeyFrame>,
     pub command_line: Option<CommandLineFrame>,
@@ -626,6 +627,7 @@ pub struct PaneFrame {
     pub is_active: bool,
     pub title: String,              // page title or "Timeline: X" etc.
     pub dirty: bool,
+    pub status_bar: StatusBar,      // per-pane: active pane gets full bar, inactive gets compact
 }
 
 pub enum PaneKind {
@@ -793,9 +795,9 @@ pub enum Action {
     FollowLink,
     CopyToClipboard(String),
 
-    OpenTimeline(PageId),
-    OpenAgenda,
-    OpenUndoTree,
+    OpenTimeline(PageId),           // toggle: opens in split, or closes if already open
+    OpenAgenda,                     // toggle: opens in split, or closes if already open
+    OpenUndoTree,                   // toggle: opens in split, or closes if already open
     OpenDatePicker(DatePickerPurpose),
     DialogResponse(usize),          // index of chosen option
 
@@ -1117,17 +1119,31 @@ impl WindowManager {
     pub fn new() -> Self;
     pub fn active_pane(&self) -> PaneId;
     pub fn pane_count(&self) -> usize;
+    pub fn is_maximized(&self) -> bool;
+    pub fn hidden_pane_count(&self) -> usize;     // 0 when not maximized
 
-    pub fn split(&mut self, direction: SplitDirection) -> PaneId;
+    /// Split the active pane. Fails if pane is too small or not an editor pane.
+    pub fn split(&mut self, direction: SplitDirection) -> Result<PaneId, BloomError>;
     pub fn close(&mut self, pane: PaneId) -> bool;   // false if last pane
     pub fn close_others(&mut self);
-    pub fn navigate(&mut self, direction: Direction);
+
+    /// Navigate to the nearest spatial neighbor in the given direction.
+    /// Uses cursor_line to pick the closest pane when multiple candidates exist.
+    pub fn navigate(&mut self, direction: Direction, cursor_line: usize);
+
+    /// Resize the active pane. No-op if minimum size (20 cols / 5 lines) would be violated.
     pub fn resize(&mut self, pane: PaneId, delta: i32, axis: SplitDirection);
     pub fn balance(&mut self);
     pub fn maximize_toggle(&mut self);
     pub fn swap_with_next(&mut self);
     pub fn rotate_layout(&mut self);
     pub fn move_buffer(&mut self, direction: Direction);
+
+    /// Open a special view in a new split. If a pane of that kind already exists, close it (toggle).
+    pub fn open_special_view(&mut self, kind: PaneKind, direction: SplitDirection) -> PaneId;
+
+    /// Find an open pane of a given kind (for toggle detection).
+    pub fn find_pane_by_kind(&self, kind: &PaneKind) -> Option<PaneId>;
 
     /// Produce the layout tree for rendering.
     pub fn layout(&self) -> LayoutTree;
