@@ -136,3 +136,154 @@ impl Buffer {
         self.dirty = false;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // UC-14: Basic editing
+    #[test]
+    fn test_from_text_and_read_back() {
+        let buf = Buffer::from_text("hello world");
+        assert_eq!(buf.len_chars(), 11);
+        assert_eq!(buf.len_lines(), 1);
+        assert!(!buf.is_dirty());
+        assert_eq!(buf.version(), 0);
+    }
+
+    #[test]
+    fn test_insert_makes_dirty() {
+        let mut buf = Buffer::from_text("hello");
+        buf.insert(5, " world");
+        assert!(buf.is_dirty());
+        assert_eq!(buf.text().to_string(), "hello world");
+        assert!(buf.version() > 0);
+    }
+
+    #[test]
+    fn test_delete_range() {
+        let mut buf = Buffer::from_text("hello world");
+        buf.delete(5..11);
+        assert_eq!(buf.text().to_string(), "hello");
+    }
+
+    #[test]
+    fn test_replace_range() {
+        let mut buf = Buffer::from_text("hello world");
+        buf.replace(6..11, "rust");
+        assert_eq!(buf.text().to_string(), "hello rust");
+    }
+
+    // UC-18: Undo and redo
+    #[test]
+    fn test_undo_reverses_insert() {
+        let mut buf = Buffer::from_text("hello");
+        buf.insert(5, " world");
+        assert_eq!(buf.text().to_string(), "hello world");
+        assert!(buf.undo());
+        assert_eq!(buf.text().to_string(), "hello");
+    }
+
+    #[test]
+    fn test_redo_after_undo() {
+        let mut buf = Buffer::from_text("hello");
+        buf.insert(5, " world");
+        buf.undo();
+        assert!(buf.redo());
+        assert_eq!(buf.text().to_string(), "hello world");
+    }
+
+    #[test]
+    fn test_undo_at_root_returns_false() {
+        let mut buf = Buffer::from_text("hello");
+        assert!(!buf.undo());
+    }
+
+    #[test]
+    fn test_redo_at_tip_returns_false() {
+        let mut buf = Buffer::from_text("hello");
+        buf.insert(5, " world");
+        assert!(!buf.redo());
+    }
+
+    // UC-18 step 5: Branching undo tree
+    #[test]
+    fn test_undo_tree_branches() {
+        let mut buf = Buffer::from_text("");
+        buf.insert(0, "alpha");     // node 1
+        buf.insert(5, " beta");     // node 2
+        buf.insert(10, " gamma");   // node 3
+        buf.undo();                 // back to node 2: "alpha beta"
+        buf.undo();                 // back to node 1: "alpha"
+        buf.insert(5, " delta");    // NEW branch: node 4
+        assert_eq!(buf.text().to_string(), "alpha delta");
+
+        // The undo tree should have branches
+        let tree = buf.undo_tree();
+        // Node 1 (id=1) is the child of root; it should have 2 children (node 2 and node 4)
+        let node1_children = tree.children(1);
+        assert!(node1_children.len() >= 2, "expected branching undo tree");
+    }
+
+    // UC-86: mark_clean
+    #[test]
+    fn test_mark_clean_resets_dirty() {
+        let mut buf = Buffer::from_text("hello");
+        buf.insert(5, " world");
+        assert!(buf.is_dirty());
+        buf.mark_clean();
+        assert!(!buf.is_dirty());
+    }
+
+    #[test]
+    fn test_dirty_after_clean_then_edit() {
+        let mut buf = Buffer::from_text("hello");
+        buf.insert(5, " world");
+        buf.mark_clean();
+        buf.insert(11, "!");
+        assert!(buf.is_dirty());
+    }
+
+    // UC-68: find_text for MCP search-and-replace
+    #[test]
+    fn test_find_text_single_match() {
+        let buf = Buffer::from_text("hello world hello");
+        let matches = buf.find_text("world");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0], 6..11);
+    }
+
+    #[test]
+    fn test_find_text_multiple_matches() {
+        let buf = Buffer::from_text("hello world hello");
+        let matches = buf.find_text("hello");
+        assert_eq!(matches.len(), 2);
+    }
+
+    #[test]
+    fn test_find_text_no_match() {
+        let buf = Buffer::from_text("hello world");
+        let matches = buf.find_text("xyz");
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn test_line_access() {
+        let buf = Buffer::from_text("line one\nline two\nline three");
+        assert_eq!(buf.len_lines(), 3);
+        assert_eq!(buf.line(0).to_string(), "line one\n");
+        assert_eq!(buf.line(1).to_string(), "line two\n");
+    }
+
+    // UC-19: restore_state navigates undo tree
+    #[test]
+    fn test_restore_state() {
+        let mut buf = Buffer::from_text("");
+        buf.insert(0, "first");   // node 1
+        let node_after_first = buf.undo_tree().current();
+        buf.insert(5, " second"); // node 2
+        assert_eq!(buf.text().to_string(), "first second");
+        buf.restore_state(node_after_first);
+        assert_eq!(buf.text().to_string(), "first");
+    }
+}

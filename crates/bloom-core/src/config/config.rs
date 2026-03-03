@@ -153,3 +153,31 @@ impl Default for McpConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config() {
+        let config = Config::defaults();
+        assert_eq!(config.autosave_debounce_ms, 300);
+        assert_eq!(config.which_key_timeout_ms, 500);
+        assert_eq!(config.font.family, "JetBrains Mono");
+        assert_eq!(config.font.size, 14);
+    }
+
+    #[test]
+    fn test_config_from_toml() {
+        let toml_str = r#"
+            autosave_debounce_ms = 500
+            [startup]
+            mode = "Restore"
+            [theme]
+            name = "bloom-light"
+        "#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.autosave_debounce_ms, 500);
+        assert_eq!(config.theme.name, "bloom-light");
+    }
+}

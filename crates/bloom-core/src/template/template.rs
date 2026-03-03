@@ -319,3 +319,143 @@ impl TemplateModeState {
         self.active = false;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    // UC-60: Magic variable expansion
+    #[test]
+    fn test_expand_auto_uuid() {
+        let engine = TemplateEngine::new(std::path::Path::new("/tmp"));
+        let template = Template {
+            name: "test".into(),
+            description: "".into(),
+            content: "id: ${AUTO}\ntitle: ${TITLE}\ndate: ${DATE}".into(),
+            placeholders: vec![],
+        };
+        let expanded = engine.expand(&template, "My Page", &HashMap::new());
+        assert!(!expanded.content.contains("${AUTO}"));
+        assert!(expanded.content.contains("My Page"));
+        assert!(!expanded.content.contains("${DATE}"));
+    }
+
+    // UC-58: Tab stop progression
+    #[test]
+    fn test_tab_stop_basic() {
+        let stops = vec![
+            TabStop {
+                index: 1,
+                ranges: vec![0..10],
+                default_text: "Attendees".into(),
+            },
+            TabStop {
+                index: 2,
+                ranges: vec![20..26],
+                default_text: "Topics".into(),
+            },
+            TabStop {
+                index: 0,
+                ranges: vec![40..40],
+                default_text: "".into(),
+            },
+        ];
+        let mut state = TemplateModeState::new(stops);
+        assert!(state.is_active());
+
+        // At stop 1
+        let current = state.current_stop().unwrap();
+        assert_eq!(current.index, 1);
+
+        // Advance to stop 2
+        let result = state.advance("Alice, Bob");
+        assert!(matches!(result, TemplateAdvanceResult::NextStop { .. }));
+
+        let current = state.current_stop().unwrap();
+        assert_eq!(current.index, 2);
+    }
+
+    // UC-58c: Skip placeholder (Tab without typing)
+    #[test]
+    fn test_skip_placeholder_keeps_default() {
+        let stops = vec![
+            TabStop {
+                index: 1,
+                ranges: vec![0..10],
+                default_text: "Attendees".into(),
+            },
+            TabStop {
+                index: 2,
+                ranges: vec![20..26],
+                default_text: "Topics".into(),
+            },
+        ];
+        let mut state = TemplateModeState::new(stops);
+        let result = state.advance("Attendees"); // typed same as default = skip
+        assert!(matches!(result, TemplateAdvanceResult::NextStop { .. }));
+    }
+
+    // UC-58: Final cursor
+    #[test]
+    fn test_advance_to_final_cursor() {
+        let stops = vec![
+            TabStop {
+                index: 1,
+                ranges: vec![0..5],
+                default_text: "text".into(),
+            },
+            TabStop {
+                index: 0,
+                ranges: vec![20..20],
+                default_text: "".into(),
+            },
+        ];
+        let mut state = TemplateModeState::new(stops);
+        let result = state.advance("hello");
+        assert!(matches!(
+            result,
+            TemplateAdvanceResult::FinalCursor { .. }
+        ));
+        assert!(!state.is_active());
+    }
+
+    // UC-58a: Mirroring
+    #[test]
+    fn test_mirroring_produces_edits() {
+        let stops = vec![
+            TabStop {
+                index: 1,
+                ranges: vec![0..5, 20..25],
+                default_text: "Name".into(),
+            },
+            TabStop {
+                index: 0,
+                ranges: vec![40..40],
+                default_text: "".into(),
+            },
+        ];
+        let mut state = TemplateModeState::new(stops);
+        let result = state.advance("Alice");
+        match result {
+            TemplateAdvanceResult::FinalCursor { mirror_edits, .. } => {
+                assert_eq!(mirror_edits.len(), 1); // one mirror edit for the second occurrence
+                assert_eq!(mirror_edits[0].new_text, "Alice");
+            }
+            _ => panic!("expected FinalCursor"),
+        }
+    }
+
+    #[test]
+    fn test_deactivate_ends_mode() {
+        let stops = vec![TabStop {
+            index: 1,
+            ranges: vec![0..5],
+            default_text: "x".into(),
+        }];
+        let mut state = TemplateModeState::new(stops);
+        assert!(state.is_active());
+        state.deactivate();
+        assert!(!state.is_active());
+    }
+}

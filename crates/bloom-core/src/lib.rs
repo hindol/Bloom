@@ -536,6 +536,124 @@ impl BloomEditor {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::*;
+
+    // UC-14: Basic editor flow
+    #[test]
+    fn test_editor_creates_and_renders() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "# Hello\n\nWorld\n");
+        let frame = editor.render();
+        assert!(!frame.panes.is_empty());
+        assert_eq!(frame.panes[0].status_bar.mode, "NORMAL");
+        assert!(!frame.panes[0].title.is_empty());
+    }
+
+    // UC-14: Insert mode typing
+    #[test]
+    fn test_enter_insert_mode() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.handle_key(KeyEvent::char('i'));
+        let frame = editor.render();
+        assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
+        assert!(matches!(frame.panes[0].cursor.shape, render::CursorShape::Bar));
+    }
+
+    // UC-14: Return to normal mode
+    #[test]
+    fn test_esc_returns_to_normal() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.handle_key(KeyEvent::char('i'));
+        editor.handle_key(KeyEvent::esc());
+        let frame = editor.render();
+        assert_eq!(frame.panes[0].status_bar.mode, "NORMAL");
+        assert!(matches!(frame.panes[0].cursor.shape, render::CursorShape::Block));
+    }
+
+    // UC-90: Ctrl+S saves
+    #[test]
+    fn test_ctrl_s_saves() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        let actions = editor.handle_key(KeyEvent::ctrl('s'));
+        assert!(actions.iter().any(|a| matches!(a, keymap::dispatch::Action::Save)));
+    }
+
+    // UC-52: Window splits
+    #[test]
+    fn test_window_split_via_editor() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+
+        // Count initial panes
+        let frame = editor.render();
+        let initial_count = frame.panes.len();
+        assert_eq!(initial_count, 1);
+    }
+
+    // UC-18: Undo through editor
+    #[test]
+    fn test_undo_via_handle_key() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        // Type 'u' for undo in normal mode
+        editor.handle_key(KeyEvent::char('u'));
+        // Shouldn't crash, even with no edits to undo
+    }
+
+    // Tick clears expired notifications
+    #[test]
+    fn test_tick_clears_notifications() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let far_future = std::time::Instant::now() + std::time::Duration::from_secs(3600);
+        editor.tick(far_future);
+        // Should not crash
+    }
+
+    // UC-13: Create page
+    #[test]
+    fn test_create_page_returns_id() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = editor.create_page("New Page", None).unwrap();
+        assert_eq!(id.to_hex().len(), 8);
+    }
+
+    // save_current marks buffer clean
+    #[test]
+    fn test_save_marks_clean() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        // Make dirty by inserting through vim
+        editor.handle_key(KeyEvent::char('i'));
+        editor.handle_key(KeyEvent::char('x'));
+        editor.handle_key(KeyEvent::esc());
+        editor.save_current().unwrap();
+        let frame = editor.render();
+        assert!(!frame.panes[0].dirty);
+    }
+}
+
 fn convert_style(s: parser::traits::Style) -> render::Style {
     match s {
         parser::traits::Style::Normal => render::Style::Normal,

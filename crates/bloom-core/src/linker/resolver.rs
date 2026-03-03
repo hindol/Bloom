@@ -102,3 +102,37 @@ impl Linker {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_linker_new() {
+        let linker = Linker::new();
+        // Should create without error
+        let _ = linker;
+    }
+
+    // UC-28: promote_unlinked_mention
+    #[test]
+    fn test_promote_creates_link_text() {
+        let linker = Linker::new();
+        let target = crate::types::PageId::from_hex("aabbccdd").unwrap();
+        let mention = crate::index::UnlinkedMention {
+            source_page: crate::types::PageMeta {
+                id: crate::types::PageId::from_hex("11223344").unwrap(),
+                title: "Source".into(),
+                created: chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+                tags: vec![],
+                path: std::path::PathBuf::from("source.md"),
+            },
+            context: "Read about Text Editor Theory today".into(),
+            line: 5,
+            match_range: 11..31,
+        };
+        let edit = linker.promote_unlinked_mention(&mention, &target);
+        assert!(edit.new_text.contains("[["));
+        assert!(edit.new_text.contains("aabbccdd"));
+    }
+}

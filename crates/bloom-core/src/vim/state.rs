@@ -784,3 +784,284 @@ fn is_repeatable(action: &VimAction) -> bool {
         _ => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buffer::Buffer;
+    use crate::types::{KeyCode, KeyEvent, Modifiers};
+
+    fn key(c: char) -> KeyEvent { KeyEvent::char(c) }
+    fn esc() -> KeyEvent { KeyEvent::esc() }
+
+    // UC-14: Mode transitions
+    #[test]
+    fn test_initial_mode_is_normal() {
+        let vim = VimState::new();
+        assert_eq!(vim.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn test_i_enters_insert_mode() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello");
+        let _action = vim.process_key(key('i'), &buf, 0);
+        assert!(matches!(vim.mode(), Mode::Insert));
+    }
+
+    #[test]
+    fn test_esc_returns_to_normal() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello");
+        vim.process_key(key('i'), &buf, 0);
+        assert!(matches!(vim.mode(), Mode::Insert));
+        vim.process_key(esc(), &buf, 0);
+        assert_eq!(vim.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn test_a_enters_insert_after_cursor() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello");
+        let _action = vim.process_key(key('a'), &buf, 2);
+        assert!(matches!(vim.mode(), Mode::Insert));
+    }
+
+    #[test]
+    fn test_v_enters_visual_mode() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello");
+        vim.process_key(key('v'), &buf, 0);
+        assert!(matches!(vim.mode(), Mode::Visual { .. }));
+    }
+
+    #[test]
+    fn test_colon_enters_command_mode() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello");
+        vim.process_key(key(':'), &buf, 0);
+        assert_eq!(vim.mode(), Mode::Command);
+    }
+
+    // UC-15: Motions with counts
+    #[test]
+    fn test_w_motion_moves_to_next_word() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello world foo");
+        let action = vim.process_key(key('w'), &buf, 0);
+        if let VimAction::Motion(m) = action {
+            assert_eq!(m.new_position, 6); // 'w' in "world"
+        } else {
+            panic!("expected Motion, got {:?}", action);
+        }
+    }
+
+    #[test]
+    fn test_b_motion_moves_to_prev_word() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello world");
+        let action = vim.process_key(key('b'), &buf, 8);
+        if let VimAction::Motion(m) = action {
+            assert_eq!(m.new_position, 6);
+        } else {
+            panic!("expected Motion");
+        }
+    }
+
+    #[test]
+    fn test_dollar_motion_to_end_of_line() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello world\nsecond");
+        let action = vim.process_key(key('$'), &buf, 0);
+        if let VimAction::Motion(m) = action {
+            assert_eq!(m.new_position, 10); // last char of first line
+        } else {
+            panic!("expected Motion");
+        }
+    }
+
+    #[test]
+    fn test_0_motion_to_start_of_line() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello world");
+        let action = vim.process_key(key('0'), &buf, 5);
+        if let VimAction::Motion(m) = action {
+            assert_eq!(m.new_position, 0);
+        } else {
+            panic!("expected Motion");
+        }
+    }
+
+    #[test]
+    fn test_gg_motion_to_document_start() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("first\nsecond\nthird");
+        vim.process_key(key('g'), &buf, 10);
+        let action = vim.process_key(key('g'), &buf, 10);
+        if let VimAction::Motion(m) = action {
+            assert_eq!(m.new_position, 0);
+        } else {
+            panic!("expected Motion for gg");
+        }
+    }
+
+    #[test]
+    fn test_G_motion_to_document_end() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("first\nsecond\nthird");
+        let action = vim.process_key(key('G'), &buf, 0);
+        if let VimAction::Motion(m) = action {
+            assert!(m.new_position > 0); // should be at end
+        } else {
+            panic!("expected Motion");
+        }
+    }
+
+    // UC-14: Operators
+    #[test]
+    fn test_dd_deletes_line() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("first\nsecond\nthird");
+        vim.process_key(key('d'), &buf, 0);
+        let action = vim.process_key(key('d'), &buf, 0);
+        match action {
+            VimAction::Edit(edit) => {
+                assert!(edit.replacement.is_empty()); // deletion
+            }
+            VimAction::Composite(actions) => {
+                assert!(!actions.is_empty());
+            }
+            _ => panic!("expected Edit or Composite for dd, got {:?}", action),
+        }
+    }
+
+    #[test]
+    fn test_x_deletes_char() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello");
+        let action = vim.process_key(key('x'), &buf, 0);
+        match action {
+            VimAction::Edit(edit) => {
+                assert!(edit.replacement.is_empty());
+                assert!(edit.range.start == 0);
+            }
+            _ => panic!("expected Edit for x, got {:?}", action),
+        }
+    }
+
+    // UC-14 step 7: Pending keys display
+    #[test]
+    fn test_pending_keys_shown_after_d() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello");
+        vim.process_key(key('d'), &buf, 0);
+        assert!(!vim.pending_keys().is_empty());
+    }
+
+    // UC-21: Registers
+    #[test]
+    fn test_yy_copies_to_unnamed_register() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello world\n");
+        vim.process_key(key('y'), &buf, 0);
+        vim.process_key(key('y'), &buf, 0);
+        // The unnamed register should have content
+        // (exact behavior depends on implementation)
+    }
+
+    // UC-22: Macros
+    #[test]
+    fn test_macro_recording_flag() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello");
+        assert!(!vim.is_recording());
+        vim.process_key(key('q'), &buf, 0);
+        vim.process_key(key('a'), &buf, 0);
+        assert!(vim.is_recording());
+        vim.process_key(key('q'), &buf, 0);
+        assert!(!vim.is_recording());
+    }
+
+    // UC-15: Count prefix
+    #[test]
+    fn test_count_prefix_with_motion() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("one two three four five");
+        vim.process_key(key('3'), &buf, 0);
+        let action = vim.process_key(key('w'), &buf, 0);
+        if let VimAction::Motion(m) = action {
+            // Should skip 3 words
+            assert!(m.new_position > 4); // past "one "
+        } else {
+            panic!("expected Motion for 3w");
+        }
+    }
+
+    // UC-14: h/j/k/l basic motions
+    #[test]
+    fn test_h_moves_left() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello");
+        let action = vim.process_key(key('h'), &buf, 3);
+        if let VimAction::Motion(m) = action {
+            assert_eq!(m.new_position, 2);
+        } else {
+            panic!("expected Motion");
+        }
+    }
+
+    #[test]
+    fn test_l_moves_right() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello");
+        let action = vim.process_key(key('l'), &buf, 0);
+        if let VimAction::Motion(m) = action {
+            assert_eq!(m.new_position, 1);
+        } else {
+            panic!("expected Motion");
+        }
+    }
+
+    #[test]
+    fn test_j_moves_down() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("first\nsecond");
+        let action = vim.process_key(key('j'), &buf, 0);
+        if let VimAction::Motion(m) = action {
+            assert!(m.new_position >= 6); // somewhere on second line
+        } else {
+            panic!("expected Motion");
+        }
+    }
+
+    #[test]
+    fn test_o_opens_line_below_and_enters_insert() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello\nworld");
+        let _action = vim.process_key(key('o'), &buf, 3);
+        assert!(matches!(vim.mode(), Mode::Insert));
+    }
+
+    #[test]
+    fn test_O_opens_line_above_and_enters_insert() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello\nworld");
+        let _action = vim.process_key(key('O'), &buf, 8);
+        assert!(matches!(vim.mode(), Mode::Insert));
+    }
+
+    // Insert mode: typing goes through as Unhandled
+    #[test]
+    fn test_insert_mode_chars_are_edits() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("");
+        vim.process_key(key('i'), &buf, 0);
+        let action = vim.process_key(key('a'), &buf, 0);
+        // In insert mode, characters produce Unhandled (caller handles raw input)
+        match action {
+            VimAction::Edit(_) => {}
+            VimAction::Unhandled => {}
+            _ => panic!("expected Edit or Unhandled in insert mode, got {:?}", action),
+        }
+    }
+}

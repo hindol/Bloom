@@ -85,6 +85,63 @@ impl Vault {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    // UC-73: Create vault
+    #[test]
+    fn test_create_vault_creates_dirs() {
+        let dir = TempDir::new().unwrap();
+        let _vault = Vault::create(dir.path()).unwrap();
+        assert!(dir.path().join("pages").exists());
+        assert!(dir.path().join("journal").exists());
+    }
+
+    // UC-82: Merge conflict detection
+    #[test]
+    fn test_detect_merge_conflicts() {
+        let dir = TempDir::new().unwrap();
+        let vault = Vault::create(dir.path()).unwrap();
+        let conflict = "<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> branch";
+        assert!(vault.has_merge_conflicts(conflict));
+    }
+
+    #[test]
+    fn test_no_false_positive_conflicts() {
+        let dir = TempDir::new().unwrap();
+        let vault = Vault::create(dir.path()).unwrap();
+        assert!(!vault.has_merge_conflicts("normal content\nnothing special"));
+    }
+
+    // UC-03: filename sanitization
+    #[test]
+    fn test_filename_sanitization() {
+        let dir = TempDir::new().unwrap();
+        let vault = Vault::create(dir.path()).unwrap();
+        let id = crate::types::PageId::from_hex("aabbccdd").unwrap();
+        let name = vault.filename_for_title("Hello / World: Test?", &id);
+        assert!(!name.contains('/'));
+        assert!(!name.contains(':'));
+        assert!(!name.contains('?'));
+    }
+
+    // UC-84: UUID collision avoidance
+    #[test]
+    fn test_uuid_generation() {
+        let id = crate::uuid::generate_hex_id();
+        assert_eq!(id.to_hex().len(), 8);
+    }
+
+    // gitignore
+    #[test]
+    fn test_gitignore_content() {
+        let content = Vault::gitignore_content();
+        assert!(content.contains(".bloom"));
+    }
+}
+
 /// Generate 4 pseudo-random bytes using a simple xorshift on the current time.
 fn rand_bytes() -> [u8; 4] {
     let seed = std::time::SystemTime::now()

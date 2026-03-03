@@ -98,3 +98,186 @@ impl Index {
         Ok(Index { conn })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    fn make_entry(id_hex: &str, title: &str, content: &str, tags: &[&str]) -> IndexEntry {
+        let id = PageId::from_hex(id_hex).unwrap();
+        IndexEntry {
+            meta: PageMeta {
+                id: id.clone(),
+                title: title.to_string(),
+                created: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+                tags: tags.iter().map(|t| TagName(t.to_string())).collect(),
+                path: std::path::PathBuf::from(format!("pages/{}.md", title.to_lowercase())),
+            },
+            content: content.to_string(),
+            links: vec![],
+            tags: tags.iter().map(|t| TagName(t.to_string())).collect(),
+            tasks: vec![],
+            block_ids: vec![],
+        }
+    }
+
+    // UC-76: Rebuild index
+    #[test]
+    fn test_rebuild_index() {
+        let mut idx = Index::open_in_memory().unwrap();
+        let entries = vec![
+            make_entry("aabbccdd", "Page One", "Hello world", &["rust"]),
+            make_entry("11223344", "Page Two", "Goodbye world", &["python"]),
+        ];
+        let stats = idx.rebuild(&entries).unwrap();
+        assert_eq!(stats.pages, 2);
+        assert_eq!(stats.tags, 2);
+    }
+
+    // UC-08: Find page by title
+    #[test]
+    fn test_find_page_by_title() {
+        let mut idx = Index::open_in_memory().unwrap();
+        idx.index_page(&make_entry("aabbccdd", "Rust Notes", "content", &[]))
+            .unwrap();
+        let result = idx.find_page_by_title("Rust Notes");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().title, "Rust Notes");
+    }
+
+    #[test]
+    fn test_find_page_by_id() {
+        let mut idx = Index::open_in_memory().unwrap();
+        let id = PageId::from_hex("aabbccdd").unwrap();
+        idx.index_page(&make_entry("aabbccdd", "Test", "content", &[]))
+            .unwrap();
+        let result = idx.find_page_by_id(&id);
+        assert!(result.is_some());
+    }
+
+    // UC-34: Tags
+    #[test]
+    fn test_all_tags_with_counts() {
+        let mut idx = Index::open_in_memory().unwrap();
+        idx.index_page(&make_entry("aabbccdd", "P1", "c", &["rust", "editors"]))
+            .unwrap();
+        idx.index_page(&make_entry("11223344", "P2", "c", &["rust"]))
+            .unwrap();
+        let tags = idx.all_tags();
+        let rust_count = tags.iter().find(|(t, _)| t.0 == "rust").map(|(_, c)| *c);
+        assert_eq!(rust_count, Some(2));
+    }
+
+    #[test]
+    fn test_pages_with_tag() {
+        let mut idx = Index::open_in_memory().unwrap();
+        idx.index_page(&make_entry("aabbccdd", "P1", "c", &["rust"]))
+            .unwrap();
+        idx.index_page(&make_entry("11223344", "P2", "c", &["python"]))
+            .unwrap();
+        let pages = idx.pages_with_tag(&TagName("rust".into()));
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].title, "P1");
+    }
+
+    // UC-36: Rename tag
+    #[test]
+    fn test_rename_tag() {
+        let mut idx = Index::open_in_memory().unwrap();
+        idx.index_page(&make_entry("aabbccdd", "P1", "c", &["editors"]))
+            .unwrap();
+        let count = idx
+            .rename_tag(
+                &TagName("editors".into()),
+                &TagName("text-editors".into()),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        let pages = idx.pages_with_tag(&TagName("text-editors".into()));
+        assert_eq!(pages.len(), 1);
+    }
+
+    // UC-10: Remove page
+    #[test]
+    fn test_remove_page() {
+        let mut idx = Index::open_in_memory().unwrap();
+        let id = PageId::from_hex("aabbccdd").unwrap();
+        idx.index_page(&make_entry("aabbccdd", "Test", "c", &["rust"]))
+            .unwrap();
+        idx.remove_page(&id).unwrap();
+        assert!(idx.find_page_by_id(&id).is_none());
+    }
+
+    // UC-37: Full-text search
+    #[test]
+    fn test_fts_search() {
+        let mut idx = Index::open_in_memory().unwrap();
+        idx.index_page(&make_entry(
+            "aabbccdd",
+            "Rust Notes",
+            "Rope data structures are fast",
+            &[],
+        ))
+        .unwrap();
+        let filters = SearchFilters {
+            tags: vec![],
+            date_range: None,
+            links_to: None,
+            task_status: None,
+        };
+        let results = idx.search("rope", &filters);
+        assert!(!results.is_empty());
+    }
+
+    // UC-08: List pages
+    #[test]
+    fn test_list_pages() {
+        let mut idx = Index::open_in_memory().unwrap();
+        idx.index_page(&make_entry("aabbccdd", "P1", "c", &[]))
+            .unwrap();
+        idx.index_page(&make_entry("11223344", "P2", "c", &[]))
+            .unwrap();
+        let pages = idx.list_pages(None);
+        assert_eq!(pages.len(), 2);
+    }
+
+    // UC-27: Backlinks
+    #[test]
+    fn test_backlinks() {
+        let mut idx = Index::open_in_memory().unwrap();
+        let target_id = PageId::from_hex("aabbccdd").unwrap();
+        let mut entry = make_entry("11223344", "Source", "links to target", &[]);
+        entry.links.push(LinkTarget {
+            page: target_id.clone(),
+            section: None,
+            display_hint: "Target".into(),
+        });
+        idx.index_page(&make_entry("aabbccdd", "Target", "content", &[]))
+            .unwrap();
+        idx.index_page(&entry).unwrap();
+        let backlinks = idx.backlinks_to(&target_id);
+        assert_eq!(backlinks.len(), 1);
+    }
+
+    // UC-43: Tasks for agenda
+    #[test]
+    fn test_open_tasks() {
+        let mut idx = Index::open_in_memory().unwrap();
+        let page_id = PageId::from_hex("aabbccdd").unwrap();
+        let mut entry = make_entry("aabbccdd", "Tasks", "content", &[]);
+        entry.tasks.push(Task {
+            text: "Do thing".into(),
+            done: false,
+            timestamps: vec![Timestamp::Due(
+                NaiveDate::from_ymd_opt(2026, 3, 5).unwrap(),
+            )],
+            source_page: page_id,
+            line: 5,
+        });
+        idx.index_page(&entry).unwrap();
+        let tasks = idx.all_open_tasks();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].text, "Do thing");
+    }
+}

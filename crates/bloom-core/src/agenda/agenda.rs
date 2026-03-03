@@ -55,3 +55,48 @@ impl Agenda {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::index::*;
+    use crate::types::*;
+    use chrono::NaiveDate;
+
+    // UC-43: Agenda categorization
+    #[test]
+    fn test_agenda_categorizes_tasks() {
+        let mut idx = Index::open_in_memory().unwrap();
+        let page_id = PageId::from_hex("aabbccdd").unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 3, 3).unwrap();
+        let yesterday = NaiveDate::from_ymd_opt(2026, 3, 2).unwrap();
+        let tomorrow = NaiveDate::from_ymd_opt(2026, 3, 4).unwrap();
+
+        let entry = IndexEntry {
+            meta: PageMeta {
+                id: page_id.clone(),
+                title: "Tasks".into(),
+                created: today,
+                tags: vec![],
+                path: "tasks.md".into(),
+            },
+            content: "tasks".into(),
+            links: vec![],
+            tags: vec![],
+            tasks: vec![
+                Task { text: "Overdue".into(), done: false, timestamps: vec![Timestamp::Due(yesterday)], source_page: page_id.clone(), line: 1 },
+                Task { text: "Today".into(), done: false, timestamps: vec![Timestamp::Due(today)], source_page: page_id.clone(), line: 2 },
+                Task { text: "Tomorrow".into(), done: false, timestamps: vec![Timestamp::Due(tomorrow)], source_page: page_id.clone(), line: 3 },
+            ],
+            block_ids: vec![],
+        };
+        idx.index_page(&entry).unwrap();
+
+        let agenda = Agenda::new();
+        let filters = AgendaFilters { tags: vec![], page: None, date_range: None };
+        let view = agenda.build(today, &idx, &filters);
+        assert_eq!(view.overdue.len(), 1);
+        assert_eq!(view.today.len(), 1);
+        assert_eq!(view.upcoming.len(), 1);
+    }
+}

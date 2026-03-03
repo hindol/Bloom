@@ -97,3 +97,80 @@ impl NoteStore for LocalFileStore {
         self.watcher_rx.clone()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::traits::NoteStore;
+    use tempfile::TempDir;
+
+    fn setup() -> (TempDir, LocalFileStore) {
+        let dir = TempDir::new().unwrap();
+        let pages_dir = dir.path().join("pages");
+        let journal_dir = dir.path().join("journal");
+        std::fs::create_dir_all(&pages_dir).unwrap();
+        std::fs::create_dir_all(&journal_dir).unwrap();
+        let store = LocalFileStore::new(dir.path().to_path_buf()).unwrap();
+        (dir, store)
+    }
+
+    // UC-86: Read/write
+    #[test]
+    fn test_write_and_read() {
+        let (_dir, store) = setup();
+        let path = Path::new("pages").join("test.md");
+        store.write(&path, "hello world").unwrap();
+        let content = store.read(&path).unwrap();
+        assert_eq!(content, "hello world");
+    }
+
+    #[test]
+    fn test_exists() {
+        let (_dir, store) = setup();
+        let path = Path::new("pages").join("test.md");
+        assert!(!store.exists(&path));
+        store.write(&path, "content").unwrap();
+        assert!(store.exists(&path));
+    }
+
+    #[test]
+    fn test_delete() {
+        let (_dir, store) = setup();
+        let path = Path::new("pages").join("test.md");
+        store.write(&path, "content").unwrap();
+        store.delete(&path).unwrap();
+        assert!(!store.exists(&path));
+    }
+
+    #[test]
+    fn test_list_pages() {
+        let (dir, store) = setup();
+        std::fs::write(dir.path().join("pages").join("a.md"), "content").unwrap();
+        std::fs::write(dir.path().join("pages").join("b.md"), "content").unwrap();
+        let pages = store.list_pages().unwrap();
+        assert_eq!(pages.len(), 2);
+    }
+
+    #[test]
+    fn test_list_journals() {
+        let (dir, store) = setup();
+        std::fs::write(
+            dir.path().join("journal").join("2026-03-01.md"),
+            "content",
+        )
+        .unwrap();
+        let journals = store.list_journals().unwrap();
+        assert_eq!(journals.len(), 1);
+    }
+
+    #[test]
+    fn test_rename() {
+        let (_dir, store) = setup();
+        let from = Path::new("pages").join("old.md");
+        let to = Path::new("pages").join("new.md");
+        store.write(&from, "content").unwrap();
+        store.rename(&from, &to).unwrap();
+        assert!(!store.exists(&from));
+        assert!(store.exists(&to));
+    }
+}

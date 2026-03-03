@@ -49,3 +49,31 @@ impl SessionState {
         Ok(state)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_session_save_and_load_roundtrip() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("session.json");
+        let state = SessionState {
+            buffers: vec![SessionBuffer {
+                page_path: "pages/test.md".into(),
+                cursor_line: 5,
+                cursor_column: 10,
+                scroll_offset: 0,
+                pane: 0,
+            }],
+            layout: SessionLayout::Leaf(0),
+            active_pane: 0,
+        };
+        state.save(&path).unwrap();
+        let loaded = SessionState::load(&path).unwrap();
+        assert_eq!(loaded.buffers.len(), 1);
+        assert_eq!(loaded.buffers[0].cursor_line, 5);
+        assert_eq!(loaded.active_pane, 0);
+    }
+}

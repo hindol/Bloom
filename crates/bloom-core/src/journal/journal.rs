@@ -106,3 +106,58 @@ impl Journal {
         content
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+    use tempfile::TempDir;
+    use crate::store::local::LocalFileStore;
+
+
+    fn setup() -> (TempDir, Journal) {
+        let dir = TempDir::new().unwrap();
+        let journal_dir = dir.path().join("journal");
+        std::fs::create_dir_all(&journal_dir).unwrap();
+        let journal = Journal::new(dir.path());
+        (dir, journal)
+    }
+
+    // UC-01: Journal path
+    #[test]
+    fn test_path_for_date() {
+        let (_dir, journal) = setup();
+        let date = NaiveDate::from_ymd_opt(2026, 3, 2).unwrap();
+        let path = journal.path_for_date(date);
+        assert!(path.to_string_lossy().contains("journal"));
+        assert!(path.to_string_lossy().contains("2026-03-02"));
+    }
+
+    // UC-04: Date navigation
+    #[test]
+    fn test_all_dates_empty() {
+        let (dir, journal) = setup();
+        let store = LocalFileStore::new(dir.path().to_path_buf()).unwrap();
+        let dates = journal.all_dates(&store).unwrap();
+        assert!(dates.is_empty());
+    }
+
+    #[test]
+    fn test_all_dates_with_files() {
+        let (dir, journal) = setup();
+        let journal_dir = dir.path().join("journal");
+        std::fs::write(
+            journal_dir.join("2026-03-01.md"),
+            "---\nid: aabbccdd\ntitle: \"2026-03-01\"\ncreated: 2026-03-01\ntags: []\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            journal_dir.join("2026-03-02.md"),
+            "---\nid: 11223344\ntitle: \"2026-03-02\"\ncreated: 2026-03-02\ntags: []\n---\n",
+        )
+        .unwrap();
+        let store = LocalFileStore::new(dir.path().to_path_buf()).unwrap();
+        let dates = journal.all_dates(&store).unwrap();
+        assert_eq!(dates.len(), 2);
+    }
+}
