@@ -124,6 +124,7 @@ pub struct BloomEditor {
     viewport: render::Viewport,
     wizard: Option<SetupWizardState>,
     vault_root: Option<std::path::PathBuf>,
+    leader_keys: Vec<types::KeyEvent>,
 }
 
 // ---------------------------------------------------------------------------
@@ -283,6 +284,7 @@ impl BloomEditor {
             viewport: render::Viewport::new(24, 80),
             wizard: None,
             vault_root: None,
+            leader_keys: Vec::new(),
             config,
         })
     }
@@ -378,6 +380,7 @@ impl BloomEditor {
 
         // Check platform shortcuts first
         if let Some(action) = keymap::platform_shortcut(&key) {
+            self.leader_keys.clear();
             return vec![action];
         }
 
@@ -391,6 +394,20 @@ impl BloomEditor {
             return self.handle_quick_capture_key(&key);
         }
 
+        // If we're in a leader key sequence (SPC was pressed), route to which-key
+        if !self.leader_keys.is_empty() {
+            return self.handle_leader_key(key);
+        }
+
+        // Check if this is the leader key (Space in Normal mode)
+        if key.code == types::KeyCode::Char(' ')
+            && key.modifiers == types::Modifiers::none()
+            && matches!(self.vim_state.mode(), vim::Mode::Normal)
+        {
+            self.leader_keys.push(key);
+            return vec![keymap::dispatch::Action::Noop];
+        }
+
         // Vim processing
         if let Some(buf) = self.active_page.as_ref().and_then(|id| self.buffer_mgr.get(id)) {
             let action = self.vim_state.process_key(key.clone(), buf, self.cursor);
@@ -398,6 +415,95 @@ impl BloomEditor {
         }
 
         vec![keymap::dispatch::Action::Noop]
+    }
+
+    fn handle_leader_key(&mut self, key: types::KeyEvent) -> Vec<keymap::dispatch::Action> {
+        // Esc cancels leader sequence
+        if key.code == types::KeyCode::Esc {
+            self.leader_keys.clear();
+            return vec![keymap::dispatch::Action::Noop];
+        }
+
+        self.leader_keys.push(key);
+
+        // Look up the full sequence (skipping the initial SPC)
+        let lookup_keys: Vec<types::KeyEvent> = self.leader_keys[1..].to_vec();
+        match self.which_key_tree.lookup(&lookup_keys) {
+            which_key::WhichKeyLookup::Action(action_id) => {
+                self.leader_keys.clear();
+                self.action_id_to_actions(&action_id)
+            }
+            which_key::WhichKeyLookup::Prefix(_entries) => {
+                // Still accumulating — show which-key popup on next render
+                vec![keymap::dispatch::Action::Noop]
+            }
+            which_key::WhichKeyLookup::NoMatch => {
+                self.leader_keys.clear();
+                vec![keymap::dispatch::Action::Noop]
+            }
+        }
+    }
+
+    fn action_id_to_actions(&mut self, action_id: &str) -> Vec<keymap::dispatch::Action> {
+        match action_id {
+            "find_page" => vec![keymap::dispatch::Action::OpenPicker(
+                keymap::dispatch::PickerKind::FindPage,
+            )],
+            "switch_buffer" => vec![keymap::dispatch::Action::OpenPicker(
+                keymap::dispatch::PickerKind::SwitchBuffer,
+            )],
+            "search" => vec![keymap::dispatch::Action::OpenPicker(
+                keymap::dispatch::PickerKind::Search,
+            )],
+            "search_tags" => vec![keymap::dispatch::Action::OpenPicker(
+                keymap::dispatch::PickerKind::Tags,
+            )],
+            "journal_today" => {
+                self.open_journal_today();
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "journal_append" => vec![keymap::dispatch::Action::QuickCapture(
+                keymap::dispatch::QuickCaptureKind::Note,
+            )],
+            "journal_task" => vec![keymap::dispatch::Action::QuickCapture(
+                keymap::dispatch::QuickCaptureKind::Task,
+            )],
+            "split_vertical" => vec![keymap::dispatch::Action::SplitWindow(
+                window::SplitDirection::Vertical,
+            )],
+            "split_horizontal" => vec![keymap::dispatch::Action::SplitWindow(
+                window::SplitDirection::Horizontal,
+            )],
+            "navigate_left" => vec![keymap::dispatch::Action::NavigateWindow(
+                window::Direction::Left,
+            )],
+            "navigate_down" => vec![keymap::dispatch::Action::NavigateWindow(
+                window::Direction::Down,
+            )],
+            "navigate_up" => vec![keymap::dispatch::Action::NavigateWindow(
+                window::Direction::Up,
+            )],
+            "navigate_right" => vec![keymap::dispatch::Action::NavigateWindow(
+                window::Direction::Right,
+            )],
+            "close_window" => vec![keymap::dispatch::Action::CloseWindow],
+            "agenda" => vec![keymap::dispatch::Action::OpenAgenda],
+            "undo_tree" => vec![keymap::dispatch::Action::OpenUndoTree],
+            "new_from_template" => vec![keymap::dispatch::Action::OpenPicker(
+                keymap::dispatch::PickerKind::Templates,
+            )],
+            "split_page" => vec![keymap::dispatch::Action::Refactor(
+                keymap::dispatch::RefactorOp::SplitPage,
+            )],
+            "merge_pages" => vec![keymap::dispatch::Action::Refactor(
+                keymap::dispatch::RefactorOp::MergePages,
+            )],
+            "move_block" => vec![keymap::dispatch::Action::Refactor(
+                keymap::dispatch::RefactorOp::MoveBlock,
+            )],
+            "rebuild_index" => vec![keymap::dispatch::Action::RebuildIndex],
+            _ => vec![keymap::dispatch::Action::Noop],
+        }
     }
 
     fn handle_picker_key(&mut self, key: &types::KeyEvent) -> Vec<keymap::dispatch::Action> {
@@ -762,7 +868,45 @@ impl BloomEditor {
             maximized: self.window_mgr.is_maximized(),
             hidden_pane_count: self.window_mgr.hidden_pane_count(),
             picker: None,
-            which_key: None,
+            which_key: if self.leader_keys.len() > 1 {
+                let lookup_keys: Vec<types::KeyEvent> = self.leader_keys[1..].to_vec();
+                match self.which_key_tree.lookup(&lookup_keys) {
+                    which_key::WhichKeyLookup::Prefix(entries) => {
+                        let prefix = self.leader_keys.iter()
+                            .map(|k| k.to_string())
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        Some(render::WhichKeyFrame {
+                            entries: entries.into_iter().map(|e| render::WhichKeyEntry {
+                                key: e.key,
+                                label: e.label,
+                                is_group: e.is_group,
+                            }).collect(),
+                            prefix,
+                            context: render::WhichKeyContext::Leader,
+                        })
+                    }
+                    _ => None,
+                }
+            } else if self.leader_keys.len() == 1 {
+                let entries = self.which_key_tree.lookup(&[]);
+                match entries {
+                    which_key::WhichKeyLookup::Prefix(entries) => {
+                        Some(render::WhichKeyFrame {
+                            entries: entries.into_iter().map(|e| render::WhichKeyEntry {
+                                key: e.key,
+                                label: e.label,
+                                is_group: e.is_group,
+                            }).collect(),
+                            prefix: "SPC".to_string(),
+                            context: render::WhichKeyContext::Leader,
+                        })
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            },
             command_line: None,
             quick_capture: self.quick_capture.as_ref().map(|qc| render::QuickCaptureFrame {
                 prompt: match qc.kind {
@@ -1249,6 +1393,49 @@ mod tests {
         editor.start_wizard();
         let actions = editor.handle_key(KeyEvent::ctrl('q'));
         assert!(actions.iter().any(|a| matches!(a, keymap::dispatch::Action::Quit)));
+    }
+
+    // SPC f f opens find page picker
+    #[test]
+    fn test_leader_spc_f_f_opens_picker() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.handle_key(KeyEvent::char(' ')); // SPC
+        editor.handle_key(KeyEvent::char('f')); // f (group)
+        let actions = editor.handle_key(KeyEvent::char('f')); // f (action)
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, keymap::dispatch::Action::OpenPicker(keymap::dispatch::PickerKind::FindPage))));
+    }
+
+    // SPC shows which-key popup in render
+    #[test]
+    fn test_leader_spc_shows_which_key() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.handle_key(KeyEvent::char(' ')); // SPC
+        let frame = editor.render();
+        assert!(frame.which_key.is_some());
+        let wk = frame.which_key.unwrap();
+        assert_eq!(wk.prefix, "SPC");
+        assert!(!wk.entries.is_empty());
+    }
+
+    // Esc cancels leader sequence
+    #[test]
+    fn test_leader_esc_cancels() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.handle_key(KeyEvent::char(' ')); // SPC
+        editor.handle_key(KeyEvent::esc());     // Cancel
+        let frame = editor.render();
+        assert!(frame.which_key.is_none());
     }
 }
 
