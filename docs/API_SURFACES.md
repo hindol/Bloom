@@ -743,6 +743,7 @@ pub enum Action {
     DialogResponse(usize),          // index of chosen option
 
     Refactor(RefactorOp),
+    TemplateAdvance,                // Tab pressed while template mode active
     RebuildIndex,
     ToggleMcp,
 
@@ -778,6 +779,7 @@ pub struct EditorContext {
     pub cursor: usize,
     pub picker_open: bool,
     pub quick_capture_open: bool,
+    pub template_mode_active: bool,
     pub active_pane: PaneId,
 }
 ```
@@ -929,6 +931,53 @@ pub struct TabStop {
     pub index: usize,                      // 0 = final cursor, 1+ = numbered stops
     pub ranges: Vec<Range<usize>>,         // all occurrences in content (for mirroring)
     pub default_text: String,              // description text if user skips
+}
+
+/// Runtime state for an active template session.
+/// Lives in BloomEditor alongside VimState — independent lifecycle.
+pub struct TemplateModeState {
+    // internal: tab_stops, current_stop_index, typed text per stop
+}
+
+impl TemplateModeState {
+    /// Create from an expanded template's tab stops.
+    pub fn new(tab_stops: Vec<TabStop>) -> Self;
+
+    /// Is template mode currently active?
+    pub fn is_active(&self) -> bool;
+
+    /// Current tab stop the user is filling (None if mode ended).
+    pub fn current_stop(&self) -> Option<&TabStop>;
+
+    /// Advance to the next tab stop. Returns the mirroring edits to apply
+    /// (search-and-replace for all other occurrences of the current stop).
+    /// Returns None if advancing past the last numbered stop (→ $0 or exit).
+    pub fn advance(&mut self, typed_text: &str) -> TemplateAdvanceResult;
+
+    /// End template mode (called after $0 or when user navigates away).
+    pub fn deactivate(&mut self);
+}
+
+pub enum TemplateAdvanceResult {
+    /// Move cursor to next tab stop. Apply these mirror edits first.
+    NextStop {
+        cursor_target: Range<usize>,        // where to place cursor (first range of next stop)
+        mirror_edits: Vec<MirrorEdit>,      // replace other occurrences of previous stop
+    },
+    /// Move cursor to $0 (final position). Template mode ends.
+    FinalCursor {
+        cursor_target: usize,               // char position for $0
+        mirror_edits: Vec<MirrorEdit>,
+    },
+    /// No $0 defined, template mode ends. No cursor move.
+    Done {
+        mirror_edits: Vec<MirrorEdit>,
+    },
+}
+
+pub struct MirrorEdit {
+    pub range: Range<usize>,                // byte range of the other occurrence
+    pub new_text: String,                   // the text the user typed (replaces default)
 }
 ```
 
@@ -1307,6 +1356,37 @@ impl BloomEditor {
 6. User resolves conflicts, saves
 7. Vault::has_merge_conflicts(content) → false
 8. Index::index_page(entry) — re-indexed normally
+```
+
+### UC-58: Use a built-in template (full chain)
+
+```
+ 1. KeymapDispatcher::dispatch(SPC n) → Action::OpenPicker(Templates)
+ 2. TemplateEngine::list() → Vec<Template>
+ 3. Picker<Template> populated with names and descriptions
+ 4. User selects "Meeting notes" → picker prompts for title (QuickCaptureFrame)
+ 5. User types "Sprint Retrospective" → Action::SubmitQuickCapture("Sprint Retrospective")
+ 6. TemplateEngine::expand(template, "Sprint Retrospective", {}) → ExpandedTemplate
+    - ${AUTO} → generated UUID
+    - ${DATE} → "2026-03-03"
+    - ${TITLE} → "Sprint Retrospective"
+    - ${1:Attendees}, ${2:Topics}, ${3:Action item}, $0 left as tab stops
+ 7. Buffer::from_text(expanded.content)
+ 8. TemplateModeState::new(expanded.tab_stops) — template mode activated
+ 9. Cursor placed at tab_stops[0].ranges[0].start (first occurrence of $1)
+10. User types "Alice, Bob" (Insert mode, normal buffer editing)
+11. User presses Tab → KeymapDispatcher sees template_mode_active
+    → Action::TemplateAdvance
+12. TemplateModeState::advance("Alice, Bob") → NextStop {
+        cursor_target: Range for $2,
+        mirror_edits: [replace other ${1:Attendees} occurrences with "Alice, Bob"]
+    }
+13. BloomEditor applies mirror_edits via Buffer::replace for each MirrorEdit
+14. Cursor moves to $2
+15. (Repeat for $2, $3...)
+16. After $3, Tab → TemplateModeState::advance(...) → FinalCursor { cursor at $0 }
+17. TemplateModeState::deactivate() — template mode ends
+18. Next Tab → normal tab character (KeymapDispatcher, no template_mode_active)
 ```
 
 ---
