@@ -85,12 +85,14 @@ Verifies: G19 (Templates)
 1. User presses `SPC n` in Normal mode.
 2. A picker shows available templates: "Blank page", "Daily journal", "Meeting notes", "Book review", "Project page", plus any user templates from `.bloom/templates/`.
 3. User selects "Meeting notes".
-4. A new buffer is created with the template content. Frontmatter is auto-filled: `id` (generated UUID), `created` (today), `tags: [meeting]`.
-5. Cursor lands on `${1:Meeting Title}` — the first placeholder.
-6. User types "Q1 Review" — replaces the placeholder.
-7. User presses Tab — cursor jumps to `${2:Attendees}`.
-8. User fills remaining placeholders with Tab progression.
-9. The file is NOT written to disk until auto-save triggers after the first edit beyond placeholders.
+4. Picker prompts: "Page title: _". User types "Q1 Review".
+5. A new buffer is created with the template content. Magic variables are auto-filled: `${AUTO}` → UUID, `${DATE}` → today, `${TITLE}` → "Q1 Review". Tags from the template are set.
+6. Cursor lands on `${1:Attendees}` — the first numbered placeholder.
+7. User types "Alice, Bob" — replaces the placeholder.
+8. User presses Tab — cursor jumps to `${2:Topics}`.
+9. User fills remaining placeholders with Tab progression.
+10. After the last numbered stop, Tab moves cursor to `$0` (or end of file if no `$0`). Template mode ends.
+11. The file is NOT written to disk until auto-save triggers after the first edit beyond placeholders.
 
 ### UC-08: Find and open an existing page
 
@@ -642,14 +644,45 @@ Verifies: G11
 
 Verifies: G19 (Templates)
 
-1. User presses `SPC n` → selects "Meeting notes".
-2. New buffer with template content and auto-filled frontmatter.
-3. Cursor lands on `${1:Meeting Title}`.
-4. User types "Sprint Retrospective" — replaces placeholder.
-5. Tab → cursor jumps to `${2:Attendees}`.
+1. User presses `SPC n` → template picker shows available templates with names and descriptions.
+2. User selects "Meeting notes".
+3. Picker prompts: "Page title: _". User types "Sprint Retrospective".
+4. New buffer is created. `${AUTO}` → UUID, `${DATE}` → today, `${TITLE}` → "Sprint Retrospective".
+5. Cursor lands on `${1:Attendees}`.
 6. User types "Alice, Bob, Carol".
-7. Tab → `${3:Topics}`. And so on.
-8. After the last placeholder, Tab does nothing (normal Tab behavior resumes).
+7. Tab → cursor jumps to `${2:Topics}`.
+8. User types "Q1 Review, Roadmap".
+9. Tab → cursor jumps to `${3:First action item}`.
+10. User types "Follow up on budget".
+11. Tab → cursor moves to `$0` (final cursor position, in the Notes section). Template mode ends.
+12. Next Tab press inserts a normal tab character.
+
+### UC-58a: Template mirroring
+
+Verifies: G19 (Templates)
+
+1. A template contains `${1:Component}` in two places: the frontmatter title and a heading.
+2. User types "Authentication" for `${1:Component}`.
+3. User presses Tab to advance to `${2:...}`.
+4. Both occurrences of `${1:Component}` are replaced with "Authentication" (search-and-replace).
+
+### UC-58b: Escape mid-template
+
+Verifies: G19 (Templates)
+
+1. User is filling `${1:Attendees}` in Insert mode.
+2. User presses Escape → returns to Normal mode. Template mode persists.
+3. User navigates with Vim motions, then presses `i` to re-enter Insert mode.
+4. User presses Tab → cursor advances to `${2:Topics}`. Template mode still active.
+
+### UC-58c: Skip a placeholder
+
+Verifies: G19 (Templates)
+
+1. Cursor is on `${1:Attendees}`.
+2. User presses Tab without typing.
+3. The text "Attendees" remains as literal content.
+4. Cursor advances to `${2:Topics}`.
 
 ### UC-59: Create a custom template
 
@@ -657,32 +690,36 @@ Verifies: G19
 
 1. User creates a file `.bloom/templates/bug-report.md`:
    ```markdown
+   <!-- template: Bug Report | Track and document software bugs with reproduction steps -->
    ---
    id: ${AUTO}
-   title: "${1:Bug Title}"
+   title: "${TITLE}"
    created: ${DATE}
    tags: [bug]
    ---
 
    ## Description
-   ${2:What happened?}
+   ${1:What happened?}
 
    ## Steps to Reproduce
-   ${3:Steps}
+   ${2:Steps}
 
    ## Expected Behavior
-   ${4:What should happen?}
+   ${3:What should happen?}
+
+   $0
    ```
-2. Next time user presses `SPC n`, "Bug report" appears in the template picker.
-3. Template name is derived from the filename: `bug-report.md` → "Bug report".
+2. Next time user presses `SPC n`, "Bug Report" appears in the picker with description "Track and document software bugs with reproduction steps".
+3. If the `<!-- template: ... -->` comment is omitted, the name is derived from the filename: `bug-report.md` → "Bug report".
 
 ### UC-60: Template with auto-filled values
 
 Verifies: G19
 
-1. User creates a page from any template.
+1. User creates a page from any template. Picker prompts for a title.
 2. `${AUTO}` in the frontmatter `id` field is replaced with a generated 8-char hex UUID.
 3. `${DATE}` is replaced with today's ISO date.
+4. `${TITLE}` is replaced with the title the user entered in the picker prompt.
 4. These are filled silently — the cursor does not stop on them.
 
 ### UC-61: Template available via MCP

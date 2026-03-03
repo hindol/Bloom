@@ -63,24 +63,61 @@ Your content here.
 
 Templates use snippet-style tab-stops: `${N:description}`.
 
+### Magic Variables
+
+| Variable | Filled with | Notes |
+|----------|------------|-------|
+| `${AUTO}` | Generated 8-char hex UUID | Used in frontmatter `id` field |
+| `${DATE}` | Today's ISO date (YYYY-MM-DD) | Used in frontmatter `created` field |
+| `${TITLE}` | The title the user entered in the template picker | Avoids redundant entry — populates frontmatter and heading |
+| `$0` | Final cursor position (no text) | After all tab-stops are filled, cursor lands here |
+
+### Tab-Stop Behavior
+
+- `${1:description}`, `${2:description}`, etc. are numbered tab-stops.
+- On template creation, the cursor jumps to `$1`. `Tab` advances to `$2`, and so on.
+- **Mirroring:** If `${1:desc}` appears multiple times, typing in the first occurrence and pressing `Tab` replaces all other `${1:desc}` instances with the typed text (search-and-replace on advance).
+- **Skipping:** Pressing `Tab` without typing keeps the default description text as literal content.
+- **After the last tab-stop:** `Tab` exits template mode and inserts a normal tab character. If `$0` is present, cursor moves there first.
+- **Escape mid-template:** Returns to Normal mode (standard Vim behavior). Template mode persists — re-entering Insert mode and pressing `Tab` continues to the next placeholder.
+- **Template mode ends** when: (a) `Tab` is pressed after the last numbered stop, or (b) the user manually navigates away and the cursor leaves all placeholder regions.
+
+### Template Metadata
+
+Templates declare their name and description via an HTML comment (stripped from expanded output):
+
 ```markdown
+<!-- template: Meeting Notes | Notes for recurring meetings with attendees, agenda, and action items -->
+```
+
+Format: `<!-- template: Name | Description -->`. If omitted, the name is derived from the filename (`meeting-notes.md` → "Meeting notes") and the description is empty.
+
+### Code-Block Safety
+
+Template placeholders (`${...}`) inside fenced code blocks and inline code spans are **not expanded**. This prevents collisions with shell variables (`${HOME}`), JavaScript template literals, and other `${}` syntax. Backslash escape (`\${...}`) is also supported for edge cases outside code contexts.
+
+### Example Template
+
+```markdown
+<!-- template: Meeting Notes | Notes for recurring meetings with attendees, agenda, and action items -->
 ---
 id: ${AUTO}
-title: "${1:Meeting Title}"
+title: "${TITLE}"
 created: ${DATE}
 tags: [meeting]
 ---
 
 ## Attendees
-${2:Names}
+${1:Names}
 
 ## Agenda
-${3:Topics}
+${2:Topics}
 
 ## Notes
+$0
 
 ## Action Items
-- [ ] ${4:First action item}
+- [ ] ${3:First action item}
 ```
 
-On template creation, the cursor jumps to `$1`, then `Tab` advances to `$2`, and so on. `${AUTO}` and `${DATE}` are filled automatically. Unfilled placeholders remain as plain text.
+On template creation, the cursor jumps to `$1`, then `Tab` advances to `$2`, `$3`, and finally `$0` (the Notes section). `${AUTO}`, `${DATE}`, and `${TITLE}` are filled automatically. Unfilled placeholders remain as plain text.

@@ -901,9 +901,9 @@ pub struct Template {
 }
 
 pub struct Placeholder {
-    pub index: usize,              // 1-based tab-stop order
+    pub index: usize,              // 1-based tab-stop order (0 = final cursor)
     pub description: String,       // e.g., "Meeting Title"
-    pub default_text: String,      // the "${N:description}" text before replacement
+    pub occurrences: Vec<Range<usize>>,  // all positions of this placeholder in content
 }
 
 impl TemplateEngine {
@@ -912,11 +912,23 @@ impl TemplateEngine {
     /// List all available templates (built-in + user).
     pub fn list(&self) -> Vec<Template>;
 
-    /// Expand a template: fill ${AUTO} and ${DATE}, return content with placeholders.
-    pub fn expand(&self, template: &Template, values: &HashMap<usize, String>) -> String;
+    /// Expand a template: fill ${AUTO}, ${DATE}, ${TITLE}, return content with tab-stop placeholders.
+    pub fn expand(&self, template: &Template, title: &str,
+                  values: &HashMap<usize, String>) -> ExpandedTemplate;
 
     /// Get tab-stop positions in expanded content (for cursor jumping).
-    pub fn tab_stops(&self, template: &Template, expanded: &str) -> Vec<Range<usize>>;
+    pub fn tab_stops(&self, expanded: &ExpandedTemplate) -> Vec<TabStop>;
+}
+
+pub struct ExpandedTemplate {
+    pub content: String,
+    pub tab_stops: Vec<TabStop>,
+}
+
+pub struct TabStop {
+    pub index: usize,                      // 0 = final cursor, 1+ = numbered stops
+    pub ranges: Vec<Range<usize>>,         // all occurrences in content (for mirroring)
+    pub default_text: String,              // description text if user skips
 }
 ```
 

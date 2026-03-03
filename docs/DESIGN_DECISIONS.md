@@ -35,7 +35,8 @@
 | Logseq import | Non-destructive copy, full syntax mapping table, import report | In-place transformation |
 | Logseq namespaces | Flatten to title + auto-tags | Subdirectories, drop hierarchy |
 | Logseq properties | Preserve as arbitrary YAML frontmatter | Drop, convert to tags |
-| Template placeholders | `${N:description}` snippet-style tab-stops | No placeholders, manual editing |
+| Template placeholders | `${N:description}` snippet-style tab-stops with code-block-aware expansion | No placeholders, manual editing, double-brace syntax |
+| Template mirroring | Search-and-replace on Tab advance (not real-time sync) | Real-time mirror, no mirroring |
 | Code-block safety | All Bloom extensions ignored inside code spans, fences, frontmatter | Tags only |
 | Theming | Rougier-inspired semantic highlighting: monochrome base, typography-driven, sparing color | Rainbow syntax highlighting, no highlighting |
 | Workspace | Cargo workspace with separate crates per frontend | Single crate with feature flags |
