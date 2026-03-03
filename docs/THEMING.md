@@ -14,6 +14,56 @@
 4. **Light and dark variants are peers.** Each theme provides both. The same semantic roles exist in both variants; only the concrete hex values differ.
 5. **Medium contrast.** Neither washed-out nor neon. Lambda's "decent compromise between aesthetics and readability" is the target.
 6. **Terminal-friendly.** All colours must work on 256-colour terminals. The TUI is the primary frontend.
+7. **Monospace throughout.** Both TUI and GUI use monospace fonts. Typography is achieved through bold/italic/dim/size — not font family variation. This keeps Vim column operations correct and simplifies the rendering pipeline. The GUI may use font size variation for headings (larger monospace), but each line remains a uniform monospace grid.
+
+---
+
+## Typography
+
+### Font Strategy
+
+| Frontend | Font | Size Variation |
+|----------|------|---------------|
+| TUI | Terminal's monospace font | None — fixed grid, all characters same size |
+| GUI | Configurable monospace (default: system monospace) | Headings rendered at larger sizes (see below) |
+
+### GUI Font Sizes
+
+| Element | Size | Notes |
+|---------|------|-------|
+| H1 | 1.5× base | Bold, `strong` colour |
+| H2 | 1.3× base | Bold, `salient` colour |
+| H3 | 1.1× base | Bold, `foreground` |
+| H4–H6 | 1.0× (base) | Bold only |
+| Body text | 1.0× (base) | Default: 14px equivalent |
+| Code block | 1.0× (base) | `subtle` background wash |
+| Frontmatter | 0.9× base | `faded`, italic |
+| Status bar, picker, UI chrome | 1.0× (base) | Fixed size |
+
+Base font size is user-configurable in `config.toml`:
+
+```toml
+[font]
+family = "JetBrains Mono"   # any installed monospace font
+size = 14                    # base size in points (GUI only)
+line_height = 1.6            # line-height multiplier (GUI only)
+```
+
+### Line Spacing
+
+Generous line spacing is the single biggest factor in making monospace prose readable. Default `line_height = 1.6` (inspired by iA Writer). The TUI uses the terminal's native line spacing.
+
+### Recommended Fonts
+
+Not shipped with Bloom, but the docs/setup wizard can suggest:
+
+| Font | Character | Notes |
+|------|-----------|-------|
+| JetBrains Mono | Clean, modern | Free, excellent bold/italic, ligatures optional |
+| Berkeley Mono | Premium, elegant | Paid, beautiful for prose |
+| Input Mono | Customizable | Free for personal use, width/spacing variants |
+| iA Writer Mono | Writing-optimized | Free, designed specifically for prose readability |
+| Fira Code | Developer-friendly | Free, good ligatures |
 
 ---
 
@@ -82,15 +132,94 @@ The key insight from Lambda: **most text renders in `foreground` with typographi
 | `Code` | `foreground` | `subtle` | — | Faint bg wash, like Lambda string-face |
 | `CodeBlock` | `foreground` | `subtle` | — | Same faint wash |
 | `Link` | `strong` | `modeline` | underline | Lambda: strong + lowlight bg + underline |
-| `Embed` | `strong` | `modeline` | *italic* | Same as link but italic |
 | `Tag` | `faded` | — | — | Quiet, like comments |
 | `Timestamp` | `faded` | — | — | Secondary info |
 | `BlockId` | `faded` | — | dim | Even quieter |
-| `ListMarker` | `faded` | — | — | Structural punctuation |
+| `ListMarker` | `foreground` | — | — | Structural — conveys document hierarchy |
 | `CheckboxUnchecked` | `accent_yellow` | — | — | Pending state |
 | `CheckboxChecked` | `accent_green` | — | ~~strikethrough~~ | Completed state |
 | `Frontmatter` | `faded` | — | *italic* | Like Lambda comment-face |
 | `BrokenLink` | `critical` | — | ~~strikethrough~~ | Demands attention |
+| `SyntaxNoise` | `faded` | — | dim | Pure syntax markers — see Syntax Semantic Weight below |
+
+---
+
+## Syntax Semantic Weight
+
+Bloom renders Markdown as a styled document, not a code file. This means the `highlight.rs` scanner splits every construct into **marker spans** and **content spans**, each receiving an independent style. Markers are classified into three tiers based on their semantic weight — how much meaning the reader would lose if the marker were invisible.
+
+### Tier 1 — Structural (Full Visibility)
+
+The marker **is** the meaning. Removing it changes what the reader understands.
+
+| Construct | Marker characters | Marker style | Rationale |
+|-----------|-------------------|-------------|-----------|
+| List item | `-` or `*` or `+` | `ListMarker` (`foreground`) | Conveys document structure. Without it, items become ambiguous paragraphs. |
+| Ordered list | `1.`, `2.`, etc. | `ListMarker` (`foreground`) | Conveys ordering. Without it, sequence is lost. |
+| Checkbox (unchecked) | `- [ ]` | `CheckboxUnchecked` (`accent_yellow`) | Signals "this needs doing." The `[ ]` IS the status. |
+| Checkbox (checked) | `- [x]` | `CheckboxChecked` (`accent_green`, ~~strikethrough~~) | Signals completion. The `[x]` IS the status. |
+| Tag | `#` in `#rust` | Same style as tag text (`faded`) | The `#` is part of the tag's identity. Dimming it makes `rust` look like prose. |
+| Blockquote | `>` | `faded` | Conveys attribution/quoting. Without it, quoted text blends into the author's voice. |
+| Timestamp keyword | `@due`, `@start`, `@at` | `faded` (same as timestamp) | Tells you the *type* of date — deadline vs start vs event. The keyword is the meaning. |
+
+### Tier 2 — Contextual (Present but Subdued)
+
+Carries some information, but context or styling already communicates the construct's role. Rendered visibly but quieter than Tier 1.
+
+| Construct | Marker characters | Marker style | Rationale |
+|-----------|-------------------|-------------|-----------|
+| Block ID | `^` in `^rope-perf` | `faded` + dim | The `^` signals "this is a reference target." Already very quiet in current theme. |
+| Timestamp parens | `(` `)` in `@due(2026-03-05)` | `SyntaxNoise` (`faded` + dim) | Grouping syntax. `@due` already tells you what follows. |
+| Frontmatter delimiters | `---` | `faded` + dim | Marks a section boundary, but frontmatter content is already faded/italic — the delimiters can be quieter. |
+| Code fence | ` ``` ` and language hint | `faded` + dim | Marks code block boundary. The `subtle` background wash already signals "code zone." |
+
+### Tier 3 — Noise (Dimmed)
+
+Pure parsing syntax. The rendered styling already communicates everything the marker would. These get the `SyntaxNoise` style: `faded` foreground + `dim` decoration.
+
+| Construct | Marker characters | Content style | Rationale |
+|-----------|-------------------|--------------|-----------|
+| Bold | `**` | `Bold` (foreground, **bold**) | Bold styling is visible. The `**` adds nothing for the reader. |
+| Italic | `*` | `Italic` (foreground, *italic*) | Italic styling is visible. The `*` adds nothing. |
+| Heading prefix | `#`, `##`, `###`, etc. | Heading style (bold + colour) | Heading styling (bold, size, colour) already signals the level. The `#` markers are line noise. |
+| Link brackets | `[[`, `]]`, `\|` | `Link` (strong, underline) | The underline + colour already says "this is a link." |
+| Link UUID | UUID portion of `[[uuid\|text]]` | — (not displayed) | Internal ID, meaningless to the reader. Visually suppressed (rendered in `SyntaxNoise` but could be hidden entirely in future). |
+| Inline code markers | `` ` `` | `Code` (foreground + subtle bg) | The background wash already signals "code." |
+
+### Rendering Examples
+
+Showing how a document looks with semantic weight applied. Dim markers shown in parenthetical notation for illustration (in the actual UI they'd be faded/dim):
+
+**Raw Markdown:**
+```markdown
+### Design Decisions
+
+I chose **Rust** for its *memory safety* and performance.
+See [[8f3a1b2c|Text Editor Theory]] for background.
+
+- First consideration
+- [ ] Review the ropey crate API @due(2026-03-05)
+- [x] Read Xi Editor source
+
+#editors #rust
+```
+
+**As rendered in Bloom (described):**
+```
+(###) Design Decisions                    ← (###) dim, "Design Decisions" bold
+                                          
+I chose (**)Rust(**) for its (*)memory    ← (**) dim, "Rust" bold; (*) dim
+safety(*) and performance.                  "memory safety" italic
+See ([[)Text Editor Theory(]])            ← ([[ ]]) dim, "Text Editor Theory"
+for background.                             teal underline; UUID hidden
+
+- First consideration                     ← "-" normal (structural)
+- [ ] Review the ropey crate API          ← "- [ ]" yellow (structural)
+      @due(()2026-03-05())                  "@due" faded, "()" dim, date faded
+- [x] Read Xi Editor source               ← "- [x]" green strikethrough
+
+#editors #rust                            ← full tag including "#" in faded
+```
 
 ### UI Chrome Mapping
 

@@ -138,7 +138,7 @@ Buffer text → highlight.rs (per-line scan) → StyledSpan[] → RenderedLine
 2. **De-emphasize metadata.** Frontmatter, block IDs, and timestamps are dimmed — present but not screaming.
 3. **Links are subtle.** Underline + soft teal, not bright blue. You see them when you look for them.
 4. **Completed tasks fade.** Checked items get dim + strikethrough — done means out of mind.
-5. **Color = semantic signal.** Broken links are red. Tags are peach italic. Embeds are mauve. Each color means one thing.
+5. **Color = semantic signal.** Broken links are red. Tags are peach italic. Each color means one thing.
 6. **Code blocks recede.** Monochrome dim — content, not code decoration.
 
 ### Style Variants
@@ -152,7 +152,6 @@ Buffer text → highlight.rs (per-line scan) → StyledSpan[] → RenderedLine
 | `code` | Green (inline) |
 | Code block | Dim gray |
 | `[[link]]` | Teal, underline |
-| `![[embed]]` | Mauve, underline |
 | `#tag` | Peach, italic |
 | `@timestamp` | Yellow, dim |
 | `^block-id` | Gray, dim |

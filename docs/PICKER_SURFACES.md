@@ -138,7 +138,7 @@ Search note *contents* across all files. Each result is a matching line, not a p
 | Sort | Relevance score from FTS5 |
 | Preview | Surrounding context (±5 lines) with match highlighted (`❯`) |
 | Filters | `Ctrl+T` tag, `Ctrl+D` date range, `Ctrl+L` links-to, `Ctrl+S` task status |
-| Actions (`Tab`) | Open at line, Open in split, Copy block link, Embed block |
+| Actions (`Tab`) | Open at line, Open in split, Copy block link |
 
 ---
 
@@ -383,50 +383,7 @@ Triggered while typing in Insert mode. Appears inline, anchored to the cursor po
 
 ---
 
-## 10. Inline Embed Picker — `![[` trigger
-
-Same as link picker, but after selecting a page, drills into its structure for block-level targeting.
-
-**Step 1: Choose page**
-```
-   Here is a key insight: |
-                          ┌─ Embed from… ──────────────────────┐
-                          │ > text editor_                      │
-                          │                                     │
-                          │ ▸ Text Editor Theory       #rust    │
-                          │   Editor Architecture      #design  │
-                          │                                     │
-                          │ ↵ embed whole page   → drill in     │
-                          └─────────────────────────────────────┘
-```
-
-**Step 2: Drill into page (press `→` or `Tab`)**
-```
-                          ┌─ Embed from: Text Editor Theory ───┐
-                          │ > rope_                             │
-                          │                                     │
-                          │   § Rope Data Structure   (section) │
-                          │ ▸ ¶ Ropes are O(log n)…  (block)   │
-                          │   ¶ Gap buffers are simp… (block)   │
-                          │   § Piece Table           (section) │
-                          │                                     │
-                          │ ↵ embed  ← back to pages            │
-                          └─────────────────────────────────────┘
-```
-
-| Element | Content |
-|---------|---------|
-| Step 1 | Pick a page (same as link picker) |
-| Step 2 | Browse sections (`§`) and blocks (`¶`) within that page |
-| Marginalia | `(section)` or `(block)` type indicator |
-| On select (`Enter`) in step 1 | Inserts `![[uuid\|title]]` (whole page embed) |
-| On drill (`→` / `Tab`) | Enters step 2 |
-| On select in step 2 | Inserts `![[uuid#block-id\|text]]` (block/section embed) |
-| On back (`←` / `Backspace`) | Returns to step 1 |
-
----
-
-## 11. Quick Capture — `SPC j a` / `SPC j t`
+## 10. Quick Capture — `SPC j a` / `SPC j t`
 
 Not a full picker — a minimal single-line input anchored to the bottom of the screen.
 

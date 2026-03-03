@@ -14,8 +14,8 @@
 | Text buffer | Rope (`ropey`) | Piece table, gap buffer, CRDT (automerge, diamond-types) |
 | Undo model | Undo tree (branching), RAM-only | Linear undo/redo, persisted undo |
 | Link discovery | Explicit `[[links]]` + unlinked mentions (FTS5-backed) | Fully implicit linking, naive O(N×M) scan |
-| Link creation UX | `[[` / `![[` triggers inline fuzzy picker (drills into blocks for embeds) | Manual UUID entry |
-| Transclusion depth | One level only | Recursive, configurable depth |
+| Link creation UX | `[[` triggers inline fuzzy picker | Manual UUID entry |
+| Transclusion | Deferred to post-v1; links + timeline + backlinks provide sufficient navigability | Inline expansion, collapsed by default, hover preview |
 | Tag syntax | `#tag` with Unicode letter start rule | Org-mode `:tag:`, `@tag` |
 | Timestamps | `@due` / `@start` / `@at` | Org-mode `<date>`, `{date}` |
 | Threading | OS threads + crossbeam channels | Tokio async tasks, green threads |
@@ -23,6 +23,7 @@
 | Search | Fuzzy picker + composable filters | Dedicated query DSL (datalog) |
 | MCP concurrency | Virtual editor (shared rope buffer) with 60s buffer eviction | Direct disk writes, file locking |
 | MCP API | Title-based with `resolve_journal` for date-based pages | UUID-based |
+| MCP edit targeting | Search-and-replace (`old_text` → `new_text`) — content-addressed, no byte offsets | Position-based edits, version counter, CRDT |
 | MCP security | Read-only / read-write modes + path exclusion in config.toml | All-or-nothing enable/disable |
 | Abstraction | Traits for format, storage, keybindings | Hard-coded implementations |
 | Journal | `journal/` directory, one file per day, lazy file creation, quick-capture | Inbox page, single journal file |
@@ -37,3 +38,14 @@
 | Template placeholders | `${N:description}` snippet-style tab-stops | No placeholders, manual editing |
 | Code-block safety | All Bloom extensions ignored inside code spans, fences, frontmatter | Tags only |
 | Theming | Rougier-inspired semantic highlighting: monochrome base, typography-driven, sparing color | Rainbow syntax highlighting, no highlighting |
+| Workspace | Cargo workspace with separate crates per frontend | Single crate with feature flags |
+| Core granularity | Monolithic `bloom-core` with internal modules | Fine-grained crates (`bloom-parser`, `bloom-vim`, etc.) |
+| Logging | `tracing` crate with structured spans/events | `log` crate, `env_logger`, println debugging |
+| Snapshot testing | `insta` crate for RenderFrame snapshot tests | Manual assert-based tests only |
+| Import crate | Separate `bloom-import` crate | Module inside bloom-core |
+| Test utilities | Dedicated `bloom-test-harness` crate (dev-dependency) | Ad-hoc test helpers per crate |
+| Syntax markers | Three-tier semantic weight system: structural (visible), contextual (subdued), noise (dimmed) | Uniform dimming, no dimming, hidden syntax |
+| List marker style | Full visibility (`foreground`) — `-` is structural | `faded` like other markers |
+| Tag `#` style | Same style as tag text — `#` is part of tag identity | Dim `#`, show only tag name |
+| Link UUID display | Suppressed (rendered as `SyntaxNoise` / hidden) — meaningless to reader | Show UUID, dim UUID |
+| Font strategy | Monospace-only (both TUI and GUI), GUI uses size variation for headings | Mixed-pitch (proportional body + monospace code), proportional everywhere |

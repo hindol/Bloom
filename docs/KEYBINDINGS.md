@@ -30,7 +30,6 @@
 | `SPC s u` | Search unlinked mentions | G16 |
 | **Links** | | |
 | `SPC l l` | Insert link (alternative to `[[`) | G4 |
-| `SPC l e` | Insert embed (`![[]]`) | G4 |
 | `SPC l y` | Yank link to current page to clipboard | G4 |
 | `SPC l Y` | Yank link to current block to clipboard | G4 |
 | `SPC l t` | Open timeline view for current page | G6 |
@@ -79,7 +78,6 @@
 | Trigger | Action |
 |---------|--------|
 | `[[` | Inline fuzzy picker → inserts `[[uuid\|title]]` |
-| `![[` | Inline fuzzy picker → inserts `![[uuid\|title]]` (drills into page blocks) |
 
 ---
 
@@ -128,7 +126,7 @@ See [PICKER_SURFACES.md](PICKER_SURFACES.md) for detailed wireframes of each pic
 | `j` / `k` | Next / previous entry |
 | `Enter` | Jump to source note |
 | `o` | Open source in split window |
-| `e` | Toggle embed / collapse |
+| `e` | Toggle expand / collapse entry |
 | `q` | Close timeline |
 
 ---
@@ -160,8 +158,6 @@ See [PICKER_SURFACES.md](PICKER_SURFACES.md) for detailed wireframes of each pic
 |--------|--------|---------|
 | Inside link | `il` | Content within `[[...]]` |
 | Around link | `al` | Entire `[[...]]` including brackets |
-| Inside embed | `ie` | Content within `![[...]]` |
-| Around embed | `ae` | Entire `![[...]]` including brackets |
 | Inside tag | `i#` | Tag name after `#` |
 | Around tag | `a#` | `#tag` including the `#` |
 | Inside timestamp | `i@` | Date within `@due(...)` etc. |
