@@ -930,6 +930,50 @@ mod tests {
         assert!(matches!(frame.panes[0].cursor.shape, render::CursorShape::Bar));
     }
 
+    // UC-14: Insert mode actually inserts characters
+    #[test]
+    fn test_insert_mode_types_chars() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "");
+        editor.handle_key(KeyEvent::char('i')); // enter insert mode
+        editor.handle_key(KeyEvent::char('H'));
+        editor.handle_key(KeyEvent::char('i'));
+        let buf = editor.buffer_mgr.get(&id).unwrap();
+        assert_eq!(buf.text().to_string(), "Hi");
+    }
+
+    // UC-14: Insert mode Enter creates newline
+    #[test]
+    fn test_insert_mode_enter() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "");
+        editor.handle_key(KeyEvent::char('i'));
+        editor.handle_key(KeyEvent::char('a'));
+        editor.handle_key(KeyEvent::enter());
+        editor.handle_key(KeyEvent::char('b'));
+        let buf = editor.buffer_mgr.get(&id).unwrap();
+        assert_eq!(buf.text().to_string(), "a\nb");
+    }
+
+    // UC-14: Insert mode Backspace deletes
+    #[test]
+    fn test_insert_mode_backspace() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "");
+        editor.handle_key(KeyEvent::char('i'));
+        editor.handle_key(KeyEvent::char('a'));
+        editor.handle_key(KeyEvent::char('b'));
+        editor.handle_key(KeyEvent::backspace());
+        let buf = editor.buffer_mgr.get(&id).unwrap();
+        assert_eq!(buf.text().to_string(), "a");
+    }
+
     // UC-14: Return to normal mode
     #[test]
     fn test_esc_returns_to_normal() {

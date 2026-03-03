@@ -98,7 +98,7 @@ impl VimState {
 
         match self.mode.clone() {
             Mode::Normal => self.process_normal(key, buffer, cursor),
-            Mode::Insert => self.process_insert(key),
+            Mode::Insert => self.process_insert(key, buffer, cursor),
             Mode::Visual { start } => self.process_visual(key, buffer, cursor, start),
             Mode::Command => self.process_command(key),
         }
@@ -195,12 +195,48 @@ impl VimState {
 
     // ── Insert mode ──────────────────────────────────────────────────
 
-    fn process_insert(&mut self, key: KeyEvent) -> VimAction {
-        if key.code == KeyCode::Esc {
-            self.mode = Mode::Normal;
-            return VimAction::ModeChange(Mode::Normal);
+    fn process_insert(&mut self, key: KeyEvent, buffer: &Buffer, cursor: usize) -> VimAction {
+        match key.code {
+            KeyCode::Esc => {
+                self.mode = Mode::Normal;
+                VimAction::ModeChange(Mode::Normal)
+            }
+            KeyCode::Char(c) => {
+                let mut s = String::new();
+                s.push(c);
+                VimAction::Edit(EditOp {
+                    range: cursor..cursor,
+                    replacement: s,
+                    cursor_after: cursor + c.len_utf8(),
+                })
+            }
+            KeyCode::Enter => VimAction::Edit(EditOp {
+                range: cursor..cursor,
+                replacement: "\n".to_string(),
+                cursor_after: cursor + 1,
+            }),
+            KeyCode::Backspace => {
+                if cursor == 0 {
+                    return VimAction::Unhandled;
+                }
+                VimAction::Edit(EditOp {
+                    range: (cursor - 1)..cursor,
+                    replacement: String::new(),
+                    cursor_after: cursor - 1,
+                })
+            }
+            KeyCode::Delete => {
+                if cursor >= buffer.len_chars() {
+                    return VimAction::Unhandled;
+                }
+                VimAction::Edit(EditOp {
+                    range: cursor..(cursor + 1),
+                    replacement: String::new(),
+                    cursor_after: cursor,
+                })
+            }
+            _ => VimAction::Unhandled,
         }
-        VimAction::Unhandled
     }
 
     // ── Visual mode ──────────────────────────────────────────────────
