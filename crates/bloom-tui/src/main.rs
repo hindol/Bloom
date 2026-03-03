@@ -96,7 +96,10 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
                         for action in actions {
                             match action {
                                 Action::Quit => return Ok(()),
-                                _ => {} // Other actions are handled internally by BloomEditor
+                                Action::Save => {
+                                    let _ = editor.save_current();
+                                }
+                                _ => {}
                             }
                         }
                     }

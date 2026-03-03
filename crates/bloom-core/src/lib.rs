@@ -77,6 +77,10 @@ impl BufferManager {
         self.buffers.get(&page_id.to_hex()).map(|(b, _)| b)
     }
 
+    pub fn get_with_info(&self, page_id: &types::PageId) -> Option<(&buffer::Buffer, &BufferInfo)> {
+        self.buffers.get(&page_id.to_hex()).map(|(b, i)| (b, i))
+    }
+
     pub fn get_mut(&mut self, page_id: &types::PageId) -> Option<&mut buffer::Buffer> {
         self.buffers.get_mut(&page_id.to_hex()).map(|(b, _)| b)
     }
@@ -1044,6 +1048,35 @@ impl BloomEditor {
 
     pub fn save_current(&mut self) -> Result<(), error::BloomError> {
         if let Some(page_id) = &self.active_page {
+            let (content, path) = {
+                if let Some((buf, info)) = self.buffer_mgr.get_with_info(page_id) {
+                    if !buf.is_dirty() {
+                        return Ok(());
+                    }
+                    (buf.text().to_string(), info.path.clone())
+                } else {
+                    return Ok(());
+                }
+            };
+
+            // Skip pseudo-paths like [scratch]
+            if path.to_string_lossy().starts_with('[') {
+                return Ok(());
+            }
+
+            // Atomic write: write to tmp, fsync, rename
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let tmp = path.with_extension("tmp");
+            {
+                use std::io::Write;
+                let mut file = std::fs::File::create(&tmp)?;
+                file.write_all(content.as_bytes())?;
+                file.sync_all()?;
+            }
+            std::fs::rename(&tmp, &path)?;
+
             if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
                 buf.mark_clean();
             }
@@ -1241,10 +1274,14 @@ mod tests {
     // save_current marks buffer clean
     #[test]
     fn test_save_marks_clean() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file_path = dir.path().join("test.md");
+        std::fs::write(&file_path, "hello").unwrap();
+
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.open_page_with_content(&id, "Test", &file_path, "hello");
         // Make dirty by inserting through vim
         editor.handle_key(KeyEvent::char('i'));
         editor.handle_key(KeyEvent::char('x'));
@@ -1252,6 +1289,30 @@ mod tests {
         editor.save_current().unwrap();
         let frame = editor.render();
         assert!(!frame.panes[0].dirty);
+    }
+
+    // save_current writes to disk
+    #[test]
+    fn test_save_writes_to_disk() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file_path = dir.path().join("test.md");
+        std::fs::write(&file_path, "hello").unwrap();
+
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", &file_path, "hello");
+
+        // Edit: insert 'X' at start
+        editor.handle_key(KeyEvent::char('i'));
+        editor.handle_key(KeyEvent::char('X'));
+        editor.handle_key(KeyEvent::esc());
+
+        editor.save_current().unwrap();
+
+        // Verify file on disk has the new content
+        let on_disk = std::fs::read_to_string(&file_path).unwrap();
+        assert_eq!(on_disk, "Xhello");
     }
 
     // Startup: Journal mode opens today's journal
