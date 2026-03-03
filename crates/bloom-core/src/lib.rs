@@ -438,6 +438,7 @@ impl BloomEditor {
             );
             lines.push(render::RenderedLine {
                 line_number: line_idx,
+                text: line_text,
                 spans,
             });
         }
@@ -461,6 +462,11 @@ impl BloomEditor {
     /// Tick for timers, notifications, debounce
     pub fn tick(&mut self, now: std::time::Instant) {
         self.notifications.retain(|n| n.expires_at > now);
+    }
+
+    /// Update the viewport size (e.g. on terminal resize).
+    pub fn resize(&mut self, height: usize, width: usize) {
+        self.viewport = render::Viewport::new(height.saturating_sub(2), width);
     }
 
     // Buffer management

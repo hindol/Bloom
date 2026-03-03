@@ -142,6 +142,7 @@ pub struct DialogFrame {
 
 pub struct RenderedLine {
     pub line_number: usize,
+    pub text: String,
     pub spans: Vec<StyledSpan>,
 }
 
