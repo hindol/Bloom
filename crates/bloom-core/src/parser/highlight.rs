@@ -310,3 +310,142 @@ fn try_match_timestamp(line: &str, pos: usize) -> Option<usize> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::traits::{LineContext, Style};
+
+    // UC-16: Syntax highlighting
+
+    #[test]
+    fn test_highlight_heading() {
+        let ctx = LineContext::default();
+        let spans = highlight_line("## My Heading", &ctx);
+        assert!(spans
+            .iter()
+            .any(|s| s.style == Style::Heading { level: 2 }));
+    }
+
+    #[test]
+    fn test_highlight_heading_level_1() {
+        let ctx = LineContext::default();
+        let spans = highlight_line("# Title", &ctx);
+        assert!(spans
+            .iter()
+            .any(|s| s.style == Style::Heading { level: 1 }));
+    }
+
+    #[test]
+    fn test_highlight_link() {
+        let ctx = LineContext::default();
+        let spans = highlight_line("See [[8f3a1b2c|Link]]", &ctx);
+        assert!(spans.iter().any(|s| s.style == Style::Link));
+    }
+
+    #[test]
+    fn test_highlight_broken_link() {
+        let ctx = LineContext::default();
+        let spans = highlight_line("[[bad|Link]]", &ctx);
+        assert!(spans.iter().any(|s| s.style == Style::BrokenLink));
+    }
+
+    #[test]
+    fn test_highlight_tag() {
+        let ctx = LineContext::default();
+        let spans = highlight_line("text #mytag here", &ctx);
+        assert!(spans.iter().any(|s| s.style == Style::Tag));
+    }
+
+    #[test]
+    fn test_highlight_timestamp() {
+        let ctx = LineContext::default();
+        let spans = highlight_line("task @due(2026-01-01)", &ctx);
+        assert!(spans.iter().any(|s| s.style == Style::Timestamp));
+    }
+
+    #[test]
+    fn test_highlight_block_id() {
+        let ctx = LineContext::default();
+        let spans = highlight_line("text ^my-block", &ctx);
+        assert!(spans.iter().any(|s| s.style == Style::BlockId));
+    }
+
+    #[test]
+    fn test_highlight_bold() {
+        let ctx = LineContext::default();
+        let spans = highlight_line("some **bold** text", &ctx);
+        assert!(spans.iter().any(|s| s.style == Style::Bold));
+    }
+
+    #[test]
+    fn test_highlight_italic() {
+        let ctx = LineContext::default();
+        let spans = highlight_line("some *italic* text", &ctx);
+        assert!(spans.iter().any(|s| s.style == Style::Italic));
+    }
+
+    #[test]
+    fn test_highlight_inline_code() {
+        let ctx = LineContext::default();
+        let spans = highlight_line("some `code` text", &ctx);
+        assert!(spans.iter().any(|s| s.style == Style::Code));
+    }
+
+    #[test]
+    fn test_highlight_in_code_block_context() {
+        let ctx = LineContext {
+            in_code_block: true,
+            in_frontmatter: false,
+            code_fence_lang: None,
+        };
+        let spans = highlight_line("[[8f3a1b2c|Link]] #tag @due(2026-01-01)", &ctx);
+        assert!(spans.iter().all(|s| s.style == Style::CodeBlock));
+    }
+
+    #[test]
+    fn test_highlight_in_frontmatter_context() {
+        let ctx = LineContext {
+            in_code_block: false,
+            in_frontmatter: true,
+            code_fence_lang: None,
+        };
+        let spans = highlight_line("id: 8f3a1b2c", &ctx);
+        assert!(spans.iter().all(|s| s.style == Style::Frontmatter));
+    }
+
+    #[test]
+    fn test_highlight_empty_line() {
+        let ctx = LineContext::default();
+        let spans = highlight_line("", &ctx);
+        assert!(spans.is_empty());
+    }
+
+    #[test]
+    fn test_highlight_checkbox_unchecked() {
+        let ctx = LineContext::default();
+        let spans = highlight_line("- [ ] Task", &ctx);
+        assert!(spans.iter().any(|s| s.style == Style::CheckboxUnchecked));
+    }
+
+    #[test]
+    fn test_highlight_checkbox_checked() {
+        let ctx = LineContext::default();
+        let spans = highlight_line("- [x] Done", &ctx);
+        assert!(spans.iter().any(|s| s.style == Style::CheckboxChecked));
+    }
+
+    #[test]
+    fn test_highlight_list_marker() {
+        let ctx = LineContext::default();
+        let spans = highlight_line("- Item", &ctx);
+        assert!(spans.iter().any(|s| s.style == Style::ListMarker));
+    }
+
+    #[test]
+    fn test_highlight_numbered_list() {
+        let ctx = LineContext::default();
+        let spans = highlight_line("1. First", &ctx);
+        assert!(spans.iter().any(|s| s.style == Style::ListMarker));
+    }
+}

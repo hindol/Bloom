@@ -90,3 +90,67 @@ pub fn serialize_frontmatter(fm: &Frontmatter) -> String {
     lines.push("---".to_string());
     lines.join("\n")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::PageId;
+
+    // UC-07, UC-13: Frontmatter parsing
+    #[test]
+    fn test_parse_complete_frontmatter() {
+        let text = "---\nid: 8f3a1b2c\ntitle: \"Test\"\ncreated: 2026-01-01\ntags: [rust, editors]\n---\n\nBody text";
+        let fm = parse_frontmatter(text).unwrap();
+        assert_eq!(fm.id, Some(PageId::from_hex("8f3a1b2c").unwrap()));
+        assert_eq!(fm.title.as_deref(), Some("Test"));
+        assert_eq!(
+            fm.created,
+            Some(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap())
+        );
+        assert_eq!(fm.tags.len(), 2);
+        assert_eq!(fm.tags[0].0, "rust");
+        assert_eq!(fm.tags[1].0, "editors");
+    }
+
+    #[test]
+    fn test_parse_frontmatter_missing_fields() {
+        let text = "---\nid: 8f3a1b2c\ntitle: \"Minimal\"\n---\n";
+        let fm = parse_frontmatter(text).unwrap();
+        assert!(fm.id.is_some());
+        assert_eq!(fm.title.as_deref(), Some("Minimal"));
+        assert!(fm.created.is_none());
+        assert!(fm.tags.is_empty());
+    }
+
+    #[test]
+    fn test_parse_frontmatter_no_frontmatter() {
+        let text = "Just some text without frontmatter";
+        assert!(parse_frontmatter(text).is_none());
+    }
+
+    #[test]
+    fn test_serialize_frontmatter_roundtrip() {
+        let text = "---\nid: 8f3a1b2c\ntitle: \"Test\"\ncreated: 2026-01-01\ntags: [rust, editors]\n---\n";
+        let fm = parse_frontmatter(text).unwrap();
+        let serialized = serialize_frontmatter(&fm);
+        let reparsed = parse_frontmatter(&format!("{}\n", serialized)).unwrap();
+        assert_eq!(fm.id, reparsed.id);
+        assert_eq!(fm.title, reparsed.title);
+        assert_eq!(fm.created, reparsed.created);
+        assert_eq!(fm.tags.len(), reparsed.tags.len());
+    }
+
+    #[test]
+    fn test_extract_frontmatter_text() {
+        let text = "---\nid: abc\ntitle: \"X\"\n---\nBody";
+        let (yaml, body_start) = extract_frontmatter_text(text).unwrap();
+        assert!(yaml.contains("id: abc"));
+        assert_eq!(body_start, 4); // line after closing ---
+    }
+
+    #[test]
+    fn test_extract_frontmatter_text_none_when_missing() {
+        assert!(extract_frontmatter_text("No frontmatter").is_none());
+        assert!(extract_frontmatter_text("").is_none());
+    }
+}

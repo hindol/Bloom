@@ -289,3 +289,241 @@ pub fn parse_task(line: &str, line_number: usize) -> Option<ParsedTask> {
         line: line_number,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Timelike;
+    use crate::types::{BlockId, PageId, TagName, Timestamp};
+
+    // --- Link tests (UC-24) ---
+
+    #[test]
+    fn test_parse_link_with_display() {
+        let line = "See [[8f3a1b2c|Text Editor]] for details";
+        let links = parse_links(line, 0);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target, PageId::from_hex("8f3a1b2c").unwrap());
+        assert_eq!(links[0].display_hint, "Text Editor");
+        assert!(links[0].section.is_none());
+    }
+
+    #[test]
+    fn test_parse_link_with_section() {
+        let line = "[[8f3a1b2c#intro|Text Editor]]";
+        let links = parse_links(line, 0);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].section, Some(BlockId("intro".to_string())));
+        assert_eq!(links[0].display_hint, "Text Editor");
+    }
+
+    #[test]
+    fn test_parse_multiple_links_on_one_line() {
+        let line = "[[aabbccdd|A]] and [[11223344|B]]";
+        let links = parse_links(line, 0);
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].display_hint, "A");
+        assert_eq!(links[1].display_hint, "B");
+    }
+
+    #[test]
+    fn test_parse_link_without_display() {
+        let line = "[[8f3a1b2c]]";
+        let links = parse_links(line, 0);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].display_hint, "8f3a1b2c");
+    }
+
+    #[test]
+    fn test_parse_link_invalid_id() {
+        let line = "[[short|Bad]]";
+        let links = parse_links(line, 0);
+        assert_eq!(links.len(), 0);
+    }
+
+    #[test]
+    fn test_links_not_parsed_in_code_span() {
+        let line = "Before `[[8f3a1b2c|Link]]` after";
+        let links = parse_links(line, 0);
+        assert_eq!(links.len(), 0);
+    }
+
+    // --- Tag tests (UC-35) ---
+
+    #[test]
+    fn test_parse_tag() {
+        let line = "This is about #rust and #editors";
+        let tags = parse_tags(line, 0);
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags[0].name, TagName("rust".to_string()));
+        assert_eq!(tags[1].name, TagName("editors".to_string()));
+    }
+
+    #[test]
+    fn test_tag_must_start_with_letter() {
+        let line = "#123 should not match but #rust123 should";
+        let tags = parse_tags(line, 0);
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].name, TagName("rust123".to_string()));
+    }
+
+    #[test]
+    fn test_tag_not_preceded_by_word_char() {
+        let line = "foo#bar is not a tag";
+        let tags = parse_tags(line, 0);
+        assert_eq!(tags.len(), 0);
+    }
+
+    #[test]
+    fn test_tags_not_parsed_in_code_span() {
+        let line = "`#not-a-tag` but #real-tag yes";
+        let tags = parse_tags(line, 0);
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].name, TagName("real-tag".to_string()));
+    }
+
+    #[test]
+    fn test_tag_at_start_of_line() {
+        let line = "#mytag here";
+        let tags = parse_tags(line, 0);
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].name, TagName("mytag".to_string()));
+    }
+
+    #[test]
+    fn test_heading_not_parsed_as_tag() {
+        let line = "## My Heading";
+        let tags = parse_tags(line, 0);
+        assert_eq!(tags.len(), 0);
+    }
+
+    // --- Task tests (UC-41) ---
+
+    #[test]
+    fn test_parse_unchecked_task() {
+        let task = parse_task("- [ ] Review the API", 0).unwrap();
+        assert!(!task.done);
+        assert_eq!(task.text, "Review the API");
+    }
+
+    #[test]
+    fn test_parse_checked_task() {
+        let task = parse_task("- [x] Done item", 0).unwrap();
+        assert!(task.done);
+        assert_eq!(task.text, "Done item");
+    }
+
+    #[test]
+    fn test_parse_checked_task_uppercase() {
+        let task = parse_task("- [X] Also done", 0).unwrap();
+        assert!(task.done);
+    }
+
+    #[test]
+    fn test_parse_task_with_timestamp() {
+        let task = parse_task("- [ ] Do thing @due(2026-03-05)", 0).unwrap();
+        assert!(!task.done);
+        assert_eq!(task.timestamps.len(), 1);
+        match &task.timestamps[0] {
+            Timestamp::Due(d) => {
+                assert_eq!(*d, chrono::NaiveDate::from_ymd_opt(2026, 3, 5).unwrap())
+            }
+            _ => panic!("Expected Due timestamp"),
+        }
+    }
+
+    #[test]
+    fn test_parse_non_task_line() {
+        assert!(parse_task("Just a normal line", 0).is_none());
+        assert!(parse_task("- A list item", 0).is_none());
+    }
+
+    // --- Timestamp tests (UC-47) ---
+
+    #[test]
+    fn test_parse_due_timestamp() {
+        let ts = parse_timestamps("@due(2026-03-05)", 0);
+        assert_eq!(ts.len(), 1);
+        match &ts[0].timestamp {
+            Timestamp::Due(d) => {
+                assert_eq!(*d, chrono::NaiveDate::from_ymd_opt(2026, 3, 5).unwrap())
+            }
+            _ => panic!("Expected Due"),
+        }
+    }
+
+    #[test]
+    fn test_parse_start_timestamp() {
+        let ts = parse_timestamps("@start(2026-03-01)", 0);
+        assert_eq!(ts.len(), 1);
+        match &ts[0].timestamp {
+            Timestamp::Start(d) => {
+                assert_eq!(*d, chrono::NaiveDate::from_ymd_opt(2026, 3, 1).unwrap())
+            }
+            _ => panic!("Expected Start"),
+        }
+    }
+
+    #[test]
+    fn test_parse_at_timestamp() {
+        let ts = parse_timestamps("@at(2026-03-05 14:30)", 0);
+        assert_eq!(ts.len(), 1);
+        match &ts[0].timestamp {
+            Timestamp::At(dt) => {
+                assert_eq!(dt.date(), chrono::NaiveDate::from_ymd_opt(2026, 3, 5).unwrap());
+                assert_eq!(dt.time().hour(), 14);
+                assert_eq!(dt.time().minute(), 30);
+            }
+            _ => panic!("Expected At"),
+        }
+    }
+
+    #[test]
+    fn test_parse_at_timestamp_date_only() {
+        let ts = parse_timestamps("@at(2026-03-05)", 0);
+        assert_eq!(ts.len(), 1);
+        match &ts[0].timestamp {
+            Timestamp::At(dt) => {
+                assert_eq!(dt.date(), chrono::NaiveDate::from_ymd_opt(2026, 3, 5).unwrap());
+            }
+            _ => panic!("Expected At"),
+        }
+    }
+
+    #[test]
+    fn test_timestamps_not_parsed_in_code_span() {
+        let ts = parse_timestamps("`@due(2026-01-01)` visible", 0);
+        assert_eq!(ts.len(), 0);
+    }
+
+    #[test]
+    fn test_multiple_timestamps() {
+        let ts = parse_timestamps("@due(2026-01-01) and @start(2026-02-01)", 0);
+        assert_eq!(ts.len(), 2);
+    }
+
+    // --- Block ID tests ---
+
+    #[test]
+    fn test_parse_block_id() {
+        let bid = parse_block_id("Some text ^my-block", 0).unwrap();
+        assert_eq!(bid.id, BlockId("my-block".to_string()));
+    }
+
+    #[test]
+    fn test_parse_block_id_standalone() {
+        let bid = parse_block_id("^solo-block", 0).unwrap();
+        assert_eq!(bid.id, BlockId("solo-block".to_string()));
+    }
+
+    #[test]
+    fn test_no_block_id() {
+        assert!(parse_block_id("No block id here", 0).is_none());
+    }
+
+    #[test]
+    fn test_block_id_with_underscores() {
+        let bid = parse_block_id("Text ^my_block_2", 0).unwrap();
+        assert_eq!(bid.id, BlockId("my_block_2".to_string()));
+    }
+}
