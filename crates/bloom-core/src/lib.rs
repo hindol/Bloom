@@ -1148,6 +1148,26 @@ mod tests {
         assert_eq!(buf.text().to_string(), "a");
     }
 
+    // Insert mode arrow keys navigate without leaving insert
+    #[test]
+    fn test_insert_mode_arrow_navigation() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "ab");
+        editor.handle_key(KeyEvent::char('i')); // insert at pos 0
+        // Move right twice to end
+        editor.handle_key(KeyEvent { code: types::KeyCode::Right, modifiers: types::Modifiers::none() });
+        editor.handle_key(KeyEvent { code: types::KeyCode::Right, modifiers: types::Modifiers::none() });
+        // Type 'c' — should appear after "ab"
+        editor.handle_key(KeyEvent::char('c'));
+        let buf = editor.buffer_mgr.get(&id).unwrap();
+        assert_eq!(buf.text().to_string(), "abc");
+        // Still in insert mode
+        let frame = editor.render();
+        assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
+    }
+
     // UC-14: Return to normal mode
     #[test]
     fn test_esc_returns_to_normal() {

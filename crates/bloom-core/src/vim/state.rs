@@ -235,8 +235,37 @@ impl VimState {
                     cursor_after: cursor,
                 })
             }
+            KeyCode::Left => self.insert_motion(MotionType::Left, buffer, cursor),
+            KeyCode::Right => self.insert_motion(MotionType::Right, buffer, cursor),
+            KeyCode::Up => self.insert_motion(MotionType::Up, buffer, cursor),
+            KeyCode::Down => self.insert_motion(MotionType::Down, buffer, cursor),
+            KeyCode::Home => self.insert_motion(MotionType::LineStart, buffer, cursor),
+            KeyCode::End => self.insert_motion(MotionType::LineEnd, buffer, cursor),
+            KeyCode::PageUp => self.insert_motion(MotionType::DocumentStart, buffer, cursor),
+            KeyCode::PageDown => self.insert_motion(MotionType::DocumentEnd, buffer, cursor),
             _ => VimAction::Unhandled,
         }
+    }
+
+    fn insert_motion(&self, motion: MotionType, buffer: &Buffer, cursor: usize) -> VimAction {
+        let len = buffer.len_chars();
+        let new_pos = match motion {
+            // Insert mode allows cursor after last char, so use simple +1/-1
+            MotionType::Left => cursor.saturating_sub(1),
+            MotionType::Right => (cursor + 1).min(len),
+            MotionType::LineStart | MotionType::LineEnd
+            | MotionType::DocumentStart | MotionType::DocumentEnd => {
+                motion::execute_motion(&motion, buffer, cursor, None, &self.last_find)
+            }
+            _ => {
+                // Up/Down use the standard motion (line-based, works for insert)
+                motion::execute_motion(&motion, buffer, cursor, None, &self.last_find)
+            }
+        };
+        VimAction::Motion(MotionResult {
+            new_position: new_pos,
+            extend_selection: false,
+        })
     }
 
     // ── Visual mode ──────────────────────────────────────────────────
