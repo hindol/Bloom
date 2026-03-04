@@ -692,11 +692,4 @@ The preview pane shows a fixed sample document rendered in the highlighted theme
 | Theme description | `faded` |
 | Preview content | Rendered with the highlighted theme's palette |
 
-### Interaction
-
-| Binding | Action |
-|---------|--------|
-| `↑` / `↓` | Move highlight, live-preview theme |
-| `Enter` | Confirm theme, persist to config |
-| `Escape` | Revert to previous theme, close picker |
-| Type to filter | Fuzzy-match theme names |
+Standard picker navigation applies (see **Shared Anatomy Summary** above). `Enter` persists the selection to `config.toml`; `Escape` reverts to the theme that was active when the picker opened.
