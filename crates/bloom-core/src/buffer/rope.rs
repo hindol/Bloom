@@ -11,6 +11,9 @@ pub struct Buffer {
     version: Version,
     dirty: bool,
     clean_version: Version,
+    /// Rope snapshot taken when an edit group (insert session) began.
+    /// While Some, individual edits do not push undo nodes.
+    edit_group_checkpoint: Option<Rope>,
 }
 
 impl Buffer {
@@ -23,6 +26,7 @@ impl Buffer {
             version: 0,
             dirty: false,
             clean_version: 0,
+            edit_group_checkpoint: None,
         }
     }
 
@@ -58,19 +62,23 @@ impl Buffer {
     pub fn insert(&mut self, char_idx: usize, text: &str) {
         self.rope.insert(char_idx, text);
         self.bump_version();
-        let desc = if text.len() <= 20 {
-            format!("insert '{text}'")
-        } else {
-            format!("insert '{}...'", &text[..17])
-        };
-        self.undo_tree.push(self.rope.clone(), desc);
+        if self.edit_group_checkpoint.is_none() {
+            let desc = if text.len() <= 20 {
+                format!("insert '{text}'")
+            } else {
+                format!("insert '{}...'", &text[..17])
+            };
+            self.undo_tree.push(self.rope.clone(), desc);
+        }
     }
 
     pub fn delete(&mut self, range: Range<usize>) {
         self.rope.remove(range);
         self.bump_version();
-        self.undo_tree
-            .push(self.rope.clone(), "delete".to_string());
+        if self.edit_group_checkpoint.is_none() {
+            self.undo_tree
+                .push(self.rope.clone(), "delete".to_string());
+        }
     }
 
     pub fn replace(&mut self, range: Range<usize>, text: &str) {
@@ -78,12 +86,14 @@ impl Buffer {
         self.rope.remove(range);
         self.rope.insert(start, text);
         self.bump_version();
-        let desc = if text.len() <= 20 {
-            format!("replace with '{text}'")
-        } else {
-            format!("replace with '{}...'", &text[..17])
-        };
-        self.undo_tree.push(self.rope.clone(), desc);
+        if self.edit_group_checkpoint.is_none() {
+            let desc = if text.len() <= 20 {
+                format!("replace with '{text}'")
+            } else {
+                format!("replace with '{}...'", &text[..17])
+            };
+            self.undo_tree.push(self.rope.clone(), desc);
+        }
     }
 
     pub fn find_text(&self, needle: &str) -> Vec<Range<usize>> {
@@ -134,6 +144,36 @@ impl Buffer {
     pub fn mark_clean(&mut self) {
         self.clean_version = self.version;
         self.dirty = false;
+    }
+
+    /// Begin an edit group (e.g., entering Insert mode). Saves a checkpoint.
+    /// All edits until `end_edit_group` are grouped into one undo node.
+    pub fn begin_edit_group(&mut self) {
+        self.edit_group_checkpoint = Some(self.rope.clone());
+    }
+
+    /// End the edit group (e.g., leaving Insert mode). If edits were made,
+    /// pushes one undo node for the entire group.
+    pub fn end_edit_group(&mut self) {
+        if let Some(checkpoint) = self.edit_group_checkpoint.take() {
+            if self.rope != checkpoint {
+                self.undo_tree
+                    .push(self.rope.clone(), "insert session".to_string());
+            }
+        }
+    }
+
+    /// Restore the edit group checkpoint (Ctrl+U in Insert mode).
+    /// Reverts to the state when the edit group began, but keeps the group open.
+    /// Returns true if restored, false if no group is active.
+    pub fn restore_edit_group_checkpoint(&mut self) -> bool {
+        if let Some(checkpoint) = &self.edit_group_checkpoint {
+            self.rope = checkpoint.clone();
+            self.bump_version();
+            true
+        } else {
+            false
+        }
     }
 }
 

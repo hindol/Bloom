@@ -1395,6 +1395,21 @@ impl BloomEditor {
                 } else {
                     self.pending_since = None;
                 }
+                // Edit group lifecycle: begin on Insert entry, end on Insert exit
+                if matches!(mode, vim::Mode::Insert) {
+                    if let Some(page_id) = &self.active_page {
+                        if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                            buf.begin_edit_group();
+                        }
+                    }
+                } else if matches!(mode, vim::Mode::Normal) {
+                    // Leaving Insert (or Visual, Command) → close any open group
+                    if let Some(page_id) = &self.active_page {
+                        if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                            buf.end_edit_group();
+                        }
+                    }
+                }
                 vec![keymap::dispatch::Action::ModeChange(mode.clone())]
             }
             vim::VimAction::Command(cmd) => self.handle_vim_command(&cmd),
@@ -1405,6 +1420,16 @@ impl BloomEditor {
                 vec![keymap::dispatch::Action::Noop]
             }
             vim::VimAction::Unhandled => vec![keymap::dispatch::Action::Noop],
+            vim::VimAction::RestoreCheckpoint => {
+                // Ctrl+U in Insert mode: revert to checkpoint
+                if let Some(page_id) = &self.active_page {
+                    if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                        buf.restore_edit_group_checkpoint();
+                        self.cursor = 0; // reset cursor to start (safe default)
+                    }
+                }
+                vec![keymap::dispatch::Action::Noop]
+            }
             vim::VimAction::Composite(actions) => actions
                 .into_iter()
                 .flat_map(|a| self.translate_vim_action(a))
@@ -2246,6 +2271,31 @@ mod tests {
         // Type 'u' for undo in normal mode
         editor.handle_key(KeyEvent::char('u'));
         // Shouldn't crash, even with no edits to undo
+    }
+
+    // Vim-style undo: entire insert session is one undo unit
+    #[test]
+    fn test_undo_groups_insert_session() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "");
+
+        // Enter insert mode, type "abc", exit
+        editor.handle_key(KeyEvent::char('i'));
+        editor.handle_key(KeyEvent::char('a'));
+        editor.handle_key(KeyEvent::char('b'));
+        editor.handle_key(KeyEvent::char('c'));
+        editor.handle_key(KeyEvent::esc());
+
+        // Buffer should be "abc"
+        let buf = editor.buffer_mgr.get(&editor.active_page.clone().unwrap()).unwrap();
+        assert_eq!(buf.text().to_string(), "abc");
+
+        // One undo should revert the entire insert session
+        editor.handle_key(KeyEvent::char('u'));
+        let buf = editor.buffer_mgr.get(&editor.active_page.clone().unwrap()).unwrap();
+        assert_eq!(buf.text().to_string(), "");
     }
 
     // Tick clears expired notifications

@@ -38,6 +38,8 @@ pub enum VimAction {
     Unhandled,
     /// Multiple actions (e.g., delete + mode change for `cc`).
     Composite(Vec<VimAction>),
+    /// Restore the insert-mode checkpoint (Ctrl+U).
+    RestoreCheckpoint,
 }
 
 /// Result of a cursor-only motion.
@@ -196,6 +198,37 @@ impl VimState {
     // ── Insert mode ──────────────────────────────────────────────────
 
     fn process_insert(&mut self, key: KeyEvent, buffer: &Buffer, cursor: usize) -> VimAction {
+        // Handle Ctrl combinations first
+        if key.modifiers.ctrl {
+            match key.code {
+                KeyCode::Char('u') | KeyCode::Char('U') => {
+                    return VimAction::RestoreCheckpoint;
+                }
+                KeyCode::Char('w') | KeyCode::Char('W') => {
+                    // Delete word before cursor
+                    if cursor == 0 {
+                        return VimAction::Unhandled;
+                    }
+                    let rope = buffer.text();
+                    let mut pos = cursor;
+                    // Skip whitespace backwards
+                    while pos > 0 && rope.char(pos - 1).is_whitespace() {
+                        pos -= 1;
+                    }
+                    // Skip word chars backwards
+                    while pos > 0 && !rope.char(pos - 1).is_whitespace() {
+                        pos -= 1;
+                    }
+                    return VimAction::Edit(EditOp {
+                        range: pos..cursor,
+                        replacement: String::new(),
+                        cursor_after: pos,
+                    });
+                }
+                _ => {}
+            }
+        }
+
         match key.code {
             KeyCode::Esc => {
                 self.mode = Mode::Normal;
