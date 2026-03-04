@@ -431,7 +431,7 @@ impl BloomEditor {
         // Check platform shortcuts first
         if let Some(action) = keymap::platform_shortcut(&key) {
             self.leader_keys.clear();
-            return vec![action];
+            return self.execute_actions(vec![action]);
         }
 
         // If picker is open, route to picker
@@ -446,7 +446,8 @@ impl BloomEditor {
 
         // If we're in a leader key sequence (SPC was pressed), route to which-key
         if !self.leader_keys.is_empty() {
-            return self.handle_leader_key(key);
+            let actions = self.handle_leader_key(key);
+            return self.execute_actions(actions);
         }
 
         // Check if this is the leader key (Space in Normal mode)
@@ -461,10 +462,64 @@ impl BloomEditor {
         // Vim processing
         if let Some(buf) = self.active_page.as_ref().and_then(|id| self.buffer_mgr.get(id)) {
             let action = self.vim_state.process_key(key.clone(), buf, self.cursor);
-            return self.translate_vim_action(action);
+            let actions = self.translate_vim_action(action);
+            return self.execute_actions(actions);
         }
 
         vec![keymap::dispatch::Action::Noop]
+    }
+
+    /// Execute actions on editor state. Returns the actions for the TUI to handle
+    /// (only Quit, Save, and informational actions pass through).
+    fn execute_actions(
+        &mut self,
+        actions: Vec<keymap::dispatch::Action>,
+    ) -> Vec<keymap::dispatch::Action> {
+        let mut result = Vec::new();
+        for action in actions {
+            match action {
+                keymap::dispatch::Action::SplitWindow(dir) => {
+                    let _ = self.window_mgr.split(dir);
+                }
+                keymap::dispatch::Action::CloseWindow => {
+                    let pane = self.window_mgr.active_pane();
+                    self.window_mgr.close(pane);
+                }
+                keymap::dispatch::Action::NavigateWindow(dir) => {
+                    let cursor_line = self.cursor_position().0;
+                    self.window_mgr.navigate(dir, cursor_line);
+                }
+                keymap::dispatch::Action::OpenAgenda => {
+                    // TODO: open agenda in split pane
+                    result.push(action);
+                }
+                keymap::dispatch::Action::OpenUndoTree => {
+                    // TODO: open undo tree in split pane
+                    result.push(action);
+                }
+                keymap::dispatch::Action::OpenPicker(_) => {
+                    // TODO: open picker overlay
+                    result.push(action);
+                }
+                keymap::dispatch::Action::ClosePicker => {
+                    self.picker_state = None;
+                    result.push(action);
+                }
+                keymap::dispatch::Action::ModeChange(_) => {
+                    // Mode change already applied in vim state
+                    result.push(action);
+                }
+                keymap::dispatch::Action::Edit(_) | keymap::dispatch::Action::Motion(_) => {
+                    // Already applied to buffer/cursor in translate_vim_action
+                    result.push(action);
+                }
+                // Pass through to TUI: Quit, Save, and others
+                _ => {
+                    result.push(action);
+                }
+            }
+        }
+        result
     }
 
     fn handle_leader_key(&mut self, key: types::KeyEvent) -> Vec<keymap::dispatch::Action> {
