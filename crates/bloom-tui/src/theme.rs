@@ -100,6 +100,21 @@ impl<'a> TuiTheme<'a> {
         rgb(self.palette.mild)
     }
 
+    /// Faded colour.
+    pub fn faded(&self) -> Color {
+        rgb(self.palette.faded)
+    }
+
+    /// Accent red.
+    pub fn accent_red(&self) -> Color {
+        rgb(self.palette.accent_red)
+    }
+
+    /// Highlight colour.
+    pub fn highlight(&self) -> Color {
+        rgb(self.palette.highlight)
+    }
+
     pub fn faded_style(&self) -> RStyle {
         to_rstyle(&theme::resolve_chrome(Chrome::Faded, self.palette))
     }

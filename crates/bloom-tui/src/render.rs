@@ -297,7 +297,7 @@ fn draw_status_bar_slot(
     }
 }
 
-/// Render the normal status bar (mode, title, position, etc.)
+/// Render the normal status bar with per-element typographic weights.
 fn draw_normal_status(
     f: &mut Frame,
     area: Rect,
@@ -305,66 +305,107 @@ fn draw_normal_status(
     status: &bloom_core::render::NormalStatus,
     theme: &TuiTheme,
 ) {
-    let style = theme.status_bar_style(mode, true);
+    let bar_bg = theme.highlight();
+    let base_style = theme.status_bar_style(mode, true);
     let width = area.width as usize;
 
     // Fill background
     f.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            " ".repeat(width),
-            style,
-        ))),
+        Paragraph::new(Line::from(Span::styled(" ".repeat(width), base_style))),
         area,
     );
 
-    // Right side: [macro] [pending] [mcp] line:col
-    let mut right_parts: Vec<String> = Vec::new();
+    // --- Build right-side spans with individual weights ---
+    let mut right_spans: Vec<Span> = Vec::new();
+    right_spans.push(Span::raw(" "));
 
     if let Some(reg) = status.recording_macro {
-        right_parts.push(format!("@{reg}"));
+        // Macro: accent_red — recording state, visually distinct
+        let macro_style = RStyle::default().fg(theme.accent_red()).bg(bar_bg);
+        right_spans.push(Span::styled(format!("@{reg}"), macro_style));
+        right_spans.push(Span::raw("  "));
     }
     if !status.pending_keys.is_empty() {
-        right_parts.push(status.pending_keys.clone());
+        // Pending keys: salient + bold — transient but important
+        let pending_style = RStyle::default()
+            .fg(theme.salient())
+            .bg(bar_bg)
+            .add_modifier(Modifier::BOLD);
+        right_spans.push(Span::styled(status.pending_keys.clone(), pending_style));
+        right_spans.push(Span::raw("  "));
     }
 
+    let mcp_animating = matches!(&status.mcp, McpIndicator::Editing { .. });
     let mcp_str = match &status.mcp {
         McpIndicator::Off => String::new(),
         McpIndicator::Idle => "\u{26a1}".to_string(),
         McpIndicator::Editing { tick } => {
             const FRAMES: &[&str] = &["\u{26a1}", "\u{25d0}", "\u{25d1}", "\u{25d2}", "\u{25d3}"];
-            FRAMES[(tick.clone() as usize) % FRAMES.len()].to_string()
+            FRAMES[(*tick as usize) % FRAMES.len()].to_string()
         }
     };
     if !mcp_str.is_empty() {
-        right_parts.push(mcp_str);
+        // MCP: faded when idle, salient when animating
+        let mcp_fg = if mcp_animating { theme.salient() } else { theme.faded() };
+        let mcp_style = RStyle::default().fg(mcp_fg).bg(bar_bg);
+        right_spans.push(Span::styled(mcp_str, mcp_style));
+        right_spans.push(Span::raw("  "));
     }
 
-    right_parts.push(format!("{}:{}", status.line + 1, status.column + 1));
+    // Line:col — faded, reference info
+    let pos_style = RStyle::default().fg(theme.faded()).bg(bar_bg);
+    right_spans.push(Span::styled(
+        format!("{}:{}", status.line + 1, status.column + 1),
+        pos_style,
+    ));
+    right_spans.push(Span::styled(" ", RStyle::default().bg(bar_bg)));
 
-    let right = format!(" {} ", right_parts.join("  "));
+    let right_width: usize = right_spans.iter().map(|s| s.content.len()).sum();
 
-    // Left side: MODE │ title [+]
+    // --- Build left-side spans with individual weights ---
+    // Mode badge: bold, uses the mode-specific style (already has bg color)
+    let mode_style = base_style.add_modifier(Modifier::BOLD);
+    let mode_text = format!(" {} ", mode);
+
+    // Separator: faded on bar bg
+    let sep_style = RStyle::default().fg(theme.faded()).bg(bar_bg);
+
+    // Title: foreground on bar bg, normal weight
+    let title_style = RStyle::default().fg(theme.foreground()).bg(bar_bg);
+
+    // Dirty: salient on bar bg — needs attention
+    let dirty_style = RStyle::default().fg(theme.salient()).bg(bar_bg);
+
     let dirty_mark = if status.dirty { " [+]" } else { "" };
-    let mode_section = format!(" {} \u{2502} ", mode);
     let title_max = width
-        .saturating_sub(mode_section.len())
+        .saturating_sub(mode_text.len())
+        .saturating_sub(3)  // " │ "
         .saturating_sub(dirty_mark.len())
-        .saturating_sub(right.len());
+        .saturating_sub(right_width);
     let title = truncate_with_ellipsis(&status.title, title_max);
-    let left = format!("{mode_section}{title}{dirty_mark}");
+
+    let mut left_spans: Vec<Span> = Vec::new();
+    left_spans.push(Span::styled(&mode_text, mode_style));
+    left_spans.push(Span::styled(" \u{2502} ", sep_style));
+    left_spans.push(Span::styled(title, title_style));
+    if status.dirty {
+        left_spans.push(Span::styled(dirty_mark, dirty_style));
+    }
+
+    let left_width: usize = left_spans.iter().map(|s| s.content.len()).sum();
 
     // Render left
     f.render_widget(
-        Paragraph::new(Line::from(Span::styled(&left, style))),
+        Paragraph::new(Line::from(left_spans)),
         area,
     );
 
     // Render right
-    let rx = area.right().saturating_sub(right.len() as u16);
-    if rx > area.x + left.len() as u16 {
+    let rx = area.right().saturating_sub(right_width as u16);
+    if rx > area.x + left_width as u16 {
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(&right, style))),
-            Rect::new(rx, area.y, right.len() as u16, 1),
+            Paragraph::new(Line::from(right_spans)),
+            Rect::new(rx, area.y, right_width as u16, 1),
         );
     }
 }
