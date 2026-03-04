@@ -37,7 +37,7 @@
 | H4–H6 | 1.0× (base) | Bold only |
 | Body text | 1.0× (base) | Default: 14px equivalent |
 | Code block | 1.0× (base) | `subtle` background wash |
-| Frontmatter | 0.9× base | `faded`, italic |
+| Frontmatter | 0.9× base | Per-field styling: title bold italic, keys faded italic, id dim |
 | Status bar, picker, UI chrome | 1.0× (base) | Fixed size |
 
 Base font size is user-configurable in `config.toml`:
@@ -138,7 +138,12 @@ The key insight from Lambda: **most text renders in `foreground` with typographi
 | `ListMarker` | `foreground` | — | — | Structural — conveys document hierarchy |
 | `CheckboxUnchecked` | `accent_yellow` | — | — | Pending state |
 | `CheckboxChecked` | `accent_green` | — | ~~strikethrough~~ | Completed state |
-| `Frontmatter` | `faded` | — | *italic* | Like Lambda comment-face |
+| `Frontmatter` | `faded` | — | *italic* | Like Lambda comment-face — base style for structural elements |
+| `FrontmatterKey` | `faded` | — | *italic* | YAML keys (`id:`, `title:`, etc.) — structure, not content |
+| `FrontmatterTitle` | `foreground` | — | **bold** *italic* | The page name — most important metadata |
+| `FrontmatterId` | `faded` | — | *italic* + dim | Internal UUID — rarely useful to the reader |
+| `FrontmatterDate` | `faded` | — | *italic* | Useful context, not critical |
+| `FrontmatterTags` | `faded` | — | — | Same weight as inline tags — meaningful for navigation |
 | `BrokenLink` | `critical` | — | ~~strikethrough~~ | Demands attention |
 | `SyntaxNoise` | `faded` | — | dim | Pure syntax markers — see Syntax Semantic Weight below |
 
@@ -158,6 +163,7 @@ The marker **is** the meaning. Removing it changes what the reader understands.
 | Ordered list | `1.`, `2.`, etc. | `ListMarker` (`foreground`) | Conveys ordering. Without it, sequence is lost. |
 | Checkbox (unchecked) | `- [ ]` | `CheckboxUnchecked` (`accent_yellow`) | Signals "this needs doing." The `[ ]` IS the status. |
 | Checkbox (checked) | `- [x]` | `CheckboxChecked` (`accent_green`, ~~strikethrough~~) | Signals completion. The `[x]` IS the status. |
+| Frontmatter title value | `"My Page Title"` | `FrontmatterTitle` (`foreground`, bold italic) | The page's name — most important metadata, deserves full visibility. |
 | Tag | `#` in `#rust` | Same style as tag text (`faded`) | The `#` is part of the tag's identity. Dimming it makes `rust` look like prose. |
 | Blockquote | `>` | `faded` | Conveys attribution/quoting. Without it, quoted text blends into the author's voice. |
 | Timestamp keyword | `@due`, `@start`, `@at` | `faded` (same as timestamp) | Tells you the *type* of date — deadline vs start vs event. The keyword is the meaning. |
@@ -170,7 +176,8 @@ Carries some information, but context or styling already communicates the constr
 |-----------|-------------------|-------------|-----------|
 | Block ID | `^` in `^rope-perf` | `faded` + dim | The `^` signals "this is a reference target." Already very quiet in current theme. |
 | Timestamp parens | `(` `)` in `@due(2026-03-05)` | `SyntaxNoise` (`faded` + dim) | Grouping syntax. `@due` already tells you what follows. |
-| Frontmatter delimiters | `---` | `faded` + dim | Marks a section boundary, but frontmatter content is already faded/italic — the delimiters can be quieter. |
+| Frontmatter delimiters | `---` | `faded` + dim | Marks a section boundary, but frontmatter content is already styled — the delimiters can be quieter. |
+| Frontmatter keys | `id:`, `title:`, `created:`, `tags:` | `FrontmatterKey` (`faded`, italic) | YAML structure — the values carry the meaning, not the keys. |
 | Code fence | ` ``` ` and language hint | `faded` + dim | Marks code block boundary. The `subtle` background wash already signals "code zone." |
 
 ### Tier 3 — Noise (Dimmed)
@@ -192,6 +199,13 @@ Showing how a document looks with semantic weight applied. Dim markers shown in 
 
 **Raw Markdown:**
 ```markdown
+---
+id: 8f3a1b2c
+title: "Design Decisions"
+created: 2026-02-28
+tags: [editors, rust]
+---
+
 ### Design Decisions
 
 I chose **Rust** for its *memory safety* and performance.
@@ -206,6 +220,13 @@ See [[8f3a1b2c|Text Editor Theory]] for background.
 
 **As rendered in Bloom (described):**
 ```
+---                                       ← faded + dim (delimiter)
+id: 8f3a1b2c                              ← "id:" faded italic, value faded italic + dim
+title: "Design Decisions"                 ← "title:" faded italic, value foreground bold italic
+created: 2026-02-28                       ← "created:" faded italic, value faded italic
+tags: [editors, rust]                     ← "tags:" faded italic, values faded (like inline tags)
+---                                       ← faded + dim (delimiter)
+
 (###) Design Decisions                    ← (###) dim, "Design Decisions" bold
                                           
 I chose (**)Rust(**) for its (*)memory    ← (**) dim, "Rust" bold; (*) dim
