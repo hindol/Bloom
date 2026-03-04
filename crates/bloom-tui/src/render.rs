@@ -26,8 +26,8 @@ pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &TuiTheme) {
         let col_width = 24u16;
         let cols = (area.width.saturating_sub(4) / col_width).max(1);
         let rows_needed = ((wk.entries.len() as u16) + cols - 1) / cols;
-        // +1 for top border, +1 for top padding, +1 for bottom padding
-        (rows_needed + 3).min(area.height / 3).max(4)
+        // +1 for top padding, +1 for bottom padding
+        (rows_needed + 2).min(area.height / 3).max(3)
     } else {
         0
     };
@@ -683,19 +683,23 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
 fn draw_which_key(f: &mut Frame, area: Rect, wk: &WhichKeyFrame, theme: &TuiTheme) {
     f.render_widget(Clear, area);
 
-    let block = Block::default()
-        .borders(Borders::TOP)
-        .style(theme.which_key_style())
-        .border_style(theme.border_style());
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let bg_style = RStyle::default().fg(theme.foreground()).bg(theme.background());
+
+    // Fill background (no border — status bar provides separation)
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            " ".repeat(area.width as usize),
+            bg_style,
+        ))),
+        area,
+    );
 
     // Add horizontal and vertical padding for readability
     let padded = Rect::new(
-        inner.x.saturating_add(2),
-        inner.y.saturating_add(1),
-        inner.width.saturating_sub(4),
-        inner.height.saturating_sub(2),  // 1 top + 1 bottom padding
+        area.x.saturating_add(2),
+        area.y.saturating_add(1),
+        area.width.saturating_sub(4),
+        area.height.saturating_sub(2),  // 1 top + 1 bottom padding
     );
 
     let col_width = 24u16;
@@ -707,11 +711,11 @@ fn draw_which_key(f: &mut Frame, area: Rect, wk: &WhichKeyFrame, theme: &TuiThem
         if row >= padded.height {
             break;
         }
-        let key_style = theme.which_key_style().add_modifier(Modifier::BOLD);
+        let key_style = RStyle::default().fg(theme.foreground()).bg(theme.background()).add_modifier(Modifier::BOLD);
         let label_style = if entry.is_group {
-            RStyle::default().fg(theme.salient())
+            RStyle::default().fg(theme.salient()).bg(theme.background())
         } else {
-            theme.which_key_style()
+            bg_style
         };
         let text = Line::from(vec![
             Span::styled(format!("{:<4}", entry.key), key_style),
