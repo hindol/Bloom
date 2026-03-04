@@ -113,31 +113,28 @@ fn draw_pane(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
         return;
     }
 
-    // Split into: title bar (1 line) + content + status bar (1 line)
+    // Split into: content + status bar (1 line)
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),                    // title
             Constraint::Min(1),                      // content
             Constraint::Length(1),                    // status bar
         ])
         .split(area);
 
-    draw_pane_title(f, layout[0], pane, theme);
-
     match &pane.kind {
-        PaneKind::Editor => draw_editor_content(f, layout[1], pane, theme),
-        PaneKind::Agenda(agenda) => draw_agenda(f, layout[1], agenda, theme),
-        PaneKind::Timeline(tl) => draw_timeline(f, layout[1], tl, theme),
-        PaneKind::UndoTree(ut) => draw_undo_tree(f, layout[1], ut, theme),
-        PaneKind::SetupWizard(sw) => draw_setup_wizard(f, layout[1], sw, theme),
+        PaneKind::Editor => draw_editor_content(f, layout[0], pane, theme),
+        PaneKind::Agenda(agenda) => draw_agenda(f, layout[0], agenda, theme),
+        PaneKind::Timeline(tl) => draw_timeline(f, layout[0], tl, theme),
+        PaneKind::UndoTree(ut) => draw_undo_tree(f, layout[0], ut, theme),
+        PaneKind::SetupWizard(sw) => draw_setup_wizard(f, layout[0], sw, theme),
     }
 
-    draw_status_bar(f, layout[2], &pane.status_bar, pane.is_active, theme);
+    draw_status_bar(f, layout[1], &pane.status_bar, pane.is_active, theme);
 
     // Set cursor position for active pane
     if pane.is_active {
-        let content_area = layout[1];
+        let content_area = layout[0];
         let line_number_width = 4u16;
         let cursor_y = pane.cursor.line.saturating_sub(pane.scroll_offset);
         let cy = content_area.y + cursor_y as u16;
