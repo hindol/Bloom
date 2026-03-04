@@ -66,7 +66,7 @@ pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &TuiTheme) {
 
 fn draw_panes(
     f: &mut Frame,
-    area: Rect,
+    _area: Rect,
     panes: &[PaneFrame],
     _maximized: bool,
     hidden_count: usize,
@@ -76,24 +76,20 @@ fn draw_panes(
         return;
     }
 
-    // Simple layout: split equally among panes (binary split tree is handled by core;
-    // here we just tile them left-to-right for multiple panes).
-    let constraints: Vec<Constraint> = panes
-        .iter()
-        .map(|_| Constraint::Ratio(1, panes.len() as u32))
-        .collect();
-
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(constraints)
-        .split(area);
-
-    for (i, pane) in panes.iter().enumerate() {
-        draw_pane(f, chunks[i], pane, theme);
+    // Each pane carries its own rect from the core layout engine — just draw them.
+    for pane in panes {
+        let pane_area = Rect::new(
+            pane.rect.x,
+            pane.rect.y,
+            pane.rect.width,
+            pane.rect.total_height,
+        );
+        draw_pane(f, pane_area, pane, theme);
     }
 
     // Hidden pane count indicator (top-right)
     if hidden_count > 0 {
+        let area = f.area();
         let indicator = format!("[{hidden_count} hidden]");
         let x = area.right().saturating_sub(indicator.len() as u16 + 1);
         if x > area.x {
@@ -111,31 +107,35 @@ fn draw_pane(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
         return;
     }
 
-    // Every pane: content + status bar (1 line)
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),       // content
-            Constraint::Length(1),    // status bar
-        ])
-        .split(area);
+    // Content and status bar areas from core-computed rect
+    let content_area = Rect::new(
+        pane.rect.x,
+        pane.rect.y,
+        pane.rect.width,
+        pane.rect.content_height,
+    );
+    let status_area = Rect::new(
+        pane.rect.x,
+        pane.rect.y + pane.rect.content_height,
+        pane.rect.width,
+        1,
+    );
 
     match &pane.kind {
-        PaneKind::Editor => draw_editor_content(f, layout[0], pane, theme),
-        PaneKind::Agenda(agenda) => draw_agenda(f, layout[0], agenda, theme),
-        PaneKind::Timeline(tl) => draw_timeline(f, layout[0], tl, theme),
-        PaneKind::UndoTree(ut) => draw_undo_tree(f, layout[0], ut, theme),
-        PaneKind::SetupWizard(sw) => draw_setup_wizard(f, layout[0], sw, theme),
+        PaneKind::Editor => draw_editor_content(f, content_area, pane, theme),
+        PaneKind::Agenda(agenda) => draw_agenda(f, content_area, agenda, theme),
+        PaneKind::Timeline(tl) => draw_timeline(f, content_area, tl, theme),
+        PaneKind::UndoTree(ut) => draw_undo_tree(f, content_area, ut, theme),
+        PaneKind::SetupWizard(sw) => draw_setup_wizard(f, content_area, sw, theme),
     }
 
     // Status bar: slot-based for active pane, compact for inactive
     if pane.is_active {
-        let cursor = draw_status_bar_slot(f, layout[1], &pane.status_bar, theme);
+        let cursor = draw_status_bar_slot(f, status_area, &pane.status_bar, theme);
         // Cursor: status bar slots (command line, quick capture) take priority
         if let Some((cx, cy)) = cursor {
             f.set_cursor_position((cx, cy));
         } else if matches!(&pane.kind, PaneKind::Editor) {
-            let content_area = layout[0];
             let line_number_width = 4u16;
             let cursor_y = pane.cursor.line.saturating_sub(pane.scroll_offset);
             let cy = content_area.y + cursor_y as u16;
@@ -145,7 +145,7 @@ fn draw_pane(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
             }
         }
     } else {
-        draw_inactive_pane_bar(f, layout[1], pane, theme);
+        draw_inactive_pane_bar(f, status_area, pane, theme);
     }
 }
 

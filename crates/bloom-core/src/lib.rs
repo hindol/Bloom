@@ -132,6 +132,8 @@ pub struct BloomEditor {
     leader_keys: Vec<types::KeyEvent>,
     pending_since: Option<Instant>,
     active_theme: &'static theme::ThemePalette,
+    terminal_height: u16,
+    terminal_width: u16,
 }
 
 // ---------------------------------------------------------------------------
@@ -324,6 +326,8 @@ impl BloomEditor {
             leader_keys: Vec::new(),
             pending_since: None,
             active_theme,
+            terminal_height: 24,
+            terminal_width: 80,
             config,
         })
     }
@@ -1513,7 +1517,7 @@ impl BloomEditor {
     }
 
     /// Produce the render frame
-    pub fn render(&self) -> render::RenderFrame {
+    pub fn render(&mut self) -> render::RenderFrame {
         // If wizard is active, render wizard as a full-screen pane
         if let Some(wiz) = &self.wizard {
             return render::RenderFrame {
@@ -1527,6 +1531,7 @@ impl BloomEditor {
                     title: String::new(),
                     dirty: false,
                     status_bar: render::StatusBarFrame::default(),
+                    rect: render::PaneRectFrame::default(),
                 }],
                 maximized: false,
                 hidden_pane_count: 0,
@@ -1547,8 +1552,33 @@ impl BloomEditor {
             vim::Mode::Command => "COMMAND",
         };
 
-        for pane_id in self.window_mgr.all_pane_ids() {
-            let is_active = pane_id == self.window_mgr.active_pane();
+        // Compute pane rects from the core layout engine.
+        // Reserve space for the which-key drawer if active.
+        let wk_h = if !self.leader_keys.is_empty() || self.vim_state.pending_keys().len() > 0 {
+            // Estimate which-key height (mirrors TUI calculation)
+            let col_width = 24u16;
+            let cols = (self.terminal_width.saturating_sub(4) / col_width).max(1);
+            let entry_count = 12u16; // conservative estimate
+            let rows_needed = (entry_count + cols - 1) / cols;
+            (rows_needed + 2).min(self.terminal_height / 3).max(3)
+        } else {
+            0
+        };
+        let pane_area_h = self.terminal_height.saturating_sub(wk_h);
+        let pane_rects = self.window_mgr.compute_pane_rects(self.terminal_width, pane_area_h);
+
+        // Update viewport from the active pane's content height
+        if let Some(active_rect) = pane_rects.iter().find(|r| r.pane_id == self.window_mgr.active_pane()) {
+            self.viewport.height = active_rect.content_height as usize;
+            self.viewport.width = active_rect.width as usize;
+        }
+
+        // Ensure cursor is visible (scrolls the viewport if needed)
+        let (cursor_line, cursor_col) = self.cursor_position();
+        self.viewport.ensure_visible(cursor_line);
+
+        for rect in &pane_rects {
+            let is_active = rect.pane_id == self.window_mgr.active_pane();
 
             let (title, dirty, visible_lines) = if let Some(page_id) = &self.active_page {
                 if let Some(buf) = self.buffer_mgr.get(page_id) {
@@ -1635,7 +1665,7 @@ impl BloomEditor {
             };
 
             panes.push(render::PaneFrame {
-                id: pane_id,
+                id: rect.pane_id,
                 kind: render::PaneKind::Editor,
                 visible_lines,
                 cursor: render::CursorState {
@@ -1653,6 +1683,13 @@ impl BloomEditor {
                 title: title.clone(),
                 dirty,
                 status_bar,
+                rect: render::PaneRectFrame {
+                    x: rect.x,
+                    y: rect.y,
+                    width: rect.width,
+                    content_height: rect.content_height,
+                    total_height: rect.height,
+                },
             });
         }
 
@@ -1954,9 +1991,10 @@ impl BloomEditor {
         self.notifications.retain(|n| n.expires_at > now);
     }
 
-    /// Update the viewport size (e.g. on terminal resize).
+    /// Update the terminal size (e.g. on terminal resize).
     pub fn resize(&mut self, height: usize, width: usize) {
-        self.viewport = render::Viewport::new(height.saturating_sub(2), width);
+        self.terminal_height = height as u16;
+        self.terminal_width = width as u16;
     }
 
     // Buffer management

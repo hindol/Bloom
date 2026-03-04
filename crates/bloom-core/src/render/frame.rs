@@ -34,6 +34,18 @@ pub struct PaneFrame {
     pub title: String,
     pub dirty: bool,
     pub status_bar: StatusBarFrame,
+    /// Cell rect computed by core layout — TUI reads this directly.
+    pub rect: PaneRectFrame,
+}
+
+/// Pane positioning info for the TUI renderer.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PaneRectFrame {
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub content_height: u16,
+    pub total_height: u16,
 }
 
 pub enum PaneKind {

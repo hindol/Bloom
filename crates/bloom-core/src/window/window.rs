@@ -552,6 +552,69 @@ impl WindowManager {
         collect_pane_ids(&self.tree, &mut ids);
         ids
     }
+
+    /// Compute concrete cell rects for every pane given the total available area.
+    /// Each pane gets a content area (for editor/view) and a 1-line status bar.
+    pub fn compute_pane_rects(&self, total_width: u16, total_height: u16) -> Vec<CellRect> {
+        let mut rects = Vec::new();
+        let tree = if self.maximized {
+            &LayoutTree::Leaf(self.active)
+        } else {
+            &self.tree
+        };
+        compute_cell_rects(tree, 0, 0, total_width, total_height, &mut rects);
+        rects
+    }
+}
+
+/// Concrete cell rect computed by the core layout engine for each pane.
+#[derive(Debug, Clone, Copy)]
+pub struct CellRect {
+    pub pane_id: PaneId,
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub height: u16,          // total pane height (content + status bar)
+    pub content_height: u16,  // rows for content (height - 1 for status bar)
+}
+
+fn compute_cell_rects(
+    tree: &LayoutTree,
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+    out: &mut Vec<CellRect>,
+) {
+    match tree {
+        LayoutTree::Leaf(id) => {
+            let content_h = height.saturating_sub(1);
+            out.push(CellRect {
+                pane_id: *id,
+                x,
+                y,
+                width,
+                height,
+                content_height: content_h,
+            });
+        }
+        LayoutTree::Split { direction, ratio, left, right } => {
+            match direction {
+                SplitDirection::Vertical => {
+                    let left_w = ((width as f32) * ratio) as u16;
+                    let right_w = width.saturating_sub(left_w);
+                    compute_cell_rects(left, x, y, left_w, height, out);
+                    compute_cell_rects(right, x + left_w, y, right_w, height, out);
+                }
+                SplitDirection::Horizontal => {
+                    let top_h = ((height as f32) * ratio) as u16;
+                    let bottom_h = height.saturating_sub(top_h);
+                    compute_cell_rects(left, x, y, width, top_h, out);
+                    compute_cell_rects(right, x, y + top_h, width, bottom_h, out);
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
