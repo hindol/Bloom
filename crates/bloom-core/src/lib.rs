@@ -896,6 +896,9 @@ impl BloomEditor {
                     // Already applied to buffer/cursor in translate_vim_action
                     result.push(action);
                 }
+                keymap::dispatch::Action::ToggleTask => {
+                    self.toggle_task_at_cursor();
+                }
                 // Pass through to TUI: Quit, Save, and others
                 _ => {
                     result.push(action);
@@ -1356,6 +1359,32 @@ impl BloomEditor {
         let root = std::path::PathBuf::from(&vault_path);
         let _ = self.init_vault(&root);
         self.startup();
+    }
+
+    /// Toggle task checkbox on the line at the cursor: `[ ]` ↔ `[x]`.
+    fn toggle_task_at_cursor(&mut self) {
+        let Some(page_id) = &self.active_page else { return };
+        let Some(buf) = self.buffer_mgr.get_mut(page_id) else { return };
+        let rope = buf.text();
+        let len = rope.len_chars();
+        if len == 0 { return; }
+        let cursor = self.cursor.min(len.saturating_sub(1));
+        let line_idx = rope.char_to_line(cursor);
+        let line_text = rope.line(line_idx).to_string();
+        let trimmed = line_text.trim_start();
+        let indent = line_text.len() - trimmed.len();
+
+        let line_start = rope.line_to_char(line_idx);
+
+        if trimmed.starts_with("- [ ] ") {
+            // Unchecked → checked
+            let bracket_start = line_start + indent + 2; // position of '['
+            buf.replace(bracket_start..bracket_start + 3, "[x]");
+        } else if trimmed.starts_with("- [x] ") || trimmed.starts_with("- [X] ") {
+            // Checked → unchecked
+            let bracket_start = line_start + indent + 2;
+            buf.replace(bracket_start..bracket_start + 3, "[ ]");
+        }
     }
 
     fn translate_vim_action(
