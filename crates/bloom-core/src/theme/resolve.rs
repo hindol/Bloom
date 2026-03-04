@@ -55,21 +55,44 @@ pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
             bg: Some(p.subtle),
             ..Default::default()
         },
-        Style::Link => StyleProps {
+        Style::LinkText => StyleProps {
             fg: Some(p.strong),
             bg: Some(p.modeline),
             underline: true,
+            ..Default::default()
+        },
+        Style::LinkChrome => StyleProps {
+            fg: Some(p.faded),
+            dim: true,
             ..Default::default()
         },
         Style::Tag => StyleProps {
             fg: Some(p.faded),
             ..Default::default()
         },
-        Style::Timestamp => StyleProps {
+        Style::TimestampKeyword => StyleProps {
             fg: Some(p.faded),
             ..Default::default()
         },
+        Style::TimestampDate => StyleProps {
+            fg: Some(p.foreground),
+            ..Default::default()
+        },
+        Style::TimestampOverdue => StyleProps {
+            fg: Some(p.accent_red),
+            ..Default::default()
+        },
+        Style::TimestampParens => StyleProps {
+            fg: Some(p.faded),
+            dim: true,
+            ..Default::default()
+        },
         Style::BlockId => StyleProps {
+            fg: Some(p.faded),
+            dim: true,
+            ..Default::default()
+        },
+        Style::BlockIdCaret => StyleProps {
             fg: Some(p.faded),
             dim: true,
             ..Default::default()
@@ -87,9 +110,58 @@ pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
             strikethrough: true,
             ..Default::default()
         },
+        Style::CheckedTaskText => StyleProps {
+            fg: Some(p.faded),
+            strikethrough: true,
+            ..Default::default()
+        },
+        Style::Blockquote => StyleProps {
+            fg: Some(p.foreground),
+            italic: true,
+            ..Default::default()
+        },
+        Style::BlockquoteMarker => StyleProps {
+            fg: Some(p.faded),
+            ..Default::default()
+        },
+        Style::TablePipe => StyleProps {
+            fg: Some(p.faded),
+            ..Default::default()
+        },
+        Style::TableAlignmentRow => StyleProps {
+            fg: Some(p.faded),
+            dim: true,
+            ..Default::default()
+        },
         Style::Frontmatter => StyleProps {
             fg: Some(p.faded),
             italic: true,
+            ..Default::default()
+        },
+        Style::FrontmatterKey => StyleProps {
+            fg: Some(p.faded),
+            italic: true,
+            ..Default::default()
+        },
+        Style::FrontmatterTitle => StyleProps {
+            fg: Some(p.foreground),
+            bold: true,
+            italic: true,
+            ..Default::default()
+        },
+        Style::FrontmatterId => StyleProps {
+            fg: Some(p.faded),
+            italic: true,
+            dim: true,
+            ..Default::default()
+        },
+        Style::FrontmatterDate => StyleProps {
+            fg: Some(p.faded),
+            italic: true,
+            ..Default::default()
+        },
+        Style::FrontmatterTags => StyleProps {
+            fg: Some(p.faded),
             ..Default::default()
         },
         Style::BrokenLink => StyleProps {
