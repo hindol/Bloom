@@ -40,7 +40,7 @@ Starting from a single pane, each split divides one pane into two. This produces
 │  ~                                                            │
 │  ~                                                            │
 ├───────────────────────────────────────────────────────────────┤
-│ NORMAL │ Text Editor Theory [+]              12:1 │ markdown  │
+│ NORMAL │ Text Editor Theory [+]                          12:1 │
 └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -65,7 +65,7 @@ The most common layout: two editors side by side.
 │  ~                            │  ~                            │
 │  ~                            │  ~                            │
 ├───────────────────────────────┼───────────────────────────────┤
-│ NORMAL │ Text Editor… 12:1    │ NORMAL │ 2026-03-03    4:1    │
+│ NORMAL │ Text Editor…           12:1 │ 2026-03-03                    │
 └───────────────────────────────┴───────────────────────────────┘
 ```
 
@@ -96,7 +96,7 @@ Tree: `Split { V, 0.5, Leaf(A), Leaf(B) }`
 │  The borrow checker ensures memory safety at compile time.    │
 │                                                               │
 ├───────────────────────────────────────────────────────────────┤
-│ NORMAL │ Rust Programming [+]                 8:1 │ markdown  │
+│ NORMAL │ Rust Programming [+]                             8:1 │
 └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -226,7 +226,7 @@ Hides all other panes. The active pane takes full screen. A subtle indicator sho
 │  ~                                                             │
 │  ~                                                             │
 ├────────────────────────────────────────────────────────────────┤
-│ NORMAL │ Text Editor Theory [+]              14:1 │ markdown   │
+│ NORMAL │ Text Editor Theory [+]                          14:1 │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -249,6 +249,80 @@ The active pane is indicated by **status bar styling**, not borders:
 | Cursor | Visible (block/bar/underline per mode) | Hidden (no cursor shown) |
 
 This means pane borders are always the same weight — the eye is drawn to the active pane by its cursor and bright status bar, not by border changes.
+
+---
+
+## Status Bar Anatomy
+
+The status bar is a single line at the bottom of each pane. Active and inactive panes show different levels of detail.
+
+### Active Pane
+
+```
+│ NORMAL │ Text Editor Theory [+]            @q  SPC f    12:1 │
+  ├─1──┘   ├──────2──────────┘├3┘            ├4┘ ├─5──┘   ├─6─┘
+```
+
+| # | Element | Description | When shown |
+|---|---------|-------------|------------|
+| 1 | **Mode** | `NORMAL` / `INSERT` / `VISUAL` / `COMMAND` | Always |
+| 2 | **Page title** | Frontmatter title, not filename or UUID | Always |
+| 3 | **Dirty marker** | `[+]` | Buffer has unsaved changes |
+| 4 | **Macro recording** | `@q` (register name) | While recording a macro |
+| 5 | **Pending keys** | Keys accumulated so far: `d`, `SPC f`, `2d` | During incomplete Vim command or leader sequence |
+| 6 | **Cursor position** | `line:col` (1-indexed) | Always |
+
+Layout: mode + title + dirty are **left-aligned**. Macro, pending, position are **right-aligned**. The middle is empty space — the bar breathes.
+
+### Inactive Pane
+
+```
+│ Text Editor Theory                                            │
+```
+
+Just the page title. No mode, no position, no pending keys. `subtle` background — the bar recedes visually.
+
+### Mode Colours
+
+| Mode | Foreground | Background | Rationale |
+|------|------------|------------|-----------|
+| NORMAL | `foreground` | `modeline` | Calm default — you're navigating, not editing |
+| INSERT | `background` | `accent_green` | Green = "go" — you're actively writing |
+| VISUAL | `background` | `popout` | Selection is happening — needs to stand out |
+| COMMAND | `background` | `accent_blue` | Informational — you're talking to the editor |
+
+### MCP Status Indicator
+
+When the MCP server (G17) is enabled, a small indicator appears in the right section of the **active pane's** status bar, between pending keys and cursor position.
+
+```
+│ NORMAL │ Text Editor Theory                    ⚡    12:1 │
+                                                 ↑
+                                           MCP indicator
+```
+
+| State | Icon | Description |
+|-------|------|-------------|
+| Off | *(nothing)* | MCP server is not running |
+| Idle | `⚡` | MCP server running, no activity |
+| Editing this buffer | `⚡` animated | MCP is writing to the buffer you're viewing |
+
+**Animation:** When an MCP edit arrives on the active buffer, the indicator cycles through a spinner sequence (`⚡◐◑◒◓`) at the tick rate (~100ms). The animation plays for approximately 1 second after the last MCP edit, then returns to the static `⚡`. This tells the user "the LLM is changing this file right now" without being intrusive.
+
+If the MCP server is editing a *different* buffer (not the one in the active pane), the indicator stays at static `⚡` — no animation. The user only sees activity when it's happening in their viewport.
+
+### Separator
+
+The `│` between mode and title is a thin Unicode box-drawing character, styled in `faded` — it separates sections without drawing the eye.
+
+### Truncation
+
+When the pane is narrow (e.g., in a vertical split):
+- Title truncates first, with `…`: `Text Edi…`
+- If still too narrow, pending keys are hidden
+- Mode and position are never truncated — they're the minimum viable status bar
+
+Minimum status bar: `│ NOR  12:1 │` (~12 chars). Below that, the pane is too small to split (enforced by the 20-column minimum).
 
 ---
 
@@ -399,9 +473,9 @@ Active pane indicator (status bar styling, not borders):
 │  (content)                    │  (content)                    │
 │                               │                               │
 ├───────────────────────────────┼───────────────────────────────┤
-│ NORMAL │ page [+]  12:1  md  │ page               (compact)  │
+│ NORMAL │ Page Title [+]    12:1 │ Page Title          (compact) │
 └───────────────────────────────┴───────────────────────────────┘
- ↑ active: full status bar       ↑ inactive: compact, dim bg
+ ↑ active: full status bar       ↑ inactive: title only, dim bg
 ```
 
 | Border element | Character | Style |
