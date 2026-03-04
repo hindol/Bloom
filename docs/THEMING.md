@@ -307,6 +307,24 @@ for background.                             strong underline; UUID hidden
 | Window border | `faded` | — |
 | Tilde `~` beyond EOF | `faded` | — |
 
+### Status Bar Element Weights
+
+Within the active pane's status bar, each element has its own typographic weight. Three visual tiers create a hierarchy without additional colour slots:
+
+| Element | Foreground | Modifier | Tier | Rationale |
+|---------|------------|----------|------|-----------|
+| Mode badge | mode bg colour | **bold** | Heavy | Most important — tells you what keystrokes do |
+| `│` separator | `faded` | — | Noise | Structural, should recede |
+| Page title | `foreground` | — | Normal | Primary context — what file you're in |
+| Dirty `[+]` | `salient` | — | Signal | Needs attention — unsaved changes |
+| Pending keys | `salient` | **bold** | Signal | Transient but important — command is building |
+| Macro `@q` | `accent_red` | — | Signal | Recording state — visually distinct from pending |
+| Line:col | `faded` | — | Faded | Reference info — glance-at, not stare-at |
+| MCP `⚡` (idle) | `faded` | — | Faded | Background service, not active |
+| MCP `⚡` (editing) | `salient` | — | Signal | LLM is writing to this buffer right now |
+
+All elements share the status bar background (`highlight` for Normal mode, mode-specific colour for Insert/Visual/Command). The inactive pane bar uses `faded` on `subtle` with just the page title — no mode, position, or pending keys.
+
 ---
 
 ## Rust Representation
