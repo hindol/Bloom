@@ -501,7 +501,7 @@ Top/bottom:          gg / G
 
 ## 11. Which-Key Popup — `SPC` + timeout / pending Vim key
 
-Not a picker — a bottom-anchored panel that appears after a brief timeout (~1000ms) when a key prefix is pending. Provides progressive disclosure of available next keys.
+Not a picker — a bottom-anchored panel that appears after a brief timeout (~500ms) when a key prefix is pending. Provides progressive disclosure of available next keys.
 
 ### Leader Which-Key (after `SPC`)
 
@@ -547,7 +547,7 @@ Not a picker — a bottom-anchored panel that appears after a brief timeout (~10
 | Description (`files`, `search`) | `foreground` — what it does |
 | Group vs action | Groups (contain sub-keys) show as label only; actions execute immediately |
 | Grid layout | Keys arranged in columns, max 4 columns wide, rows wrap as needed |
-| Timeout | Popup appears ~1000ms after the pending key. Typing before timeout skips the popup — the key is processed normally. |
+| Timeout | Popup appears ~500ms after the pending key. Typing before timeout skips the popup — the key is processed normally. |
 
 ### Vim Grammar Which-Key (after pending operator)
 
@@ -601,8 +601,8 @@ Not a picker — a bottom-anchored panel that appears after a brief timeout (~10
 
 - **No interaction required.** The popup is read-only. The user just presses the next key.
 - **Instant dismiss.** Any keypress closes the popup and processes the key. No Escape needed.
-- **Timeout only.** Popup ONLY appears after ~1000ms of inactivity. Fast typists never see it — `SPC f f` typed quickly opens Find Page directly.
-- **Configurable timeout.** `which_key_timeout_ms = 1000` in `config.toml`.
+- **Timeout only.** Popup ONLY appears after ~500ms of inactivity. Fast typists never see it — `SPC f f` typed quickly opens Find Page directly.
+- **Configurable timeout.** `which_key_timeout_ms = 500` in `config.toml`.
 - **Nested groups.** Leader which-key supports arbitrary depth: `SPC` → `w` → `=` (balance windows). Each level replaces the popup content.
 
 ---
