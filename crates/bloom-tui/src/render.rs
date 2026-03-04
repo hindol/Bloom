@@ -462,6 +462,44 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
     // Results (between query and footer)
     let results_h = top_h.saturating_sub(2); // -1 query, -1 footer
     let results_area = Rect::new(inner.x, inner.y + 1, inner.width, results_h);
+
+    // Show hint when query is below minimum length
+    if picker.results.is_empty() && picker.min_query_len > 0 && picker.query.len() < picker.min_query_len {
+        let hint = "Type to search…";
+        let hx = results_area.x + (results_area.width.saturating_sub(hint.len() as u16)) / 2;
+        let hy = results_area.y + results_area.height / 2;
+        if hy < results_area.bottom() {
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled(hint, theme.faded_style()))),
+                Rect::new(hx, hy, hint.len() as u16, 1),
+            );
+        }
+    }
+
+    let available = results_area.width as usize;
+
+    // Compute fixed right-column width from the visible results
+    let visible_count = (results_h as usize).min(picker.results.len());
+    let max_right_w: usize = picker.results[..visible_count]
+        .iter()
+        .map(|row| row.right.as_deref().unwrap_or("").width())
+        .max()
+        .unwrap_or(0)
+        .min(available * 2 / 5); // cap at 40% of available width
+    let max_middle_w: usize = picker.results[..visible_count]
+        .iter()
+        .map(|row| row.middle.as_deref().unwrap_or("").width())
+        .max()
+        .unwrap_or(0)
+        .min(available / 4); // cap at 25%
+
+    let right_zone = if max_right_w > 0 { max_right_w + 2 } else { 0 }; // +2 padding
+    let middle_zone = if max_middle_w > 0 { max_middle_w + 2 } else { 0 };
+    let marker_w = 2; // "▸ " or "  "
+    let label_max = available.saturating_sub(marker_w + middle_zone + right_zone);
+
+    let faded_style = theme.faded_style();
+
     for (i, row) in picker.results.iter().enumerate() {
         if i as u16 >= results_area.height {
             break;
@@ -474,32 +512,31 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
         };
         let marker = if is_selected { "▸ " } else { "  " };
 
-        // Build right-aligned text from right column
-        let right_text = row.right.as_deref().unwrap_or("");
-        // Build middle text
-        let middle_text = row.middle.as_deref().unwrap_or("");
-
-        let available = results_area.width as usize;
-        let right_pad = 2;
-        let marker_w = marker.width();
-        let right_w = right_text.width();
-        let middle_w = if !middle_text.is_empty() { middle_text.width() + 2 } else { 0 };
-        let fixed_w = marker_w + right_w + middle_w + right_pad;
-        let label_max = available.saturating_sub(fixed_w + 1);
         let label = truncate_to_width(&row.label, label_max);
-
-        // Compose the line: marker + label + gap + middle + gap + right + right_pad
         let label_w = label.width();
-        let used = marker_w + label_w + middle_w + right_w + right_pad;
-        let pad = available.saturating_sub(used);
+        let middle_text = row.middle.as_deref().unwrap_or("");
+        let right_text = row.right.as_deref().unwrap_or("");
 
-        let text = if !middle_text.is_empty() {
-            format!("{marker}{label}  {middle_text}{}{right_text}  ", " ".repeat(pad))
-        } else {
-            format!("{marker}{label}{}{right_text}  ", " ".repeat(pad))
-        };
+        // Gap between label and middle/right columns
+        let label_gap = available.saturating_sub(marker_w + label_w + middle_zone + right_zone);
+
+        let mut spans: Vec<Span> = Vec::new();
+        spans.push(Span::styled(marker, style));
+        spans.push(Span::styled(label.clone(), style));
+        spans.push(Span::styled(" ".repeat(label_gap), style));
+
+        if middle_zone > 0 {
+            let mid_padded = format!("{:<width$}", middle_text, width = middle_zone);
+            spans.push(Span::styled(mid_padded, if is_selected { style } else { faded_style }));
+        }
+
+        if right_zone > 0 {
+            let right_padded = format!("{:>width$}", right_text, width = right_zone);
+            spans.push(Span::styled(right_padded, if is_selected { style } else { faded_style }));
+        }
+
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(text, style))),
+            Paragraph::new(Line::from(spans)),
             Rect::new(results_area.x, results_area.y + i as u16, results_area.width, 1),
         );
     }

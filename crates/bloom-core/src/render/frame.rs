@@ -297,6 +297,8 @@ pub struct PickerFrame {
     pub total_count: usize,
     pub filtered_count: usize,
     pub status_noun: String,
+    /// Minimum query length before showing results (0 = show immediately).
+    pub min_query_len: usize,
 }
 
 pub struct PickerRow {

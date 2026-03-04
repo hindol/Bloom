@@ -252,6 +252,7 @@ struct ActivePicker {
     title: String,
     query: String,
     status_noun: String,
+    min_query_len: usize,
     /// For theme picker: the theme to revert to on cancel.
     previous_theme: Option<&'static theme::ThemePalette>,
 }
@@ -424,12 +425,17 @@ impl BloomEditor {
                 ("Picker".to_string(), "results".to_string(), Vec::new())
             }
         };
+        let min_query_len = match &kind {
+            PickerKind::Search => 2,
+            _ => 0,
+        };
         self.picker_state = Some(ActivePicker {
             kind,
             picker: picker::Picker::new(items),
             title,
             query: String::new(),
             status_noun,
+            min_query_len,
             previous_theme: None,
         });
     }
@@ -636,6 +642,7 @@ impl BloomEditor {
             title: "Theme".to_string(),
             query: String::new(),
             status_noun: "themes".to_string(),
+            min_query_len: 0,
             previous_theme: Some(previous_theme),
         });
     }
@@ -1566,24 +1573,34 @@ impl BloomEditor {
             maximized: self.window_mgr.is_maximized(),
             hidden_pane_count: self.window_mgr.hidden_pane_count(),
             picker: if let Some(ap) = &self.picker_state {
-                let results: Vec<render::PickerRow> = ap.picker.results().into_iter().map(|item| {
-                    render::PickerRow {
-                        label: item.label.clone(),
-                        middle: item.middle.clone(),
-                        right: item.right.clone(),
-                    }
-                }).collect();
-                let preview = ap.picker.selected().and_then(|item| item.preview_text.clone());
+                let below_min = ap.query.len() < ap.min_query_len;
+                let results: Vec<render::PickerRow> = if below_min {
+                    Vec::new()
+                } else {
+                    ap.picker.results().into_iter().map(|item| {
+                        render::PickerRow {
+                            label: item.label.clone(),
+                            middle: item.middle.clone(),
+                            right: item.right.clone(),
+                        }
+                    }).collect()
+                };
+                let preview = if below_min {
+                    None
+                } else {
+                    ap.picker.selected().and_then(|item| item.preview_text.clone())
+                };
                 Some(render::PickerFrame {
                     title: ap.title.clone(),
                     query: ap.query.clone(),
                     results,
-                    selected_index: ap.picker.selected_index(),
+                    selected_index: if below_min { 0 } else { ap.picker.selected_index() },
                     filters: Vec::new(),
                     preview,
                     total_count: ap.picker.total_count(),
-                    filtered_count: ap.picker.filtered_count(),
+                    filtered_count: if below_min { 0 } else { ap.picker.filtered_count() },
                     status_noun: ap.status_noun.clone(),
+                    min_query_len: ap.min_query_len,
                 })
             } else {
                 None
