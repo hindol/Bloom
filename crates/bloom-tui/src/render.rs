@@ -369,16 +369,30 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
             theme.picker_style()
         };
         let marker = if is_selected { "▸ " } else { "  " };
-        let marginalia = row.marginalia.join("  ");
+
+        // Build right-aligned text from right column
+        let right_text = row.right.as_deref().unwrap_or("");
+        // Build middle text
+        let middle_text = row.middle.as_deref().unwrap_or("");
+
         let available = results_area.width as usize;
-        let label_max = available.saturating_sub(marginalia.len() + marker.len() + 1);
+        let fixed_len = marker.len() + right_text.len() + if !middle_text.is_empty() { middle_text.len() + 2 } else { 0 };
+        let label_max = available.saturating_sub(fixed_len + 1);
         let label = if row.label.len() > label_max {
             format!("{}…", &row.label[..label_max.saturating_sub(1)])
         } else {
             row.label.clone()
         };
-        let pad = available.saturating_sub(marker.len() + label.len() + marginalia.len());
-        let text = format!("{marker}{label}{}{marginalia}", " ".repeat(pad));
+
+        // Compose the line: marker + label + gap + middle + gap + right
+        let used = marker.len() + label.len() + if !middle_text.is_empty() { middle_text.len() + 2 } else { 0 } + right_text.len();
+        let pad = available.saturating_sub(used);
+
+        let text = if !middle_text.is_empty() {
+            format!("{marker}{label}  {middle_text}{}{right_text}", " ".repeat(pad))
+        } else {
+            format!("{marker}{label}{}{right_text}", " ".repeat(pad))
+        };
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(text, style))),
             Rect::new(results_area.x, results_area.y + i as u16, results_area.width, 1),
@@ -387,8 +401,8 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
 
     // Footer: count
     let footer = format!(
-        "  {} of {} results",
-        picker.filtered_count, picker.total_count
+        "  {} of {} {}",
+        picker.filtered_count, picker.total_count, picker.status_noun
     );
     let footer_y = inner.y + inner.height.saturating_sub(1);
     f.render_widget(

@@ -5,8 +5,21 @@ pub trait PickerItem: Clone {
     fn preview(&self) -> Option<String>;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ColumnStyle {
+    Normal,
+    Faded,
+}
+
+#[derive(Debug, Clone)]
+pub struct PickerColumn {
+    pub text: String,
+    pub style: ColumnStyle,
+}
+
 #[derive(Debug, Clone)]
 pub struct PickerRow {
     pub label: String,
-    pub marginalia: Vec<String>,
+    pub middle: Option<PickerColumn>,
+    pub right: Option<PickerColumn>,
 }

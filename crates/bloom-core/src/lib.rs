@@ -131,13 +131,6 @@ pub struct BloomEditor {
     vault_root: Option<std::path::PathBuf>,
     leader_keys: Vec<types::KeyEvent>,
     active_theme: &'static theme::ThemePalette,
-    theme_picker: Option<ThemePickerState>,
-}
-
-struct ThemePickerState {
-    selected: usize,
-    previous_theme: &'static theme::ThemePalette,
-    query: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -257,13 +250,17 @@ struct ActivePicker {
     picker: picker::Picker<GenericPickerItem>,
     title: String,
     query: String,
+    status_noun: String,
+    /// For theme picker: the theme to revert to on cancel.
+    previous_theme: Option<&'static theme::ThemePalette>,
 }
 
 #[derive(Clone)]
 struct GenericPickerItem {
     id: String,
     label: String,
-    marginalia: Vec<String>,
+    middle: Option<String>,
+    right: Option<String>,
     preview_text: Option<String>,
 }
 
@@ -274,7 +271,14 @@ impl picker::PickerItem for GenericPickerItem {
     fn display(&self) -> picker::PickerRow {
         picker::PickerRow {
             label: self.label.clone(),
-            marginalia: self.marginalia.clone(),
+            middle: self.middle.as_ref().map(|t| picker::PickerColumn {
+                text: t.clone(),
+                style: picker::ColumnStyle::Faded,
+            }),
+            right: self.right.as_ref().map(|t| picker::PickerColumn {
+                text: t.clone(),
+                style: picker::ColumnStyle::Faded,
+            }),
         }
     }
     fn preview(&self) -> Option<String> {
@@ -317,7 +321,6 @@ impl BloomEditor {
             vault_root: None,
             leader_keys: Vec::new(),
             active_theme,
-            theme_picker: None,
             config,
         })
     }
@@ -348,26 +351,27 @@ impl BloomEditor {
 
     fn open_picker(&mut self, kind: keymap::dispatch::PickerKind) {
         use keymap::dispatch::PickerKind;
-        let (title, items) = match &kind {
+        let (title, status_noun, items) = match &kind {
             PickerKind::FindPage => {
-                ("Find Page".to_string(), self.collect_page_items())
+                ("Find Page".to_string(), "pages".to_string(), self.collect_page_items())
             }
             PickerKind::SwitchBuffer => {
                 let items: Vec<GenericPickerItem> = self.buffer_mgr.open_buffers().iter().map(|info| {
                     GenericPickerItem {
                         id: info.page_id.to_hex(),
                         label: info.title.clone(),
-                        marginalia: vec![info.path.display().to_string()],
+                        middle: Some("[+]".to_string()),
+                        right: Some(info.path.display().to_string()),
                         preview_text: None,
                     }
                 }).collect();
-                ("Switch Buffer".to_string(), items)
+                ("Switch Buffer".to_string(), "open buffers".to_string(), items)
             }
             PickerKind::Search => {
-                ("Search".to_string(), self.collect_page_items())
+                ("Search".to_string(), "matches".to_string(), self.collect_page_items())
             }
             PickerKind::Journal => {
-                ("Journal".to_string(), self.collect_journal_items())
+                ("Journal".to_string(), "journal entries".to_string(), self.collect_journal_items())
             }
             PickerKind::Tags => {
                 let items = if let Some(idx) = &self.index {
@@ -375,14 +379,15 @@ impl BloomEditor {
                         GenericPickerItem {
                             id: tag.0.clone(),
                             label: format!("#{}", tag.0),
-                            marginalia: vec![format!("{count} pages")],
+                            middle: None,
+                            right: Some(format!("{count} pages")),
                             preview_text: None,
                         }
                     }).collect()
                 } else {
                     Vec::new()
                 };
-                ("Tags".to_string(), items)
+                ("Tags".to_string(), "tags".to_string(), items)
             }
             PickerKind::AllCommands => {
                 let items: Vec<GenericPickerItem> = vec![
@@ -402,17 +407,18 @@ impl BloomEditor {
                     GenericPickerItem {
                         id: id.to_string(),
                         label: label.to_string(),
-                        marginalia: vec![keys.to_string()],
+                        middle: Some(keys.to_string()),
+                        right: None,
                         preview_text: None,
                     }
                 }).collect();
-                ("All Commands".to_string(), items)
+                ("All Commands".to_string(), "commands".to_string(), items)
             }
             PickerKind::Templates => {
-                ("Templates".to_string(), Vec::new())
+                ("Templates".to_string(), "templates".to_string(), Vec::new())
             }
             _ => {
-                ("Picker".to_string(), Vec::new())
+                ("Picker".to_string(), "results".to_string(), Vec::new())
             }
         };
         self.picker_state = Some(ActivePicker {
@@ -420,6 +426,8 @@ impl BloomEditor {
             picker: picker::Picker::new(items),
             title,
             query: String::new(),
+            status_noun,
+            previous_theme: None,
         });
     }
 
@@ -440,10 +448,12 @@ impl BloomEditor {
                         });
                         let tags = fm.tags.iter().map(|t| format!("#{}", t.0)).collect::<Vec<_>>().join(" ");
                         let preview = content.lines().take(10).collect::<Vec<_>>().join("\n");
+                        let date = fm.created.map(|d| d.format("%b %d").to_string());
                         Some(GenericPickerItem {
                             id: path.to_string_lossy().to_string(),
                             label: title,
-                            marginalia: vec![tags],
+                            middle: if tags.is_empty() { None } else { Some(tags) },
+                            right: date,
                             preview_text: Some(preview),
                         })
                     }).collect();
@@ -468,7 +478,8 @@ impl BloomEditor {
                         Some(GenericPickerItem {
                             id: path.to_string_lossy().to_string(),
                             label: stem,
-                            marginalia: vec!["journal".to_string()],
+                            middle: None,
+                            right: Some("journal".to_string()),
                             preview_text: preview,
                         })
                     }).collect();
@@ -481,58 +492,93 @@ impl BloomEditor {
     }
 
     fn open_theme_picker(&mut self) {
+        let current_name = self.active_theme.name;
+        let previous_theme = self.active_theme;
+        let sample = "## Preview\n\n- [ ] Sample task @due(2026-03-05)\n- [x] Completed task\nSee [[abc123|Text Editor Theory]].\n#rust #editors";
+        let items: Vec<GenericPickerItem> = theme::THEME_NAMES
+            .iter()
+            .map(|name| {
+                let current_marker = if *name == current_name { "(current)" } else { "" };
+                let desc = theme::theme_description(name);
+                let right = if current_marker.is_empty() {
+                    if desc.is_empty() { None } else { Some(desc.to_string()) }
+                } else {
+                    Some(format!(
+                        "{}{}{}",
+                        desc,
+                        if desc.is_empty() { "" } else { "  " },
+                        current_marker,
+                    ))
+                };
+                GenericPickerItem {
+                    id: name.to_string(),
+                    label: name.to_string(),
+                    middle: None,
+                    right,
+                    preview_text: Some(sample.to_string()),
+                }
+            })
+            .collect();
         let current_idx = theme::THEME_NAMES
             .iter()
-            .position(|n| *n == self.active_theme.name)
+            .position(|n| *n == current_name)
             .unwrap_or(0);
-        self.theme_picker = Some(ThemePickerState {
-            selected: current_idx,
-            previous_theme: self.active_theme,
+        let mut picker = picker::Picker::new(items);
+        // Pre-select the current theme
+        for _ in 0..current_idx {
+            picker.move_selection(1);
+        }
+        self.picker_state = Some(ActivePicker {
+            kind: keymap::dispatch::PickerKind::Theme,
+            picker,
+            title: "Theme".to_string(),
             query: String::new(),
+            status_noun: "themes".to_string(),
+            previous_theme: Some(previous_theme),
         });
-        // Apply live preview of the currently selected theme
-        self.set_theme(theme::THEME_NAMES[current_idx]);
     }
 
-    fn theme_picker_move(&mut self, delta: i32) {
-        if let Some(tp) = &mut self.theme_picker {
-            let count = theme::THEME_NAMES.len() as i32;
-            tp.selected = ((tp.selected as i32 + delta).rem_euclid(count)) as usize;
-            let name = theme::THEME_NAMES[tp.selected];
-            // Live preview
-            if let Some(palette) = theme::palette_by_name(name) {
-                self.active_theme = palette;
+    /// Live-preview theme on picker selection change.
+    fn theme_picker_preview_current(&mut self) {
+        if let Some(ap) = &self.picker_state {
+            if matches!(ap.kind, keymap::dispatch::PickerKind::Theme) {
+                if let Some(item) = ap.picker.selected() {
+                    if let Some(palette) = theme::palette_by_name(&item.id) {
+                        self.active_theme = palette;
+                    }
+                }
             }
         }
     }
 
     fn theme_picker_confirm(&mut self) {
-        if let Some(tp) = self.theme_picker.take() {
-            // Keep the currently previewed theme
-            let name = theme::THEME_NAMES[tp.selected];
-            self.set_theme(name);
-            // Persist to config.toml if vault is initialized
-            if let Some(root) = &self.vault_root {
-                let config_path = root.join("config.toml");
-                if config_path.exists() {
-                    if let Ok(content) = std::fs::read_to_string(&config_path) {
-                        // Simple replacement of the theme name line
-                        let new_content = if content.contains("name = ") {
-                            content
-                                .lines()
-                                .map(|l| {
-                                    if l.trim().starts_with("name = ") && !l.contains("mode") {
-                                        format!("name = \"{}\"", name)
-                                    } else {
-                                        l.to_string()
-                                    }
-                                })
-                                .collect::<Vec<_>>()
-                                .join("\n")
-                        } else {
-                            format!("{content}\n[theme]\nname = \"{name}\"\n")
-                        };
-                        let _ = std::fs::write(&config_path, new_content);
+        if let Some(ap) = self.picker_state.take() {
+            if !matches!(ap.kind, keymap::dispatch::PickerKind::Theme) { return; }
+            if let Some(selected) = ap.picker.selected() {
+                let name = selected.id.clone();
+                self.set_theme(&name);
+                // Persist to config.toml
+                if let Some(root) = &self.vault_root {
+                    let config_path = root.join("config.toml");
+                    if config_path.exists() {
+                        if let Ok(content) = std::fs::read_to_string(&config_path) {
+                            let new_content = if content.contains("name = ") {
+                                content
+                                    .lines()
+                                    .map(|l| {
+                                        if l.trim().starts_with("name = ") && !l.contains("mode") {
+                                            format!("name = \"{}\"", name)
+                                        } else {
+                                            l.to_string()
+                                        }
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            } else {
+                                format!("{content}\n[theme]\nname = \"{name}\"\n")
+                            };
+                            let _ = std::fs::write(&config_path, new_content);
+                        }
                     }
                 }
             }
@@ -540,9 +586,10 @@ impl BloomEditor {
     }
 
     fn theme_picker_cancel(&mut self) {
-        if let Some(tp) = self.theme_picker.take() {
-            // Revert to original theme
-            self.active_theme = tp.previous_theme;
+        if let Some(ap) = self.picker_state.take() {
+            if let Some(prev) = ap.previous_theme {
+                self.active_theme = prev;
+            }
         }
     }
 
@@ -648,12 +695,7 @@ impl BloomEditor {
             return self.execute_actions(vec![action]);
         }
 
-        // If theme picker is open, route to theme picker
-        if self.theme_picker.is_some() {
-            return self.handle_theme_picker_key(&key);
-        }
-
-        // If picker is open, route to picker
+        // If picker is open (all picker types, including theme)
         if self.picker_state.is_some() {
             return self.handle_picker_key(&key);
         }
@@ -837,38 +879,64 @@ impl BloomEditor {
         }
     }
 
-    fn handle_theme_picker_key(&mut self, key: &types::KeyEvent) -> Vec<keymap::dispatch::Action> {
-        use types::KeyCode;
-        match &key.code {
-            KeyCode::Esc => {
-                self.theme_picker_cancel();
-                vec![keymap::dispatch::Action::Noop]
-            }
-            KeyCode::Enter => {
-                self.theme_picker_confirm();
-                vec![keymap::dispatch::Action::Noop]
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                self.theme_picker_move(-1);
-                vec![keymap::dispatch::Action::Noop]
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                self.theme_picker_move(1);
-                vec![keymap::dispatch::Action::Noop]
-            }
-            _ => vec![keymap::dispatch::Action::Noop],
-        }
-    }
-
     fn handle_picker_key(&mut self, key: &types::KeyEvent) -> Vec<keymap::dispatch::Action> {
         use types::KeyCode;
+        let is_theme = self.picker_state.as_ref()
+            .map_or(false, |ap| matches!(ap.kind, keymap::dispatch::PickerKind::Theme));
+
+        // Ctrl+key shortcuts
+        if key.modifiers.ctrl {
+            match &key.code {
+                // Ctrl+N / Ctrl+J → next result
+                KeyCode::Char('n') | KeyCode::Char('j') => {
+                    if let Some(ap) = &mut self.picker_state {
+                        ap.picker.move_selection(1);
+                    }
+                    if is_theme { self.theme_picker_preview_current(); }
+                    return vec![keymap::dispatch::Action::Noop];
+                }
+                // Ctrl+P / Ctrl+K → previous result
+                KeyCode::Char('p') | KeyCode::Char('k') => {
+                    if let Some(ap) = &mut self.picker_state {
+                        ap.picker.move_selection(-1);
+                    }
+                    if is_theme { self.theme_picker_preview_current(); }
+                    return vec![keymap::dispatch::Action::Noop];
+                }
+                // Ctrl+G → close picker
+                KeyCode::Char('g') => {
+                    if is_theme {
+                        self.theme_picker_cancel();
+                    } else {
+                        self.picker_state = None;
+                    }
+                    return vec![keymap::dispatch::Action::Noop];
+                }
+                // Ctrl+U → clear search input
+                KeyCode::Char('u') => {
+                    if let Some(ap) = &mut self.picker_state {
+                        ap.query.clear();
+                        ap.picker.set_query("");
+                    }
+                    return vec![keymap::dispatch::Action::Noop];
+                }
+                _ => return vec![keymap::dispatch::Action::Noop],
+            }
+        }
+
         match &key.code {
             KeyCode::Esc => {
-                self.picker_state = None;
+                if is_theme {
+                    self.theme_picker_cancel();
+                } else {
+                    self.picker_state = None;
+                }
                 vec![keymap::dispatch::Action::Noop]
             }
             KeyCode::Enter => {
-                if let Some(ap) = self.picker_state.take() {
+                if is_theme {
+                    self.theme_picker_confirm();
+                } else if let Some(ap) = self.picker_state.take() {
                     if let Some(selected) = ap.picker.selected() {
                         self.handle_picker_selection(&ap.kind, selected.clone());
                     }
@@ -879,11 +947,19 @@ impl BloomEditor {
                 if let Some(ap) = &mut self.picker_state {
                     ap.picker.move_selection(-1);
                 }
+                if is_theme { self.theme_picker_preview_current(); }
                 vec![keymap::dispatch::Action::Noop]
             }
             KeyCode::Down => {
                 if let Some(ap) = &mut self.picker_state {
                     ap.picker.move_selection(1);
+                }
+                if is_theme { self.theme_picker_preview_current(); }
+                vec![keymap::dispatch::Action::Noop]
+            }
+            KeyCode::Tab => {
+                if let Some(ap) = &mut self.picker_state {
+                    ap.picker.toggle_mark();
                 }
                 vec![keymap::dispatch::Action::Noop]
             }
@@ -1361,35 +1437,12 @@ impl BloomEditor {
             panes,
             maximized: self.window_mgr.is_maximized(),
             hidden_pane_count: self.window_mgr.hidden_pane_count(),
-            picker: if let Some(tp) = &self.theme_picker {
-                let sample = "## Preview\n\n- [ ] Sample task @due(2026-03-05)\n- [x] Completed task\nSee [[abc123|Text Editor Theory]].\n#rust #editors";
-                Some(render::PickerFrame {
-                    title: "Theme".to_string(),
-                    query: tp.query.clone(),
-                    results: theme::THEME_NAMES
-                        .iter()
-                        .map(|name| {
-                            let current = if *name == tp.previous_theme.name { "(current)" } else { "" };
-                            render::PickerRow {
-                                label: name.to_string(),
-                                marginalia: vec![
-                                    theme::theme_description(name).to_string(),
-                                    current.to_string(),
-                                ],
-                            }
-                        })
-                        .collect(),
-                    selected_index: tp.selected,
-                    filters: Vec::new(),
-                    preview: Some(sample.to_string()),
-                    total_count: theme::THEME_NAMES.len(),
-                    filtered_count: theme::THEME_NAMES.len(),
-                })
-            } else if let Some(ap) = &self.picker_state {
+            picker: if let Some(ap) = &self.picker_state {
                 let results: Vec<render::PickerRow> = ap.picker.results().into_iter().map(|item| {
                     render::PickerRow {
                         label: item.label.clone(),
-                        marginalia: item.marginalia.clone(),
+                        middle: item.middle.clone(),
+                        right: item.right.clone(),
                     }
                 }).collect();
                 let preview = ap.picker.selected().and_then(|item| item.preview_text.clone());
@@ -1402,6 +1455,7 @@ impl BloomEditor {
                     preview,
                     total_count: ap.picker.total_count(),
                     filtered_count: ap.picker.filtered_count(),
+                    status_noun: ap.status_noun.clone(),
                 })
             } else {
                 None
@@ -2227,21 +2281,22 @@ mod tests {
         });
         editor.handle_key(KeyEvent::char('t'));
 
-        // Picker should be open
-        assert!(editor.theme_picker.is_some());
+        // Picker should be open (unified picker_state)
+        assert!(editor.picker_state.is_some());
         let frame = editor.render();
         assert!(frame.picker.is_some());
         let picker = frame.picker.unwrap();
         assert_eq!(picker.title, "Theme");
         assert_eq!(picker.results.len(), 4);
 
-        // Move down — live preview changes theme
-        editor.handle_key(KeyEvent::char('j'));
+        // Move down — live preview changes theme (now typed as Char, goes to query)
+        // Use Ctrl+J for navigation
+        editor.handle_key(KeyEvent::ctrl('j'));
         assert_eq!(editor.theme().name, "bloom-dark-faded");
 
         // Esc reverts
         editor.handle_key(KeyEvent::esc());
-        assert!(editor.theme_picker.is_none());
+        assert!(editor.picker_state.is_none());
         assert_eq!(editor.theme().name, "bloom-dark");
     }
 
@@ -2259,16 +2314,38 @@ mod tests {
             modifiers: types::Modifiers::shift(),
         });
         editor.handle_key(KeyEvent::char('t'));
-        editor.handle_key(KeyEvent::char('j')); // bloom-dark-faded
-        editor.handle_key(KeyEvent::char('j')); // bloom-light
+        editor.handle_key(KeyEvent::ctrl('j')); // bloom-dark-faded
+        editor.handle_key(KeyEvent::ctrl('j')); // bloom-light
         assert_eq!(editor.theme().name, "bloom-light");
 
         // Enter confirms
         editor.handle_key(KeyEvent::enter());
-        assert!(editor.theme_picker.is_none());
+        assert!(editor.picker_state.is_none());
         assert_eq!(editor.theme().name, "bloom-light");
     }
+
+    #[test]
+    fn test_theme_picker_ctrl_n_p() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "hello");
+
+        editor.handle_key(KeyEvent::char(' '));
+        editor.handle_key(KeyEvent {
+            code: types::KeyCode::Char('T'),
+            modifiers: types::Modifiers::shift(),
+        });
+        editor.handle_key(KeyEvent::char('t'));
+
+        // Ctrl+N moves down
+        editor.handle_key(KeyEvent::ctrl('n'));
+        assert_eq!(editor.theme().name, "bloom-dark-faded");
+
+        // Ctrl+P moves back up
+        editor.handle_key(KeyEvent::ctrl('p'));
+        assert_eq!(editor.theme().name, "bloom-dark");
+
+        editor.handle_key(KeyEvent::esc());
+    }
 }
-
-
-

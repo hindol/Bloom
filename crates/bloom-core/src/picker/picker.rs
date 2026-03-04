@@ -150,7 +150,8 @@ mod tests {
         fn display(&self) -> PickerRow {
             PickerRow {
                 label: self.name.clone(),
-                marginalia: vec![],
+                middle: None,
+                right: None,
             }
         }
         fn preview(&self) -> Option<String> {

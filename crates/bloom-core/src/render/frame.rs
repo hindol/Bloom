@@ -279,11 +279,13 @@ pub struct PickerFrame {
     pub preview: Option<String>,
     pub total_count: usize,
     pub filtered_count: usize,
+    pub status_noun: String,
 }
 
 pub struct PickerRow {
     pub label: String,
-    pub marginalia: Vec<String>,
+    pub middle: Option<String>,
+    pub right: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
