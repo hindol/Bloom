@@ -130,6 +130,7 @@ pub struct BloomEditor {
     wizard: Option<SetupWizardState>,
     vault_root: Option<std::path::PathBuf>,
     leader_keys: Vec<types::KeyEvent>,
+    pending_since: Option<Instant>,
     active_theme: &'static theme::ThemePalette,
 }
 
@@ -320,6 +321,7 @@ impl BloomEditor {
             wizard: None,
             vault_root: None,
             leader_keys: Vec::new(),
+            pending_since: None,
             active_theme,
             config,
         })
@@ -692,6 +694,7 @@ impl BloomEditor {
         // Check platform shortcuts first
         if let Some(action) = keymap::platform_shortcut(&key) {
             self.leader_keys.clear();
+            self.pending_since = None;
             return self.execute_actions(vec![action]);
         }
 
@@ -717,6 +720,7 @@ impl BloomEditor {
             && matches!(self.vim_state.mode(), vim::Mode::Normal)
         {
             self.leader_keys.push(key);
+            self.pending_since = Some(Instant::now());
             return vec![keymap::dispatch::Action::Noop];
         }
 
@@ -790,24 +794,28 @@ impl BloomEditor {
         // Esc cancels leader sequence
         if key.code == types::KeyCode::Esc {
             self.leader_keys.clear();
+            self.pending_since = None;
             return vec![keymap::dispatch::Action::Noop];
         }
 
         self.leader_keys.push(key);
+        self.pending_since = Some(Instant::now());
 
         // Look up the full sequence (skipping the initial SPC)
         let lookup_keys: Vec<types::KeyEvent> = self.leader_keys[1..].to_vec();
         match self.which_key_tree.lookup(&lookup_keys) {
             which_key::WhichKeyLookup::Action(action_id) => {
                 self.leader_keys.clear();
+                self.pending_since = None;
                 self.action_id_to_actions(&action_id)
             }
             which_key::WhichKeyLookup::Prefix(_entries) => {
-                // Still accumulating — show which-key popup on next render
+                // Still accumulating — show which-key popup after timeout
                 vec![keymap::dispatch::Action::Noop]
             }
             which_key::WhichKeyLookup::NoMatch => {
                 self.leader_keys.clear();
+                self.pending_since = None;
                 vec![keymap::dispatch::Action::Noop]
             }
         }
@@ -1218,6 +1226,7 @@ impl BloomEditor {
     ) -> Vec<keymap::dispatch::Action> {
         match action {
             vim::VimAction::Edit(edit) => {
+                self.pending_since = None;
                 if let Some(page_id) = &self.active_page {
                     if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
                         if edit.replacement.is_empty() {
@@ -1237,6 +1246,7 @@ impl BloomEditor {
                 })]
             }
             vim::VimAction::Motion(motion) => {
+                self.pending_since = None;
                 self.cursor = motion.new_position;
                 vec![keymap::dispatch::Action::Motion(
                     keymap::dispatch::MotionResult {
@@ -1245,11 +1255,21 @@ impl BloomEditor {
                     },
                 )]
             }
-            vim::VimAction::ModeChange(mode) => {
-                vec![keymap::dispatch::Action::ModeChange(mode)]
+            vim::VimAction::ModeChange(ref mode) => {
+                if matches!(mode, vim::Mode::Command) {
+                    self.pending_since = Some(Instant::now());
+                } else {
+                    self.pending_since = None;
+                }
+                vec![keymap::dispatch::Action::ModeChange(mode.clone())]
             }
             vim::VimAction::Command(cmd) => self.handle_vim_command(&cmd),
-            vim::VimAction::Pending => vec![keymap::dispatch::Action::Noop],
+            vim::VimAction::Pending => {
+                if self.pending_since.is_none() {
+                    self.pending_since = Some(Instant::now());
+                }
+                vec![keymap::dispatch::Action::Noop]
+            }
             vim::VimAction::Unhandled => vec![keymap::dispatch::Action::Noop],
             vim::VimAction::Composite(actions) => actions
                 .into_iter()
@@ -1460,7 +1480,14 @@ impl BloomEditor {
             } else {
                 None
             },
-            which_key: if matches!(self.vim_state.mode(), vim::Mode::Command) {
+            which_key: {
+                let timeout = std::time::Duration::from_millis(self.config.which_key_timeout_ms);
+                let timed_out = self.pending_since
+                    .map_or(false, |since| since.elapsed() >= timeout);
+
+                if !timed_out {
+                    None
+                } else if matches!(self.vim_state.mode(), vim::Mode::Command) {
                 // Show available commands as which-key hints
                 let input = self.vim_state.pending_keys();
                 let commands: Vec<(&str, &str)> = vec![
@@ -1587,7 +1614,7 @@ impl BloomEditor {
                 } else {
                     None
                 }
-            },
+            }}, // which_key
             command_line: if matches!(self.vim_state.mode(), vim::Mode::Command) {
                 Some(render::CommandLineFrame {
                     input: self.vim_state.pending_keys().to_string(),
@@ -2302,8 +2329,9 @@ mod tests {
     // SPC shows which-key popup in render
     #[test]
     fn test_leader_spc_shows_which_key() {
-        let config = config::Config::defaults();
-        let mut editor = BloomEditor::new(config).unwrap();
+        let mut cfg = config::Config::defaults();
+        cfg.which_key_timeout_ms = 0; // instant for testing
+        let mut editor = BloomEditor::new(cfg).unwrap();
         let id = crate::uuid::generate_hex_id();
         editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
         editor.handle_key(KeyEvent::char(' ')); // SPC
