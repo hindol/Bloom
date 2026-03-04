@@ -66,6 +66,7 @@
 | `SPC w H/J/K/L` | Move buffer to window in direction | G11 |
 | **Toggles** | | |
 | `SPC T m` | Toggle MCP server on/off | G17 |
+| `SPC T t` | Theme selector (live preview) | — |
 | **Help / Meta** | | |
 | `SPC SPC` | All commands (M-x equivalent) | G16 |
 | `SPC ?` | Fuzzy-searchable command list | G8 |

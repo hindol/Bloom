@@ -649,3 +649,54 @@ Error message shown briefly (`critical` colour), then the command line closes.
 | `Shift+Tab` | Cycle completions in reverse |
 | `↑` / `↓` | Command history (previous/next) |
 | `Ctrl+U` | Clear command line |
+
+---
+
+## 13. Theme Selector — `SPC T t`
+
+A picker that lists all available themes with **live preview**: as the highlight moves, the entire editor re-renders in the highlighted theme. Pressing `Enter` confirms; `Escape` reverts to the previous theme.
+
+```
+┌─ Theme ────────────────────────────────────────────────────────┐
+│ > _                                                            │
+│                                                                │
+│ ▸ Bloom Dark                                        (current)  │
+│   Bloom Dark Faded                          softer, Nord-like  │
+│   Bloom Light                              warm white, strong  │
+│   Bloom Light Faded                         cool, muted light  │
+│                                                                │
+│   4 themes                                                     │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│   ## Preview                                                   │
+│                                                                │
+│   - [ ] Sample task @due(2026-03-05)                           │
+│   - [x] Completed task                                         │
+│   See [[abc123|Text Editor Theory]] for background.            │
+│   #rust #editors                                               │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+```
+
+The preview pane shows a fixed sample document rendered in the highlighted theme, so the user can compare colours without switching to their own content.
+
+**Live preview behavior:**
+- Moving the highlight immediately applies the highlighted theme to the **entire editor** — the picker itself, the panes behind it, all chrome.
+- This gives a true WYSIWYG preview, not just a swatch.
+- `Enter` confirms the selection, writes `theme.name` to `config.toml`.
+- `Escape` reverts to the theme that was active when the picker opened.
+
+| Element | Style |
+|---------|-------|
+| Current theme marker `(current)` | `faded` |
+| Theme description | `faded` |
+| Preview content | Rendered with the highlighted theme's palette |
+
+### Interaction
+
+| Binding | Action |
+|---------|--------|
+| `↑` / `↓` | Move highlight, live-preview theme |
+| `Enter` | Confirm theme, persist to config |
+| `Escape` | Revert to previous theme, close picker |
+| Type to filter | Fuzzy-match theme names |
