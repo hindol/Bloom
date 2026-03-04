@@ -1367,14 +1367,12 @@ impl BloomEditor {
                     is_active: true,
                     title: String::new(),
                     dirty: false,
-                    status_bar: render::StatusBar::default(),
                 }],
                 maximized: false,
                 hidden_pane_count: 0,
                 picker: None,
                 which_key: None,
-                command_line: None,
-                quick_capture: None,
+                status_bar: render::StatusBarFrame::default(),
                 date_picker: None,
                 dialog: None,
                 notification: None,
@@ -1383,14 +1381,15 @@ impl BloomEditor {
 
         let mut panes = Vec::new();
 
+        let mode_str = match self.vim_state.mode() {
+            vim::Mode::Normal => "NORMAL",
+            vim::Mode::Insert => "INSERT",
+            vim::Mode::Visual { .. } => "VISUAL",
+            vim::Mode::Command => "COMMAND",
+        };
+
         for pane_id in self.window_mgr.all_pane_ids() {
             let is_active = pane_id == self.window_mgr.active_pane();
-            let mode_str = match self.vim_state.mode() {
-                vim::Mode::Normal => "NORMAL",
-                vim::Mode::Insert => "INSERT",
-                vim::Mode::Visual { .. } => "VISUAL",
-                vim::Mode::Command => "COMMAND",
-            };
 
             let (title, dirty, visible_lines) = if let Some(page_id) = &self.active_page {
                 if let Some(buf) = self.buffer_mgr.get(page_id) {
@@ -1429,29 +1428,15 @@ impl BloomEditor {
                 is_active,
                 title: title.clone(),
                 dirty,
-                status_bar: render::StatusBar {
-                    mode: mode_str.to_string(),
-                    title,
-                    dirty,
-                    line: cursor_line,
-                    column: cursor_col,
-                    pending_keys: if !self.leader_keys.is_empty() {
-                        self.leader_keys.iter()
-                            .map(|k| k.to_string())
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    } else {
-                        self.vim_state.pending_keys().to_string()
-                    },
-                    recording_macro: if self.vim_state.is_recording() {
-                        Some('q')
-                    } else {
-                        None
-                    },
-                    mcp: render::McpIndicator::Off,
-                },
             });
         }
+
+        // Gather active pane info for the global status bar before moving panes.
+        let active_info: (String, bool, usize, usize) = panes
+            .iter()
+            .find(|p| p.is_active)
+            .map(|p| (p.title.clone(), p.dirty, p.cursor.line, p.cursor.column))
+            .unwrap_or_default();
 
         render::RenderFrame {
             panes,
@@ -1615,29 +1600,56 @@ impl BloomEditor {
                     None
                 }
             }}, // which_key
-            command_line: if matches!(self.vim_state.mode(), vim::Mode::Command) {
-                Some(render::CommandLineFrame {
-                    input: self.vim_state.pending_keys().to_string(),
-                    cursor_pos: self.vim_state.pending_keys().len(),
-                    completions: Vec::new(),
-                    selected_completion: None,
-                    error: None,
-                })
-            } else {
-                None
+            status_bar: {
+                // Priority: CommandLine > QuickCapture > Normal
+                let content = if matches!(self.vim_state.mode(), vim::Mode::Command) {
+                    render::StatusBarContent::CommandLine(render::CommandLineSlot {
+                        input: self.vim_state.pending_keys().to_string(),
+                        cursor_pos: self.vim_state.pending_keys().len(),
+                        error: None,
+                    })
+                } else if let Some(qc) = &self.quick_capture {
+                    let prompt = match qc.kind {
+                        keymap::dispatch::QuickCaptureKind::Note => {
+                            "📓 Append to journal > ".to_string()
+                        }
+                        keymap::dispatch::QuickCaptureKind::Task => {
+                            "☐ Append task > ".to_string()
+                        }
+                    };
+                    render::StatusBarContent::QuickCapture(render::QuickCaptureSlot {
+                        prompt,
+                        input: qc.input.clone(),
+                        cursor_pos: qc.cursor_pos,
+                    })
+                } else {
+                    let (title, dirty, line, col) = active_info.clone();
+                    render::StatusBarContent::Normal(render::NormalStatus {
+                        title,
+                        dirty,
+                        line,
+                        column: col,
+                        pending_keys: if !self.leader_keys.is_empty() {
+                            self.leader_keys.iter()
+                                .map(|k| k.to_string())
+                                .collect::<Vec<_>>()
+                                .join(" ")
+                        } else {
+                            self.vim_state.pending_keys().to_string()
+                        },
+                        recording_macro: if self.vim_state.is_recording() {
+                            Some('q')
+                        } else {
+                            None
+                        },
+                        mcp: render::McpIndicator::Off,
+                    })
+                };
+                render::StatusBarFrame {
+                    content,
+                    mode: mode_str.to_string(),
+                }
             },
-            quick_capture: self.quick_capture.as_ref().map(|qc| render::QuickCaptureFrame {
-                prompt: match qc.kind {
-                    keymap::dispatch::QuickCaptureKind::Note => {
-                        "📓 Append to journal > ".to_string()
-                    }
-                    keymap::dispatch::QuickCaptureKind::Task => {
-                        "☐ Append task > ".to_string()
-                    }
-                },
-                input: qc.input.clone(),
-                cursor_pos: qc.cursor_pos,
-            }),
             date_picker: None,
             dialog: None,
             notification: self.notifications.last().cloned(),
@@ -1867,7 +1879,7 @@ mod tests {
         editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "# Hello\n\nWorld\n");
         let frame = editor.render();
         assert!(!frame.panes.is_empty());
-        assert_eq!(frame.panes[0].status_bar.mode, "NORMAL");
+        assert_eq!(frame.status_bar.mode, "NORMAL");
         assert!(!frame.panes[0].title.is_empty());
     }
 
@@ -1880,7 +1892,7 @@ mod tests {
         editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
         editor.handle_key(KeyEvent::char('i'));
         let frame = editor.render();
-        assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
+        assert_eq!(frame.status_bar.mode, "INSERT");
         assert!(matches!(frame.panes[0].cursor.shape, render::CursorShape::Bar));
     }
 
@@ -1945,7 +1957,7 @@ mod tests {
         assert_eq!(buf.text().to_string(), "abc");
         // Still in insert mode
         let frame = editor.render();
-        assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
+        assert_eq!(frame.status_bar.mode, "INSERT");
     }
 
     // o opens a new line below and positions cursor correctly
@@ -1958,7 +1970,7 @@ mod tests {
         editor.handle_key(KeyEvent::char('o'));
         // Should be in insert mode on a new line below "hello"
         let frame = editor.render();
-        assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
+        assert_eq!(frame.status_bar.mode, "INSERT");
         assert_eq!(frame.panes[0].cursor.line, 1);
         assert_eq!(frame.panes[0].cursor.column, 0);
         // Type on the new line
@@ -1977,7 +1989,7 @@ mod tests {
         editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello\nworld\n");
         editor.handle_key(KeyEvent::char('O'));
         let frame = editor.render();
-        assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
+        assert_eq!(frame.status_bar.mode, "INSERT");
         assert_eq!(frame.panes[0].cursor.line, 0);
         assert_eq!(frame.panes[0].cursor.column, 0);
         editor.handle_key(KeyEvent::char('!'));
@@ -1995,7 +2007,7 @@ mod tests {
         editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
         editor.handle_key(KeyEvent::char('o'));
         let frame = editor.render();
-        assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
+        assert_eq!(frame.status_bar.mode, "INSERT");
         assert_eq!(frame.panes[0].cursor.line, 1);
         assert_eq!(frame.panes[0].cursor.column, 0);
         editor.handle_key(KeyEvent::char('!'));
@@ -2014,7 +2026,7 @@ mod tests {
         editor.handle_key(KeyEvent::char('i'));
         editor.handle_key(KeyEvent::esc());
         let frame = editor.render();
-        assert_eq!(frame.panes[0].status_bar.mode, "NORMAL");
+        assert_eq!(frame.status_bar.mode, "NORMAL");
         assert!(matches!(frame.panes[0].cursor.shape, render::CursorShape::Block));
     }
 
@@ -2130,7 +2142,7 @@ mod tests {
         // Keys should work — enter insert mode
         editor.handle_key(KeyEvent::char('i'));
         let frame = editor.render();
-        assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
+        assert_eq!(frame.status_bar.mode, "INSERT");
     }
 
     // Startup: Blank mode opens scratch buffer
@@ -2146,7 +2158,7 @@ mod tests {
         // Keys should work
         editor.handle_key(KeyEvent::char('i'));
         let frame = editor.render();
-        assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
+        assert_eq!(frame.status_bar.mode, "INSERT");
     }
 
     // Startup: Restore mode falls back to scratch when no session exists
@@ -2163,7 +2175,7 @@ mod tests {
         // Keys should work
         editor.handle_key(KeyEvent::char('i'));
         let frame = editor.render();
-        assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
+        assert_eq!(frame.status_bar.mode, "INSERT");
     }
 
     // Wizard: starts at Welcome step

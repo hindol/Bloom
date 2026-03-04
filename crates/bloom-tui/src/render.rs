@@ -1,6 +1,6 @@
 use bloom_core::render::{
-    CommandLineFrame, DialogFrame, NotificationLevel, PaneFrame, PaneKind,
-    PickerFrame, QuickCaptureFrame, RenderFrame, StatusBar, WhichKeyFrame,
+    DialogFrame, McpIndicator, NotificationLevel, PaneFrame, PaneKind,
+    PickerFrame, RenderFrame, StatusBarContent, StatusBarFrame, WhichKeyFrame,
 };
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style as RStyle};
@@ -21,45 +21,53 @@ pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &TuiTheme) {
         area,
     );
 
-    // If which-key is showing, split area: panes on top, which-key drawer at bottom
-    let (pane_area, wk_area) = if let Some(wk) = &frame.which_key {
+    // Layout: panes | status bar (1 line) | which-key drawer (optional)
+    let wk_h = if let Some(wk) = &frame.which_key {
         let col_width = 24u16;
         let cols = (area.width.saturating_sub(4) / col_width).max(1);
         let rows_needed = ((wk.entries.len() as u16) + cols - 1) / cols;
         // +1 for top border, +1 for vertical padding
-        let wk_h = (rows_needed + 2).min(area.height / 3).max(3);
-        let pane_h = area.height.saturating_sub(wk_h);
-        (
-            Rect::new(area.x, area.y, area.width, pane_h),
-            Some(Rect::new(area.x, area.y + pane_h, area.width, wk_h)),
-        )
+        (rows_needed + 2).min(area.height / 3).max(3)
     } else {
-        (area, None)
+        0
     };
 
-    // Layout: panes take pane_area, overlays drawn on top
+    let status_h = 1u16;
+    let pane_h = area.height.saturating_sub(status_h).saturating_sub(wk_h);
+
+    let pane_area = Rect::new(area.x, area.y, area.width, pane_h);
+    let status_area = Rect::new(area.x, area.y + pane_h, area.width, status_h);
+    let wk_area = if wk_h > 0 {
+        Some(Rect::new(area.x, area.y + pane_h + status_h, area.width, wk_h))
+    } else {
+        None
+    };
+
+    // Draw panes
     draw_panes(f, pane_area, &frame.panes, frame.maximized, frame.hidden_pane_count, theme);
 
-    // Which-key drawer (below status bar)
+    // Draw the global status bar
+    let status_bar_cursor = draw_status_bar_slot(f, status_area, &frame.status_bar, theme);
+
+    // Which-key drawer
     if let (Some(wk), Some(wk_rect)) = (&frame.which_key, wk_area) {
         draw_which_key(f, wk_rect, wk, theme);
     }
 
-    // Other overlays (drawn on top of panes)
+    // Overlays
     if let Some(picker) = &frame.picker {
         draw_picker(f, area, picker, theme);
-    }
-    if let Some(cmd) = &frame.command_line {
-        draw_command_line(f, area, cmd, theme);
-    }
-    if let Some(qc) = &frame.quick_capture {
-        draw_quick_capture(f, area, qc, theme);
     }
     if let Some(dialog) = &frame.dialog {
         draw_dialog(f, area, dialog, theme);
     }
     if let Some(notif) = &frame.notification {
         draw_notification(f, area, &notif.message, &notif.level, theme);
+    }
+
+    // Cursor placement: status bar slots take priority over pane cursor
+    if let Some((cx, cy)) = status_bar_cursor {
+        f.set_cursor_position((cx, cy));
     }
 }
 
@@ -114,35 +122,46 @@ fn draw_pane(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
         return;
     }
 
-    // Split into: content + status bar (1 line)
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),                      // content
-            Constraint::Length(1),                    // status bar
-        ])
-        .split(area);
-
-    match &pane.kind {
-        PaneKind::Editor => draw_editor_content(f, layout[0], pane, theme),
-        PaneKind::Agenda(agenda) => draw_agenda(f, layout[0], agenda, theme),
-        PaneKind::Timeline(tl) => draw_timeline(f, layout[0], tl, theme),
-        PaneKind::UndoTree(ut) => draw_undo_tree(f, layout[0], ut, theme),
-        PaneKind::SetupWizard(sw) => draw_setup_wizard(f, layout[0], sw, theme),
-    }
-
-    draw_status_bar(f, layout[1], &pane.status_bar, pane.is_active, theme);
-
-    // Set cursor position for active pane
     if pane.is_active {
-        let content_area = layout[0];
-        let line_number_width = 4u16;
-        let cursor_y = pane.cursor.line.saturating_sub(pane.scroll_offset);
-        let cy = content_area.y + cursor_y as u16;
-        let cx = content_area.x + line_number_width + pane.cursor.column as u16;
-        if cy < content_area.bottom() && cx < content_area.right() {
-            f.set_cursor_position((cx, cy));
+        // Active pane: full content area (status bar is global)
+        match &pane.kind {
+            PaneKind::Editor => draw_editor_content(f, area, pane, theme),
+            PaneKind::Agenda(agenda) => draw_agenda(f, area, agenda, theme),
+            PaneKind::Timeline(tl) => draw_timeline(f, area, tl, theme),
+            PaneKind::UndoTree(ut) => draw_undo_tree(f, area, ut, theme),
+            PaneKind::SetupWizard(sw) => draw_setup_wizard(f, area, sw, theme),
         }
+
+        // Cursor for active editor pane (may be overridden by status bar cursor)
+        if matches!(&pane.kind, PaneKind::Editor) {
+            let line_number_width = 4u16;
+            let cursor_y = pane.cursor.line.saturating_sub(pane.scroll_offset);
+            let cy = area.y + cursor_y as u16;
+            let cx = area.x + line_number_width + pane.cursor.column as u16;
+            if cy < area.bottom() && cx < area.right() {
+                f.set_cursor_position((cx, cy));
+            }
+        }
+    } else {
+        // Inactive pane: content + 1-line title separator
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(1),                      // content
+                Constraint::Length(1),                    // title separator
+            ])
+            .split(area);
+
+        match &pane.kind {
+            PaneKind::Editor => draw_editor_content(f, layout[0], pane, theme),
+            PaneKind::Agenda(agenda) => draw_agenda(f, layout[0], agenda, theme),
+            PaneKind::Timeline(tl) => draw_timeline(f, layout[0], tl, theme),
+            PaneKind::UndoTree(ut) => draw_undo_tree(f, layout[0], ut, theme),
+            PaneKind::SetupWizard(sw) => draw_setup_wizard(f, layout[0], sw, theme),
+        }
+
+        // Inactive pane chrome: just the title
+        draw_inactive_pane_bar(f, layout[1], pane, theme);
     }
 }
 
@@ -241,19 +260,68 @@ fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiT
 }
 
 // ---------------------------------------------------------------------------
-// Status bar
+// Status bar (slot-based, global)
 // ---------------------------------------------------------------------------
 
-fn draw_status_bar(
+/// Renders the global status bar. Returns cursor position if the active slot
+/// needs the cursor (command line, quick capture).
+fn draw_status_bar_slot(
     f: &mut Frame,
     area: Rect,
-    status: &StatusBar,
-    is_active: bool,
+    sb: &StatusBarFrame,
+    theme: &TuiTheme,
+) -> Option<(u16, u16)> {
+    match &sb.content {
+        StatusBarContent::Normal(status) => {
+            draw_normal_status(f, area, &sb.mode, status, theme);
+            None
+        }
+        StatusBarContent::CommandLine(cmd) => {
+            let style = RStyle::default().fg(theme.foreground()).bg(theme.background());
+            let text = format!(":{}", cmd.input);
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled(&text, style))),
+                area,
+            );
+
+            // Error display: overwrite the last pane line above status bar
+            if let Some(err) = &cmd.error {
+                let err_y = area.y.saturating_sub(1);
+                let err_style = RStyle::default().fg(theme.critical()).bg(theme.background());
+                f.render_widget(
+                    Paragraph::new(Line::from(Span::styled(err, err_style))),
+                    Rect::new(area.x, err_y, area.width, 1),
+                );
+            }
+
+            let cx = area.x + 1 + cmd.cursor_pos as u16;
+            Some((cx, area.y))
+        }
+        StatusBarContent::QuickCapture(qc) => {
+            let style = RStyle::default()
+                .fg(theme.foreground())
+                .bg(theme.modeline());
+            let text = format!("{}{}", qc.prompt, qc.input);
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled(&text, style))),
+                area,
+            );
+
+            let cx = area.x + qc.prompt.len() as u16 + qc.cursor_pos as u16;
+            Some((cx, area.y))
+        }
+    }
+}
+
+/// Render the normal status bar (mode, title, position, etc.)
+fn draw_normal_status(
+    f: &mut Frame,
+    area: Rect,
+    mode: &str,
+    status: &bloom_core::render::NormalStatus,
     theme: &TuiTheme,
 ) {
-    use bloom_core::render::McpIndicator;
-
-    let style = theme.status_bar_style(&status.mode, is_active);
+    let style = theme.status_bar_style(mode, true);
     let width = area.width as usize;
 
     // Fill background
@@ -264,18 +332,6 @@ fn draw_status_bar(
         ))),
         area,
     );
-
-    if !is_active {
-        // Inactive: just the title, left-aligned
-        let title = truncate_with_ellipsis(&status.title, width.saturating_sub(2));
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled(format!(" {title}"), style))),
-            area,
-        );
-        return;
-    }
-
-    // --- Active pane: build left and right segments ---
 
     // Right side: [macro] [pending] [mcp] line:col
     let mut right_parts: Vec<String> = Vec::new();
@@ -292,7 +348,7 @@ fn draw_status_bar(
         McpIndicator::Idle => "\u{26a1}".to_string(),
         McpIndicator::Editing { tick } => {
             const FRAMES: &[&str] = &["\u{26a1}", "\u{25d0}", "\u{25d1}", "\u{25d2}", "\u{25d3}"];
-            FRAMES[(*tick as usize) % FRAMES.len()].to_string()
+            FRAMES[(tick.clone() as usize) % FRAMES.len()].to_string()
         }
     };
     if !mcp_str.is_empty() {
@@ -305,7 +361,7 @@ fn draw_status_bar(
 
     // Left side: MODE │ title [+]
     let dirty_mark = if status.dirty { " [+]" } else { "" };
-    let mode_section = format!(" {} \u{2502} ", status.mode);
+    let mode_section = format!(" {} \u{2502} ", mode);
     let title_max = width
         .saturating_sub(mode_section.len())
         .saturating_sub(dirty_mark.len())
@@ -327,6 +383,24 @@ fn draw_status_bar(
             Rect::new(rx, area.y, right.len() as u16, 1),
         );
     }
+}
+
+/// Lightweight bar for inactive panes — just the title.
+fn draw_inactive_pane_bar(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
+    let style = theme.status_bar_style("NORMAL", false);
+    let width = area.width as usize;
+
+    // Fill background
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(" ".repeat(width), style))),
+        area,
+    );
+
+    let title = truncate_with_ellipsis(&pane.title, width.saturating_sub(2));
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(format!(" {title}"), style))),
+        area,
+    );
 }
 
 fn truncate_with_ellipsis(s: &str, max: usize) -> String {
@@ -479,62 +553,6 @@ fn draw_which_key(f: &mut Frame, area: Rect, wk: &WhichKeyFrame, theme: &TuiThem
             ),
         );
     }
-}
-
-// ---------------------------------------------------------------------------
-// Command line
-// ---------------------------------------------------------------------------
-
-fn draw_command_line(f: &mut Frame, area: Rect, cmd: &CommandLineFrame, theme: &TuiTheme) {
-    let y = area.bottom().saturating_sub(1);
-    let cmd_area = Rect::new(area.x, y, area.width, 1);
-
-    let style = RStyle::default().fg(theme.foreground()).bg(theme.background());
-    let text = format!(":{}", cmd.input);
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(&text, style))),
-        cmd_area,
-    );
-
-    // Cursor in command line
-    let cx = area.x + 1 + cmd.cursor_pos as u16;
-    f.set_cursor_position((cx, y));
-
-    // Error display
-    if let Some(err) = &cmd.error {
-        let err_y = y.saturating_sub(1);
-        let err_style = RStyle::default().fg(theme.critical()).bg(theme.background());
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled(err, err_style))),
-            Rect::new(area.x, err_y, area.width, 1),
-        );
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Quick capture
-// ---------------------------------------------------------------------------
-
-fn draw_quick_capture(
-    f: &mut Frame,
-    area: Rect,
-    qc: &QuickCaptureFrame,
-    theme: &TuiTheme,
-) {
-    let y = area.bottom().saturating_sub(1);
-    let qc_area = Rect::new(area.x, y, area.width, 1);
-
-    let style = RStyle::default()
-        .fg(theme.foreground())
-        .bg(theme.modeline());
-    let text = format!("{}{}", qc.prompt, qc.input);
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(&text, style))),
-        qc_area,
-    );
-
-    let cx = area.x + qc.prompt.len() as u16 + qc.cursor_pos as u16;
-    f.set_cursor_position((cx, y));
 }
 
 // ---------------------------------------------------------------------------

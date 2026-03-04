@@ -15,8 +15,7 @@ pub struct RenderFrame {
     pub hidden_pane_count: usize,
     pub picker: Option<PickerFrame>,
     pub which_key: Option<WhichKeyFrame>,
-    pub command_line: Option<CommandLineFrame>,
-    pub quick_capture: Option<QuickCaptureFrame>,
+    pub status_bar: StatusBarFrame,
     pub date_picker: Option<DatePickerFrame>,
     pub dialog: Option<DialogFrame>,
     pub notification: Option<Notification>,
@@ -35,7 +34,6 @@ pub struct PaneFrame {
     pub is_active: bool,
     pub title: String,
     pub dirty: bool,
-    pub status_bar: StatusBar,
 }
 
 pub enum PaneKind {
@@ -201,11 +199,26 @@ pub enum CursorShape {
 }
 
 // ---------------------------------------------------------------------------
-// Status bar
+// Status bar (slot-based)
 // ---------------------------------------------------------------------------
 
-pub struct StatusBar {
+/// Global status bar — exactly one line at the bottom of the screen.
+/// Different modes populate different slots; rendering is centralized.
+pub struct StatusBarFrame {
+    pub content: StatusBarContent,
     pub mode: String,
+}
+
+pub enum StatusBarContent {
+    /// Default: mode, title, dirty flag, cursor position, etc.
+    Normal(NormalStatus),
+    /// Active when user presses `:` (Command mode).
+    CommandLine(CommandLineSlot),
+    /// Active during SPC j a / SPC j t.
+    QuickCapture(QuickCaptureSlot),
+}
+
+pub struct NormalStatus {
     pub title: String,
     pub dirty: bool,
     pub line: usize,
@@ -213,6 +226,18 @@ pub struct StatusBar {
     pub pending_keys: String,
     pub recording_macro: Option<char>,
     pub mcp: McpIndicator,
+}
+
+pub struct CommandLineSlot {
+    pub input: String,
+    pub cursor_pos: usize,
+    pub error: Option<String>,
+}
+
+pub struct QuickCaptureSlot {
+    pub prompt: String,
+    pub input: String,
+    pub cursor_pos: usize,
 }
 
 #[derive(Clone, Default)]
@@ -223,29 +248,21 @@ pub enum McpIndicator {
     Editing { tick: u8 },
 }
 
-impl Default for StatusBar {
+impl Default for StatusBarFrame {
     fn default() -> Self {
         Self {
+            content: StatusBarContent::Normal(NormalStatus {
+                title: String::new(),
+                dirty: false,
+                line: 0,
+                column: 0,
+                pending_keys: String::new(),
+                recording_macro: None,
+                mcp: McpIndicator::Off,
+            }),
             mode: String::from("NORMAL"),
-            title: String::new(),
-            dirty: false,
-            line: 0,
-            column: 0,
-            pending_keys: String::new(),
-            recording_macro: None,
-            mcp: McpIndicator::Off,
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Quick capture
-// ---------------------------------------------------------------------------
-
-pub struct QuickCaptureFrame {
-    pub prompt: String,
-    pub input: String,
-    pub cursor_pos: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -311,16 +328,8 @@ pub enum WhichKeyContext {
 }
 
 // ---------------------------------------------------------------------------
-// Command line
+// Completion (shared by command line and pickers)
 // ---------------------------------------------------------------------------
-
-pub struct CommandLineFrame {
-    pub input: String,
-    pub cursor_pos: usize,
-    pub completions: Vec<Completion>,
-    pub selected_completion: Option<usize>,
-    pub error: Option<String>,
-}
 
 pub struct Completion {
     pub text: String,
