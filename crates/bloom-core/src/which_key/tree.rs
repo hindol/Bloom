@@ -109,7 +109,7 @@ impl WhichKeyTree {
                 .children
                 .entry(key.clone())
                 .or_insert_with(|| WhichKeyChild::Group {
-                    label: format!("+{key}"),
+                    label: format!("+{key}"),  // default; override via set_group_label()
                     node: WhichKeyNode::new(),
                 });
 
@@ -121,6 +121,13 @@ impl WhichKeyTree {
                     panic!("conflict: key '{key}' is already bound to an action");
                 }
             }
+        }
+    }
+
+    /// Set a descriptive label for a group key (e.g., "f" → "files").
+    pub fn set_group_label(&mut self, key: &str, label: &str) {
+        if let Some(WhichKeyChild::Group { label: ref mut l, .. }) = self.root.children.get_mut(key) {
+            *l = label.to_string();
         }
     }
 
@@ -233,6 +240,20 @@ pub fn default_tree() -> WhichKeyTree {
     // Toggles
     tree.register("T t", "Theme selector", "theme_selector".into());
     tree.register("T m", "Toggle MCP", "toggle_mcp".into());
+
+    // Set descriptive group labels
+    tree.set_group_label("f", "files");
+    tree.set_group_label("b", "buffers");
+    tree.set_group_label("j", "journal");
+    tree.set_group_label("s", "search");
+    tree.set_group_label("l", "links");
+    tree.set_group_label("a", "agenda");
+    tree.set_group_label("w", "windows");
+    tree.set_group_label("r", "refactor");
+    tree.set_group_label("u", "undo");
+    tree.set_group_label("T", "toggles");
+    tree.set_group_label("i", "insert");
+    tree.set_group_label("t", "tags");
 
     tree
 }

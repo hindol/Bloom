@@ -24,9 +24,10 @@ pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &TuiTheme) {
     // If which-key is showing, split area: panes on top, which-key drawer at bottom
     let (pane_area, wk_area) = if let Some(wk) = &frame.which_key {
         let col_width = 24u16;
-        let cols = (area.width / col_width).max(1);
+        let cols = (area.width.saturating_sub(4) / col_width).max(1);
         let rows_needed = ((wk.entries.len() as u16) + cols - 1) / cols;
-        let wk_h = (rows_needed + 1).min(area.height / 3).max(2);
+        // +1 for top border, +1 for vertical padding
+        let wk_h = (rows_needed + 2).min(area.height / 3).max(3);
         let pane_h = area.height.saturating_sub(wk_h);
         (
             Rect::new(area.x, area.y, area.width, pane_h),
@@ -441,13 +442,21 @@ fn draw_which_key(f: &mut Frame, area: Rect, wk: &WhichKeyFrame, theme: &TuiThem
     let inner = block.inner(area);
     f.render_widget(block, area);
 
+    // Add horizontal and vertical padding for readability
+    let padded = Rect::new(
+        inner.x.saturating_add(2),
+        inner.y.saturating_add(1),
+        inner.width.saturating_sub(4),
+        inner.height.saturating_sub(1),
+    );
+
     let col_width = 24u16;
-    let cols = (inner.width / col_width).max(1);
+    let cols = (padded.width / col_width).max(1);
 
     for (i, entry) in wk.entries.iter().enumerate() {
         let col = (i as u16) % cols;
         let row = (i as u16) / cols;
-        if row >= inner.height {
+        if row >= padded.height {
             break;
         }
         let key_style = theme.which_key_style().add_modifier(Modifier::BOLD);
@@ -463,9 +472,9 @@ fn draw_which_key(f: &mut Frame, area: Rect, wk: &WhichKeyFrame, theme: &TuiThem
         f.render_widget(
             Paragraph::new(text),
             Rect::new(
-                inner.x + col * col_width,
-                inner.y + row,
-                col_width.min(inner.width.saturating_sub(col * col_width)),
+                padded.x + col * col_width,
+                padded.y + row,
+                col_width.min(padded.width.saturating_sub(col * col_width)),
                 1,
             ),
         );
