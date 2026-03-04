@@ -206,26 +206,34 @@ pub enum CursorShape {
 
 pub struct StatusBar {
     pub mode: String,
-    pub filename: String,
+    pub title: String,
     pub dirty: bool,
     pub line: usize,
     pub column: usize,
     pub pending_keys: String,
     pub recording_macro: Option<char>,
-    pub mcp_status: Option<String>,
+    pub mcp: McpIndicator,
+}
+
+#[derive(Clone, Default)]
+pub enum McpIndicator {
+    #[default]
+    Off,
+    Idle,
+    Editing { tick: u8 },
 }
 
 impl Default for StatusBar {
     fn default() -> Self {
         Self {
             mode: String::from("NORMAL"),
-            filename: String::new(),
+            title: String::new(),
             dirty: false,
             line: 0,
             column: 0,
             pending_keys: String::new(),
             recording_macro: None,
-            mcp_status: None,
+            mcp: McpIndicator::Off,
         }
     }
 }

@@ -235,57 +235,91 @@ fn draw_status_bar(
     is_active: bool,
     theme: &TuiTheme,
 ) {
-    let style = theme.status_bar_style(&status.mode, is_active);
+    use bloom_core::render::McpIndicator;
 
-    // Fill bar
+    let style = theme.status_bar_style(&status.mode, is_active);
+    let width = area.width as usize;
+
+    // Fill background
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            " ".repeat(area.width as usize),
+            " ".repeat(width),
             style,
         ))),
         area,
     );
 
-    if is_active {
-        // Full status: MODE │ filename [+]  pending   line:col │ filetype
-        let dirty_mark = if status.dirty { " [+]" } else { "" };
-        let recording = status
-            .recording_macro
-            .map(|c| format!(" @{c}"))
-            .unwrap_or_default();
-        let pending = if status.pending_keys.is_empty() {
-            String::new()
-        } else {
-            format!(" {}", status.pending_keys)
-        };
-        let left = format!(
-            " {} │ {}{}{}{}",
-            status.mode, status.filename, dirty_mark, recording, pending
-        );
-        let right = format!("{}:{} ", status.line + 1, status.column + 1);
-
-        let left_span = Span::styled(&left, style);
-        let right_span = Span::styled(&right, style);
-
+    if !is_active {
+        // Inactive: just the title, left-aligned
+        let title = truncate_with_ellipsis(&status.title, width.saturating_sub(2));
         f.render_widget(
-            Paragraph::new(Line::from(left_span)),
+            Paragraph::new(Line::from(Span::styled(format!(" {title}"), style))),
             area,
         );
+        return;
+    }
 
-        let rx = area.right().saturating_sub(right.len() as u16);
-        if rx > area.x {
-            f.render_widget(
-                Paragraph::new(Line::from(right_span)),
-                Rect::new(rx, area.y, right.len() as u16, 1),
-            );
+    // --- Active pane: build left and right segments ---
+
+    // Right side: [macro] [pending] [mcp] line:col
+    let mut right_parts: Vec<String> = Vec::new();
+
+    if let Some(reg) = status.recording_macro {
+        right_parts.push(format!("@{reg}"));
+    }
+    if !status.pending_keys.is_empty() {
+        right_parts.push(status.pending_keys.clone());
+    }
+
+    let mcp_str = match &status.mcp {
+        McpIndicator::Off => String::new(),
+        McpIndicator::Idle => "\u{26a1}".to_string(),
+        McpIndicator::Editing { tick } => {
+            const FRAMES: &[&str] = &["\u{26a1}", "\u{25d0}", "\u{25d1}", "\u{25d2}", "\u{25d3}"];
+            FRAMES[(*tick as usize) % FRAMES.len()].to_string()
         }
-    } else {
-        // Compact: just filename
-        let text = format!(" {}", status.filename);
+    };
+    if !mcp_str.is_empty() {
+        right_parts.push(mcp_str);
+    }
+
+    right_parts.push(format!("{}:{}", status.line + 1, status.column + 1));
+
+    let right = format!(" {} ", right_parts.join("  "));
+
+    // Left side: MODE │ title [+]
+    let dirty_mark = if status.dirty { " [+]" } else { "" };
+    let mode_section = format!(" {} \u{2502} ", status.mode);
+    let title_max = width
+        .saturating_sub(mode_section.len())
+        .saturating_sub(dirty_mark.len())
+        .saturating_sub(right.len());
+    let title = truncate_with_ellipsis(&status.title, title_max);
+    let left = format!("{mode_section}{title}{dirty_mark}");
+
+    // Render left
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(&left, style))),
+        area,
+    );
+
+    // Render right
+    let rx = area.right().saturating_sub(right.len() as u16);
+    if rx > area.x + left.len() as u16 {
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(&text, style))),
-            area,
+            Paragraph::new(Line::from(Span::styled(&right, style))),
+            Rect::new(rx, area.y, right.len() as u16, 1),
         );
+    }
+}
+
+fn truncate_with_ellipsis(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else if max <= 1 {
+        String::new()
+    } else {
+        format!("{}…", &s[..max - 1])
     }
 }
 

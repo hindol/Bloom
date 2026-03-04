@@ -967,25 +967,28 @@ impl BloomEditor {
                 },
                 scroll_offset: self.viewport.first_visible_line,
                 is_active,
-                title,
+                title: title.clone(),
                 dirty,
                 status_bar: render::StatusBar {
                     mode: mode_str.to_string(),
-                    filename: self
-                        .active_page
-                        .as_ref()
-                        .map(|id| id.to_hex())
-                        .unwrap_or_default(),
+                    title,
                     dirty,
                     line: cursor_line,
                     column: cursor_col,
-                    pending_keys: self.vim_state.pending_keys().to_string(),
+                    pending_keys: if !self.leader_keys.is_empty() {
+                        self.leader_keys.iter()
+                            .map(|k| k.to_string())
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    } else {
+                        self.vim_state.pending_keys().to_string()
+                    },
                     recording_macro: if self.vim_state.is_recording() {
                         Some('q')
                     } else {
                         None
                     },
-                    mcp_status: None,
+                    mcp: render::McpIndicator::Off,
                 },
             });
         }
