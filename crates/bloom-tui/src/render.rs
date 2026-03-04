@@ -685,21 +685,17 @@ fn draw_which_key(f: &mut Frame, area: Rect, wk: &WhichKeyFrame, theme: &TuiThem
 
     let wk_style = theme.which_key_style();
 
-    // Fill background (no border — status bar provides separation)
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            " ".repeat(area.width as usize),
-            wk_style,
-        ))),
-        area,
-    );
+    // Fill entire area with background (no border — status bar provides separation)
+    let block = Block::default().style(wk_style);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
 
     // Add horizontal and vertical padding for readability
     let padded = Rect::new(
-        area.x.saturating_add(2),
-        area.y.saturating_add(1),
-        area.width.saturating_sub(4),
-        area.height.saturating_sub(2),  // 1 top + 1 bottom padding
+        inner.x.saturating_add(2),
+        inner.y.saturating_add(1),
+        inner.width.saturating_sub(4),
+        inner.height.saturating_sub(2),  // 1 top + 1 bottom padding
     );
 
     let col_width = 24u16;
