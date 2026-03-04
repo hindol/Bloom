@@ -26,8 +26,8 @@ pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &TuiTheme) {
         let col_width = 24u16;
         let cols = (area.width.saturating_sub(4) / col_width).max(1);
         let rows_needed = ((wk.entries.len() as u16) + cols - 1) / cols;
-        // +1 for top border, +1 for vertical padding
-        (rows_needed + 2).min(area.height / 3).max(3)
+        // +1 for top border, +1 for top padding, +1 for bottom padding
+        (rows_needed + 3).min(area.height / 3).max(4)
     } else {
         0
     };
@@ -642,7 +642,7 @@ fn draw_which_key(f: &mut Frame, area: Rect, wk: &WhichKeyFrame, theme: &TuiThem
         inner.x.saturating_add(2),
         inner.y.saturating_add(1),
         inner.width.saturating_sub(4),
-        inner.height.saturating_sub(1),
+        inner.height.saturating_sub(2),  // 1 top + 1 bottom padding
     );
 
     let col_width = 24u16;
