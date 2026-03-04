@@ -307,6 +307,7 @@ pub struct WhichKeyEntry {
 pub enum WhichKeyContext {
     Leader,
     VimOperator { operator: String },
+    CommandLine,
 }
 
 // ---------------------------------------------------------------------------

@@ -1460,7 +1460,38 @@ impl BloomEditor {
             } else {
                 None
             },
-            which_key: if self.leader_keys.len() > 1 {
+            which_key: if matches!(self.vim_state.mode(), vim::Mode::Command) {
+                // Show available commands as which-key hints
+                let input = self.vim_state.pending_keys();
+                let commands: Vec<(&str, &str)> = vec![
+                    ("w", "write (save)"),
+                    ("q", "quit"),
+                    ("wq", "write and quit"),
+                    ("e", "edit (find page)"),
+                    ("sp", "split horizontal"),
+                    ("vs", "vsplit vertical"),
+                    ("bd", "close buffer"),
+                    ("theme", "switch theme"),
+                    ("rebuild-index", "rebuild search index"),
+                ];
+                let filtered: Vec<render::WhichKeyEntry> = commands.iter()
+                    .filter(|(cmd, _)| input.is_empty() || cmd.starts_with(input))
+                    .map(|(cmd, label)| render::WhichKeyEntry {
+                        key: cmd.to_string(),
+                        label: label.to_string(),
+                        is_group: false,
+                    })
+                    .collect();
+                if !filtered.is_empty() {
+                    Some(render::WhichKeyFrame {
+                        entries: filtered,
+                        prefix: format!(":{input}"),
+                        context: render::WhichKeyContext::CommandLine,
+                    })
+                } else {
+                    None
+                }
+            } else if self.leader_keys.len() > 1 {
                 let lookup_keys: Vec<types::KeyEvent> = self.leader_keys[1..].to_vec();
                 match self.which_key_tree.lookup(&lookup_keys) {
                     which_key::WhichKeyLookup::Prefix(entries) => {
@@ -1499,7 +1530,17 @@ impl BloomEditor {
             } else {
                 None
             },
-            command_line: None,
+            command_line: if matches!(self.vim_state.mode(), vim::Mode::Command) {
+                Some(render::CommandLineFrame {
+                    input: self.vim_state.pending_keys().to_string(),
+                    cursor_pos: self.vim_state.pending_keys().len(),
+                    completions: Vec::new(),
+                    selected_completion: None,
+                    error: None,
+                })
+            } else {
+                None
+            },
             quick_capture: self.quick_capture.as_ref().map(|qc| render::QuickCaptureFrame {
                 prompt: match qc.kind {
                     keymap::dispatch::QuickCaptureKind::Note => {
