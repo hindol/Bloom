@@ -3,30 +3,65 @@
 > Detailed wireframes for every fuzzy picker surface in Bloom.
 > See GOALS.md G16 for architecture and keybinding reference.
 
-Every picker shares the same layout anatomy:
+Every picker shares a single layout component and input handler. Individual pickers only supply **data** (items, columns, preview content) — they never define their own layout or keybindings.
+
+### Two layout variants
+
+**Modal** (default) — centered overlay, 60% × 70% of screen, with optional preview pane:
 
 ```
 ┌─ [Title] ─────────────────────────────────────────────────────┐
 │ > query text_                                     [filters]   │
 │                                                               │
-│ ▸ Result one                           marginalia right-align │
-│   Result two                           marginalia right-align │
-│   Result three                         marginalia right-align │
-│   Result four                          marginalia right-align │
+│ ▸ [label]             [middle col]          [right col]       │
+│   [label]             [middle col]          [right col]       │
+│   [label]             [middle col]          [right col]       │
 │                                                               │
-│   N results (filtered from M total)                           │
+│   N of M [noun]                                               │  ← status line
 ├───────────────────────────────────────────────────────────────┤
 │                                                               │
-│   Preview of highlighted result                               │
+│   [preview of highlighted item]                               │  ← preview pane
 │                                                               │
 └───────────────────────────────────────────────────────────────┘
 ```
 
+**Inline** (link picker only) — compact, cursor-anchored, no preview, no status line:
+
+```
+   text before cursor|
+                      ┌─ Link to… ───────────────────────┐
+                      │ > query_                          │
+                      │                                   │
+                      │ ▸ [label]                [right]  │
+                      │   [label]                [right]  │
+                      │                                   │
+                      │ ↵ select  ⎋ cancel  + new page   │  ← hint line
+                      └───────────────────────────────────┘
+```
+
+### Row columns
+
+Each result row has a **label** (left-aligned, takes remaining space) plus up to two additional columns:
+
+| Column | Alignment | Truncation | Purpose |
+|--------|-----------|------------|---------|
+| Label | Left | Truncates with `…` first | Primary text (title, command name, date, matching line) |
+| Middle | Left (after label gap) | Truncates after label | Secondary metadata (tags, `[+]` marker, keybinding, item count) |
+| Right | Right-aligned to edge | Hidden if no space | Tertiary metadata (date, time-ago, category, note count) |
+
+Not every picker uses all three columns — see individual wireframes below.
+
+### Status line
+
+Bottom of the results section, faded. Format: `{filtered} of {total} {noun}`, where **noun** varies per picker (pages, buffers, themes, etc.).
+
+### Common properties
+
 - `▸` marks the highlighted (selected) result.
-- **Marginalia** is right-aligned metadata per row.
 - **Filters** are shown as pills: `[tag:rust] [date:this-week]`. `Ctrl+←/→` navigates pills, `Backspace` removes.
 - **Preview** pane shows the content of the highlighted result. Auto-updates as you move.
 - `Ctrl+N/P` or `Ctrl+J/K` or `↑/↓` moves the highlight. `Enter` confirms. `Escape` closes. `Tab` opens action menu. `Alt+Enter` creates a new page from the query text.
+- **All pickers**, including the theme selector, share one input handler and one rendering path.
 
 ---
 
@@ -422,11 +457,11 @@ For `SPC j t` (task variant):
 ┌─ Title ───────────────────────────────────────────────────────┐
 │ > [query input]                          [filter] [filter]    │  ← input + filters
 │                                                               │
-│ ▸ [highlighted result]              [marginalia]              │  ← result list
-│   [result]                          [marginalia]              │
-│   [result]                          [marginalia]              │
+│ ▸ [label]             [middle col]          [right col]       │  ← result list
+│   [label]             [middle col]          [right col]       │
+│   [label]             [middle col]          [right col]       │
 │                                                               │
-│   [count] of [total]                                          │  ← status line
+│   [filtered] of [total] [noun]                                │  ← status line
 ├───────────────────────────────────────────────────────────────┤
 │                                                               │
 │   [preview of highlighted item]                               │  ← preview pane
@@ -445,6 +480,22 @@ Clear all filters:   Ctrl+Backspace
 Clear input:         Ctrl+U
 Top/bottom:          gg / G
 ```
+
+### Column usage by picker
+
+| Picker | Label | Middle | Right | Status noun | Preview |
+|--------|-------|--------|-------|-------------|---------|
+| Find Page | Page title | Tags | Date | pages | ✓ |
+| Switch Buffer | Title | `[+]` marker | time ago | open buffers | ✓ |
+| Search | Matching line | — | Source page | matches | ✓ |
+| Journal | Date | Item count | Tags | journal entries | ✓ |
+| Tags | `#tag-name` | — | Note count | tags | ✓ |
+| Backlinks | Source page | — | Context quote | backlinks | ✓ |
+| Unlinked Mentions | Source page | — | Context quote | unlinked mentions | ✓ |
+| All Commands | Command name | Keybinding | Category | commands | ✓ |
+| Inline Link | Page title | — | Tags | (hint line) | — |
+| Templates | Template name | — | Description | templates | ✓ |
+| Theme | Theme name | — | Description / `(current)` | themes | ✓ |
 
 ---
 
