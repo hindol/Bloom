@@ -1,0 +1,20 @@
+#!/bin/sh
+# Pre-commit hook — auto-fix formatting and trivial clippy warnings
+# Install: git config core.hooksPath hooks
+
+set -e
+
+export PATH="$HOME/.cargo/bin:$PATH"
+
+echo "🔧 Pre-commit auto-fix..."
+
+echo "  ▸ rustfmt"
+cargo fmt --all
+
+echo "  ▸ clippy --fix"
+cargo clippy --fix --allow-dirty --allow-staged --workspace --all-targets --quiet 2>/dev/null || true
+
+# Re-stage any files that were auto-fixed
+git diff --name-only | xargs -r git add
+
+echo "✓ Pre-commit done"

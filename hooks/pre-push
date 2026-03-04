@@ -1,0 +1,24 @@
+#!/bin/sh
+# Pre-push hook — mirrors CI checks (clippy strict + test + coverage)
+# Formatting and auto-fixable clippy are handled by pre-commit hook.
+# Install: git config core.hooksPath hooks
+
+set -e
+
+export PATH="$HOME/.cargo/bin:$PATH"
+
+echo "🔍 Running pre-push checks..."
+
+echo "  ▸ clippy (strict)"
+cargo clippy --workspace --all-targets --quiet -- -D warnings
+
+echo "  ▸ tests + coverage (minimum 65% region coverage)"
+if command -v cargo-llvm-cov >/dev/null 2>&1; then
+    cargo llvm-cov --workspace --fail-under-regions 65 --quiet
+else
+    echo "    ⚠ cargo-llvm-cov not installed, running tests without coverage gate"
+    echo "    Install: cargo install cargo-llvm-cov && rustup component add llvm-tools-preview"
+    cargo test --workspace --quiet
+fi
+
+echo "✓ All checks passed"
