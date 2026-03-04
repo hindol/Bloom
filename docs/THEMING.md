@@ -141,8 +141,8 @@ The key insight from Lambda: **most text renders in `foreground` with typographi
 | `BlockId` | `faded` | — | dim | Even quieter |
 | `BlockIdCaret` | `faded` | — | dim | The `^` prefix — slightly less meaningful than the ID itself |
 | `ListMarker` | `foreground` | — | — | Structural — conveys document hierarchy |
-| `CheckboxUnchecked` | `accent_yellow` | — | — | Pending state — the `[ ]` IS the status |
-| `CheckboxChecked` | `accent_green` | — | ~~strikethrough~~ | Completed marker |
+| `CheckboxUnchecked` | `accent_yellow` | — | — | Pending state — `[ ]` IS the status |
+| `CheckboxChecked` | `accent_green` | — | ~~strikethrough~~ | Completed marker — `[x]` IS the status |
 | `CheckedTaskText` | `faded` | — | ~~strikethrough~~ | Text after `[x]` — visually completes the entire line |
 | `Blockquote` | `foreground` | — | *italic* | Distinguishes quoted voice from the author's own text |
 | `BlockquoteMarker` | `faded` | — | — | The `>` prefix — structural but repetitive on multi-line quotes |
@@ -172,8 +172,8 @@ The marker **is** the meaning. Removing it changes what the reader understands.
 |-----------|-------------------|-------------|-----------|
 | List item | `-` or `*` or `+` | `ListMarker` (`foreground`) | Conveys document structure. Without it, items become ambiguous paragraphs. |
 | Ordered list | `1.`, `2.`, etc. | `ListMarker` (`foreground`) | Conveys ordering. Without it, sequence is lost. |
-| Checkbox (unchecked) | `- [ ]` | `CheckboxUnchecked` (`accent_yellow`) | Signals "this needs doing." The `[ ]` IS the status. |
-| Checkbox (checked) | `- [x]` | `CheckboxChecked` (`accent_green`, ~~strikethrough~~) | Signals completion. The `[x]` IS the status. |
+| Checkbox (unchecked) | `[ ]` | `CheckboxUnchecked` (`accent_yellow`) | Signals "this needs doing." The `[ ]` IS the status. The preceding `-` is a `ListMarker`. |
+| Checkbox (checked) | `[x]` | `CheckboxChecked` (`accent_green`, ~~strikethrough~~) | Signals completion. The `[x]` IS the status. The preceding `-` is a `ListMarker`. |
 | Checked task text | Text after `[x]` | `CheckedTaskText` (`faded`, ~~strikethrough~~) | The entire line reads as "done" — not just the checkbox. |
 | Frontmatter title value | `"My Page Title"` | `FrontmatterTitle` (`foreground`, bold italic) | The page's name — most important metadata, deserves full visibility. |
 | Tag | `#` in `#rust` | Same style as tag text (`faded`) | The `#` is part of the tag's identity. Dimming it makes `rust` look like prose. |
@@ -263,11 +263,11 @@ for background.                             strong underline; UUID hidden
 (>) The best tool is one that             ← ">" faded, content foreground italic
    disappears in your hand.
 
-- First consideration                     ← "-" normal (structural)
-- [ ] Review the ropey crate API          ← "- [ ]" yellow (structural)
+- First consideration                     ← "-" normal (list marker)
+- [ ] Review the ropey crate API          ← "-" normal, "[ ]" yellow (checkbox)
       @due(()2026-03-05())                  "@due" faded, "()" dim, date foreground
-- [x] Read Xi Editor source               ← "- [x]" green strikethrough, text faded strikethrough
-- [ ] Fix overdue item                    ← "- [ ]" yellow
+- [x] Read Xi Editor source               ← "-" normal, "[x]" green strikethrough, text faded strikethrough
+- [ ] Fix overdue item                    ← "-" normal, "[ ]" yellow
       @due(()2025-01-01())                  "@due" faded, "()" dim, date accent_red (overdue!)
 
 | Feature   | Status  |                   ← "|" faded, cell content foreground
