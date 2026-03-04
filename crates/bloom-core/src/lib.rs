@@ -370,7 +370,8 @@ impl BloomEditor {
                 ("Switch Buffer".to_string(), "open buffers".to_string(), items)
             }
             PickerKind::Search => {
-                ("Search".to_string(), "matches".to_string(), self.collect_search_items())
+                let (noun, items) = self.collect_search_items();
+                ("Search".to_string(), noun, items)
             }
             PickerKind::Journal => {
                 ("Journal".to_string(), "journal entries".to_string(), self.collect_journal_items())
@@ -493,12 +494,14 @@ impl BloomEditor {
         Vec::new()
     }
 
-    fn collect_search_items(&self) -> Vec<GenericPickerItem> {
-        // Collect all content lines from pages and journals for full-text search.
-        // Each item is a single line with source page as metadata.
+    fn collect_search_items(&self) -> (String, Vec<GenericPickerItem>) {
+        // Collect content lines from pages and journals for full-text search.
+        // Each item is a single line with source page title as right column.
         let mut items = Vec::new();
+        let mut page_titles = std::collections::HashSet::new();
         if let Some(root) = &self.vault_root {
             for subdir in &["pages", "journal"] {
+                let is_journal = *subdir == "journal";
                 let dir = root.join(subdir);
                 if !dir.exists() {
                     continue;
@@ -525,29 +528,69 @@ impl BloomEditor {
                                 .to_string_lossy()
                                 .to_string()
                         });
+                    let display_title = if is_journal {
+                        format!("{} (journal)", title)
+                    } else {
+                        title.clone()
+                    };
+
                     let lines: Vec<&str> = content.lines().collect();
+
+                    // Skip frontmatter region
+                    let body_start = if lines.first().map_or(false, |l| l.trim() == "---") {
+                        lines.iter()
+                            .skip(1)
+                            .position(|l| l.trim() == "---")
+                            .map(|i| i + 2)   // +1 for skip(1), +1 to get past closing ---
+                            .unwrap_or(0)
+                    } else {
+                        0
+                    };
+
+                    let mut page_has_items = false;
                     for (line_num, line_text) in lines.iter().enumerate() {
-                        let trimmed = line_text.trim();
-                        if trimmed.is_empty() || trimmed == "---" {
+                        if line_num < body_start {
                             continue;
                         }
-                        // Build ±3 lines of context for preview
-                        let ctx_start = line_num.saturating_sub(3);
-                        let ctx_end = (line_num + 4).min(lines.len());
-                        let preview = lines[ctx_start..ctx_end].join("\n");
+                        let trimmed = line_text.trim();
+                        if trimmed.is_empty() {
+                            continue;
+                        }
+
+                        // Build ±5 lines of context with ❯ marker on matching line
+                        let ctx_start = line_num.saturating_sub(5);
+                        let ctx_end = (line_num + 6).min(lines.len());
+                        let preview: String = lines[ctx_start..ctx_end]
+                            .iter()
+                            .enumerate()
+                            .map(|(i, l)| {
+                                if ctx_start + i == line_num {
+                                    format!("❯ {l}")
+                                } else {
+                                    format!("  {l}")
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n");
 
                         items.push(GenericPickerItem {
                             id: format!("{}:{}", path.display(), line_num),
                             label: trimmed.to_string(),
-                            middle: Some(title.clone()),
-                            right: Some(format!("L{}", line_num + 1)),
+                            middle: None,
+                            right: Some(display_title.clone()),
                             preview_text: Some(preview),
                         });
+                        page_has_items = true;
+                    }
+                    if page_has_items {
+                        page_titles.insert(title);
                     }
                 }
             }
         }
-        items
+        let page_count = page_titles.len();
+        let noun = format!("matches across {} {}", page_count, if page_count == 1 { "page" } else { "pages" });
+        (noun, items)
     }
 
     fn open_theme_picker(&mut self) {
