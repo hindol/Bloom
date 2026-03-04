@@ -1523,24 +1523,71 @@ impl BloomEditor {
         let mut lines = Vec::new();
         let line_count = buf.len_lines();
 
-        for line_idx in range {
-            if line_idx >= line_count {
-                break;
-            }
+        // Compute line context (frontmatter/code block state) from the start
+        // of the document up to and through the visible range.
+        let scan_end = if range.end < line_count { range.end } else { line_count };
+        let mut in_frontmatter = false;
+        let mut in_code_block = false;
+        let mut code_fence_lang: Option<String> = None;
+        let mut seen_first_delimiter = false;
+
+        for line_idx in 0..scan_end {
             let line_text = buf.line(line_idx).to_string();
-            let spans = self.parser.highlight_line(
-                &line_text,
-                &parser::traits::LineContext {
-                    in_code_block: false,
-                    in_frontmatter: false,
-                    code_fence_lang: None,
-                },
-            );
-            lines.push(render::RenderedLine {
-                line_number: line_idx,
-                text: line_text,
-                spans,
-            });
+            let trimmed = line_text.trim();
+
+            // Track frontmatter: first line must be "---", closed by next "---"
+            if line_idx == 0 && trimmed == "---" {
+                in_frontmatter = true;
+                seen_first_delimiter = true;
+            } else if in_frontmatter && seen_first_delimiter && trimmed == "---" {
+                // This line is still inside frontmatter (closing delimiter),
+                // but after it we're out.
+                if line_idx >= range.start {
+                    let spans = self.parser.highlight_line(
+                        &line_text,
+                        &parser::traits::LineContext {
+                            in_code_block: false,
+                            in_frontmatter: true,
+                            code_fence_lang: None,
+                        },
+                    );
+                    lines.push(render::RenderedLine {
+                        line_number: line_idx,
+                        text: line_text,
+                        spans,
+                    });
+                }
+                in_frontmatter = false;
+                continue;
+            }
+
+            // Track code fences
+            if !in_frontmatter && trimmed.starts_with("```") {
+                if in_code_block {
+                    in_code_block = false;
+                    code_fence_lang = None;
+                } else {
+                    in_code_block = true;
+                    let lang = trimmed[3..].trim();
+                    code_fence_lang = if lang.is_empty() { None } else { Some(lang.to_string()) };
+                }
+            }
+
+            if line_idx >= range.start {
+                let spans = self.parser.highlight_line(
+                    &line_text,
+                    &parser::traits::LineContext {
+                        in_code_block,
+                        in_frontmatter,
+                        code_fence_lang: code_fence_lang.clone(),
+                    },
+                );
+                lines.push(render::RenderedLine {
+                    line_number: line_idx,
+                    text: line_text,
+                    spans,
+                });
+            }
         }
         lines
     }
