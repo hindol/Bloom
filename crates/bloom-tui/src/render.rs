@@ -377,22 +377,23 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
         let middle_text = row.middle.as_deref().unwrap_or("");
 
         let available = results_area.width as usize;
+        let right_pad = 2;
         let marker_w = marker.width();
         let right_w = right_text.width();
         let middle_w = if !middle_text.is_empty() { middle_text.width() + 2 } else { 0 };
-        let fixed_w = marker_w + right_w + middle_w;
+        let fixed_w = marker_w + right_w + middle_w + right_pad;
         let label_max = available.saturating_sub(fixed_w + 1);
         let label = truncate_to_width(&row.label, label_max);
 
-        // Compose the line: marker + label + gap + middle + gap + right
+        // Compose the line: marker + label + gap + middle + gap + right + right_pad
         let label_w = label.width();
-        let used = marker_w + label_w + middle_w + right_w;
+        let used = marker_w + label_w + middle_w + right_w + right_pad;
         let pad = available.saturating_sub(used);
 
         let text = if !middle_text.is_empty() {
-            format!("{marker}{label}  {middle_text}{}{right_text}", " ".repeat(pad))
+            format!("{marker}{label}  {middle_text}{}{right_text}  ", " ".repeat(pad))
         } else {
-            format!("{marker}{label}{}{right_text}", " ".repeat(pad))
+            format!("{marker}{label}{}{right_text}  ", " ".repeat(pad))
         };
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(text, style))),
