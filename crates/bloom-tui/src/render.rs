@@ -21,15 +21,32 @@ pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &TuiTheme) {
         area,
     );
 
-    // Layout: panes take the full area, overlays drawn on top
-    draw_panes(f, area, &frame.panes, frame.maximized, frame.hidden_pane_count, theme);
+    // If which-key is showing, split area: panes on top, which-key drawer at bottom
+    let (pane_area, wk_area) = if let Some(wk) = &frame.which_key {
+        let col_width = 24u16;
+        let cols = (area.width / col_width).max(1);
+        let rows_needed = ((wk.entries.len() as u16) + cols - 1) / cols;
+        let wk_h = (rows_needed + 1).min(area.height / 3).max(2);
+        let pane_h = area.height.saturating_sub(wk_h);
+        (
+            Rect::new(area.x, area.y, area.width, pane_h),
+            Some(Rect::new(area.x, area.y + pane_h, area.width, wk_h)),
+        )
+    } else {
+        (area, None)
+    };
 
-    // Overlays (drawn on top of panes)
+    // Layout: panes take pane_area, overlays drawn on top
+    draw_panes(f, pane_area, &frame.panes, frame.maximized, frame.hidden_pane_count, theme);
+
+    // Which-key drawer (below status bar)
+    if let (Some(wk), Some(wk_rect)) = (&frame.which_key, wk_area) {
+        draw_which_key(f, wk_rect, wk, theme);
+    }
+
+    // Other overlays (drawn on top of panes)
     if let Some(picker) = &frame.picker {
         draw_picker(f, area, picker, theme);
-    }
-    if let Some(wk) = &frame.which_key {
-        draw_which_key(f, area, wk, theme);
     }
     if let Some(cmd) = &frame.command_line {
         draw_command_line(f, area, cmd, theme);
@@ -418,22 +435,17 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
 // ---------------------------------------------------------------------------
 
 fn draw_which_key(f: &mut Frame, area: Rect, wk: &WhichKeyFrame, theme: &TuiTheme) {
-    // Bottom drawer below status bar (Doom Emacs style)
-    let col_width = 24u16;
-    let cols = (area.width / col_width).max(1);
-    let rows_needed = ((wk.entries.len() as u16) + cols - 1) / cols;
-    let h = (rows_needed + 1).min(area.height / 3).max(2); // +1 for top border
-    let y = area.bottom().saturating_sub(h); // flush to bottom, below status bar
-    let popup_area = Rect::new(area.x, y, area.width, h);
-
-    f.render_widget(Clear, popup_area);
+    f.render_widget(Clear, area);
 
     let block = Block::default()
         .borders(Borders::TOP)
         .style(theme.which_key_style())
         .border_style(theme.border_style());
-    let inner = block.inner(popup_area);
-    f.render_widget(block, popup_area);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let col_width = 24u16;
+    let cols = (inner.width / col_width).max(1);
 
     for (i, entry) in wk.entries.iter().enumerate() {
         let col = (i as u16) % cols;
