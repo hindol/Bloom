@@ -38,7 +38,13 @@ fn main() -> io::Result<()> {
 }
 
 fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
-    let config = Config::defaults();
+    let vault_path = default_vault_path();
+    let config_path = std::path::Path::new(&vault_path).join("config.toml");
+    let config = if config_path.exists() {
+        Config::load(&config_path).unwrap_or_else(|_| Config::defaults())
+    } else {
+        Config::defaults()
+    };
     let mut editor = BloomEditor::new(config)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{e:?}")))?;
 
