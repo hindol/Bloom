@@ -525,7 +525,7 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
             Rect::new(inner.x, sep_y, inner.width, 1),
         );
 
-        // Preview content with padding
+        // Preview content with padding, search terms highlighted
         let preview_area = Rect::new(
             inner.x + 2,
             sep_y + 1,
@@ -533,14 +533,55 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
             preview_h.saturating_sub(1),
         );
         let preview_style = theme.faded_style();
+        let match_style = theme.style_for(&bloom_core::parser::traits::Style::SearchMatch);
+        let search_spans = bloom_core::render::search_highlight::highlight_matches(
+            preview_text,
+            &picker.query,
+        );
+
+        // Build a set of match byte ranges for quick lookup
+        let match_ranges: Vec<std::ops::Range<usize>> =
+            search_spans.iter().map(|s| s.range.clone()).collect();
+
+        let mut byte_offset = 0usize;
         for (i, line) in preview_text.lines().enumerate() {
             if i as u16 >= preview_area.height {
                 break;
             }
+            let line_start = byte_offset;
+            let line_end = line_start + line.len();
+
+            // Build spans for this line: faded base with search matches overlaid
+            let mut spans = Vec::new();
+            let mut pos = 0usize;
+            for mr in &match_ranges {
+                // Convert absolute byte range to line-relative
+                if mr.end <= line_start || mr.start >= line_end {
+                    continue;
+                }
+                let rel_start = mr.start.saturating_sub(line_start).min(line.len());
+                let rel_end = mr.end.saturating_sub(line_start).min(line.len());
+                if rel_start > pos {
+                    spans.push(Span::styled(&line[pos..rel_start], preview_style));
+                }
+                if rel_start < rel_end {
+                    spans.push(Span::styled(&line[rel_start..rel_end], match_style));
+                }
+                pos = rel_end;
+            }
+            if pos < line.len() {
+                spans.push(Span::styled(&line[pos..], preview_style));
+            }
+            if spans.is_empty() {
+                spans.push(Span::styled(line, preview_style));
+            }
+
             f.render_widget(
-                Paragraph::new(Line::from(Span::styled(line, preview_style))),
+                Paragraph::new(Line::from(spans)),
                 Rect::new(preview_area.x, preview_area.y + i as u16, preview_area.width, 1),
             );
+            // +1 for the newline character
+            byte_offset = line_end + 1;
         }
     }
 }

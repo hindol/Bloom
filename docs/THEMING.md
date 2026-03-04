@@ -301,6 +301,8 @@ for background.                             strong underline; UUID hidden
 | Picker border | `faded` | — |
 | Which-key popup | `foreground` | `subtle` |
 | Visual selection (region) | `foreground` | `mild` |
+| Search match (current) | `foreground` | `popout` |
+| Search match (other) | `foreground` | `ultralight` |
 | Current line (hl-line) | — | `highlight` |
 | Window border | `faded` | — |
 | Tilde `~` beyond EOF | `faded` | — |

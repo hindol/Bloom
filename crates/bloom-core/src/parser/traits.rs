@@ -115,6 +115,8 @@ pub enum Style {
     FrontmatterTags,
     BrokenLink,
     SyntaxNoise,
+    SearchMatch,
+    SearchMatchCurrent,
 }
 
 #[derive(Debug, Clone, Default)]

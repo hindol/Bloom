@@ -174,6 +174,16 @@ pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
             dim: true,
             ..Default::default()
         },
+        Style::SearchMatch => StyleProps {
+            fg: Some(p.foreground),
+            bg: Some(p.ultralight),
+            ..Default::default()
+        },
+        Style::SearchMatchCurrent => StyleProps {
+            fg: Some(p.foreground),
+            bg: Some(p.popout),
+            ..Default::default()
+        },
     }
 }
 

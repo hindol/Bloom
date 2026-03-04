@@ -370,7 +370,7 @@ impl BloomEditor {
                 ("Switch Buffer".to_string(), "open buffers".to_string(), items)
             }
             PickerKind::Search => {
-                ("Search".to_string(), "matches".to_string(), self.collect_page_items())
+                ("Search".to_string(), "matches".to_string(), self.collect_search_items())
             }
             PickerKind::Journal => {
                 ("Journal".to_string(), "journal entries".to_string(), self.collect_journal_items())
@@ -491,6 +491,63 @@ impl BloomEditor {
             }
         }
         Vec::new()
+    }
+
+    fn collect_search_items(&self) -> Vec<GenericPickerItem> {
+        // Collect all content lines from pages and journals for full-text search.
+        // Each item is a single line with source page as metadata.
+        let mut items = Vec::new();
+        if let Some(root) = &self.vault_root {
+            for subdir in &["pages", "journal"] {
+                let dir = root.join(subdir);
+                if !dir.exists() {
+                    continue;
+                }
+                let entries = match std::fs::read_dir(&dir) {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                        continue;
+                    }
+                    let content = match std::fs::read_to_string(&path) {
+                        Ok(c) => c,
+                        Err(_) => continue,
+                    };
+                    let fm = self.parser.parse_frontmatter(&content);
+                    let title = fm
+                        .and_then(|f| f.title)
+                        .unwrap_or_else(|| {
+                            path.file_stem()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string()
+                        });
+                    let lines: Vec<&str> = content.lines().collect();
+                    for (line_num, line_text) in lines.iter().enumerate() {
+                        let trimmed = line_text.trim();
+                        if trimmed.is_empty() || trimmed == "---" {
+                            continue;
+                        }
+                        // Build ±3 lines of context for preview
+                        let ctx_start = line_num.saturating_sub(3);
+                        let ctx_end = (line_num + 4).min(lines.len());
+                        let preview = lines[ctx_start..ctx_end].join("\n");
+
+                        items.push(GenericPickerItem {
+                            id: format!("{}:{}", path.display(), line_num),
+                            label: trimmed.to_string(),
+                            middle: Some(title.clone()),
+                            right: Some(format!("L{}", line_num + 1)),
+                            preview_text: Some(preview),
+                        });
+                    }
+                }
+            }
+        }
+        items
     }
 
     fn open_theme_picker(&mut self) {
@@ -998,7 +1055,7 @@ impl BloomEditor {
     ) {
         use keymap::dispatch::PickerKind;
         match kind {
-            PickerKind::FindPage | PickerKind::Search | PickerKind::Journal => {
+            PickerKind::FindPage | PickerKind::Journal => {
                 // Open the selected page
                 let path = std::path::PathBuf::from(&item.id);
                 if let Ok(content) = std::fs::read_to_string(&path) {
@@ -1006,6 +1063,29 @@ impl BloomEditor {
                     let title = fm.and_then(|f| f.title).unwrap_or_else(|| item.label.clone());
                     let id = crate::uuid::generate_hex_id();
                     self.open_page_with_content(&id, &title, &path, &content);
+                }
+            }
+            PickerKind::Search => {
+                // item.id is "path:line_number" — open page and jump to line
+                if let Some(colon) = item.id.rfind(':') {
+                    let path_str = &item.id[..colon];
+                    let line_num: usize = item.id[colon + 1..].parse().unwrap_or(0);
+                    let path = std::path::PathBuf::from(path_str);
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        let fm = self.parser.parse_frontmatter(&content);
+                        let title = fm.and_then(|f| f.title).unwrap_or_else(|| item.label.clone());
+                        let id = crate::uuid::generate_hex_id();
+                        self.open_page_with_content(&id, &title, &path, &content);
+                        // Jump cursor to the matching line
+                        if let Some(page_id) = &self.active_page {
+                            if let Some(buf) = self.buffer_mgr.get(page_id) {
+                                let target_char = buf.text().line_to_char(
+                                    line_num.min(buf.len_lines().saturating_sub(1)),
+                                );
+                                self.cursor = target_char;
+                            }
+                        }
+                    }
                 }
             }
             PickerKind::SwitchBuffer => {
