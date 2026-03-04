@@ -34,6 +34,7 @@
 │  • RenderFrame producer (visible lines, cursor,      │
 │    status bar, picker state, diagnostics)             │
 │  • Which-key discoverability                         │
+│  • Theme engine (palettes, style resolution)         │
 │  • Link resolver + backlink tracker                  │
 │  • Bloom Markdown parser                             │
 │  • Search / query engine                             │
@@ -127,7 +128,7 @@ Bloom uses **semantic highlighting** inspired by Nicolas Rougier's nano-emacs/el
 ```
 Buffer text → highlight.rs (per-line scan) → StyledSpan[] → RenderedLine
                                                               ↓
-                                              Theme::props_for(style) → StyleProps
+                                              Theme::resolve(style, palette) → StyleProps
                                                               ↓
                                               TUI: ratatui::Style  |  GUI: CSS classes
 ```
@@ -162,7 +163,7 @@ Buffer text → highlight.rs (per-line scan) → StyledSpan[] → RenderedLine
 
 ### Theme Struct
 
-Themes are data — a `Theme` struct maps each `Style` variant to `StyleProps` (fg, bg, bold, italic, underline, dim, strikethrough). The default "Bloom" theme uses a Catppuccin Mocha base palette. Themes are swappable and will be user-configurable via `config.toml`.
+Themes are data — a `ThemePalette` struct holds 16 named colour slots (see [THEMING.md](THEMING.md) for hex values). The `resolve()` function maps each `Style` variant to `StyleProps` using the active palette. Themes are swappable at runtime via `:theme <name>` and user-configurable via `config.toml`.
 
 ---
 
