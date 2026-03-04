@@ -214,7 +214,7 @@ pub fn resolve_status_bar(mode: &str, active: bool, p: &ThemePalette) -> StylePr
         },
         _ => StyleProps {
             fg: Some(p.foreground),
-            bg: Some(p.modeline),
+            bg: Some(p.highlight),
             ..Default::default()
         },
     }

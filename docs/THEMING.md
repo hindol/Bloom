@@ -292,7 +292,7 @@ for background.                             strong underline; UUID hidden
 
 | Element | Foreground | Background |
 |---------|------------|------------|
-| Status bar (Normal) | `foreground` | `modeline` |
+| Status bar (Normal) | `foreground` | `highlight` |
 | Status bar (Insert) | `background` | `accent_green` |
 | Status bar (Visual) | `background` | `popout` |
 | Status bar (Command) | `background` | `accent_blue` |
