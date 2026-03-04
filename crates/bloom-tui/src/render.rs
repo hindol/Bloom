@@ -7,6 +7,7 @@ use ratatui::style::{Modifier, Style as RStyle};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
 
 use crate::theme::TuiTheme;
 
@@ -376,16 +377,16 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
         let middle_text = row.middle.as_deref().unwrap_or("");
 
         let available = results_area.width as usize;
-        let fixed_len = marker.len() + right_text.len() + if !middle_text.is_empty() { middle_text.len() + 2 } else { 0 };
-        let label_max = available.saturating_sub(fixed_len + 1);
-        let label = if row.label.len() > label_max {
-            format!("{}…", &row.label[..label_max.saturating_sub(1)])
-        } else {
-            row.label.clone()
-        };
+        let marker_w = marker.width();
+        let right_w = right_text.width();
+        let middle_w = if !middle_text.is_empty() { middle_text.width() + 2 } else { 0 };
+        let fixed_w = marker_w + right_w + middle_w;
+        let label_max = available.saturating_sub(fixed_w + 1);
+        let label = truncate_to_width(&row.label, label_max);
 
         // Compose the line: marker + label + gap + middle + gap + right
-        let used = marker.len() + label.len() + if !middle_text.is_empty() { middle_text.len() + 2 } else { 0 } + right_text.len();
+        let label_w = label.width();
+        let used = marker_w + label_w + middle_w + right_w;
         let pad = available.saturating_sub(used);
 
         let text = if !middle_text.is_empty() {
@@ -1042,4 +1043,25 @@ fn render_line(f: &mut Frame, x: u16, y: u16, _max_w: u16, text: &str, style: RS
         Paragraph::new(Line::from(Span::styled(text, style))),
         Rect::new(x, y, text.len() as u16 + 1, 1),
     );
+}
+
+/// Truncate a string to fit within `max_width` display columns, appending `…` if truncated.
+fn truncate_to_width(s: &str, max_width: usize) -> String {
+    use unicode_width::UnicodeWidthChar;
+    if s.width() <= max_width {
+        return s.to_string();
+    }
+    let ellipsis_w = 1; // '…' is 1 column wide
+    let target = max_width.saturating_sub(ellipsis_w);
+    let mut width = 0;
+    let mut end = 0;
+    for (i, ch) in s.char_indices() {
+        let cw = ch.width().unwrap_or(0);
+        if width + cw > target {
+            break;
+        }
+        width += cw;
+        end = i + ch.len_utf8();
+    }
+    format!("{}…", &s[..end])
 }
