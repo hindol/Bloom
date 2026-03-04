@@ -123,7 +123,7 @@ pub struct BloomEditor {
     // State
     cursor: usize,
     active_page: Option<types::PageId>,
-    picker_state: Option<PickerState>,
+    picker_state: Option<ActivePicker>,
     quick_capture: Option<QuickCaptureState>,
     notifications: Vec<render::Notification>,
     viewport: render::Viewport,
@@ -252,34 +252,40 @@ fn set_hidden_attribute(path: &std::path::Path) -> std::io::Result<()> {
     Ok(())
 }
 
-enum PickerState {
-    FindPage(picker::Picker<PageItem>),
+struct ActivePicker {
+    kind: keymap::dispatch::PickerKind,
+    picker: picker::Picker<GenericPickerItem>,
+    title: String,
+    query: String,
+}
+
+#[derive(Clone)]
+struct GenericPickerItem {
+    id: String,
+    label: String,
+    marginalia: Vec<String>,
+    preview_text: Option<String>,
+}
+
+impl picker::PickerItem for GenericPickerItem {
+    fn match_text(&self) -> &str {
+        &self.label
+    }
+    fn display(&self) -> picker::PickerRow {
+        picker::PickerRow {
+            label: self.label.clone(),
+            marginalia: self.marginalia.clone(),
+        }
+    }
+    fn preview(&self) -> Option<String> {
+        self.preview_text.clone()
+    }
 }
 
 struct QuickCaptureState {
     kind: keymap::dispatch::QuickCaptureKind,
     input: String,
     cursor_pos: usize,
-}
-
-#[derive(Clone)]
-struct PageItem {
-    meta: types::PageMeta,
-}
-
-impl picker::PickerItem for PageItem {
-    fn match_text(&self) -> &str {
-        &self.meta.title
-    }
-    fn display(&self) -> picker::PickerRow {
-        picker::PickerRow {
-            label: self.meta.title.clone(),
-            marginalia: vec![self.meta.path.display().to_string()],
-        }
-    }
-    fn preview(&self) -> Option<String> {
-        None
-    }
 }
 
 impl BloomEditor {
@@ -338,6 +344,140 @@ impl BloomEditor {
         let idx = names.iter().position(|n| *n == current).unwrap_or(0);
         let next = names[(idx + 1) % names.len()];
         self.set_theme(next);
+    }
+
+    fn open_picker(&mut self, kind: keymap::dispatch::PickerKind) {
+        use keymap::dispatch::PickerKind;
+        let (title, items) = match &kind {
+            PickerKind::FindPage => {
+                ("Find Page".to_string(), self.collect_page_items())
+            }
+            PickerKind::SwitchBuffer => {
+                let items: Vec<GenericPickerItem> = self.buffer_mgr.open_buffers().iter().map(|info| {
+                    GenericPickerItem {
+                        id: info.page_id.to_hex(),
+                        label: info.title.clone(),
+                        marginalia: vec![info.path.display().to_string()],
+                        preview_text: None,
+                    }
+                }).collect();
+                ("Switch Buffer".to_string(), items)
+            }
+            PickerKind::Search => {
+                ("Search".to_string(), self.collect_page_items())
+            }
+            PickerKind::Journal => {
+                ("Journal".to_string(), self.collect_journal_items())
+            }
+            PickerKind::Tags => {
+                let items = if let Some(idx) = &self.index {
+                    idx.all_tags().into_iter().map(|(tag, count)| {
+                        GenericPickerItem {
+                            id: tag.0.clone(),
+                            label: format!("#{}", tag.0),
+                            marginalia: vec![format!("{count} pages")],
+                            preview_text: None,
+                        }
+                    }).collect()
+                } else {
+                    Vec::new()
+                };
+                ("Tags".to_string(), items)
+            }
+            PickerKind::AllCommands => {
+                let items: Vec<GenericPickerItem> = vec![
+                    ("find_page", "Find page", "SPC f f"),
+                    ("switch_buffer", "Switch buffer", "SPC b b"),
+                    ("journal_today", "Journal today", "SPC j j"),
+                    ("search", "Search", "SPC s s"),
+                    ("search_tags", "Search tags", "SPC s t"),
+                    ("split_vertical", "Split vertical", "SPC w v"),
+                    ("split_horizontal", "Split horizontal", "SPC w s"),
+                    ("agenda", "Agenda", "SPC a a"),
+                    ("undo_tree", "Undo tree", "SPC u u"),
+                    ("theme_selector", "Theme selector", "SPC T t"),
+                    ("new_from_template", "New from template", "SPC n"),
+                    ("rebuild_index", "Rebuild index", "SPC h r"),
+                ].into_iter().map(|(id, label, keys)| {
+                    GenericPickerItem {
+                        id: id.to_string(),
+                        label: label.to_string(),
+                        marginalia: vec![keys.to_string()],
+                        preview_text: None,
+                    }
+                }).collect();
+                ("All Commands".to_string(), items)
+            }
+            PickerKind::Templates => {
+                ("Templates".to_string(), Vec::new())
+            }
+            _ => {
+                ("Picker".to_string(), Vec::new())
+            }
+        };
+        self.picker_state = Some(ActivePicker {
+            kind,
+            picker: picker::Picker::new(items),
+            title,
+            query: String::new(),
+        });
+    }
+
+    fn collect_page_items(&self) -> Vec<GenericPickerItem> {
+        // Scan vault directory for .md files in pages/
+        if let Some(root) = &self.vault_root {
+            let pages_dir = root.join("pages");
+            if pages_dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(&pages_dir) {
+                    return entries.filter_map(|e| {
+                        let e = e.ok()?;
+                        let path = e.path();
+                        if path.extension()?.to_str()? != "md" { return None; }
+                        let content = std::fs::read_to_string(&path).ok()?;
+                        let fm = self.parser.parse_frontmatter(&content)?;
+                        let title = fm.title.unwrap_or_else(|| {
+                            path.file_stem().unwrap_or_default().to_string_lossy().to_string()
+                        });
+                        let tags = fm.tags.iter().map(|t| format!("#{}", t.0)).collect::<Vec<_>>().join(" ");
+                        let preview = content.lines().take(10).collect::<Vec<_>>().join("\n");
+                        Some(GenericPickerItem {
+                            id: path.to_string_lossy().to_string(),
+                            label: title,
+                            marginalia: vec![tags],
+                            preview_text: Some(preview),
+                        })
+                    }).collect();
+                }
+            }
+        }
+        Vec::new()
+    }
+
+    fn collect_journal_items(&self) -> Vec<GenericPickerItem> {
+        if let Some(root) = &self.vault_root {
+            let journal_dir = root.join("journal");
+            if journal_dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(&journal_dir) {
+                    let mut items: Vec<GenericPickerItem> = entries.filter_map(|e| {
+                        let e = e.ok()?;
+                        let path = e.path();
+                        if path.extension()?.to_str()? != "md" { return None; }
+                        let stem = path.file_stem()?.to_string_lossy().to_string();
+                        let preview = std::fs::read_to_string(&path).ok()
+                            .map(|c| c.lines().take(8).collect::<Vec<_>>().join("\n"));
+                        Some(GenericPickerItem {
+                            id: path.to_string_lossy().to_string(),
+                            label: stem,
+                            marginalia: vec!["journal".to_string()],
+                            preview_text: preview,
+                        })
+                    }).collect();
+                    items.sort_by(|a, b| b.label.cmp(&a.label)); // most recent first
+                    return items;
+                }
+            }
+        }
+        Vec::new()
     }
 
     fn open_theme_picker(&mut self) {
@@ -580,8 +720,7 @@ impl BloomEditor {
                     if matches!(kind, keymap::dispatch::PickerKind::Theme) {
                         self.open_theme_picker();
                     } else {
-                        // TODO: open other picker overlays
-                        result.push(action);
+                        self.open_picker(kind.clone());
                     }
                 }
                 keymap::dispatch::Action::ClosePicker => {
@@ -726,18 +865,83 @@ impl BloomEditor {
         match &key.code {
             KeyCode::Esc => {
                 self.picker_state = None;
-                vec![keymap::dispatch::Action::ClosePicker]
+                vec![keymap::dispatch::Action::Noop]
             }
             KeyCode::Enter => {
-                vec![keymap::dispatch::Action::ClosePicker]
+                if let Some(ap) = self.picker_state.take() {
+                    if let Some(selected) = ap.picker.selected() {
+                        self.handle_picker_selection(&ap.kind, selected.clone());
+                    }
+                }
+                vec![keymap::dispatch::Action::Noop]
             }
-            KeyCode::Up => vec![keymap::dispatch::Action::PickerInput(
-                keymap::dispatch::PickerInputAction::MoveSelection(-1),
-            )],
-            KeyCode::Down => vec![keymap::dispatch::Action::PickerInput(
-                keymap::dispatch::PickerInputAction::MoveSelection(1),
-            )],
+            KeyCode::Up => {
+                if let Some(ap) = &mut self.picker_state {
+                    ap.picker.move_selection(-1);
+                }
+                vec![keymap::dispatch::Action::Noop]
+            }
+            KeyCode::Down => {
+                if let Some(ap) = &mut self.picker_state {
+                    ap.picker.move_selection(1);
+                }
+                vec![keymap::dispatch::Action::Noop]
+            }
+            KeyCode::Backspace => {
+                if let Some(ap) = &mut self.picker_state {
+                    if !ap.query.is_empty() {
+                        ap.query.pop();
+                        ap.picker.set_query(&ap.query);
+                    }
+                }
+                vec![keymap::dispatch::Action::Noop]
+            }
+            KeyCode::Char(c) => {
+                if let Some(ap) = &mut self.picker_state {
+                    ap.query.push(*c);
+                    ap.picker.set_query(&ap.query);
+                }
+                vec![keymap::dispatch::Action::Noop]
+            }
             _ => vec![keymap::dispatch::Action::Noop],
+        }
+    }
+
+    fn handle_picker_selection(
+        &mut self,
+        kind: &keymap::dispatch::PickerKind,
+        item: GenericPickerItem,
+    ) {
+        use keymap::dispatch::PickerKind;
+        match kind {
+            PickerKind::FindPage | PickerKind::Search | PickerKind::Journal => {
+                // Open the selected page
+                let path = std::path::PathBuf::from(&item.id);
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    let fm = self.parser.parse_frontmatter(&content);
+                    let title = fm.and_then(|f| f.title).unwrap_or_else(|| item.label.clone());
+                    let id = crate::uuid::generate_hex_id();
+                    self.open_page_with_content(&id, &title, &path, &content);
+                }
+            }
+            PickerKind::SwitchBuffer => {
+                // Switch to the selected buffer
+                if let Some(page_id) = types::PageId::from_hex(&item.id) {
+                    self.active_page = Some(page_id);
+                    self.cursor = 0;
+                }
+            }
+            PickerKind::Tags => {
+                // Open a search filtered by this tag (for now, just log)
+                // TODO: transition to search picker filtered by tag
+            }
+            PickerKind::AllCommands => {
+                // Execute the command
+                let actions = self.action_id_to_actions(&item.id);
+                // Need to execute these actions
+                let _ = self.execute_actions(actions);
+            }
+            _ => {}
         }
     }
 
@@ -1180,6 +1384,24 @@ impl BloomEditor {
                     preview: Some(sample.to_string()),
                     total_count: theme::THEME_NAMES.len(),
                     filtered_count: theme::THEME_NAMES.len(),
+                })
+            } else if let Some(ap) = &self.picker_state {
+                let results: Vec<render::PickerRow> = ap.picker.results().into_iter().map(|item| {
+                    render::PickerRow {
+                        label: item.label.clone(),
+                        marginalia: item.marginalia.clone(),
+                    }
+                }).collect();
+                let preview = ap.picker.selected().and_then(|item| item.preview_text.clone());
+                Some(render::PickerFrame {
+                    title: ap.title.clone(),
+                    query: ap.query.clone(),
+                    results,
+                    selected_index: ap.picker.selected_index(),
+                    filters: Vec::new(),
+                    preview,
+                    total_count: ap.picker.total_count(),
+                    filtered_count: ap.picker.filtered_count(),
                 })
             } else {
                 None
@@ -1869,10 +2091,12 @@ mod tests {
         editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
         editor.handle_key(KeyEvent::char(' ')); // SPC
         editor.handle_key(KeyEvent::char('f')); // f (group)
-        let actions = editor.handle_key(KeyEvent::char('f')); // f (action)
-        assert!(actions
-            .iter()
-            .any(|a| matches!(a, keymap::dispatch::Action::OpenPicker(keymap::dispatch::PickerKind::FindPage))));
+        editor.handle_key(KeyEvent::char('f')); // f (action)
+        // Picker should now be open
+        assert!(editor.picker_state.is_some());
+        assert_eq!(editor.picker_state.as_ref().unwrap().title, "Find Page");
+        let frame = editor.render();
+        assert!(frame.picker.is_some());
     }
 
     // SPC shows which-key popup in render
