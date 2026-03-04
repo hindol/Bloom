@@ -547,7 +547,35 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
 
         let mut spans: Vec<Span> = Vec::new();
         spans.push(Span::styled(marker, style));
-        spans.push(Span::styled(label.clone(), style));
+
+        // Highlight query matches in the label
+        if !picker.query.is_empty() && !is_selected {
+            let match_spans = bloom_core::render::search_highlight::highlight_matches(
+                &label, &picker.query,
+            );
+            let match_style = theme.style_for(&bloom_core::parser::traits::Style::SearchMatch);
+            if match_spans.is_empty() {
+                spans.push(Span::styled(label.clone(), style));
+            } else {
+                let mut pos = 0;
+                for ms in &match_spans {
+                    let s = ms.range.start.min(label.len());
+                    let e = ms.range.end.min(label.len());
+                    if s > pos {
+                        spans.push(Span::styled(&label[pos..s], style));
+                    }
+                    if s < e {
+                        spans.push(Span::styled(&label[s..e], match_style));
+                    }
+                    pos = e;
+                }
+                if pos < label.len() {
+                    spans.push(Span::styled(&label[pos..], style));
+                }
+            }
+        } else {
+            spans.push(Span::styled(label.clone(), style));
+        }
         spans.push(Span::styled(" ".repeat(label_gap), style));
 
         if middle_zone > 0 {

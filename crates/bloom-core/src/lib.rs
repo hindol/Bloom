@@ -429,9 +429,13 @@ impl BloomEditor {
             PickerKind::Search => 2,
             _ => 0,
         };
+        let match_mode = match &kind {
+            PickerKind::Search => picker::MatchMode::AllWords,
+            _ => picker::MatchMode::Fuzzy,
+        };
         self.picker_state = Some(ActivePicker {
             kind,
-            picker: picker::Picker::new(items),
+            picker: picker::Picker::with_match_mode(items, match_mode),
             title,
             query: String::new(),
             status_noun,

@@ -4,5 +4,5 @@ pub mod picker;
 pub mod source;
 
 pub use filter::PickerFilter;
-pub use picker::Picker;
+pub use picker::{MatchMode, Picker};
 pub use source::{ColumnStyle, PickerColumn, PickerItem, PickerRow};

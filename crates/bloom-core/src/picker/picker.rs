@@ -1,7 +1,16 @@
 use crate::picker::filter::PickerFilter;
-use crate::picker::nucleo::fuzzy_score;
+use crate::picker::nucleo::{fuzzy_score, all_words_score};
 use crate::picker::source::PickerItem;
 use std::collections::HashSet;
+
+/// How the picker matches query against items.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatchMode {
+    /// Subsequence fuzzy matching (default for FindPage, SwitchBuffer, etc.)
+    Fuzzy,
+    /// All whitespace-separated words must appear as contiguous substrings.
+    AllWords,
+}
 
 pub struct Picker<T: PickerItem> {
     all_items: Vec<T>,
@@ -10,10 +19,15 @@ pub struct Picker<T: PickerItem> {
     selected_index: usize,
     filters: Vec<PickerFilter>,
     marked: HashSet<usize>,
+    match_mode: MatchMode,
 }
 
 impl<T: PickerItem> Picker<T> {
     pub fn new(items: Vec<T>) -> Self {
+        Self::with_match_mode(items, MatchMode::Fuzzy)
+    }
+
+    pub fn with_match_mode(items: Vec<T>, match_mode: MatchMode) -> Self {
         let filtered: Vec<(usize, u32)> = items.iter().enumerate().map(|(i, _)| (i, 0)).collect();
         Picker {
             all_items: items,
@@ -22,6 +36,7 @@ impl<T: PickerItem> Picker<T> {
             selected_index: 0,
             filters: Vec::new(),
             marked: HashSet::new(),
+            match_mode,
         }
     }
 
@@ -39,12 +54,16 @@ impl<T: PickerItem> Picker<T> {
                 .map(|(i, _)| (i, 0))
                 .collect();
         } else {
+            let scorer = match self.match_mode {
+                MatchMode::Fuzzy => fuzzy_score as fn(&str, &str) -> Option<u32>,
+                MatchMode::AllWords => all_words_score,
+            };
             self.filtered = self
                 .all_items
                 .iter()
                 .enumerate()
                 .filter_map(|(i, item)| {
-                    fuzzy_score(&self.query, item.match_text()).map(|score| (i, score))
+                    scorer(&self.query, item.match_text()).map(|score| (i, score))
                 })
                 .collect();
             self.filtered.sort_by(|a, b| b.1.cmp(&a.1));

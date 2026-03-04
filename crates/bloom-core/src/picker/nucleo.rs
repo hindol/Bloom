@@ -44,6 +44,37 @@ pub fn fuzzy_score(query: &str, candidate: &str) -> Option<u32> {
     }
 }
 
+/// Score a candidate using all-words substring matching.
+/// Every whitespace-separated word in the query must appear as a contiguous
+/// case-insensitive substring in the candidate. Returns None if any word is
+/// missing. Score favours earlier match positions.
+pub fn all_words_score(query: &str, candidate: &str) -> Option<u32> {
+    let candidate_lower = candidate.to_lowercase();
+    let mut score: u32 = 0;
+
+    for word in query.split_whitespace() {
+        if word.is_empty() {
+            continue;
+        }
+        let word_lower = word.to_lowercase();
+        match candidate_lower.find(&word_lower) {
+            Some(pos) => {
+                // Earlier matches score higher
+                let pos_bonus = 100u32.saturating_sub(pos as u32);
+                // Word boundary bonus
+                let boundary = pos == 0
+                    || candidate_lower.as_bytes().get(pos - 1)
+                        .map(|&b| b == b' ' || b == b'_' || b == b'-' || b == b'/')
+                        .unwrap_or(false);
+                score += pos_bonus + if boundary { 50 } else { 0 };
+            }
+            None => return None,
+        }
+    }
+
+    Some(score)
+}
+
 /// Fuzzy match a query against multiple items. Returns (index, score) pairs sorted by score desc.
 pub fn fuzzy_match(query: &str, items: &[&str]) -> Vec<(usize, u32)> {
     let mut results: Vec<(usize, u32)> = items
@@ -53,4 +84,36 @@ pub fn fuzzy_match(query: &str, items: &[&str]) -> Vec<(usize, u32)> {
         .collect();
     results.sort_by(|a, b| b.1.cmp(&a.1));
     results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_words_matches_single_word() {
+        assert!(all_words_score("rust", "Written in Rust").is_some());
+    }
+
+    #[test]
+    fn all_words_matches_multiple_words_any_order() {
+        assert!(all_words_score("rust edi", "An EDItor for RUST").is_some());
+        assert!(all_words_score("edi rust", "An EDItor for RUST").is_some());
+    }
+
+    #[test]
+    fn all_words_rejects_missing_word() {
+        assert!(all_words_score("rust python", "Written in Rust").is_none());
+    }
+
+    #[test]
+    fn all_words_rejects_subsequence() {
+        // "rust" as subsequence (r-u-s-t) but not contiguous
+        assert!(all_words_score("rust", "Ropes use structures today").is_none());
+    }
+
+    #[test]
+    fn all_words_case_insensitive() {
+        assert!(all_words_score("RUST", "rust programming").is_some());
+    }
 }
