@@ -131,6 +131,13 @@ pub struct BloomEditor {
     vault_root: Option<std::path::PathBuf>,
     leader_keys: Vec<types::KeyEvent>,
     active_theme: &'static theme::ThemePalette,
+    theme_picker: Option<ThemePickerState>,
+}
+
+struct ThemePickerState {
+    selected: usize,
+    previous_theme: &'static theme::ThemePalette,
+    query: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -304,6 +311,7 @@ impl BloomEditor {
             vault_root: None,
             leader_keys: Vec::new(),
             active_theme,
+            theme_picker: None,
             config,
         })
     }
@@ -330,6 +338,72 @@ impl BloomEditor {
         let idx = names.iter().position(|n| *n == current).unwrap_or(0);
         let next = names[(idx + 1) % names.len()];
         self.set_theme(next);
+    }
+
+    fn open_theme_picker(&mut self) {
+        let current_idx = theme::THEME_NAMES
+            .iter()
+            .position(|n| *n == self.active_theme.name)
+            .unwrap_or(0);
+        self.theme_picker = Some(ThemePickerState {
+            selected: current_idx,
+            previous_theme: self.active_theme,
+            query: String::new(),
+        });
+        // Apply live preview of the currently selected theme
+        self.set_theme(theme::THEME_NAMES[current_idx]);
+    }
+
+    fn theme_picker_move(&mut self, delta: i32) {
+        if let Some(tp) = &mut self.theme_picker {
+            let count = theme::THEME_NAMES.len() as i32;
+            tp.selected = ((tp.selected as i32 + delta).rem_euclid(count)) as usize;
+            let name = theme::THEME_NAMES[tp.selected];
+            // Live preview
+            if let Some(palette) = theme::palette_by_name(name) {
+                self.active_theme = palette;
+            }
+        }
+    }
+
+    fn theme_picker_confirm(&mut self) {
+        if let Some(tp) = self.theme_picker.take() {
+            // Keep the currently previewed theme
+            let name = theme::THEME_NAMES[tp.selected];
+            self.set_theme(name);
+            // Persist to config.toml if vault is initialized
+            if let Some(root) = &self.vault_root {
+                let config_path = root.join("config.toml");
+                if config_path.exists() {
+                    if let Ok(content) = std::fs::read_to_string(&config_path) {
+                        // Simple replacement of the theme name line
+                        let new_content = if content.contains("name = ") {
+                            content
+                                .lines()
+                                .map(|l| {
+                                    if l.trim().starts_with("name = ") && !l.contains("mode") {
+                                        format!("name = \"{}\"", name)
+                                    } else {
+                                        l.to_string()
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        } else {
+                            format!("{content}\n[theme]\nname = \"{name}\"\n")
+                        };
+                        let _ = std::fs::write(&config_path, new_content);
+                    }
+                }
+            }
+        }
+    }
+
+    fn theme_picker_cancel(&mut self) {
+        if let Some(tp) = self.theme_picker.take() {
+            // Revert to original theme
+            self.active_theme = tp.previous_theme;
+        }
     }
 
     /// Initialize with a vault path — sets up index, journal, template engine
@@ -434,6 +508,11 @@ impl BloomEditor {
             return self.execute_actions(vec![action]);
         }
 
+        // If theme picker is open, route to theme picker
+        if self.theme_picker.is_some() {
+            return self.handle_theme_picker_key(&key);
+        }
+
         // If picker is open, route to picker
         if self.picker_state.is_some() {
             return self.handle_picker_key(&key);
@@ -497,9 +576,13 @@ impl BloomEditor {
                     // TODO: open undo tree in split pane
                     result.push(action);
                 }
-                keymap::dispatch::Action::OpenPicker(_) => {
-                    // TODO: open picker overlay
-                    result.push(action);
+                keymap::dispatch::Action::OpenPicker(ref kind) => {
+                    if matches!(kind, keymap::dispatch::PickerKind::Theme) {
+                        self.open_theme_picker();
+                    } else {
+                        // TODO: open other picker overlays
+                        result.push(action);
+                    }
                 }
                 keymap::dispatch::Action::ClosePicker => {
                     self.picker_state = None;
@@ -608,8 +691,30 @@ impl BloomEditor {
             )],
             "rebuild_index" => vec![keymap::dispatch::Action::RebuildIndex],
             "toggle_mcp" => vec![keymap::dispatch::Action::ToggleMcp],
-            "theme_selector" => {
-                self.cycle_theme();
+            "theme_selector" => vec![keymap::dispatch::Action::OpenPicker(
+                keymap::dispatch::PickerKind::Theme,
+            )],
+            _ => vec![keymap::dispatch::Action::Noop],
+        }
+    }
+
+    fn handle_theme_picker_key(&mut self, key: &types::KeyEvent) -> Vec<keymap::dispatch::Action> {
+        use types::KeyCode;
+        match &key.code {
+            KeyCode::Esc => {
+                self.theme_picker_cancel();
+                vec![keymap::dispatch::Action::Noop]
+            }
+            KeyCode::Enter => {
+                self.theme_picker_confirm();
+                vec![keymap::dispatch::Action::Noop]
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.theme_picker_move(-1);
+                vec![keymap::dispatch::Action::Noop]
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.theme_picker_move(1);
                 vec![keymap::dispatch::Action::Noop]
             }
             _ => vec![keymap::dispatch::Action::Noop],
@@ -1052,7 +1157,33 @@ impl BloomEditor {
             panes,
             maximized: self.window_mgr.is_maximized(),
             hidden_pane_count: self.window_mgr.hidden_pane_count(),
-            picker: None,
+            picker: if let Some(tp) = &self.theme_picker {
+                let sample = "## Preview\n\n- [ ] Sample task @due(2026-03-05)\n- [x] Completed task\nSee [[abc123|Text Editor Theory]].\n#rust #editors";
+                Some(render::PickerFrame {
+                    title: "Theme".to_string(),
+                    query: tp.query.clone(),
+                    results: theme::THEME_NAMES
+                        .iter()
+                        .map(|name| {
+                            let current = if *name == tp.previous_theme.name { "(current)" } else { "" };
+                            render::PickerRow {
+                                label: name.to_string(),
+                                marginalia: vec![
+                                    theme::theme_description(name).to_string(),
+                                    current.to_string(),
+                                ],
+                            }
+                        })
+                        .collect(),
+                    selected_index: tp.selected,
+                    filters: Vec::new(),
+                    preview: Some(sample.to_string()),
+                    total_count: theme::THEME_NAMES.len(),
+                    filtered_count: theme::THEME_NAMES.len(),
+                })
+            } else {
+                None
+            },
             which_key: if self.leader_keys.len() > 1 {
                 let lookup_keys: Vec<types::KeyEvent> = self.leader_keys[1..].to_vec();
                 match self.which_key_tree.lookup(&lookup_keys) {
@@ -1851,6 +1982,67 @@ mod tests {
         assert!(actions.iter().any(|a| matches!(a, keymap::dispatch::Action::Redo)));
         let buf = editor.buffer_mgr.get(&id).unwrap();
         assert_eq!(buf.text().to_string(), "Xhello");
+    }
+
+    // SPC T t opens theme picker, j/k navigates with live preview, Enter confirms, Esc reverts
+    #[test]
+    fn test_theme_picker_flow() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "hello");
+
+        let original_theme = editor.theme().name;
+        assert_eq!(original_theme, "bloom-dark");
+
+        // Open theme picker via SPC T t
+        editor.handle_key(KeyEvent::char(' ')); // SPC
+        editor.handle_key(KeyEvent {
+            code: types::KeyCode::Char('T'),
+            modifiers: types::Modifiers::shift(),
+        });
+        editor.handle_key(KeyEvent::char('t'));
+
+        // Picker should be open
+        assert!(editor.theme_picker.is_some());
+        let frame = editor.render();
+        assert!(frame.picker.is_some());
+        let picker = frame.picker.unwrap();
+        assert_eq!(picker.title, "Theme");
+        assert_eq!(picker.results.len(), 4);
+
+        // Move down — live preview changes theme
+        editor.handle_key(KeyEvent::char('j'));
+        assert_eq!(editor.theme().name, "bloom-dark-faded");
+
+        // Esc reverts
+        editor.handle_key(KeyEvent::esc());
+        assert!(editor.theme_picker.is_none());
+        assert_eq!(editor.theme().name, "bloom-dark");
+    }
+
+    #[test]
+    fn test_theme_picker_confirm() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "hello");
+
+        // Open and move to bloom-light
+        editor.handle_key(KeyEvent::char(' '));
+        editor.handle_key(KeyEvent {
+            code: types::KeyCode::Char('T'),
+            modifiers: types::Modifiers::shift(),
+        });
+        editor.handle_key(KeyEvent::char('t'));
+        editor.handle_key(KeyEvent::char('j')); // bloom-dark-faded
+        editor.handle_key(KeyEvent::char('j')); // bloom-light
+        assert_eq!(editor.theme().name, "bloom-light");
+
+        // Enter confirms
+        editor.handle_key(KeyEvent::enter());
+        assert!(editor.theme_picker.is_none());
+        assert_eq!(editor.theme().name, "bloom-light");
     }
 }
 

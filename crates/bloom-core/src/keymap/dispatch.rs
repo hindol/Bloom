@@ -77,6 +77,7 @@ pub enum PickerKind {
     AllCommands,
     InlineLink,
     Templates,
+    Theme,
 }
 
 #[derive(Debug, Clone)]
