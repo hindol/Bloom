@@ -1,150 +1,135 @@
 use bloom_core::parser::traits::Style;
+use bloom_core::render::NotificationLevel;
+use bloom_core::theme::{self, Chrome, Rgb, StyleProps, ThemePalette};
 use ratatui::style::{Color, Modifier, Style as RStyle};
 
-/// 16-slot theme palette per THEMING.md.
-pub struct ThemePalette {
-    pub foreground: Color,
-    pub background: Color,
-    pub modeline: Color,
-    pub highlight: Color,
-    pub critical: Color,
-    pub popout: Color,
-    pub strong: Color,
-    pub salient: Color,
-    pub faded: Color,
-    pub subtle: Color,
-    pub mild: Color,
-    pub ultralight: Color,
-    pub accent_red: Color,
-    pub accent_green: Color,
-    pub accent_blue: Color,
-    pub accent_yellow: Color,
+/// Convert core `Rgb` to ratatui `Color`.
+fn rgb(c: Rgb) -> Color {
+    Color::Rgb(c.0, c.1, c.2)
 }
 
-impl ThemePalette {
-    /// Bloom Dark — Lambda `dark` variant.
-    pub fn bloom_dark() -> Self {
-        Self {
-            foreground: Color::Rgb(0xEB, 0xE9, 0xE7),
-            background: Color::Rgb(0x14, 0x14, 0x14),
-            modeline: Color::Rgb(0x1A, 0x19, 0x19),
-            highlight: Color::Rgb(0x21, 0x22, 0x28),
-            critical: Color::Rgb(0xCF, 0x67, 0x52),
-            popout: Color::Rgb(0x7A, 0x9E, 0xFF),
-            strong: Color::Rgb(0xF5, 0xF2, 0xF0),
-            salient: Color::Rgb(0xF4, 0xBF, 0x4F),
-            faded: Color::Rgb(0xA3, 0xA3, 0xA3),
-            subtle: Color::Rgb(0x37, 0x37, 0x3E),
-            mild: Color::Rgb(0x47, 0x46, 0x48),
-            ultralight: Color::Rgb(0x2C, 0x2C, 0x34),
-            accent_red: Color::Rgb(0xEC, 0x6A, 0x5E),
-            accent_green: Color::Rgb(0x62, 0xC5, 0x54),
-            accent_blue: Color::Rgb(0x81, 0xA1, 0xC1),
-            accent_yellow: Color::Rgb(0xF2, 0xDA, 0x61),
-        }
+/// Convert core `StyleProps` to ratatui `Style`.
+pub fn to_rstyle(props: &StyleProps) -> RStyle {
+    let mut s = RStyle::default();
+    if let Some(fg) = props.fg {
+        s = s.fg(rgb(fg));
+    }
+    if let Some(bg) = props.bg {
+        s = s.bg(rgb(bg));
+    }
+    if props.bold {
+        s = s.add_modifier(Modifier::BOLD);
+    }
+    if props.italic {
+        s = s.add_modifier(Modifier::ITALIC);
+    }
+    if props.underline {
+        s = s.add_modifier(Modifier::UNDERLINED);
+    }
+    if props.dim {
+        s = s.add_modifier(Modifier::DIM);
+    }
+    if props.strikethrough {
+        s = s.add_modifier(Modifier::CROSSED_OUT);
+    }
+    s
+}
+
+/// Thin wrapper around a core `ThemePalette` that produces ratatui styles.
+pub struct TuiTheme<'a> {
+    pub palette: &'a ThemePalette,
+}
+
+impl<'a> TuiTheme<'a> {
+    pub fn new(palette: &'a ThemePalette) -> Self {
+        Self { palette }
     }
 
-    /// Map a bloom-core `Style` variant to a ratatui `Style` per THEMING.md face mapping.
+    /// Resolve a content `Style` to ratatui `Style`.
     pub fn style_for(&self, style: &Style) -> RStyle {
-        match style {
-            Style::Normal => RStyle::default().fg(self.foreground),
-            Style::Heading { level: 1 } => {
-                RStyle::default().fg(self.strong).add_modifier(Modifier::BOLD)
-            }
-            Style::Heading { level: 2 } => {
-                RStyle::default().fg(self.salient).add_modifier(Modifier::BOLD)
-            }
-            Style::Heading { .. } => {
-                RStyle::default().fg(self.foreground).add_modifier(Modifier::BOLD)
-            }
-            Style::Bold => RStyle::default().fg(self.foreground).add_modifier(Modifier::BOLD),
-            Style::Italic => RStyle::default().fg(self.foreground).add_modifier(Modifier::ITALIC),
-            Style::Code => RStyle::default().fg(self.foreground).bg(self.subtle),
-            Style::CodeBlock => RStyle::default().fg(self.foreground).bg(self.subtle),
-            Style::Link => RStyle::default()
-                .fg(self.strong)
-                .bg(self.modeline)
-                .add_modifier(Modifier::UNDERLINED),
-            Style::Tag => RStyle::default().fg(self.faded),
-            Style::Timestamp => RStyle::default().fg(self.faded),
-            Style::BlockId => RStyle::default()
-                .fg(self.faded)
-                .add_modifier(Modifier::DIM),
-            Style::ListMarker => RStyle::default().fg(self.foreground),
-            Style::CheckboxUnchecked => RStyle::default().fg(self.accent_yellow),
-            Style::CheckboxChecked => RStyle::default()
-                .fg(self.accent_green)
-                .add_modifier(Modifier::CROSSED_OUT),
-            Style::Frontmatter => RStyle::default()
-                .fg(self.faded)
-                .add_modifier(Modifier::ITALIC),
-            Style::BrokenLink => RStyle::default()
-                .fg(self.critical)
-                .add_modifier(Modifier::CROSSED_OUT),
-            Style::SyntaxNoise => RStyle::default()
-                .fg(self.faded)
-                .add_modifier(Modifier::DIM),
-        }
+        to_rstyle(&theme::resolve(style, self.palette))
     }
 
-    /// Status bar style for the given mode (active pane).
-    pub fn status_bar_style(&self, mode: &str) -> RStyle {
-        match mode {
-            "INSERT" => RStyle::default().fg(self.background).bg(self.accent_green),
-            "VISUAL" => RStyle::default().fg(self.background).bg(self.popout),
-            "COMMAND" => RStyle::default().fg(self.background).bg(self.accent_blue),
-            // NORMAL and fallback
-            _ => RStyle::default().fg(self.foreground).bg(self.modeline),
-        }
+    /// Status bar style.
+    pub fn status_bar_style(&self, mode: &str, active: bool) -> RStyle {
+        to_rstyle(&theme::resolve_status_bar(mode, active, self.palette))
     }
 
-    /// Status bar style for inactive pane (compact, dim).
-    pub fn status_bar_inactive(&self) -> RStyle {
-        RStyle::default().fg(self.faded).bg(self.subtle)
+    /// Background colour for filling.
+    pub fn background(&self) -> Color {
+        rgb(self.palette.background)
     }
 
-    /// Border style.
-    pub fn border_style(&self) -> RStyle {
-        RStyle::default().fg(self.faded)
+    /// Salient colour (for which-key group labels, headings in wizard, etc.).
+    pub fn salient(&self) -> Color {
+        rgb(self.palette.salient)
     }
 
-    /// Picker surface background.
-    pub fn picker_style(&self) -> RStyle {
-        RStyle::default().fg(self.foreground).bg(self.subtle)
+    /// Strong colour.
+    pub fn strong(&self) -> Color {
+        rgb(self.palette.strong)
     }
 
-    /// Picker selected row.
-    pub fn picker_selected(&self) -> RStyle {
-        RStyle::default().fg(self.foreground).bg(self.mild)
+    /// Foreground colour.
+    pub fn foreground(&self) -> Color {
+        rgb(self.palette.foreground)
     }
 
-    /// Which-key popup style.
-    pub fn which_key_style(&self) -> RStyle {
-        RStyle::default().fg(self.foreground).bg(self.subtle)
+    /// Critical colour.
+    pub fn critical(&self) -> Color {
+        rgb(self.palette.critical)
     }
 
-    /// Faded text (tildes, line numbers).
+    /// Accent green.
+    pub fn accent_green(&self) -> Color {
+        rgb(self.palette.accent_green)
+    }
+
+    /// Accent yellow.
+    pub fn accent_yellow(&self) -> Color {
+        rgb(self.palette.accent_yellow)
+    }
+
+    /// Modeline colour.
+    pub fn modeline(&self) -> Color {
+        rgb(self.palette.modeline)
+    }
+
+    /// Mild colour.
+    pub fn mild(&self) -> Color {
+        rgb(self.palette.mild)
+    }
+
     pub fn faded_style(&self) -> RStyle {
-        RStyle::default().fg(self.faded)
+        to_rstyle(&theme::resolve_chrome(Chrome::Faded, self.palette))
     }
 
-    /// Highlight current line.
+    pub fn border_style(&self) -> RStyle {
+        to_rstyle(&theme::resolve_chrome(Chrome::WindowBorder, self.palette))
+    }
+
+    pub fn picker_style(&self) -> RStyle {
+        to_rstyle(&theme::resolve_chrome(Chrome::PickerSurface, self.palette))
+    }
+
+    pub fn picker_selected(&self) -> RStyle {
+        to_rstyle(&theme::resolve_chrome(Chrome::PickerSelected, self.palette))
+    }
+
+    pub fn which_key_style(&self) -> RStyle {
+        to_rstyle(&theme::resolve_chrome(Chrome::WhichKey, self.palette))
+    }
+
     pub fn current_line_style(&self) -> RStyle {
-        RStyle::default().bg(self.highlight)
+        to_rstyle(&theme::resolve_chrome(Chrome::CurrentLine, self.palette))
     }
 
-    /// Notification style based on level.
-    pub fn notification_style(&self, level: &bloom_core::render::NotificationLevel) -> RStyle {
-        match level {
-            bloom_core::render::NotificationLevel::Info => {
-                RStyle::default().fg(self.foreground).bg(self.subtle)
-            }
-            bloom_core::render::NotificationLevel::Warning => {
-                RStyle::default().fg(self.background).bg(self.accent_yellow)
-            }
-            bloom_core::render::NotificationLevel::Error => {
-                RStyle::default().fg(self.background).bg(self.critical)
-            }
-        }
+    pub fn notification_style(&self, level: &NotificationLevel) -> RStyle {
+        let chrome = match level {
+            NotificationLevel::Info => Chrome::NotificationInfo,
+            NotificationLevel::Warning => Chrome::NotificationWarning,
+            NotificationLevel::Error => Chrome::NotificationError,
+        };
+        to_rstyle(&theme::resolve_chrome(chrome, self.palette))
     }
 }

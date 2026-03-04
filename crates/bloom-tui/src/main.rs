@@ -17,7 +17,7 @@ use crossterm::{cursor, execute};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use theme::ThemePalette;
+use theme::TuiTheme;
 
 fn main() -> io::Result<()> {
     // Terminal setup
@@ -56,10 +56,12 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
     let size = terminal.size()?;
     editor.resize(size.height as usize, size.width as usize);
 
-    let theme = ThemePalette::bloom_dark();
     let tick_rate = Duration::from_millis(100);
 
     loop {
+        // Build TuiTheme from the editor's active palette (may change at runtime)
+        let theme = TuiTheme::new(editor.theme());
+
         // Render
         let frame = editor.render();
 

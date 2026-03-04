@@ -217,6 +217,10 @@ pub fn default_tree() -> WhichKeyTree {
     // New from template (single key, no sub-key)
     tree.register("n", "New from template", "new_from_template".into());
 
+    // Toggles
+    tree.register("T t", "Theme selector", "theme_selector".into());
+    tree.register("T m", "Toggle MCP", "toggle_mcp".into());
+
     tree
 }
 

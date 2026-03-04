@@ -15,6 +15,7 @@ pub mod render;
 pub mod session;
 pub mod store;
 pub mod template;
+pub mod theme;
 pub mod timeline;
 pub mod types;
 pub mod uuid;
@@ -129,6 +130,7 @@ pub struct BloomEditor {
     wizard: Option<SetupWizardState>,
     vault_root: Option<std::path::PathBuf>,
     leader_keys: Vec<types::KeyEvent>,
+    active_theme: &'static theme::ThemePalette,
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +277,8 @@ impl picker::PickerItem for PageItem {
 
 impl BloomEditor {
     pub fn new(config: config::Config) -> Result<Self, error::BloomError> {
+        let active_theme = theme::palette_by_name(&config.theme.name)
+            .unwrap_or(&theme::BLOOM_DARK);
         Ok(Self {
             vim_state: vim::VimState::new(),
             window_mgr: window::WindowManager::new(),
@@ -299,8 +303,33 @@ impl BloomEditor {
             wizard: None,
             vault_root: None,
             leader_keys: Vec::new(),
+            active_theme,
             config,
         })
+    }
+
+    /// Get the active theme palette.
+    pub fn theme(&self) -> &'static theme::ThemePalette {
+        self.active_theme
+    }
+
+    /// Set the active theme by name. Returns false if name not found.
+    pub fn set_theme(&mut self, name: &str) -> bool {
+        if let Some(palette) = theme::palette_by_name(name) {
+            self.active_theme = palette;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Cycle to the next theme.
+    pub fn cycle_theme(&mut self) {
+        let current = self.active_theme.name;
+        let names = theme::THEME_NAMES;
+        let idx = names.iter().position(|n| *n == current).unwrap_or(0);
+        let next = names[(idx + 1) % names.len()];
+        self.set_theme(next);
     }
 
     /// Initialize with a vault path — sets up index, journal, template engine
@@ -523,6 +552,11 @@ impl BloomEditor {
                 keymap::dispatch::RefactorOp::MoveBlock,
             )],
             "rebuild_index" => vec![keymap::dispatch::Action::RebuildIndex],
+            "toggle_mcp" => vec![keymap::dispatch::Action::ToggleMcp],
+            "theme_selector" => {
+                self.cycle_theme();
+                vec![keymap::dispatch::Action::Noop]
+            }
             _ => vec![keymap::dispatch::Action::Noop],
         }
     }
@@ -815,8 +849,20 @@ impl BloomEditor {
         }
     }
 
-    fn translate_ex_command(&self, cmd: &str) -> Vec<keymap::dispatch::Action> {
+    fn translate_ex_command(&mut self, cmd: &str) -> Vec<keymap::dispatch::Action> {
         let trimmed = cmd.trim();
+        // Handle :theme with optional argument
+        if trimmed == "theme" {
+            self.cycle_theme();
+            return vec![keymap::dispatch::Action::Noop];
+        }
+        if let Some(name) = trimmed.strip_prefix("theme ") {
+            let name = name.trim();
+            if !self.set_theme(name) {
+                // Unknown theme name — could show notification
+            }
+            return vec![keymap::dispatch::Action::Noop];
+        }
         match trimmed {
             "q" | "quit" => vec![keymap::dispatch::Action::Quit],
             "q!" | "quit!" => vec![keymap::dispatch::Action::Quit],

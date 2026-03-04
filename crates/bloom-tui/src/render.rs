@@ -8,15 +8,15 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
-use crate::theme::ThemePalette;
+use crate::theme::TuiTheme;
 
 /// Render the full RenderFrame to the terminal.
-pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &ThemePalette) {
+pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &TuiTheme) {
     let area = f.area();
 
     // Fill background
     f.render_widget(
-        Block::default().style(RStyle::default().bg(theme.background)),
+        Block::default().style(RStyle::default().bg(theme.background())),
         area,
     );
 
@@ -54,7 +54,7 @@ fn draw_panes(
     panes: &[PaneFrame],
     _maximized: bool,
     hidden_count: usize,
-    theme: &ThemePalette,
+    theme: &TuiTheme,
 ) {
     if panes.is_empty() {
         return;
@@ -90,7 +90,7 @@ fn draw_panes(
     }
 }
 
-fn draw_pane(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &ThemePalette) {
+fn draw_pane(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
     if area.height < 2 {
         return;
     }
@@ -130,7 +130,7 @@ fn draw_pane(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &ThemePalette) 
     }
 }
 
-fn draw_pane_title(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &ThemePalette) {
+fn draw_pane_title(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
     let title_text = if pane.dirty {
         format!(" {} [+]", pane.title)
     } else {
@@ -146,7 +146,7 @@ fn draw_pane_title(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &ThemePal
     f.render_widget(Paragraph::new(line), area);
 }
 
-fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &ThemePalette) {
+fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
     let height = area.height as usize;
     let line_number_width = 4u16; // e.g. " 42 "
     let content_width = area.width.saturating_sub(line_number_width);
@@ -233,13 +233,9 @@ fn draw_status_bar(
     area: Rect,
     status: &StatusBar,
     is_active: bool,
-    theme: &ThemePalette,
+    theme: &TuiTheme,
 ) {
-    let style = if is_active {
-        theme.status_bar_style(&status.mode)
-    } else {
-        theme.status_bar_inactive()
-    };
+    let style = theme.status_bar_style(&status.mode, is_active);
 
     // Fill bar
     f.render_widget(
@@ -297,7 +293,7 @@ fn draw_status_bar(
 // Picker overlay
 // ---------------------------------------------------------------------------
 
-fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &ThemePalette) {
+fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme) {
     // Center the picker: 60% width, 70% height
     let w = (area.width * 3 / 5).max(30).min(area.width);
     let h = (area.height * 7 / 10).max(10).min(area.height);
@@ -371,7 +367,7 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &ThemePal
 // Which-key popup
 // ---------------------------------------------------------------------------
 
-fn draw_which_key(f: &mut Frame, area: Rect, wk: &WhichKeyFrame, theme: &ThemePalette) {
+fn draw_which_key(f: &mut Frame, area: Rect, wk: &WhichKeyFrame, theme: &TuiTheme) {
     // Bottom-centered popup
     let max_entries = wk.entries.len() as u16;
     let h = (max_entries + 2).min(area.height / 3).max(3);
@@ -406,7 +402,7 @@ fn draw_which_key(f: &mut Frame, area: Rect, wk: &WhichKeyFrame, theme: &ThemePa
             theme.which_key_style()
         };
         let label_style = if entry.is_group {
-            RStyle::default().fg(theme.salient)
+            RStyle::default().fg(theme.salient())
         } else {
             theme.which_key_style()
         };
@@ -430,11 +426,11 @@ fn draw_which_key(f: &mut Frame, area: Rect, wk: &WhichKeyFrame, theme: &ThemePa
 // Command line
 // ---------------------------------------------------------------------------
 
-fn draw_command_line(f: &mut Frame, area: Rect, cmd: &CommandLineFrame, theme: &ThemePalette) {
+fn draw_command_line(f: &mut Frame, area: Rect, cmd: &CommandLineFrame, theme: &TuiTheme) {
     let y = area.bottom().saturating_sub(1);
     let cmd_area = Rect::new(area.x, y, area.width, 1);
 
-    let style = RStyle::default().fg(theme.foreground).bg(theme.background);
+    let style = RStyle::default().fg(theme.foreground()).bg(theme.background());
     let text = format!(":{}", cmd.input);
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(&text, style))),
@@ -448,7 +444,7 @@ fn draw_command_line(f: &mut Frame, area: Rect, cmd: &CommandLineFrame, theme: &
     // Error display
     if let Some(err) = &cmd.error {
         let err_y = y.saturating_sub(1);
-        let err_style = RStyle::default().fg(theme.critical).bg(theme.background);
+        let err_style = RStyle::default().fg(theme.critical()).bg(theme.background());
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(err, err_style))),
             Rect::new(area.x, err_y, area.width, 1),
@@ -464,14 +460,14 @@ fn draw_quick_capture(
     f: &mut Frame,
     area: Rect,
     qc: &QuickCaptureFrame,
-    theme: &ThemePalette,
+    theme: &TuiTheme,
 ) {
     let y = area.bottom().saturating_sub(1);
     let qc_area = Rect::new(area.x, y, area.width, 1);
 
     let style = RStyle::default()
-        .fg(theme.foreground)
-        .bg(theme.modeline);
+        .fg(theme.foreground())
+        .bg(theme.modeline());
     let text = format!("{}{}", qc.prompt, qc.input);
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(&text, style))),
@@ -486,7 +482,7 @@ fn draw_quick_capture(
 // Dialog
 // ---------------------------------------------------------------------------
 
-fn draw_dialog(f: &mut Frame, area: Rect, dialog: &DialogFrame, theme: &ThemePalette) {
+fn draw_dialog(f: &mut Frame, area: Rect, dialog: &DialogFrame, theme: &TuiTheme) {
     let w = (area.width / 2).max(30).min(area.width);
     let h = 5u16.min(area.height);
     let x = area.x + (area.width.saturating_sub(w)) / 2;
@@ -540,7 +536,7 @@ fn draw_notification(
     area: Rect,
     message: &str,
     level: &NotificationLevel,
-    theme: &ThemePalette,
+    theme: &TuiTheme,
 ) {
     let w = (message.len() as u16 + 4).min(area.width);
     let x = area.right().saturating_sub(w + 1);
@@ -563,7 +559,7 @@ fn draw_agenda(
     f: &mut Frame,
     area: Rect,
     agenda: &bloom_core::render::AgendaFrame,
-    theme: &ThemePalette,
+    theme: &TuiTheme,
 ) {
     let mut y = area.y;
     let sections = [
@@ -578,7 +574,7 @@ fn draw_agenda(
         }
         // Section header
         let header_style = RStyle::default()
-            .fg(theme.salient)
+            .fg(theme.salient())
             .add_modifier(Modifier::BOLD);
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
@@ -597,7 +593,7 @@ fn draw_agenda(
             let style = if is_selected {
                 theme.picker_selected()
             } else {
-                RStyle::default().fg(theme.foreground)
+                RStyle::default().fg(theme.foreground())
             };
             let _ = i;
             let text = format!("  ☐ {}  ({})", item.task_text, item.source_page);
@@ -626,14 +622,14 @@ fn draw_timeline(
     f: &mut Frame,
     area: Rect,
     tl: &bloom_core::render::TimelineFrame,
-    theme: &ThemePalette,
+    theme: &TuiTheme,
 ) {
     // Title
     if area.height == 0 {
         return;
     }
     let title_style = RStyle::default()
-        .fg(theme.salient)
+        .fg(theme.salient())
         .add_modifier(Modifier::BOLD);
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
@@ -652,7 +648,7 @@ fn draw_timeline(
         let style = if is_selected {
             theme.picker_selected()
         } else {
-            RStyle::default().fg(theme.foreground)
+            RStyle::default().fg(theme.foreground())
         };
         let date_str = entry.date.format("%b %d").to_string();
         let header = format!("  {} · {}", date_str, entry.source_title);
@@ -663,7 +659,7 @@ fn draw_timeline(
         y += 1;
 
         if entry.expanded && y < area.bottom() {
-            let ctx_style = RStyle::default().fg(theme.faded);
+            let ctx_style = theme.faded_style();
             f.render_widget(
                 Paragraph::new(Line::from(Span::styled(
                     format!("    {}", entry.context),
@@ -680,7 +676,7 @@ fn draw_undo_tree(
     f: &mut Frame,
     area: Rect,
     ut: &bloom_core::render::UndoTreeFrame,
-    theme: &ThemePalette,
+    theme: &TuiTheme,
 ) {
     let mut y = area.y;
     for node in &ut.nodes {
@@ -691,9 +687,9 @@ fn draw_undo_tree(
         let style = if is_selected {
             theme.picker_selected().add_modifier(Modifier::BOLD)
         } else if node.is_current {
-            RStyle::default().fg(theme.salient)
+            RStyle::default().fg(theme.salient())
         } else {
-            RStyle::default().fg(theme.foreground)
+            RStyle::default().fg(theme.foreground())
         };
         let indent = "  ".repeat(node.depth);
         let marker = if node.is_current { "●" } else { "○" };
@@ -709,7 +705,7 @@ fn draw_undo_tree(
     if let Some(preview) = &ut.preview {
         if y + 1 < area.bottom() {
             y += 1;
-            let style = RStyle::default().fg(theme.faded);
+            let style = theme.faded_style();
             for line in preview.lines() {
                 if y >= area.bottom() {
                     break;
@@ -731,13 +727,13 @@ fn draw_setup_wizard(
     f: &mut Frame,
     area: Rect,
     sw: &bloom_core::render::SetupWizardFrame,
-    theme: &ThemePalette,
+    theme: &TuiTheme,
 ) {
     use bloom_core::render::{ImportChoice, SetupStep};
 
     // Fill background
     f.render_widget(
-        Block::default().style(RStyle::default().bg(theme.background)),
+        Block::default().style(RStyle::default().bg(theme.background())),
         area,
     );
 
@@ -745,18 +741,18 @@ fn draw_setup_wizard(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border_style())
-        .style(RStyle::default().bg(theme.background));
+        .style(RStyle::default().bg(theme.background()));
     let inner = block.inner(area);
     f.render_widget(block, area);
 
     // Center content vertically (use top third as offset)
     let y_start = inner.y + inner.height / 5;
     let heading_style = RStyle::default()
-        .fg(theme.strong)
+        .fg(theme.strong())
         .add_modifier(Modifier::BOLD);
-    let text_style = RStyle::default().fg(theme.foreground);
+    let text_style = RStyle::default().fg(theme.foreground());
     let faded = theme.faded_style();
-    let error_style = RStyle::default().fg(theme.critical);
+    let error_style = RStyle::default().fg(theme.critical());
 
     let cx = inner.x + 9; // indent for content
 
@@ -792,7 +788,7 @@ fn draw_setup_wizard(
             let input_y = y + 5;
             let label = "Path: ";
             render_line(f, cx, input_y, inner.width, label, text_style);
-            let input_style = RStyle::default().fg(theme.foreground).bg(theme.modeline);
+            let input_style = RStyle::default().fg(theme.foreground()).bg(theme.modeline());
             let input_w = inner.width.saturating_sub(cx - inner.x + label.len() as u16 + 2);
             let input_x = cx + label.len() as u16;
             let padded: String = format!("{:<width$}", sw.vault_path, width = input_w as usize);
@@ -839,9 +835,9 @@ fn draw_setup_wizard(
 
             let opt_y = y + 6;
             let (no_style, yes_style) = if sw.import_choice == ImportChoice::No {
-                (RStyle::default().fg(theme.foreground).bg(theme.mild), text_style)
+                (RStyle::default().fg(theme.foreground()).bg(theme.mild()), text_style)
             } else {
-                (text_style, RStyle::default().fg(theme.foreground).bg(theme.mild))
+                (text_style, RStyle::default().fg(theme.foreground()).bg(theme.mild()))
             };
             let no_marker = if sw.import_choice == ImportChoice::No { "\u{25b8} " } else { "  " };
             let yes_marker = if sw.import_choice == ImportChoice::Yes { "\u{25b8} " } else { "  " };
@@ -868,7 +864,7 @@ fn draw_setup_wizard(
             let input_y = y + 4;
             let label = "Path: ";
             render_line(f, cx, input_y, inner.width, label, text_style);
-            let input_style = RStyle::default().fg(theme.foreground).bg(theme.modeline);
+            let input_style = RStyle::default().fg(theme.foreground()).bg(theme.modeline());
             let input_w = inner.width.saturating_sub(cx - inner.x + label.len() as u16 + 2);
             let input_x = cx + label.len() as u16;
             let padded: String = format!("{:<width$}", sw.logseq_path, width = input_w as usize);
@@ -917,9 +913,9 @@ fn draw_setup_wizard(
 
                 // Stats
                 let mut sy = bar_y + 2;
-                let green = RStyle::default().fg(theme.accent_green);
-                let yellow = RStyle::default().fg(theme.accent_yellow);
-                let red = RStyle::default().fg(theme.critical);
+                let green = RStyle::default().fg(theme.accent_green());
+                let yellow = RStyle::default().fg(theme.accent_yellow());
+                let red = RStyle::default().fg(theme.critical());
                 render_line(f, cx, sy, inner.width,
                     &format!("\u{2713} {} pages imported", prog.pages_imported), green);
                 sy += 1;
@@ -962,7 +958,7 @@ fn draw_setup_wizard(
 
             let ty = sy + 4;
             render_line(f, cx, ty, inner.width, "Tips:", text_style);
-            let key_style = RStyle::default().fg(theme.salient);
+            let key_style = RStyle::default().fg(theme.salient());
             let desc_style = text_style;
             let tips = [
                 ("SPC j j", "open today's journal"),
