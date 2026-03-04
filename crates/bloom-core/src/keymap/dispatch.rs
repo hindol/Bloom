@@ -190,6 +190,27 @@ impl KeymapDispatcher {
     }
 
     fn dispatch_picker(&self, key: &KeyEvent) -> Vec<Action> {
+        // Ctrl+key shortcuts (checked before bare-char branch)
+        if key.modifiers.ctrl {
+            return match &key.code {
+                // Ctrl+N / Ctrl+J  → next result
+                KeyCode::Char('n') | KeyCode::Char('j') => {
+                    vec![Action::PickerInput(PickerInputAction::MoveSelection(1))]
+                }
+                // Ctrl+P / Ctrl+K  → previous result
+                KeyCode::Char('p') | KeyCode::Char('k') => {
+                    vec![Action::PickerInput(PickerInputAction::MoveSelection(-1))]
+                }
+                // Ctrl+G           → close picker (Emacs-style cancel)
+                KeyCode::Char('g') => vec![Action::ClosePicker],
+                // Ctrl+U           → clear search input
+                KeyCode::Char('u') => {
+                    vec![Action::PickerInput(PickerInputAction::UpdateQuery(String::new()))]
+                }
+                _ => vec![],
+            };
+        }
+
         match &key.code {
             KeyCode::Esc => vec![Action::ClosePicker],
             KeyCode::Enter => vec![Action::PickerInput(PickerInputAction::Select)],
@@ -287,6 +308,99 @@ mod tests {
         let actions = d.dispatch(KeyEvent::tab(), &ctx);
         assert_eq!(actions.len(), 1);
         assert!(matches!(actions[0], Action::TemplateAdvance));
+    }
+
+    #[test]
+    fn picker_ctrl_j_moves_down() {
+        let config = KeymapConfig::default();
+        let mut d = KeymapDispatcher::new(&config);
+        let buf = Buffer::from_text("");
+        let ctx = EditorContext {
+            picker_open: true,
+            ..make_context(&buf)
+        };
+        let actions = d.dispatch(KeyEvent::ctrl('j'), &ctx);
+        assert!(matches!(
+            actions[0],
+            Action::PickerInput(PickerInputAction::MoveSelection(1))
+        ));
+    }
+
+    #[test]
+    fn picker_ctrl_k_moves_up() {
+        let config = KeymapConfig::default();
+        let mut d = KeymapDispatcher::new(&config);
+        let buf = Buffer::from_text("");
+        let ctx = EditorContext {
+            picker_open: true,
+            ..make_context(&buf)
+        };
+        let actions = d.dispatch(KeyEvent::ctrl('k'), &ctx);
+        assert!(matches!(
+            actions[0],
+            Action::PickerInput(PickerInputAction::MoveSelection(-1))
+        ));
+    }
+
+    #[test]
+    fn picker_ctrl_n_moves_down() {
+        let config = KeymapConfig::default();
+        let mut d = KeymapDispatcher::new(&config);
+        let buf = Buffer::from_text("");
+        let ctx = EditorContext {
+            picker_open: true,
+            ..make_context(&buf)
+        };
+        let actions = d.dispatch(KeyEvent::ctrl('n'), &ctx);
+        assert!(matches!(
+            actions[0],
+            Action::PickerInput(PickerInputAction::MoveSelection(1))
+        ));
+    }
+
+    #[test]
+    fn picker_ctrl_p_moves_up() {
+        let config = KeymapConfig::default();
+        let mut d = KeymapDispatcher::new(&config);
+        let buf = Buffer::from_text("");
+        let ctx = EditorContext {
+            picker_open: true,
+            ..make_context(&buf)
+        };
+        let actions = d.dispatch(KeyEvent::ctrl('p'), &ctx);
+        assert!(matches!(
+            actions[0],
+            Action::PickerInput(PickerInputAction::MoveSelection(-1))
+        ));
+    }
+
+    #[test]
+    fn picker_ctrl_g_closes() {
+        let config = KeymapConfig::default();
+        let mut d = KeymapDispatcher::new(&config);
+        let buf = Buffer::from_text("");
+        let ctx = EditorContext {
+            picker_open: true,
+            ..make_context(&buf)
+        };
+        let actions = d.dispatch(KeyEvent::ctrl('g'), &ctx);
+        assert!(matches!(actions[0], Action::ClosePicker));
+    }
+
+    #[test]
+    fn picker_ctrl_u_clears_input() {
+        let config = KeymapConfig::default();
+        let mut d = KeymapDispatcher::new(&config);
+        let buf = Buffer::from_text("");
+        let ctx = EditorContext {
+            picker_open: true,
+            ..make_context(&buf)
+        };
+        let actions = d.dispatch(KeyEvent::ctrl('u'), &ctx);
+        assert!(matches!(
+            actions[0],
+            Action::PickerInput(PickerInputAction::UpdateQuery(_))
+        ));
     }
 
     #[test]
