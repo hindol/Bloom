@@ -131,14 +131,25 @@ The key insight from Lambda: **most text renders in `foreground` with typographi
 | `Italic` | — | — | *italic* | Typographic, not chromatic |
 | `Code` | `foreground` | `subtle` | — | Faint bg wash, like Lambda string-face |
 | `CodeBlock` | `foreground` | `subtle` | — | Same faint wash |
-| `Link` | `strong` | `modeline` | underline | Lambda: strong + lowlight bg + underline |
+| `LinkText` | `strong` | `modeline` | underline | Display text — the part the reader cares about |
+| `LinkChrome` | `faded` | — | dim | Brackets `[[` `]]` `|` and UUID — syntax noise |
 | `Tag` | `faded` | — | — | Quiet, like comments |
-| `Timestamp` | `faded` | — | — | Secondary info |
+| `TimestampKeyword` | `faded` | — | — | `@due`, `@start`, `@at` — tells you the type of date |
+| `TimestampDate` | `foreground` | — | — | The actual date value — this is the information |
+| `TimestampOverdue` | `accent_red` | — | — | Past-due `@due()` dates — demands attention |
+| `TimestampParens` | `faded` | — | dim | Grouping syntax `(` `)` — noise once you see the keyword |
 | `BlockId` | `faded` | — | dim | Even quieter |
+| `BlockIdCaret` | `faded` | — | dim | The `^` prefix — slightly less meaningful than the ID itself |
 | `ListMarker` | `foreground` | — | — | Structural — conveys document hierarchy |
-| `CheckboxUnchecked` | `accent_yellow` | — | — | Pending state |
-| `CheckboxChecked` | `accent_green` | — | ~~strikethrough~~ | Completed state |
-| `Frontmatter` | `faded` | — | *italic* | Like Lambda comment-face — base style for structural elements |
+| `CheckboxUnchecked` | `accent_yellow` | — | — | Pending state — the `[ ]` IS the status |
+| `CheckboxChecked` | `accent_green` | — | ~~strikethrough~~ | Completed marker |
+| `CheckedTaskText` | `faded` | — | ~~strikethrough~~ | Text after `[x]` — visually completes the entire line |
+| `Blockquote` | `foreground` | — | *italic* | Distinguishes quoted voice from the author's own text |
+| `BlockquoteMarker` | `faded` | — | — | The `>` prefix — structural but repetitive on multi-line quotes |
+| `TablePipe` | `faded` | — | — | `|` delimiters — structural but repetitive grid chrome |
+| `TableContent` | `foreground` | — | — | Cell text — normal weight, the actual information |
+| `TableAlignmentRow` | `faded` | — | dim | `---`, `:---:` etc. — pure layout hint, noise after initial read |
+| `Frontmatter` | `faded` | — | *italic* | Base style for frontmatter structural elements |
 | `FrontmatterKey` | `faded` | — | *italic* | YAML keys (`id:`, `title:`, etc.) — structure, not content |
 | `FrontmatterTitle` | `foreground` | — | **bold** *italic* | The page name — most important metadata |
 | `FrontmatterId` | `faded` | — | *italic* + dim | Internal UUID — rarely useful to the reader |
@@ -163,10 +174,13 @@ The marker **is** the meaning. Removing it changes what the reader understands.
 | Ordered list | `1.`, `2.`, etc. | `ListMarker` (`foreground`) | Conveys ordering. Without it, sequence is lost. |
 | Checkbox (unchecked) | `- [ ]` | `CheckboxUnchecked` (`accent_yellow`) | Signals "this needs doing." The `[ ]` IS the status. |
 | Checkbox (checked) | `- [x]` | `CheckboxChecked` (`accent_green`, ~~strikethrough~~) | Signals completion. The `[x]` IS the status. |
+| Checked task text | Text after `[x]` | `CheckedTaskText` (`faded`, ~~strikethrough~~) | The entire line reads as "done" — not just the checkbox. |
 | Frontmatter title value | `"My Page Title"` | `FrontmatterTitle` (`foreground`, bold italic) | The page's name — most important metadata, deserves full visibility. |
 | Tag | `#` in `#rust` | Same style as tag text (`faded`) | The `#` is part of the tag's identity. Dimming it makes `rust` look like prose. |
-| Blockquote | `>` | `faded` | Conveys attribution/quoting. Without it, quoted text blends into the author's voice. |
-| Timestamp keyword | `@due`, `@start`, `@at` | `faded` (same as timestamp) | Tells you the *type* of date — deadline vs start vs event. The keyword is the meaning. |
+| Timestamp keyword | `@due`, `@start`, `@at` | `TimestampKeyword` (`faded`) | Tells you the *type* of date — deadline vs start vs event. The keyword is the meaning. |
+| Timestamp date value | `2026-03-05` | `TimestampDate` (`foreground`) | The actual information. Deserves normal reading weight — you need to scan dates quickly. |
+| Overdue date | Past `@due()` date | `TimestampOverdue` (`accent_red`) | Demands attention. A missed deadline is urgent. |
+| Blockquote content | Text after `>` | `Blockquote` (`foreground`, *italic*) | Italic distinguishes quoted voice from the author's own text. |
 
 ### Tier 2 — Contextual (Present but Subdued)
 
@@ -174,8 +188,12 @@ Carries some information, but context or styling already communicates the constr
 
 | Construct | Marker characters | Marker style | Rationale |
 |-----------|-------------------|-------------|-----------|
-| Block ID | `^` in `^rope-perf` | `faded` + dim | The `^` signals "this is a reference target." Already very quiet in current theme. |
-| Timestamp parens | `(` `)` in `@due(2026-03-05)` | `SyntaxNoise` (`faded` + dim) | Grouping syntax. `@due` already tells you what follows. |
+| Blockquote marker | `>` | `BlockquoteMarker` (`faded`) | Structural, but on multi-line quotes it's repetitive. The italic content already signals "quote." |
+| Block ID | `^rope-perf` | `BlockId` (`faded` + dim) | Reference target text. Already very quiet. |
+| Block ID caret | `^` in `^rope-perf` | `BlockIdCaret` (`faded` + dim) | Prefix syntax — slightly less meaningful than the ID itself. |
+| Timestamp parens | `(` `)` in `@due(2026-03-05)` | `TimestampParens` (`faded` + dim) | Grouping syntax. `@due` already tells you what follows. |
+| Table pipes | `\|` in table rows | `TablePipe` (`faded`) | Grid structure. Repetitive, but still helps the eye track columns. |
+| Table alignment row | `\|---\|:---:\|` | `TableAlignmentRow` (`faded` + dim) | Pure layout hint. Only matters when authoring, not reading. |
 | Frontmatter delimiters | `---` | `faded` + dim | Marks a section boundary, but frontmatter content is already styled — the delimiters can be quieter. |
 | Frontmatter keys | `id:`, `title:`, `created:`, `tags:` | `FrontmatterKey` (`faded`, italic) | YAML structure — the values carry the meaning, not the keys. |
 | Code fence | ` ``` ` and language hint | `faded` + dim | Marks code block boundary. The `subtle` background wash already signals "code zone." |
@@ -189,8 +207,8 @@ Pure parsing syntax. The rendered styling already communicates everything the ma
 | Bold | `**` | `Bold` (foreground, **bold**) | Bold styling is visible. The `**` adds nothing for the reader. |
 | Italic | `*` | `Italic` (foreground, *italic*) | Italic styling is visible. The `*` adds nothing. |
 | Heading prefix | `#`, `##`, `###`, etc. | Heading style (bold + colour) | Heading styling (bold, size, colour) already signals the level. The `#` markers are line noise. |
-| Link brackets | `[[`, `]]`, `\|` | `Link` (strong, underline) | The underline + colour already says "this is a link." |
-| Link UUID | UUID portion of `[[uuid\|text]]` | — (not displayed) | Internal ID, meaningless to the reader. Visually suppressed (rendered in `SyntaxNoise` but could be hidden entirely in future). |
+| Link brackets | `[[`, `]]`, `\|` | `LinkChrome` (`faded`, dim) | The underline + colour on the display text already says "this is a link." |
+| Link UUID | UUID portion of `[[uuid\|text]]` | `LinkChrome` (`faded`, dim) | Internal ID, meaningless to the reader. Visually suppressed (could be hidden entirely in future). |
 | Inline code markers | `` ` `` | `Code` (foreground + subtle bg) | The background wash already signals "code." |
 
 ### Rendering Examples
@@ -211,9 +229,17 @@ tags: [editors, rust]
 I chose **Rust** for its *memory safety* and performance.
 See [[8f3a1b2c|Text Editor Theory]] for background.
 
+> The best tool is one that disappears in your hand.
+
 - First consideration
 - [ ] Review the ropey crate API @due(2026-03-05)
 - [x] Read Xi Editor source
+- [ ] Fix overdue item @due(2025-01-01)
+
+| Feature   | Status  |
+|-----------|---------|
+| Buffer    | Done    |
+| Search    | WIP     |
 
 #editors #rust
 ```
@@ -228,16 +254,26 @@ tags: [editors, rust]                     ← "tags:" faded italic, values faded
 ---                                       ← faded + dim (delimiter)
 
 (###) Design Decisions                    ← (###) dim, "Design Decisions" bold
-                                          
+
 I chose (**)Rust(**) for its (*)memory    ← (**) dim, "Rust" bold; (*) dim
 safety(*) and performance.                  "memory safety" italic
-See ([[)Text Editor Theory(]])            ← ([[ ]]) dim, "Text Editor Theory"
-for background.                             teal underline; UUID hidden
+See ([[)Text Editor Theory(]])            ← ([[ | ]]) faded dim, "Text Editor Theory"
+for background.                             strong underline; UUID hidden
+
+(>) The best tool is one that             ← ">" faded, content foreground italic
+   disappears in your hand.
 
 - First consideration                     ← "-" normal (structural)
 - [ ] Review the ropey crate API          ← "- [ ]" yellow (structural)
-      @due(()2026-03-05())                  "@due" faded, "()" dim, date faded
-- [x] Read Xi Editor source               ← "- [x]" green strikethrough
+      @due(()2026-03-05())                  "@due" faded, "()" dim, date foreground
+- [x] Read Xi Editor source               ← "- [x]" green strikethrough, text faded strikethrough
+- [ ] Fix overdue item                    ← "- [ ]" yellow
+      @due(()2025-01-01())                  "@due" faded, "()" dim, date accent_red (overdue!)
+
+| Feature   | Status  |                   ← "|" faded, cell content foreground
+|-----------|---------|                   ← alignment row faded + dim
+| Buffer    | Done    |
+| Search    | WIP     |
 
 #editors #rust                            ← full tag including "#" in faded
 ```
