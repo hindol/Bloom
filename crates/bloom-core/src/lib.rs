@@ -1528,7 +1528,65 @@ impl BloomEditor {
                     _ => None,
                 }
             } else {
-                None
+                // Vim grammar which-key: show motions/text objects when an operator is pending
+                let pending = self.vim_state.pending_keys();
+                let op_char = match pending {
+                    "d" => Some("d"),
+                    "c" => Some("c"),
+                    "y" => Some("y"),
+                    ">" => Some(">"),
+                    "<" => Some("<"),
+                    _ => None,
+                };
+                if let Some(op) = op_char {
+                    let op_name = match op {
+                        "d" => "delete",
+                        "c" => "change",
+                        "y" => "yank",
+                        ">" => "indent",
+                        "<" => "dedent",
+                        _ => op,
+                    };
+                    let mut entries = vec![
+                        // Motions
+                        render::WhichKeyEntry { key: "w".into(), label: "word".into(), is_group: false },
+                        render::WhichKeyEntry { key: "b".into(), label: "back word".into(), is_group: false },
+                        render::WhichKeyEntry { key: "e".into(), label: "end of word".into(), is_group: false },
+                        render::WhichKeyEntry { key: "$".into(), label: "end of line".into(), is_group: false },
+                        render::WhichKeyEntry { key: "0".into(), label: "start of line".into(), is_group: false },
+                        render::WhichKeyEntry { key: "j".into(), label: "line down".into(), is_group: false },
+                        render::WhichKeyEntry { key: "k".into(), label: "line up".into(), is_group: false },
+                        render::WhichKeyEntry { key: "gg".into(), label: "top of file".into(), is_group: false },
+                        render::WhichKeyEntry { key: "G".into(), label: "end of file".into(), is_group: false },
+                        render::WhichKeyEntry { key: "%".into(), label: "matching bracket".into(), is_group: false },
+                        render::WhichKeyEntry { key: "f…".into(), label: "find char".into(), is_group: false },
+                        render::WhichKeyEntry { key: "t…".into(), label: "till char".into(), is_group: false },
+                        // Text objects
+                        render::WhichKeyEntry { key: "iw".into(), label: "inner word".into(), is_group: false },
+                        render::WhichKeyEntry { key: "aw".into(), label: "a word".into(), is_group: false },
+                        render::WhichKeyEntry { key: "ip".into(), label: "inner paragraph".into(), is_group: false },
+                        render::WhichKeyEntry { key: "ap".into(), label: "a paragraph".into(), is_group: false },
+                        render::WhichKeyEntry { key: "il".into(), label: "inner link".into(), is_group: false },
+                        render::WhichKeyEntry { key: "al".into(), label: "a link".into(), is_group: false },
+                        render::WhichKeyEntry { key: "i#".into(), label: "inner tag".into(), is_group: false },
+                        render::WhichKeyEntry { key: "a#".into(), label: "a tag".into(), is_group: false },
+                        render::WhichKeyEntry { key: "i@".into(), label: "inner timestamp".into(), is_group: false },
+                        render::WhichKeyEntry { key: "ih".into(), label: "inner heading".into(), is_group: false },
+                        render::WhichKeyEntry { key: "ah".into(), label: "a heading".into(), is_group: false },
+                    ];
+                    entries.push(render::WhichKeyEntry {
+                        key: format!("{op}"),
+                        label: format!("{op_name} line ({op}{op})"),
+                        is_group: false,
+                    });
+                    Some(render::WhichKeyFrame {
+                        entries,
+                        prefix: op.to_string(),
+                        context: render::WhichKeyContext::VimOperator { operator: op.to_string() },
+                    })
+                } else {
+                    None
+                }
             },
             command_line: if matches!(self.vim_state.mode(), vim::Mode::Command) {
                 Some(render::CommandLineFrame {

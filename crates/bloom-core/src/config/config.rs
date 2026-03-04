@@ -7,7 +7,7 @@ fn default_autosave_debounce() -> u64 {
     300
 }
 fn default_which_key_timeout() -> u64 {
-    500
+    1000
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -162,7 +162,7 @@ mod tests {
     fn test_default_config() {
         let config = Config::defaults();
         assert_eq!(config.autosave_debounce_ms, 300);
-        assert_eq!(config.which_key_timeout_ms, 500);
+        assert_eq!(config.which_key_timeout_ms, 1000);
         assert_eq!(config.font.family, "JetBrains Mono");
         assert_eq!(config.font.size, 14);
     }

@@ -418,27 +418,22 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
 // ---------------------------------------------------------------------------
 
 fn draw_which_key(f: &mut Frame, area: Rect, wk: &WhichKeyFrame, theme: &TuiTheme) {
-    // Bottom-centered popup
-    let max_entries = wk.entries.len() as u16;
-    let h = (max_entries + 2).min(area.height / 3).max(3);
-    let w = (area.width * 2 / 3).max(20).min(area.width);
-    let x = area.x + (area.width.saturating_sub(w)) / 2;
-    let y = area.bottom().saturating_sub(h + 1);
-    let popup_area = Rect::new(x, y, w, h);
+    // Bottom-anchored full-width panel, above status bar
+    let col_width = 24u16;
+    let cols = (area.width / col_width).max(1);
+    let rows_needed = ((wk.entries.len() as u16) + cols - 1) / cols;
+    let h = (rows_needed + 2).min(area.height / 3).max(3); // +2 for border
+    let y = area.bottom().saturating_sub(h + 1); // above status bar
+    let popup_area = Rect::new(area.x, y, area.width, h);
 
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
-        .borders(Borders::ALL)
-        .title(format!(" {} ", wk.prefix))
+        .borders(Borders::TOP | Borders::BOTTOM)
         .style(theme.which_key_style())
         .border_style(theme.border_style());
     let inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
-
-    // Entries in columns
-    let col_width = 24u16;
-    let cols = (inner.width / col_width).max(1);
 
     for (i, entry) in wk.entries.iter().enumerate() {
         let col = (i as u16) % cols;
@@ -446,11 +441,7 @@ fn draw_which_key(f: &mut Frame, area: Rect, wk: &WhichKeyFrame, theme: &TuiThem
         if row >= inner.height {
             break;
         }
-        let key_style = if entry.is_group {
-            theme.which_key_style().add_modifier(Modifier::BOLD)
-        } else {
-            theme.which_key_style()
-        };
+        let key_style = theme.which_key_style().add_modifier(Modifier::BOLD);
         let label_style = if entry.is_group {
             RStyle::default().fg(theme.salient())
         } else {
@@ -465,7 +456,7 @@ fn draw_which_key(f: &mut Frame, area: Rect, wk: &WhichKeyFrame, theme: &TuiThem
             Rect::new(
                 inner.x + col * col_width,
                 inner.y + row,
-                col_width.min(inner.width - col * col_width),
+                col_width.min(inner.width.saturating_sub(col * col_width)),
                 1,
             ),
         );
