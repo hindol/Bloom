@@ -17,6 +17,7 @@ enum WhichKeyChild {
     Action { label: String, action: ActionId },
 }
 
+#[derive(Debug)]
 pub enum WhichKeyLookup {
     /// Exact match — execute this action.
     Action(ActionId),
@@ -26,6 +27,7 @@ pub enum WhichKeyLookup {
     NoMatch,
 }
 
+#[derive(Debug)]
 pub struct WhichKeyEntry {
     pub key: String,
     pub label: String,
@@ -147,15 +149,26 @@ impl WhichKeyTree {
 }
 
 fn key_event_to_string(event: &KeyEvent) -> String {
-    // For simple char keys without modifiers, just return the char.
-    // For modified keys, use the Display impl which produces "C-x", etc.
-    if event.modifiers == crate::types::Modifiers::none() {
-        match &event.code {
-            KeyCode::Char(c) => c.to_string(),
-            _ => event.to_string(),
+    // For Char keys, the case is already encoded in the character itself
+    // (e.g. Shift+t → Char('T')). Strip shift so 'T' matches tree key "T".
+    // Other modifiers (Ctrl, Alt) are preserved as prefixes.
+    match &event.code {
+        KeyCode::Char(c) => {
+            let has_ctrl = event.modifiers.ctrl;
+            let has_alt = event.modifiers.alt;
+            let has_meta = event.modifiers.meta;
+            if !has_ctrl && !has_alt && !has_meta {
+                c.to_string()
+            } else {
+                // Build prefix without Shift (it's in the char)
+                let mut prefix = String::new();
+                if has_ctrl { prefix.push_str("C-"); }
+                if has_alt { prefix.push_str("A-"); }
+                if has_meta { prefix.push_str("M-"); }
+                format!("{prefix}{c}")
+            }
         }
-    } else {
-        event.to_string()
+        _ => event.to_string(),
     }
 }
 
@@ -467,5 +480,23 @@ mod tests {
         assert!(reg.find("wq").is_some());
         assert!(reg.find("x").is_some());
         assert_eq!(reg.find("wq").unwrap().name, "write-quit");
+    }
+
+    #[test]
+    fn lookup_uppercase_with_shift_modifier() {
+        // Crossterm sends Shift+t as Char('T') with shift=true.
+        // The which-key tree registers "T" as a plain key.
+        let tree = default_tree();
+        let shift_t = KeyEvent {
+            code: crate::types::KeyCode::Char('T'),
+            modifiers: crate::types::Modifiers::shift(),
+        };
+        let result = tree.lookup(&[shift_t]);
+        match result {
+            WhichKeyLookup::Prefix(entries) => {
+                assert!(!entries.is_empty(), "T should be a group with t, m children");
+            }
+            _ => panic!("expected Prefix for Shift+T, got {result:?}"),
+        }
     }
 }
