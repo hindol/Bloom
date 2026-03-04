@@ -12,7 +12,17 @@
 2. **Typographic variation over color.** Following Lambda's non-vibrant mode: most text uses the foreground color with weight/style differences (bold, italic, light). Vivid colour is reserved sparingly for structural accents (headings, crucial info). This is what makes Lambda look calm.
 3. **Minimal palette.** A theme is defined by exactly **6 semantic roles + 4 surface colours + 2 mid-tones + 4 accent colours** = 16 named slots. Every UI element maps to one of these slots.
 4. **Light and dark variants are peers.** Each theme provides both. The same semantic roles exist in both variants; only the concrete hex values differ.
-5. **Medium contrast.** Neither washed-out nor neon. Lambda's "decent compromise between aesthetics and readability" is the target.
+5. **Medium contrast.** Neither washed-out nor neon. Lambda's "decent compromise between aesthetics and readability" is the target. Concrete targets:
+
+   | Role | Contrast ratio vs background | Rationale |
+   |------|------------------------------|-----------|
+   | `foreground` | **11–12 : 1** | Comfortable for extended reading. iA Writer ~11:1, VS Code dark ~12:1. WCAG AA minimum is 4.5:1. |
+   | `strong` | **13–15 : 1** | Slightly above foreground — headings and bold text should pop but not dazzle. |
+   | `faded` | **5–7 : 1** | Clearly readable but recedes. Tags, timestamps, comments. Stays above WCAG AA. |
+   | `subtle` (bg) | **1.2–1.5 : 1** | Barely perceptible wash. Code blocks, frontmatter background. |
+   | Accent colours | **≥ 4.5 : 1** | Must pass WCAG AA for the small amount of text they colour (checkboxes, errors). |
+
+   The "faded" variants of each theme may go ~1–2 points lower across the board for an even calmer feel.
 6. **Terminal-friendly.** All colours must work on 256-colour terminals. The TUI is the primary frontend.
 7. **Monospace throughout.** Both TUI and GUI use monospace fonts. Typography is achieved through bold/italic/dim/size — not font family variation. This keeps Vim column operations correct and simplifies the rendering pipeline. The GUI may use font size variation for headings (larger monospace), but each line remains a uniform monospace grid.
 
