@@ -21,7 +21,7 @@ pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &TuiTheme) {
         area,
     );
 
-    // Layout: panes | status bar (1 line) | which-key drawer (optional)
+    // Layout: panes | which-key drawer (optional)
     let wk_h = if let Some(wk) = &frame.which_key {
         let col_width = 24u16;
         let cols = (area.width.saturating_sub(4) / col_width).max(1);
@@ -32,22 +32,16 @@ pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &TuiTheme) {
         0
     };
 
-    let status_h = 1u16;
-    let pane_h = area.height.saturating_sub(status_h).saturating_sub(wk_h);
-
+    let pane_h = area.height.saturating_sub(wk_h);
     let pane_area = Rect::new(area.x, area.y, area.width, pane_h);
-    let status_area = Rect::new(area.x, area.y + pane_h, area.width, status_h);
     let wk_area = if wk_h > 0 {
-        Some(Rect::new(area.x, area.y + pane_h + status_h, area.width, wk_h))
+        Some(Rect::new(area.x, area.y + pane_h, area.width, wk_h))
     } else {
         None
     };
 
-    // Draw panes
+    // Draw panes (each pane includes its own status bar)
     draw_panes(f, pane_area, &frame.panes, frame.maximized, frame.hidden_pane_count, theme);
-
-    // Draw the global status bar
-    let status_bar_cursor = draw_status_bar_slot(f, status_area, &frame.status_bar, theme);
 
     // Which-key drawer
     if let (Some(wk), Some(wk_rect)) = (&frame.which_key, wk_area) {
@@ -63,11 +57,6 @@ pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &TuiTheme) {
     }
     if let Some(notif) = &frame.notification {
         draw_notification(f, area, &notif.message, &notif.level, theme);
-    }
-
-    // Cursor placement: status bar slots take priority over pane cursor
-    if let Some((cx, cy)) = status_bar_cursor {
-        f.set_cursor_position((cx, cy));
     }
 }
 
@@ -122,45 +111,40 @@ fn draw_pane(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
         return;
     }
 
-    if pane.is_active {
-        // Active pane: full content area (status bar is global)
-        match &pane.kind {
-            PaneKind::Editor => draw_editor_content(f, area, pane, theme),
-            PaneKind::Agenda(agenda) => draw_agenda(f, area, agenda, theme),
-            PaneKind::Timeline(tl) => draw_timeline(f, area, tl, theme),
-            PaneKind::UndoTree(ut) => draw_undo_tree(f, area, ut, theme),
-            PaneKind::SetupWizard(sw) => draw_setup_wizard(f, area, sw, theme),
-        }
+    // Every pane: content + status bar (1 line)
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),       // content
+            Constraint::Length(1),    // status bar
+        ])
+        .split(area);
 
-        // Cursor for active editor pane (may be overridden by status bar cursor)
-        if matches!(&pane.kind, PaneKind::Editor) {
+    match &pane.kind {
+        PaneKind::Editor => draw_editor_content(f, layout[0], pane, theme),
+        PaneKind::Agenda(agenda) => draw_agenda(f, layout[0], agenda, theme),
+        PaneKind::Timeline(tl) => draw_timeline(f, layout[0], tl, theme),
+        PaneKind::UndoTree(ut) => draw_undo_tree(f, layout[0], ut, theme),
+        PaneKind::SetupWizard(sw) => draw_setup_wizard(f, layout[0], sw, theme),
+    }
+
+    // Status bar: slot-based for active pane, compact for inactive
+    if pane.is_active {
+        let cursor = draw_status_bar_slot(f, layout[1], &pane.status_bar, theme);
+        // Cursor: status bar slots (command line, quick capture) take priority
+        if let Some((cx, cy)) = cursor {
+            f.set_cursor_position((cx, cy));
+        } else if matches!(&pane.kind, PaneKind::Editor) {
+            let content_area = layout[0];
             let line_number_width = 4u16;
             let cursor_y = pane.cursor.line.saturating_sub(pane.scroll_offset);
-            let cy = area.y + cursor_y as u16;
-            let cx = area.x + line_number_width + pane.cursor.column as u16;
-            if cy < area.bottom() && cx < area.right() {
+            let cy = content_area.y + cursor_y as u16;
+            let cx = content_area.x + line_number_width + pane.cursor.column as u16;
+            if cy < content_area.bottom() && cx < content_area.right() {
                 f.set_cursor_position((cx, cy));
             }
         }
     } else {
-        // Inactive pane: content + 1-line title separator
-        let layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(1),                      // content
-                Constraint::Length(1),                    // title separator
-            ])
-            .split(area);
-
-        match &pane.kind {
-            PaneKind::Editor => draw_editor_content(f, layout[0], pane, theme),
-            PaneKind::Agenda(agenda) => draw_agenda(f, layout[0], agenda, theme),
-            PaneKind::Timeline(tl) => draw_timeline(f, layout[0], tl, theme),
-            PaneKind::UndoTree(ut) => draw_undo_tree(f, layout[0], ut, theme),
-            PaneKind::SetupWizard(sw) => draw_setup_wizard(f, layout[0], sw, theme),
-        }
-
-        // Inactive pane chrome: just the title
         draw_inactive_pane_bar(f, layout[1], pane, theme);
     }
 }

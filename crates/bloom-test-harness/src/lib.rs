@@ -197,7 +197,7 @@ impl SnapshotHelpers {
                 "cursor: {}:{}\n",
                 pane.cursor.line, pane.cursor.column
             ));
-            output.push_str(&format!("mode: {}\n", frame.status_bar.mode));
+            output.push_str(&format!("mode: {}\n", pane.status_bar.mode));
         }
         output
     }
@@ -301,7 +301,9 @@ impl<'a> AssertFrame<'a> {
     }
 
     pub fn mode(self, expected: &str) -> Self {
-        assert_eq!(self.frame.status_bar.mode, expected, "mode mismatch");
+        if let Some(pane) = self.frame.panes.first() {
+            assert_eq!(pane.status_bar.mode, expected, "mode mismatch");
+        }
         self
     }
 

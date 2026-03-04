@@ -15,7 +15,6 @@ pub struct RenderFrame {
     pub hidden_pane_count: usize,
     pub picker: Option<PickerFrame>,
     pub which_key: Option<WhichKeyFrame>,
-    pub status_bar: StatusBarFrame,
     pub date_picker: Option<DatePickerFrame>,
     pub dialog: Option<DialogFrame>,
     pub notification: Option<Notification>,
@@ -34,6 +33,7 @@ pub struct PaneFrame {
     pub is_active: bool,
     pub title: String,
     pub dirty: bool,
+    pub status_bar: StatusBarFrame,
 }
 
 pub enum PaneKind {
