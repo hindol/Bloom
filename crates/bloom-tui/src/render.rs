@@ -439,6 +439,19 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
         return;
     }
 
+    // Split inner into results zone and optional preview zone.
+    // Layout: query (1) | results | footer (1) | separator (1) | preview
+    let has_preview = picker.preview.is_some() && inner.height >= 8;
+    let preview_h = if has_preview {
+        // Give roughly 1/3 of inner height to preview, minimum 3 lines
+        (inner.height / 3).max(3)
+    } else {
+        0
+    };
+    // 1 line for the separator between results and preview
+    let separator_h = if has_preview { 1 } else { 0 };
+    let top_h = inner.height.saturating_sub(preview_h).saturating_sub(separator_h);
+
     // Query line
     let query_line = Line::from(vec![
         Span::styled("> ", theme.picker_style()),
@@ -446,8 +459,9 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
     ]);
     f.render_widget(Paragraph::new(query_line), Rect::new(inner.x, inner.y, inner.width, 1));
 
-    // Results
-    let results_area = Rect::new(inner.x, inner.y + 1, inner.width, inner.height.saturating_sub(2));
+    // Results (between query and footer)
+    let results_h = top_h.saturating_sub(2); // -1 query, -1 footer
+    let results_area = Rect::new(inner.x, inner.y + 1, inner.width, results_h);
     for (i, row) in picker.results.iter().enumerate() {
         if i as u16 >= results_area.height {
             break;
@@ -495,11 +509,40 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
         "  {} of {} {}",
         picker.filtered_count, picker.total_count, picker.status_noun
     );
-    let footer_y = inner.y + inner.height.saturating_sub(1);
+    let footer_y = inner.y + top_h.saturating_sub(1);
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(footer, theme.faded_style()))),
         Rect::new(inner.x, footer_y, inner.width, 1),
     );
+
+    // Preview pane
+    if let (true, Some(preview_text)) = (has_preview, &picker.preview) {
+        let sep_y = inner.y + top_h;
+        // Horizontal separator
+        let sep_line = "─".repeat(inner.width as usize);
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(sep_line, theme.border_style()))),
+            Rect::new(inner.x, sep_y, inner.width, 1),
+        );
+
+        // Preview content with padding
+        let preview_area = Rect::new(
+            inner.x + 2,
+            sep_y + 1,
+            inner.width.saturating_sub(4),
+            preview_h.saturating_sub(1),
+        );
+        let preview_style = theme.faded_style();
+        for (i, line) in preview_text.lines().enumerate() {
+            if i as u16 >= preview_area.height {
+                break;
+            }
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled(line, preview_style))),
+                Rect::new(preview_area.x, preview_area.y + i as u16, preview_area.width, 1),
+            );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
