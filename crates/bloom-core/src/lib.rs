@@ -774,13 +774,44 @@ impl BloomEditor {
             vim::VimAction::ModeChange(mode) => {
                 vec![keymap::dispatch::Action::ModeChange(mode)]
             }
-            vim::VimAction::Command(cmd) => self.translate_ex_command(&cmd),
+            vim::VimAction::Command(cmd) => self.handle_vim_command(&cmd),
             vim::VimAction::Pending => vec![keymap::dispatch::Action::Noop],
             vim::VimAction::Unhandled => vec![keymap::dispatch::Action::Noop],
             vim::VimAction::Composite(actions) => actions
                 .into_iter()
                 .flat_map(|a| self.translate_vim_action(a))
                 .collect(),
+        }
+    }
+
+    fn handle_vim_command(&mut self, cmd: &str) -> Vec<keymap::dispatch::Action> {
+        match cmd {
+            "undo" => {
+                if let Some(page_id) = &self.active_page {
+                    if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                        buf.undo();
+                        // Clamp cursor to buffer length after undo
+                        let len = buf.len_chars();
+                        if self.cursor > len {
+                            self.cursor = len.saturating_sub(1);
+                        }
+                    }
+                }
+                vec![keymap::dispatch::Action::Undo]
+            }
+            "redo" => {
+                if let Some(page_id) = &self.active_page {
+                    if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                        buf.redo();
+                        let len = buf.len_chars();
+                        if self.cursor > len {
+                            self.cursor = len.saturating_sub(1);
+                        }
+                    }
+                }
+                vec![keymap::dispatch::Action::Redo]
+            }
+            _ => self.translate_ex_command(cmd),
         }
     }
 
@@ -1676,6 +1707,46 @@ mod tests {
         let actions = editor.handle_key(KeyEvent::enter());
         assert!(actions.iter().any(|a| matches!(a, keymap::dispatch::Action::Save)));
         assert!(actions.iter().any(|a| matches!(a, keymap::dispatch::Action::Quit)));
+    }
+
+    // u undoes the last edit
+    #[test]
+    fn test_undo_restores_buffer() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "hello");
+        // Insert 'X' at start
+        editor.handle_key(KeyEvent::char('i'));
+        editor.handle_key(KeyEvent::char('X'));
+        editor.handle_key(KeyEvent::esc());
+        let buf = editor.buffer_mgr.get(&id).unwrap();
+        assert_eq!(buf.text().to_string(), "Xhello");
+        // Undo
+        let actions = editor.handle_key(KeyEvent::char('u'));
+        assert!(actions.iter().any(|a| matches!(a, keymap::dispatch::Action::Undo)));
+        let buf = editor.buffer_mgr.get(&id).unwrap();
+        assert_eq!(buf.text().to_string(), "hello");
+    }
+
+    // Ctrl+R redoes
+    #[test]
+    fn test_redo_after_undo() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "hello");
+        editor.handle_key(KeyEvent::char('i'));
+        editor.handle_key(KeyEvent::char('X'));
+        editor.handle_key(KeyEvent::esc());
+        editor.handle_key(KeyEvent::char('u')); // undo
+        let buf = editor.buffer_mgr.get(&id).unwrap();
+        assert_eq!(buf.text().to_string(), "hello");
+        // Redo
+        let actions = editor.handle_key(KeyEvent::ctrl('r'));
+        assert!(actions.iter().any(|a| matches!(a, keymap::dispatch::Action::Redo)));
+        let buf = editor.buffer_mgr.get(&id).unwrap();
+        assert_eq!(buf.text().to_string(), "Xhello");
     }
 }
 
