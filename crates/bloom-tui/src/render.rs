@@ -683,13 +683,13 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
 fn draw_which_key(f: &mut Frame, area: Rect, wk: &WhichKeyFrame, theme: &TuiTheme) {
     f.render_widget(Clear, area);
 
-    let bg_style = RStyle::default().fg(theme.foreground()).bg(theme.background());
+    let wk_style = theme.which_key_style();
 
     // Fill background (no border — status bar provides separation)
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
             " ".repeat(area.width as usize),
-            bg_style,
+            wk_style,
         ))),
         area,
     );
@@ -711,11 +711,11 @@ fn draw_which_key(f: &mut Frame, area: Rect, wk: &WhichKeyFrame, theme: &TuiThem
         if row >= padded.height {
             break;
         }
-        let key_style = RStyle::default().fg(theme.foreground()).bg(theme.background()).add_modifier(Modifier::BOLD);
+        let key_style = wk_style.add_modifier(Modifier::BOLD);
         let label_style = if entry.is_group {
             RStyle::default().fg(theme.salient()).bg(theme.background())
         } else {
-            bg_style
+            wk_style
         };
         let text = Line::from(vec![
             Span::styled(format!("{:<4}", entry.key), key_style),

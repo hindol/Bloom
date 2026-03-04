@@ -253,7 +253,7 @@ pub fn resolve_chrome(element: Chrome, p: &ThemePalette) -> StyleProps {
         },
         Chrome::WhichKey => StyleProps {
             fg: Some(p.foreground),
-            bg: Some(p.subtle),
+            bg: Some(p.background),
             ..Default::default()
         },
         Chrome::CurrentLine => StyleProps {
