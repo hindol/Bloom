@@ -1,7 +1,7 @@
 mod palette;
 mod resolve;
 
-pub use palette::{Rgb, ThemePalette, BLOOM_DARK, BLOOM_DARK_FADED, BLOOM_LIGHT, BLOOM_LIGHT_FADED};
+pub use palette::{Rgb, ThemePalette, BLOOM_DARK, BLOOM_DARK_FADED, BLOOM_LIGHT, BLOOM_LIGHT_FADED, PARCHMENT, NEWSPRINT, AGED_PAPER};
 pub use resolve::{StyleProps, Chrome, resolve, resolve_status_bar, resolve_chrome};
 
 /// All built-in theme names, in display order.
@@ -10,6 +10,9 @@ pub const THEME_NAMES: &[&str] = &[
     "bloom-dark-faded",
     "bloom-light",
     "bloom-light-faded",
+    "parchment",
+    "newsprint",
+    "aged-paper",
 ];
 
 /// Look up a built-in palette by name.
@@ -19,6 +22,9 @@ pub fn palette_by_name(name: &str) -> Option<&'static ThemePalette> {
         "bloom-dark-faded" => Some(&BLOOM_DARK_FADED),
         "bloom-light" => Some(&BLOOM_LIGHT),
         "bloom-light-faded" => Some(&BLOOM_LIGHT_FADED),
+        "parchment" => Some(&PARCHMENT),
+        "newsprint" => Some(&NEWSPRINT),
+        "aged-paper" => Some(&AGED_PAPER),
         _ => None,
     }
 }
@@ -26,10 +32,13 @@ pub fn palette_by_name(name: &str) -> Option<&'static ThemePalette> {
 /// Description for each theme (for the picker).
 pub fn theme_description(name: &str) -> &'static str {
     match name {
-        "bloom-dark" => "high contrast, near-black",
+        "bloom-dark" => "warm dark, medium contrast",
         "bloom-dark-faded" => "softer, Nord-influenced",
-        "bloom-light" => "warm white, strong contrast",
+        "bloom-light" => "warm white, soft contrast",
         "bloom-light-faded" => "cool, muted light",
+        "parchment" => "cream paper, sepia ink",
+        "newsprint" => "cool grey paper, charcoal type",
+        "aged-paper" => "dark brown, candlelight warmth",
         _ => "",
     }
 }
