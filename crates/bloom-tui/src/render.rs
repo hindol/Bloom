@@ -418,18 +418,18 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
 // ---------------------------------------------------------------------------
 
 fn draw_which_key(f: &mut Frame, area: Rect, wk: &WhichKeyFrame, theme: &TuiTheme) {
-    // Bottom-anchored full-width panel, above status bar
+    // Bottom drawer below status bar (Doom Emacs style)
     let col_width = 24u16;
     let cols = (area.width / col_width).max(1);
     let rows_needed = ((wk.entries.len() as u16) + cols - 1) / cols;
-    let h = (rows_needed + 2).min(area.height / 3).max(3); // +2 for border
-    let y = area.bottom().saturating_sub(h + 1); // above status bar
+    let h = (rows_needed + 1).min(area.height / 3).max(2); // +1 for top border
+    let y = area.bottom().saturating_sub(h); // flush to bottom, below status bar
     let popup_area = Rect::new(area.x, y, area.width, h);
 
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
-        .borders(Borders::TOP | Borders::BOTTOM)
+        .borders(Borders::TOP)
         .style(theme.which_key_style())
         .border_style(theme.border_style());
     let inner = block.inner(popup_area);
