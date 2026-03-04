@@ -238,6 +238,43 @@ fn expand_tilde(path: &str) -> String {
     path.to_string()
 }
 
+/// Extract the link ID from a `[[id|text]]` pattern at the given column in a line.
+fn extract_link_at_col(line: &str, col: usize) -> Option<String> {
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    if col >= len { return None; }
+
+    // Search backwards for [[
+    let mut start = None;
+    let mut i = col.min(len.saturating_sub(1));
+    while i > 0 {
+        if i > 0 && bytes[i - 1] == b'[' && bytes[i] == b'[' {
+            start = Some(i + 1);
+            break;
+        }
+        // If we hit ]], we're not inside a link
+        if i > 0 && bytes[i - 1] == b']' && bytes[i] == b']' {
+            return None;
+        }
+        i -= 1;
+    }
+    let content_start = start?;
+
+    // Search forward for ]]
+    let mut j = content_start;
+    while j + 1 < len {
+        if bytes[j] == b']' && bytes[j + 1] == b']' {
+            let content = &line[content_start..j];
+            // Extract the ID (before | or # if present)
+            let id = content.split('|').next().unwrap_or(content);
+            let id = id.split('#').next().unwrap_or(id);
+            return Some(id.to_string());
+        }
+        j += 1;
+    }
+    None
+}
+
 /// Set the hidden file attribute on Windows.
 #[cfg(windows)]
 fn set_hidden_attribute(path: &std::path::Path) -> std::io::Result<()> {
@@ -899,6 +936,13 @@ impl BloomEditor {
                 keymap::dispatch::Action::ToggleTask => {
                     self.toggle_task_at_cursor();
                 }
+                keymap::dispatch::Action::FollowLink => {
+                    self.follow_link_at_cursor();
+                }
+                keymap::dispatch::Action::CopyToClipboard(ref text) => {
+                    // Pass through — TUI handles actual clipboard
+                    result.push(keymap::dispatch::Action::CopyToClipboard(text.clone()));
+                }
                 // Pass through to TUI: Quit, Save, and others
                 _ => {
                     result.push(action);
@@ -1000,6 +1044,29 @@ impl BloomEditor {
             "toggle_mcp" => vec![keymap::dispatch::Action::ToggleMcp],
             "theme_selector" => vec![keymap::dispatch::Action::OpenPicker(
                 keymap::dispatch::PickerKind::Theme,
+            )],
+            "close_buffer" => {
+                self.close_active_buffer();
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "toggle_task" => vec![keymap::dispatch::Action::ToggleTask],
+            "follow_link" => vec![keymap::dispatch::Action::FollowLink],
+            "yank_link" => {
+                if let Some(link) = self.yank_link_to_current_page() {
+                    vec![keymap::dispatch::Action::CopyToClipboard(link)]
+                } else {
+                    vec![keymap::dispatch::Action::Noop]
+                }
+            }
+            "yank_block_link" => {
+                if let Some(link) = self.yank_link_to_current_block() {
+                    vec![keymap::dispatch::Action::CopyToClipboard(link)]
+                } else {
+                    vec![keymap::dispatch::Action::Noop]
+                }
+            }
+            "insert_link" => vec![keymap::dispatch::Action::OpenPicker(
+                keymap::dispatch::PickerKind::InlineLink,
             )],
             _ => vec![keymap::dispatch::Action::Noop],
         }
@@ -1385,6 +1452,91 @@ impl BloomEditor {
             let bracket_start = line_start + indent + 2;
             buf.replace(bracket_start..bracket_start + 3, "[ ]");
         }
+    }
+
+    /// Close the active buffer. Opens journal or scratch if it was the last buffer.
+    fn close_active_buffer(&mut self) {
+        if let Some(page_id) = self.active_page.take() {
+            self.buffer_mgr.close(&page_id);
+            // Switch to another open buffer, or open journal
+            if let Some(next) = self.buffer_mgr.open_buffers().first() {
+                self.active_page = Some(next.page_id.clone());
+                self.cursor = 0;
+            } else {
+                self.open_journal_today();
+            }
+        }
+    }
+
+    /// Follow the wiki-link under the cursor: `[[id|text]]` → open page by id.
+    fn follow_link_at_cursor(&mut self) {
+        let Some(page_id) = &self.active_page else { return };
+        let Some(buf) = self.buffer_mgr.get(page_id) else { return };
+        let rope = buf.text();
+        let len = rope.len_chars();
+        if len == 0 { return; }
+        let cursor = self.cursor.min(len.saturating_sub(1));
+        let line_idx = rope.char_to_line(cursor);
+        let line_text = rope.line(line_idx).to_string();
+        let col = cursor - rope.line_to_char(line_idx);
+
+        // Find [[...]] surrounding the cursor column
+        if let Some(link_id) = extract_link_at_col(&line_text, col) {
+            // Try to open the page from the vault
+            if let Some(target_id) = types::PageId::from_hex(&link_id) {
+                if let Some(root) = &self.vault_root {
+                    let pages_dir = root.join("pages");
+                    // Scan for the file containing this id
+                    if let Ok(entries) = std::fs::read_dir(&pages_dir) {
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            let name = path.file_name().unwrap_or_default().to_string_lossy();
+                            if name.contains(&link_id) && name.ends_with(".md") {
+                                if let Ok(content) = std::fs::read_to_string(&path) {
+                                    let title = self.parser.parse_frontmatter(&content)
+                                        .and_then(|f| f.title)
+                                        .unwrap_or_else(|| link_id.clone());
+                                    self.open_page_with_content(&target_id, &title, &path, &content);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Yank a `[[id|title]]` link to the current page.
+    fn yank_link_to_current_page(&self) -> Option<String> {
+        let page_id = self.active_page.as_ref()?;
+        let _buf = self.buffer_mgr.get(page_id)?;
+        let buffers = self.buffer_mgr.open_buffers();
+        let info = buffers.iter().find(|b| b.page_id == *page_id)?;
+        Some(format!("[[{}|{}]]", page_id.to_hex(), info.title))
+    }
+
+    /// Yank a `[[id#block-id|title]]` link to the block at the cursor.
+    fn yank_link_to_current_block(&self) -> Option<String> {
+        let page_id = self.active_page.as_ref()?;
+        let buf = self.buffer_mgr.get(page_id)?;
+        let rope = buf.text();
+        let len = rope.len_chars();
+        if len == 0 { return None; }
+        let cursor = self.cursor.min(len.saturating_sub(1));
+        let line_idx = rope.char_to_line(cursor);
+        let line_text = rope.line(line_idx).to_string();
+        // Look for ^block-id on this line
+        if let Some(caret_pos) = line_text.rfind('^') {
+            let block_id = line_text[caret_pos + 1..].trim();
+            if !block_id.is_empty() && block_id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+                let buffers = self.buffer_mgr.open_buffers();
+                let info = buffers.iter().find(|b| b.page_id == *page_id)?;
+                return Some(format!("[[{}#{}|{}]]", page_id.to_hex(), block_id, info.title));
+            }
+        }
+        // Fallback: page link without block
+        self.yank_link_to_current_page()
     }
 
     fn translate_vim_action(
