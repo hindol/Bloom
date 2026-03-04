@@ -1754,6 +1754,17 @@ impl BloomEditor {
                 let line = rope.char_to_line(clamped);
                 let line_start = rope.line_to_char(line);
                 let col = clamped - line_start;
+                // If clamped landed on a trailing newline and there's an empty
+                // last line after it, place the cursor there instead. This
+                // matches Vim's behavior where the block cursor can sit on an
+                // empty final line (e.g. after `G` or `j`).
+                if rope.char(clamped) == '\n' && line + 1 < rope.len_lines() {
+                    let next_line_start = rope.line_to_char(line + 1);
+                    let next_line_len = rope.line(line + 1).len_chars();
+                    if next_line_len == 0 && next_line_start == len {
+                        return (line + 1, 0);
+                    }
+                }
                 return (line, col);
             }
         }
@@ -1881,6 +1892,23 @@ mod tests {
         assert!(!frame.panes.is_empty());
         assert_eq!(frame.status_bar.mode, "NORMAL");
         assert!(!frame.panes[0].title.is_empty());
+    }
+
+    // Cursor on empty last line (trailing newline)
+    #[test]
+    fn test_cursor_on_empty_last_line() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        // File with trailing newline → ropey sees 3 lines (0: "hello\n", 1: "world\n", 2: "")
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello\nworld\n");
+        // Move down twice: line 0 → line 1 → line 2 (empty last line)
+        editor.handle_key(KeyEvent::char('j'));
+        editor.handle_key(KeyEvent::char('j'));
+        let frame = editor.render();
+        // Cursor should be on line 2, column 0 (the empty last line)
+        assert_eq!(frame.panes[0].cursor.line, 2);
+        assert_eq!(frame.panes[0].cursor.column, 0);
     }
 
     // UC-14: Insert mode typing
