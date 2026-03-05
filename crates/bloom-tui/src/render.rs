@@ -637,23 +637,25 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
             Rect::new(inner.x, sep_y, inner.width, 1),
         );
 
-        // Preview content with padding, search terms highlighted
+        // Preview content with semantic highlighting + search term overlay
         let preview_area = Rect::new(
             inner.x + 2,
             sep_y + 1,
             inner.width.saturating_sub(4),
             preview_h.saturating_sub(1),
         );
-        let preview_style = theme.faded_style();
+        let faded = theme.faded_style();
         let match_style = theme.style_for(&bloom_core::parser::traits::Style::SearchMatch);
         let search_spans = bloom_core::render::search_highlight::highlight_matches(
             preview_text,
             &picker.query,
         );
-
-        // Build a set of match byte ranges for quick lookup
         let match_ranges: Vec<std::ops::Range<usize>> =
             search_spans.iter().map(|s| s.range.clone()).collect();
+
+        let parser = bloom_core::parser::BloomMarkdownParser::new();
+        use bloom_core::parser::traits::DocumentParser as _;
+        let mut line_ctx = bloom_core::parser::traits::LineContext::default();
 
         let mut byte_offset = 0usize;
         for (i, line) in preview_text.lines().enumerate() {
@@ -663,36 +665,67 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
             let line_start = byte_offset;
             let line_end = line_start + line.len();
 
-            // Build spans for this line: faded base with search matches overlaid
-            let mut spans = Vec::new();
-            let mut pos = 0usize;
-            for mr in &match_ranges {
-                // Convert absolute byte range to line-relative
-                if mr.end <= line_start || mr.start >= line_end {
-                    continue;
-                }
-                let rel_start = mr.start.saturating_sub(line_start).min(line.len());
-                let rel_end = mr.end.saturating_sub(line_start).min(line.len());
-                if rel_start > pos {
-                    spans.push(Span::styled(&line[pos..rel_start], preview_style));
-                }
-                if rel_start < rel_end {
-                    spans.push(Span::styled(&line[rel_start..rel_end], match_style));
-                }
-                pos = rel_end;
+            // Track code fences
+            if line.trim().starts_with("```") {
+                line_ctx.in_code_block = !line_ctx.in_code_block;
             }
-            if pos < line.len() {
-                spans.push(Span::styled(&line[pos..], preview_style));
+
+            // Semantic highlighting as base
+            let syntax_spans = parser.highlight_line(line, &line_ctx);
+
+            // Build base spans from syntax highlighting
+            let mut base_spans: Vec<(std::ops::Range<usize>, RStyle)> = Vec::new();
+            if syntax_spans.is_empty() {
+                base_spans.push((0..line.len(), faded));
+            } else {
+                let mut last = 0;
+                for si in &syntax_spans {
+                    let s = si.range.start.min(line.len());
+                    let e = si.range.end.min(line.len());
+                    if s > last {
+                        base_spans.push((last..s, faded));
+                    }
+                    if s < e {
+                        base_spans.push((s..e, theme.style_for(&si.style)));
+                    }
+                    last = e;
+                }
+                if last < line.len() {
+                    base_spans.push((last..line.len(), faded));
+                }
+            }
+
+            // Overlay search match highlighting
+            let mut spans: Vec<Span> = Vec::new();
+            for (range, style) in &base_spans {
+                // Check if any search match overlaps this span
+                let mut pos = range.start;
+                for mr in &match_ranges {
+                    if mr.end <= line_start || mr.start >= line_end {
+                        continue;
+                    }
+                    let rel_start = mr.start.saturating_sub(line_start).max(range.start).min(range.end);
+                    let rel_end = mr.end.saturating_sub(line_start).max(range.start).min(range.end);
+                    if rel_start > pos && pos < range.end {
+                        spans.push(Span::styled(&line[pos..rel_start.min(range.end)], *style));
+                    }
+                    if rel_start < rel_end {
+                        spans.push(Span::styled(&line[rel_start..rel_end], match_style));
+                    }
+                    pos = rel_end;
+                }
+                if pos < range.end {
+                    spans.push(Span::styled(&line[pos..range.end], *style));
+                }
             }
             if spans.is_empty() {
-                spans.push(Span::styled(line, preview_style));
+                spans.push(Span::styled(line, faded));
             }
 
             f.render_widget(
                 Paragraph::new(Line::from(spans)),
                 Rect::new(preview_area.x, preview_area.y + i as u16, preview_area.width, 1),
             );
-            // +1 for the newline character
             byte_offset = line_end + 1;
         }
     }
