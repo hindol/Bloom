@@ -1094,8 +1094,11 @@ fn draw_agenda(
                 let date_str = item.date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
                 let available = padded.width as usize;
                 let marker_w = 5; // "▸ ☐ " or "  ☐ "
+
+                // Strip @due/@start/@at timestamps from display text (already in date column)
+                let clean_text = strip_timestamps(&item.task_text);
                 let task_max = available.saturating_sub(marker_w + source_col_w + date_col_w);
-                let task_text = truncate_to_width(&item.task_text, task_max);
+                let task_text = truncate_to_width(&clean_text, task_max);
                 let task_w = task_text.width();
                 let task_pad = task_max.saturating_sub(task_w);
 
@@ -1128,7 +1131,7 @@ fn draw_agenda(
 
                 let left_prefix = format!("{marker}☐ ");
 
-                // Apply semantic highlighting to task text (tags, timestamps, links)
+                // Full semantic highlighting — same pipeline as the editor
                 let parser = bloom_core::parser::BloomMarkdownParser::new();
                 let ctx = bloom_core::parser::traits::LineContext::default();
                 use bloom_core::parser::traits::DocumentParser as _;
@@ -1149,24 +1152,11 @@ fn draw_agenda(
                             task_spans.push(Span::styled(&task_text[last_end..s], base_style));
                         }
                         if s < e {
-                            use bloom_core::parser::traits::Style as PStyle;
-                            // Only apply Bloom-extension styles; fallback to base for prose
-                            let span_style = match &si.style {
-                                PStyle::Tag | PStyle::TimestampKeyword
-                                | PStyle::TimestampDate | PStyle::TimestampOverdue
-                                | PStyle::TimestampParens | PStyle::LinkText
-                                | PStyle::LinkChrome | PStyle::SyntaxNoise
-                                | PStyle::CheckboxUnchecked | PStyle::CheckboxChecked
-                                | PStyle::CheckedTaskText => {
-                                    let mut resolved = theme.style_for(&si.style);
-                                    if let Some(bg) = sel_bg {
-                                        resolved = resolved.bg(bg);
-                                    }
-                                    resolved
-                                }
-                                _ => base_style,
-                            };
-                            task_spans.push(Span::styled(&task_text[s..e], span_style));
+                            let mut resolved = theme.style_for(&si.style);
+                            if let Some(bg) = sel_bg {
+                                resolved = resolved.bg(bg);
+                            }
+                            task_spans.push(Span::styled(&task_text[s..e], resolved));
                         }
                         last_end = e;
                     }
@@ -1638,4 +1628,27 @@ fn truncate_to_width(s: &str, max_width: usize) -> String {
         end = i + ch.len_utf8();
     }
     format!("{}…", &s[..end])
+}
+
+/// Strip @due(...), @start(...), @at(...) timestamps from task text.
+/// The dates are shown in a separate column so they're redundant in the label.
+fn strip_timestamps(s: &str) -> String {
+    let mut result = s.to_string();
+    // Remove @due(...), @start(...), @at(...) with any content inside parens
+    for prefix in &["@due(", "@start(", "@at("] {
+        while let Some(start) = result.find(prefix) {
+            if let Some(end) = result[start..].find(')') {
+                // Remove the timestamp and any surrounding whitespace
+                let remove_end = start + end + 1;
+                result = format!(
+                    "{}{}",
+                    result[..start].trim_end(),
+                    &result[remove_end..],
+                );
+            } else {
+                break;
+            }
+        }
+    }
+    result.trim().to_string()
 }
