@@ -894,8 +894,9 @@ impl BloomEditor {
 
         // Vim processing
         if let Some(buf) = self.active_page.as_ref().and_then(|id| self.buffer_mgr.get(id)) {
+            let mode_before_key = self.vim_state.mode();
             let action = self.vim_state.process_key(key.clone(), buf, self.cursor);
-            let actions = self.translate_vim_action(action);
+            let actions = self.translate_vim_action(action, mode_before_key);
             return self.execute_actions(actions);
         }
 
@@ -1711,6 +1712,7 @@ impl BloomEditor {
     fn translate_vim_action(
         &mut self,
         action: vim::VimAction,
+        prev_mode: vim::Mode,
     ) -> Vec<keymap::dispatch::Action> {
         match action {
             vim::VimAction::Edit(edit) => {
@@ -1747,7 +1749,7 @@ impl BloomEditor {
                 )]
             }
             vim::VimAction::ModeChange(ref mode) => {
-                let was_insert = matches!(self.vim_state.mode(), vim::Mode::Insert);
+                let was_insert = matches!(prev_mode, vim::Mode::Insert);
                 if matches!(mode, vim::Mode::Command) {
                     self.pending_since = Some(Instant::now());
                 } else {
@@ -1812,7 +1814,7 @@ impl BloomEditor {
             }
             vim::VimAction::Composite(actions) => actions
                 .into_iter()
-                .flat_map(|a| self.translate_vim_action(a))
+                .flat_map(|a| self.translate_vim_action(a, prev_mode.clone()))
                 .collect(),
         }
     }
