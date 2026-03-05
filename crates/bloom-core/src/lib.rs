@@ -131,6 +131,7 @@ pub struct BloomEditor {
     vault_root: Option<std::path::PathBuf>,
     leader_keys: Vec<types::KeyEvent>,
     pending_since: Option<Instant>,
+    which_key_visible: bool,
     active_theme: &'static theme::ThemePalette,
     // Auto-save
     autosave_tx: Option<crossbeam::channel::Sender<store::disk_writer::WriteRequest>>,
@@ -364,6 +365,7 @@ impl BloomEditor {
             vault_root: None,
             leader_keys: Vec::new(),
             pending_since: None,
+            which_key_visible: false,
             active_theme,
             autosave_tx: None,
             terminal_height: 24,
@@ -858,6 +860,7 @@ impl BloomEditor {
         if let Some(action) = keymap::platform_shortcut(&key) {
             self.leader_keys.clear();
             self.pending_since = None;
+                self.which_key_visible = false;
             return self.execute_actions(vec![action]);
         }
 
@@ -968,6 +971,7 @@ impl BloomEditor {
         if key.code == types::KeyCode::Esc {
             self.leader_keys.clear();
             self.pending_since = None;
+                self.which_key_visible = false;
             return vec![keymap::dispatch::Action::Noop];
         }
 
@@ -980,6 +984,7 @@ impl BloomEditor {
             which_key::WhichKeyLookup::Action(action_id) => {
                 self.leader_keys.clear();
                 self.pending_since = None;
+                self.which_key_visible = false;
                 self.action_id_to_actions(&action_id)
             }
             which_key::WhichKeyLookup::Prefix(_entries) => {
@@ -989,6 +994,7 @@ impl BloomEditor {
             which_key::WhichKeyLookup::NoMatch => {
                 self.leader_keys.clear();
                 self.pending_since = None;
+                self.which_key_visible = false;
                 vec![keymap::dispatch::Action::Noop]
             }
         }
@@ -1705,6 +1711,7 @@ impl BloomEditor {
         match action {
             vim::VimAction::Edit(edit) => {
                 self.pending_since = None;
+                self.which_key_visible = false;
                 if let Some(page_id) = &self.active_page {
                     if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
                         if edit.replacement.is_empty() {
@@ -1726,6 +1733,7 @@ impl BloomEditor {
             }
             vim::VimAction::Motion(motion) => {
                 self.pending_since = None;
+                self.which_key_visible = false;
                 self.cursor = motion.new_position;
                 vec![keymap::dispatch::Action::Motion(
                     keymap::dispatch::MotionResult {
@@ -1739,6 +1747,7 @@ impl BloomEditor {
                     self.pending_since = Some(Instant::now());
                 } else {
                     self.pending_since = None;
+                self.which_key_visible = false;
                 }
                 // Edit group lifecycle: begin on Insert entry, end on Insert exit
                 if matches!(mode, vim::Mode::Insert) {
@@ -1894,12 +1903,24 @@ impl BloomEditor {
         };
 
         // Compute pane rects from the core layout engine.
-        // Reserve space for the which-key drawer if active.
-        let wk_h = if !self.leader_keys.is_empty() || self.vim_state.pending_keys().len() > 0 {
-            // Estimate which-key height (mirrors TUI calculation)
+        // Reserve space for the which-key drawer only after timeout fires
+        // (or if it's already visible from a previous render).
+        let has_pending = !self.leader_keys.is_empty()
+            || self.vim_state.pending_keys().len() > 0
+            || matches!(self.vim_state.mode(), vim::Mode::Command);
+        let timeout = std::time::Duration::from_millis(self.config.which_key_timeout_ms);
+        let timed_out = self.pending_since
+            .map_or(false, |since| since.elapsed() >= timeout);
+        let show_wk = has_pending && (self.which_key_visible || timed_out);
+
+        if show_wk && !self.which_key_visible {
+            self.which_key_visible = true;
+        }
+
+        let wk_h = if show_wk {
             let col_width = 24u16;
             let cols = (self.terminal_width.saturating_sub(4) / col_width).max(1);
-            let entry_count = 12u16; // conservative estimate
+            let entry_count = 12u16;
             let rows_needed = (entry_count + cols - 1) / cols;
             (rows_needed + 2).min(self.terminal_height / 3).max(3)
         } else {
@@ -2072,11 +2093,7 @@ impl BloomEditor {
                 None
             },
             which_key: {
-                let timeout = std::time::Duration::from_millis(self.config.which_key_timeout_ms);
-                let timed_out = self.pending_since
-                    .map_or(false, |since| since.elapsed() >= timeout);
-
-                if !timed_out {
+                if !show_wk {
                     None
                 } else if matches!(self.vim_state.mode(), vim::Mode::Command) {
                 // Show available commands as which-key hints
