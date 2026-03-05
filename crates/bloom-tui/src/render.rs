@@ -508,15 +508,24 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
 
     let available = results_area.width as usize;
 
+    // Scroll offset: keep selected_index visible within the results viewport
+    let viewport_h = results_h as usize;
+    let scroll_offset = if picker.selected_index >= viewport_h {
+        picker.selected_index - viewport_h + 1
+    } else {
+        0
+    };
+
     // Compute fixed right-column width from the visible results
-    let visible_count = (results_h as usize).min(picker.results.len());
-    let max_right_w: usize = picker.results[..visible_count]
+    let visible_end = (scroll_offset + viewport_h).min(picker.results.len());
+    let visible_slice = &picker.results[scroll_offset..visible_end];
+    let max_right_w: usize = visible_slice
         .iter()
         .map(|row| row.right.as_deref().unwrap_or("").width())
         .max()
         .unwrap_or(0)
         .min(available * 2 / 5); // cap at 40% of available width
-    let max_middle_w: usize = picker.results[..visible_count]
+    let max_middle_w: usize = visible_slice
         .iter()
         .map(|row| row.middle.as_deref().unwrap_or("").width())
         .max()
@@ -530,11 +539,9 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
 
     let faded_style = theme.faded_style();
 
-    for (i, row) in picker.results.iter().enumerate() {
-        if i as u16 >= results_area.height {
-            break;
-        }
-        let is_selected = i == picker.selected_index;
+    for (vi, row) in visible_slice.iter().enumerate() {
+        let abs_i = scroll_offset + vi;
+        let is_selected = abs_i == picker.selected_index;
         let style = if is_selected {
             theme.picker_selected()
         } else {
@@ -595,7 +602,7 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
 
         f.render_widget(
             Paragraph::new(Line::from(spans)),
-            Rect::new(results_area.x, results_area.y + i as u16, results_area.width, 1),
+            Rect::new(results_area.x, results_area.y + vi as u16, results_area.width, 1),
         );
     }
 
