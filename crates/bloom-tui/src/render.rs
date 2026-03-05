@@ -1207,17 +1207,51 @@ fn draw_agenda(
 
         let preview_y = sep_y + 2; // 1 blank line after separator
         if let Some(text) = &agenda.preview {
-            let preview_style = theme.faded_style();
-            for (i, line) in text.lines().enumerate() {
+            let parser = bloom_core::parser::BloomMarkdownParser::new();
+            use bloom_core::parser::traits::DocumentParser as _;
+            let mut line_ctx = bloom_core::parser::traits::LineContext::default();
+            let faded = theme.faded_style();
+
+            for (i, line_text) in text.lines().enumerate() {
                 let ly = preview_y + i as u16;
                 if ly >= padded.bottom() {
                     break;
                 }
+                let padded_line = format!("  {line_text}");
+                let styled_spans = parser.highlight_line(&padded_line, &line_ctx);
+
+                // Track code fences for context
+                let trimmed = line_text.trim();
+                if trimmed.starts_with("```") {
+                    line_ctx.in_code_block = !line_ctx.in_code_block;
+                }
+
+                let mut spans: Vec<Span> = Vec::new();
+                if styled_spans.is_empty() {
+                    spans.push(Span::styled(&padded_line, faded));
+                } else {
+                    let mut last_end = 0usize;
+                    for si in &styled_spans {
+                        let s = si.range.start.min(padded_line.len());
+                        let e = si.range.end.min(padded_line.len());
+                        if s > last_end {
+                            spans.push(Span::styled(&padded_line[last_end..s], faded));
+                        }
+                        if s < e {
+                            spans.push(Span::styled(
+                                &padded_line[s..e],
+                                theme.style_for(&si.style),
+                            ));
+                        }
+                        last_end = e;
+                    }
+                    if last_end < padded_line.len() {
+                        spans.push(Span::styled(&padded_line[last_end..], faded));
+                    }
+                }
+
                 f.render_widget(
-                    Paragraph::new(Line::from(Span::styled(
-                        format!("  {line}"),
-                        preview_style,
-                    ))),
+                    Paragraph::new(Line::from(spans)),
                     Rect::new(padded.x, ly, padded.width, 1),
                 );
             }
