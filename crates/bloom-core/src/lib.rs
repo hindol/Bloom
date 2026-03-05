@@ -927,6 +927,40 @@ impl BloomEditor {
             return vec![keymap::dispatch::Action::Noop];
         }
 
+        // Command mode: intercept Tab for inline menu completion
+        if matches!(self.vim_state.mode(), vim::Mode::Command) {
+            if key.code == types::KeyCode::Tab {
+                // Accept the selected completion into the command line
+                let input = self.vim_state.pending_keys().to_string();
+                let commands: &[(&str, &str)] = &[
+                    ("w", ""), ("write", ""), ("q", ""), ("quit", ""),
+                    ("wq", ""), ("x", ""), ("q!", ""), ("e", ""), ("edit", ""),
+                    ("sp", ""), ("split", ""), ("vs", ""), ("vsplit", ""),
+                    ("bd", ""), ("bdelete", ""), ("theme", ""),
+                    ("rebuild-index", ""),
+                ];
+
+                let completion = if let Some(arg_prefix) = input.strip_prefix("theme ") {
+                    // Argument completion
+                    theme::THEME_NAMES.iter()
+                        .filter(|name| arg_prefix.is_empty() || name.starts_with(arg_prefix))
+                        .next()
+                        .map(|name| format!("theme {name}"))
+                } else {
+                    // Command completion
+                    commands.iter()
+                        .filter(|(cmd, _)| input.is_empty() || cmd.starts_with(&input))
+                        .next()
+                        .map(|(cmd, _)| cmd.to_string())
+                };
+
+                if let Some(text) = completion {
+                    self.vim_state.set_command_line(&text);
+                }
+                return vec![keymap::dispatch::Action::Noop];
+            }
+        }
+
         // Vim processing
         if let Some(buf) = self.active_page.as_ref().and_then(|id| self.buffer_mgr.get(id)) {
             let mode_before_key = self.vim_state.mode();
@@ -2106,6 +2140,7 @@ impl BloomEditor {
                 hidden_pane_count: 0,
                 picker: None,
                 agenda: None,
+                inline_menu: None,
                 which_key: None,
                 date_picker: None,
                 dialog: None,
@@ -2357,40 +2392,69 @@ impl BloomEditor {
             } else {
                 None
             },
-            which_key: {
-                if !show_wk {
-                    None
-                } else if matches!(self.vim_state.mode(), vim::Mode::Command) {
-                // Show available commands as which-key hints
+            inline_menu: if matches!(self.vim_state.mode(), vim::Mode::Command) {
                 let input = self.vim_state.pending_keys();
-                let commands: Vec<(&str, &str)> = vec![
+                let commands: &[(&str, &str)] = &[
                     ("w", "write (save)"),
+                    ("write", "write (save)"),
                     ("q", "quit"),
+                    ("quit", "quit"),
                     ("wq", "write and quit"),
+                    ("x", "write and quit"),
+                    ("q!", "quit without saving"),
                     ("e", "edit (find page)"),
+                    ("edit", "edit (find page)"),
                     ("sp", "split horizontal"),
+                    ("split", "split horizontal"),
                     ("vs", "vsplit vertical"),
+                    ("vsplit", "vsplit vertical"),
                     ("bd", "close buffer"),
+                    ("bdelete", "close buffer"),
                     ("theme", "switch theme"),
                     ("rebuild-index", "rebuild search index"),
                 ];
-                let filtered: Vec<render::WhichKeyEntry> = commands.iter()
-                    .filter(|(cmd, _)| input.is_empty() || cmd.starts_with(input))
-                    .map(|(cmd, label)| render::WhichKeyEntry {
-                        key: cmd.to_string(),
-                        label: label.to_string(),
-                        is_group: false,
-                    })
-                    .collect();
-                if !filtered.is_empty() {
-                    Some(render::WhichKeyFrame {
-                        entries: filtered,
-                        prefix: format!(":{input}"),
-                        context: render::WhichKeyContext::CommandLine,
+
+                // Detect argument completion: "theme <partial>"
+                let (items, selected) = if let Some(arg_prefix) = input.strip_prefix("theme ") {
+                    let theme_names = theme::THEME_NAMES;
+                    let items: Vec<render::InlineMenuItem> = theme_names.iter()
+                        .filter(|name| arg_prefix.is_empty() || name.starts_with(arg_prefix))
+                        .map(|name| render::InlineMenuItem {
+                            label: name.to_string(),
+                            right: None,
+                        })
+                        .collect();
+                    (items, 0)
+                } else {
+                    let items: Vec<render::InlineMenuItem> = commands.iter()
+                        .filter(|(cmd, _)| input.is_empty() || cmd.starts_with(input))
+                        .map(|(cmd, desc)| render::InlineMenuItem {
+                            label: cmd.to_string(),
+                            right: Some(desc.to_string()),
+                        })
+                        .collect();
+                    (items, 0)
+                };
+
+                if !items.is_empty() {
+                    Some(render::InlineMenuFrame {
+                        items,
+                        selected,
+                        anchor: render::InlineMenuAnchor::CommandLine,
+                        hint: None,
                     })
                 } else {
                     None
                 }
+            } else {
+                None
+            },
+            which_key: {
+                if !show_wk {
+                    None
+                } else if matches!(self.vim_state.mode(), vim::Mode::Command) {
+                // Command mode: use inline_menu instead (see inline_menu field below)
+                None
             } else if self.leader_keys.len() > 1 {
                 let lookup_keys: Vec<types::KeyEvent> = self.leader_keys[1..].to_vec();
                 match self.which_key_tree.lookup(&lookup_keys) {

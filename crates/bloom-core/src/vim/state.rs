@@ -111,6 +111,13 @@ impl VimState {
         &self.pending
     }
 
+    /// Replace the pending command line text (for Tab completion).
+    pub fn set_command_line(&mut self, text: &str) {
+        if matches!(self.mode, Mode::Command) {
+            self.pending = text.to_string();
+        }
+    }
+
     /// Get the contents of a register.
     pub fn register(&self, name: char) -> Option<&str> {
         self.registers.get(name)

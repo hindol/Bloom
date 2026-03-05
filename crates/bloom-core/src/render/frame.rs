@@ -15,6 +15,7 @@ pub struct RenderFrame {
     pub hidden_pane_count: usize,
     pub picker: Option<PickerFrame>,
     pub agenda: Option<AgendaFrame>,
+    pub inline_menu: Option<InlineMenuFrame>,
     pub which_key: Option<WhichKeyFrame>,
     pub date_picker: Option<DatePickerFrame>,
     pub dialog: Option<DialogFrame>,
@@ -112,6 +113,30 @@ pub struct TimelineEntryFrame {
     pub date: NaiveDate,
     pub context: String,
     pub expanded: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Inline menu (shared: command completion, link picker, tag completion)
+// ---------------------------------------------------------------------------
+
+pub struct InlineMenuFrame {
+    pub items: Vec<InlineMenuItem>,
+    pub selected: usize,
+    pub anchor: InlineMenuAnchor,
+    pub hint: Option<String>,
+}
+
+pub struct InlineMenuItem {
+    pub label: String,
+    pub right: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum InlineMenuAnchor {
+    /// Above the status bar (command completion, tag add/remove)
+    CommandLine,
+    /// Below a specific cursor position (inline link, inline tag)
+    Cursor { line: usize, col: usize },
 }
 
 // ---------------------------------------------------------------------------
