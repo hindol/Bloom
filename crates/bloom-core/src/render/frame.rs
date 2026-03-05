@@ -14,6 +14,7 @@ pub struct RenderFrame {
     pub maximized: bool,
     pub hidden_pane_count: usize,
     pub picker: Option<PickerFrame>,
+    pub agenda: Option<AgendaFrame>,
     pub which_key: Option<WhichKeyFrame>,
     pub date_picker: Option<DatePickerFrame>,
     pub dialog: Option<DialogFrame>,
@@ -85,6 +86,7 @@ pub struct AgendaFrame {
     pub selected_index: usize,
     pub total_open: usize,
     pub total_pages: usize,
+    pub preview: Option<String>,
 }
 
 pub struct AgendaItem {

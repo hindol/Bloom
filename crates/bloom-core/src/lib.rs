@@ -125,6 +125,7 @@ pub struct BloomEditor {
     cursor: usize,
     active_page: Option<types::PageId>,
     picker_state: Option<ActivePicker>,
+    agenda_state: Option<AgendaState>,
     quick_capture: Option<QuickCaptureState>,
     notifications: Vec<render::Notification>,
     viewport: render::Viewport,
@@ -138,6 +139,28 @@ pub struct BloomEditor {
     autosave_tx: Option<crossbeam::channel::Sender<store::disk_writer::WriteRequest>>,
     terminal_height: u16,
     terminal_width: u16,
+}
+
+// ---------------------------------------------------------------------------
+// Agenda overlay state
+// ---------------------------------------------------------------------------
+
+struct AgendaState {
+    selected_index: usize,
+    items: Vec<AgendaFlatItem>,
+}
+
+struct AgendaFlatItem {
+    task: types::Task,
+    source_title: String,
+    bucket: AgendaBucket,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum AgendaBucket {
+    Overdue,
+    Today,
+    Upcoming,
 }
 
 // ---------------------------------------------------------------------------
@@ -360,6 +383,7 @@ impl BloomEditor {
             cursor: 0,
             active_page: None,
             picker_state: None,
+            agenda_state: None,
             quick_capture: None,
             notifications: Vec::new(),
             viewport: render::Viewport::new(24, 80),
@@ -866,6 +890,11 @@ impl BloomEditor {
             return self.execute_actions(vec![action]);
         }
 
+        // If agenda overlay is open
+        if self.agenda_state.is_some() {
+            return self.handle_agenda_key(&key);
+        }
+
         // If picker is open (all picker types, including theme)
         if self.picker_state.is_some() {
             return self.handle_picker_key(&key);
@@ -924,10 +953,11 @@ impl BloomEditor {
                     self.window_mgr.navigate(dir, cursor_line);
                 }
                 keymap::dispatch::Action::OpenAgenda => {
-                    self.window_mgr.open_special_view(
-                        window::PaneKind::Agenda,
-                        window::SplitDirection::Vertical,
-                    );
+                    if self.agenda_state.is_some() {
+                        self.agenda_state = None;
+                    } else {
+                        self.open_agenda();
+                    }
                 }
                 keymap::dispatch::Action::OpenUndoTree => {
                     // TODO: open undo tree in split pane
@@ -1563,6 +1593,149 @@ impl BloomEditor {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Agenda overlay
+    // -----------------------------------------------------------------------
+
+    fn open_agenda(&mut self) {
+        let today = chrono::Local::now().date_naive();
+        let filters = index::AgendaFilters { tags: vec![], page: None, date_range: None };
+        let Some(idx) = &self.index else {
+            self.agenda_state = Some(AgendaState { selected_index: 0, items: Vec::new() });
+            return;
+        };
+        let view = self.agenda.build(today, idx, &filters);
+        let mut items = Vec::new();
+        for task in &view.overdue {
+            let source_title = idx.find_page_by_id(&task.source_page)
+                .map(|m| m.title)
+                .unwrap_or_default();
+            items.push(AgendaFlatItem { task: task.clone(), source_title, bucket: AgendaBucket::Overdue });
+        }
+        for task in &view.today {
+            let source_title = idx.find_page_by_id(&task.source_page)
+                .map(|m| m.title)
+                .unwrap_or_default();
+            items.push(AgendaFlatItem { task: task.clone(), source_title, bucket: AgendaBucket::Today });
+        }
+        for task in &view.upcoming {
+            let source_title = idx.find_page_by_id(&task.source_page)
+                .map(|m| m.title)
+                .unwrap_or_default();
+            items.push(AgendaFlatItem { task: task.clone(), source_title, bucket: AgendaBucket::Upcoming });
+        }
+        self.agenda_state = Some(AgendaState { selected_index: 0, items });
+    }
+
+    fn handle_agenda_key(&mut self, key: &types::KeyEvent) -> Vec<keymap::dispatch::Action> {
+        use types::KeyCode;
+        let noop = vec![keymap::dispatch::Action::Noop];
+
+        if key.modifiers.ctrl {
+            match &key.code {
+                KeyCode::Char('n') => {
+                    if let Some(st) = &mut self.agenda_state {
+                        if !st.items.is_empty() {
+                            st.selected_index = (st.selected_index + 1).min(st.items.len() - 1);
+                        }
+                    }
+                    return noop;
+                }
+                KeyCode::Char('p') => {
+                    if let Some(st) = &mut self.agenda_state {
+                        st.selected_index = st.selected_index.saturating_sub(1);
+                    }
+                    return noop;
+                }
+                _ => return noop,
+            }
+        }
+
+        match &key.code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                if let Some(st) = &mut self.agenda_state {
+                    if !st.items.is_empty() {
+                        st.selected_index = (st.selected_index + 1).min(st.items.len() - 1);
+                    }
+                }
+                noop
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if let Some(st) = &mut self.agenda_state {
+                    st.selected_index = st.selected_index.saturating_sub(1);
+                }
+                noop
+            }
+            KeyCode::Char('q') | KeyCode::Esc => {
+                self.agenda_state = None;
+                noop
+            }
+            KeyCode::Enter => {
+                let page_id = self.agenda_state.as_ref()
+                    .and_then(|st| st.items.get(st.selected_index))
+                    .map(|item| item.task.source_page.clone());
+                self.agenda_state = None;
+                if let Some(id) = page_id {
+                    self.navigate_to_page_by_id(&id);
+                }
+                noop
+            }
+            KeyCode::Char('x') => {
+                if let Some(st) = &self.agenda_state {
+                    if let Some(item) = st.items.get(st.selected_index) {
+                        let page_id = item.task.source_page.clone();
+                        let line = item.task.line;
+                        self.toggle_task_in_page(&page_id, line);
+                    }
+                }
+                // Refresh the agenda after toggling
+                self.open_agenda();
+                noop
+            }
+            _ => noop,
+        }
+    }
+
+    fn navigate_to_page_by_id(&mut self, page_id: &types::PageId) {
+        if let Some(idx) = &self.index {
+            if let Some(meta) = idx.find_page_by_id(page_id) {
+                if let Ok(content) = std::fs::read_to_string(&meta.path) {
+                    self.open_page_with_content(page_id, &meta.title, &meta.path, &content);
+                }
+            }
+        }
+    }
+
+    fn toggle_task_in_page(&mut self, page_id: &types::PageId, line: usize) {
+        // Ensure the page is loaded in a buffer
+        let needs_load = self.buffer_mgr.get(page_id).is_none();
+        if needs_load {
+            if let Some(idx) = &self.index {
+                if let Some(meta) = idx.find_page_by_id(page_id) {
+                    if let Ok(content) = std::fs::read_to_string(&meta.path) {
+                        self.buffer_mgr.open(page_id, &meta.title, &meta.path, &content);
+                    }
+                }
+            }
+        }
+        let Some(buf) = self.buffer_mgr.get_mut(page_id) else { return };
+        let rope = buf.text();
+        if rope.len_lines() == 0 { return; }
+        let line_idx = line.min(rope.len_lines().saturating_sub(1));
+        let line_text = rope.line(line_idx).to_string();
+        let trimmed = line_text.trim_start();
+        let indent = line_text.len() - trimmed.len();
+        let line_start = rope.line_to_char(line_idx);
+
+        if trimmed.starts_with("- [ ] ") {
+            let bracket_start = line_start + indent + 2;
+            buf.replace(bracket_start..bracket_start + 3, "[x]");
+        } else if trimmed.starts_with("- [x] ") || trimmed.starts_with("- [X] ") {
+            let bracket_start = line_start + indent + 2;
+            buf.replace(bracket_start..bracket_start + 3, "[ ]");
+        }
+    }
+
     /// Close the active buffer. Opens journal or scratch if it was the last buffer.
     fn close_active_buffer(&mut self) {
         if let Some(page_id) = self.active_page.take() {
@@ -1916,6 +2089,7 @@ impl BloomEditor {
                 maximized: false,
                 hidden_pane_count: 0,
                 picker: None,
+                agenda: None,
                 which_key: None,
                 date_picker: None,
                 dialog: None,
@@ -1971,76 +2145,6 @@ impl BloomEditor {
 
         for rect in &pane_rects {
             let is_active = rect.pane_id == self.window_mgr.active_pane();
-
-            // Agenda pane: build AgendaFrame instead of Editor
-            if self.window_mgr.pane_kind(rect.pane_id) == Some(&window::PaneKind::Agenda) {
-                let today = chrono::Local::now().date_naive();
-                let filters = index::AgendaFilters { tags: vec![], page: None, date_range: None };
-                let agenda_frame = if let Some(idx) = &self.index {
-                    let view = self.agenda.build(today, idx, &filters);
-                    let to_item = |task: &types::Task| {
-                        let source_title = idx.find_page_by_id(&task.source_page)
-                            .map(|m| m.title)
-                            .unwrap_or_default();
-                        let due = task.timestamps.iter().find_map(|ts| match ts {
-                            types::Timestamp::Due(d) => Some(*d),
-                            _ => None,
-                        });
-                        render::AgendaItem {
-                            task_text: task.text.clone(),
-                            source_page: source_title,
-                            date: due,
-                            tags: vec![],
-                        }
-                    };
-                    render::AgendaFrame {
-                        overdue: view.overdue.iter().map(&to_item).collect(),
-                        today: view.today.iter().map(&to_item).collect(),
-                        upcoming: view.upcoming.iter().map(&to_item).collect(),
-                        selected_index: 0,
-                        total_open: view.total_open,
-                        total_pages: view.total_pages,
-                    }
-                } else {
-                    render::AgendaFrame {
-                        overdue: vec![], today: vec![], upcoming: vec![],
-                        selected_index: 0, total_open: 0, total_pages: 0,
-                    }
-                };
-                panes.push(render::PaneFrame {
-                    id: rect.pane_id,
-                    kind: render::PaneKind::Agenda(agenda_frame),
-                    visible_lines: Vec::new(),
-                    cursor: render::CursorState {
-                        line: 0, column: 0,
-                        shape: render::CursorShape::Block,
-                    },
-                    scroll_offset: 0,
-                    is_active,
-                    title: "Agenda".to_string(),
-                    dirty: false,
-                    status_bar: render::StatusBarFrame {
-                        content: render::StatusBarContent::Normal(render::NormalStatus {
-                            title: "Agenda".to_string(),
-                            dirty: false,
-                            line: 0,
-                            column: 0,
-                            pending_keys: String::new(),
-                            recording_macro: None,
-                            mcp: render::McpIndicator::Off,
-                        }),
-                        mode: "NORMAL".to_string(),
-                    },
-                    rect: render::PaneRectFrame {
-                        x: rect.x,
-                        y: rect.y,
-                        width: rect.width,
-                        content_height: rect.content_height,
-                        total_height: rect.height,
-                    },
-                });
-                continue;
-            }
 
             let (title, dirty, visible_lines) = if let Some(page_id) = &self.active_page {
                 if let Some(buf) = self.buffer_mgr.get(page_id) {
@@ -2188,6 +2292,36 @@ impl BloomEditor {
                     filtered_count: if below_min { 0 } else { ap.picker.filtered_count() },
                     status_noun: ap.status_noun.clone(),
                     min_query_len: ap.min_query_len,
+                })
+            } else {
+                None
+            },
+            agenda: if let Some(state) = &self.agenda_state {
+                let mut overdue = Vec::new();
+                let mut today = Vec::new();
+                let mut upcoming = Vec::new();
+                for item in &state.items {
+                    let agenda_item = render::AgendaItem {
+                        task_text: item.task.text.clone(),
+                        source_page: item.source_title.clone(),
+                        date: item.task.timestamps.iter().find_map(|ts| match ts {
+                            types::Timestamp::Due(d) => Some(*d),
+                            _ => None,
+                        }),
+                        tags: vec![],
+                    };
+                    match item.bucket {
+                        AgendaBucket::Overdue => overdue.push(agenda_item),
+                        AgendaBucket::Today => today.push(agenda_item),
+                        AgendaBucket::Upcoming => upcoming.push(agenda_item),
+                    }
+                }
+                Some(render::AgendaFrame {
+                    overdue, today, upcoming,
+                    selected_index: state.selected_index,
+                    total_open: state.items.len(),
+                    total_pages: state.items.iter().map(|i| &i.source_title).collect::<std::collections::HashSet<_>>().len(),
+                    preview: None,
                 })
             } else {
                 None

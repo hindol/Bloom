@@ -1,5 +1,5 @@
 use bloom_core::render::{
-    DialogFrame, McpIndicator, NotificationLevel, PaneFrame, PaneKind,
+    AgendaFrame, DialogFrame, McpIndicator, NotificationLevel, PaneFrame, PaneKind,
     PickerFrame, RenderFrame, StatusBarContent, StatusBarFrame, WhichKeyFrame,
 };
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -49,6 +49,9 @@ pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &TuiTheme) {
     }
 
     // Overlays
+    if let Some(agenda) = &frame.agenda {
+        draw_agenda(f, area, agenda, theme);
+    }
     if let Some(picker) = &frame.picker {
         draw_picker(f, area, picker, theme);
     }
@@ -816,18 +819,52 @@ fn draw_notification(
 fn draw_agenda(
     f: &mut Frame,
     area: Rect,
-    agenda: &bloom_core::render::AgendaFrame,
+    agenda: &AgendaFrame,
     theme: &TuiTheme,
 ) {
-    let mut y = area.y;
+    // Full-screen overlay
+    f.render_widget(Clear, area);
+    f.render_widget(
+        Block::default().style(RStyle::default().bg(theme.background())),
+        area,
+    );
+
+    if area.height < 4 {
+        return;
+    }
+
+    // Split: top ~60% for task list + footer, 1 separator, bottom ~40% for preview
+    let has_preview = agenda.preview.is_some() && area.height >= 10;
+    let preview_h = if has_preview { (area.height * 2 / 5).max(3) } else { 0 };
+    let separator_h: u16 = if has_preview { 1 } else { 0 };
+    let top_h = area.height.saturating_sub(preview_h).saturating_sub(separator_h);
+
+    // Footer takes 1 line at bottom of the top section
+    let list_h = top_h.saturating_sub(1);
+    let footer_y = area.y + list_h;
+
+    // Build flat list with section markers for rendering
+    struct Section<'a> {
+        label: &'a str,
+        items: &'a [bloom_core::render::AgendaItem],
+        fg: ratatui::style::Color,
+    }
+
+    let today_str = chrono::Local::now().format("%Y-%m-%d").to_string();
     let sections = [
-        ("Overdue", &agenda.overdue),
-        ("Today", &agenda.today),
-        ("Upcoming", &agenda.upcoming),
+        Section { label: "Overdue", items: &agenda.overdue, fg: theme.critical() },
+        Section { label: &format!("Today · {today_str}"), items: &agenda.today, fg: theme.foreground() },
+        Section { label: "Upcoming", items: &agenda.upcoming, fg: theme.faded() },
     ];
 
-    for (label, items) in &sections {
-        if y >= area.bottom() {
+    let mut y = area.y;
+    let mut flat_idx: usize = 0;
+
+    for section in &sections {
+        if section.items.is_empty() {
+            continue;
+        }
+        if y >= area.y + list_h {
             break;
         }
         // Section header
@@ -836,43 +873,101 @@ fn draw_agenda(
             .add_modifier(Modifier::BOLD);
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                format!("  {label}"),
+                format!("  {}", section.label),
                 header_style,
             ))),
             Rect::new(area.x, y, area.width, 1),
         );
         y += 1;
 
-        for (i, item) in items.iter().enumerate() {
-            if y >= area.bottom() {
+        for item in section.items {
+            if y >= area.y + list_h {
                 break;
             }
-            let is_selected = false; // TODO: track global index
-            let style = if is_selected {
-                theme.picker_selected()
+            let is_selected = flat_idx == agenda.selected_index;
+            let base_style = if is_selected {
+                RStyle::default().fg(section.fg).bg(theme.mild())
             } else {
-                RStyle::default().fg(theme.foreground())
+                RStyle::default().fg(section.fg)
             };
-            let _ = i;
-            let text = format!("  ☐ {}  ({})", item.task_text, item.source_page);
-            f.render_widget(
-                Paragraph::new(Line::from(Span::styled(text, style))),
-                Rect::new(area.x, y, area.width, 1),
-            );
+
+            let marker = if is_selected { " ▸" } else { "  " };
+            let date_str = item.date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
+            let available = area.width as usize;
+            let left_part = format!("{marker} ☐ {}", item.task_text);
+            let left_w = left_part.width();
+
+            // Source page is always faded; date is critical for overdue, faded otherwise
+            let source_str = format!("  {}", item.source_page);
+            let date_str_padded = format!("  {date_str}");
+            let date_fg = if std::ptr::eq(*&section.items, &*agenda.overdue) {
+                theme.critical()
+            } else {
+                theme.faded()
+            };
+            let source_style = if is_selected {
+                RStyle::default().fg(theme.faded()).bg(theme.mild())
+            } else {
+                theme.faded_style()
+            };
+            let date_style = if is_selected {
+                RStyle::default().fg(date_fg).bg(theme.mild())
+            } else {
+                RStyle::default().fg(date_fg)
+            };
+
+            let right_w = source_str.width() + date_str_padded.width();
+            let pad = if available > left_w + right_w { available - left_w - right_w } else { 1 };
+
+            let line = Line::from(vec![
+                Span::styled(left_part, base_style),
+                Span::styled(" ".repeat(pad), base_style),
+                Span::styled(source_str, source_style),
+                Span::styled(date_str_padded, date_style),
+            ]);
+            f.render_widget(Paragraph::new(line), Rect::new(area.x, y, area.width, 1));
             y += 1;
+            flat_idx += 1;
         }
     }
 
     // Footer
-    if y < area.bottom() {
+    if footer_y < area.bottom() {
         let footer = format!(
-            "  {} open tasks across {} pages",
-            agenda.total_open, agenda.total_pages
+            "  ▸ {}/{} tasks   {} pages   [x]toggle [Enter]jump [q]close",
+            agenda.selected_index + 1,
+            agenda.total_open,
+            agenda.total_pages,
         );
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(footer, theme.faded_style()))),
-            Rect::new(area.x, y, area.width, 1),
+            Rect::new(area.x, footer_y, area.width, 1),
         );
+    }
+
+    // Separator
+    if has_preview {
+        let sep_y = area.y + top_h;
+        if sep_y < area.bottom() {
+            let sep = "─".repeat(area.width as usize);
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled(sep, theme.faded_style()))),
+                Rect::new(area.x, sep_y, area.width, 1),
+            );
+        }
+
+        // Preview
+        let preview_y = sep_y + 1;
+        if let Some(text) = &agenda.preview {
+            let preview_area = Rect::new(area.x, preview_y, area.width, preview_h);
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    format!("  {text}"),
+                    theme.faded_style(),
+                ))),
+                preview_area,
+            );
+        }
     }
 }
 
