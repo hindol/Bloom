@@ -1068,6 +1068,91 @@ impl BloomEditor {
             "insert_link" => vec![keymap::dispatch::Action::OpenPicker(
                 keymap::dispatch::PickerKind::InlineLink,
             )],
+            "add_tag" => {
+                // TODO: open tag input picker
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "remove_tag" => {
+                // TODO: open picker with current page's tags for selection
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "insert_due" => {
+                self.insert_text_at_cursor("@due()");
+                // Move cursor inside the parens
+                self.cursor = self.cursor.saturating_sub(1);
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "insert_start" => {
+                self.insert_text_at_cursor("@start()");
+                self.cursor = self.cursor.saturating_sub(1);
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "insert_at" => {
+                self.insert_text_at_cursor("@at()");
+                self.cursor = self.cursor.saturating_sub(1);
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "search_backlinks" => {
+                if let Some(id) = self.active_page.clone() {
+                    vec![keymap::dispatch::Action::OpenPicker(
+                        keymap::dispatch::PickerKind::Backlinks(id),
+                    )]
+                } else {
+                    vec![keymap::dispatch::Action::Noop]
+                }
+            }
+            "search_unlinked" => {
+                if let Some(id) = self.active_page.clone() {
+                    vec![keymap::dispatch::Action::OpenPicker(
+                        keymap::dispatch::PickerKind::UnlinkedMentions(id),
+                    )]
+                } else {
+                    vec![keymap::dispatch::Action::Noop]
+                }
+            }
+            "search_journal" => vec![keymap::dispatch::Action::OpenPicker(
+                keymap::dispatch::PickerKind::Journal,
+            )],
+            "timeline" => {
+                if let Some(id) = self.active_page.clone() {
+                    vec![keymap::dispatch::Action::OpenTimeline(id)]
+                } else {
+                    vec![keymap::dispatch::Action::Noop]
+                }
+            }
+            "backlinks" => {
+                if let Some(id) = self.active_page.clone() {
+                    vec![keymap::dispatch::Action::OpenPicker(
+                        keymap::dispatch::PickerKind::Backlinks(id),
+                    )]
+                } else {
+                    vec![keymap::dispatch::Action::Noop]
+                }
+            }
+            "journal_prev" => {
+                self.navigate_journal(-1);
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "journal_next" => {
+                self.navigate_journal(1);
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "rename_page" => {
+                // TODO: open rename input pre-filled with current title
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "delete_page" => {
+                // TODO: show confirmation dialog, then delete
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "balance" => {
+                self.window_mgr.balance();
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "maximize" => {
+                self.window_mgr.maximize_toggle();
+                vec![keymap::dispatch::Action::Noop]
+            }
             _ => vec![keymap::dispatch::Action::Noop],
         }
     }
@@ -1537,6 +1622,56 @@ impl BloomEditor {
         }
         // Fallback: page link without block
         self.yank_link_to_current_page()
+    }
+
+    /// Insert text at the current cursor position.
+    fn insert_text_at_cursor(&mut self, text: &str) {
+        let Some(page_id) = &self.active_page else { return };
+        let Some(buf) = self.buffer_mgr.get_mut(page_id) else { return };
+        buf.insert(self.cursor, text);
+        self.cursor += text.len();
+    }
+
+    /// Navigate to the previous or next journal entry.
+    fn navigate_journal(&mut self, delta: i32) {
+        let Some(journal) = &self.journal else { return };
+        let today = journal::Journal::today();
+
+        // Find current journal date from active page
+        let current_date = self.active_page.as_ref()
+            .and_then(|id| self.buffer_mgr.get(id))
+            .and_then(|buf| {
+                let text = buf.text().to_string();
+                self.parser.parse_frontmatter(&text)
+                    .and_then(|fm| fm.created)
+            })
+            .unwrap_or(today);
+
+        // Simply offset by one day
+        let target = if delta > 0 {
+            current_date.succ_opt().unwrap_or(current_date)
+        } else {
+            current_date.pred_opt().unwrap_or(current_date)
+        };
+
+        let title = target.format("%Y-%m-%d").to_string();
+        let path = journal.path_for_date(target);
+        let content = if path.exists() {
+            std::fs::read_to_string(&path).unwrap_or_default()
+        } else {
+            let fm = parser::traits::Frontmatter {
+                id: None,
+                title: Some(title.clone()),
+                created: Some(target),
+                tags: vec![types::TagName("journal".to_string())],
+                extra: std::collections::HashMap::new(),
+            };
+            let mut s = self.parser.serialize_frontmatter(&fm);
+            s.push('\n');
+            s
+        };
+        let id = crate::uuid::generate_hex_id();
+        self.open_page_with_content(&id, &title, &path, &content);
     }
 
     fn translate_vim_action(

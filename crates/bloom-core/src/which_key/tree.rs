@@ -209,11 +209,21 @@ pub fn default_tree() -> WhichKeyTree {
     // Links
     tree.register("l l", "Insert link", "insert_link".into());
     tree.register("l y", "Yank link", "yank_link".into());
+    tree.register("l Y", "Yank block link", "yank_block_link".into());
     tree.register("l t", "Timeline", "timeline".into());
     tree.register("l b", "Backlinks", "backlinks".into());
 
+    // Tags
+    tree.register("t a", "Add tag", "add_tag".into());
+    tree.register("t r", "Remove tag", "remove_tag".into());
+
     // Agenda
     tree.register("a a", "Agenda", "agenda".into());
+
+    // Insert
+    tree.register("i d", "Insert @due()", "insert_due".into());
+    tree.register("i s", "Insert @start()", "insert_start".into());
+    tree.register("i a", "Insert @at()", "insert_at".into());
 
     // Windows
     tree.register("w v", "Split vertical", "split_vertical".into());
