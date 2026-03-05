@@ -173,6 +173,12 @@ fn draw_pane_title(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme
 }
 
 fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
+    // Clear the entire content area to prevent stale cells on buffer switch
+    f.render_widget(
+        Block::default().style(RStyle::default().bg(theme.background())),
+        area,
+    );
+
     let height = area.height as usize;
     let line_number_width = 5u16; // e.g. " 42  " (3-digit number + gutter gap)
     let right_margin = 2u16;
