@@ -25,19 +25,19 @@ Every picker shares a single layout component and input handler. Individual pick
 └───────────────────────────────────────────────────────────────┘
 ```
 
-**Inline** (link picker only) — compact, cursor-anchored, no preview, no status line:
+**Inline menu** — compact, anchored to cursor or command line. Used for contextual completions:
 
 ```
    text before cursor|
-                      ┌─ Link to… ───────────────────────┐
-                      │ > query_                          │
-                      │                                   │
-                      │ ▸ [label]                [right]  │
-                      │   [label]                [right]  │
-                      │                                   │
-                      │ ↵ select  ⎋ cancel  + new page   │  ← hint line
-                      └───────────────────────────────────┘
+                      ┌───────────────────────────────┐
+                      │ ▸ [label]              [right] │
+                      │   [label]              [right] │
+                      │                                │
+                      │ ↵ select  ⎋ cancel             │  ← optional hint line
+                      └───────────────────────────────┘
 ```
+
+The inline menu is a shared component. Individual use cases supply **data** (items, marginalia) and an **anchor point** — they never define their own layout or keybindings. See the inline menu sections below (§9–§13) for all use cases.
 
 ### Row columns
 
@@ -390,35 +390,144 @@ Emacs `M-x` equivalent. Every Bloom command is searchable.
 
 ## 9. Inline Link Picker — `[[` trigger
 
-Triggered while typing in Insert mode. Appears inline, anchored to the cursor position. Smaller than full-screen pickers.
+Triggered while typing in Insert mode. Appears inline, anchored to the cursor position. Uses the shared **inline menu** component.
 
 ```
    Today I learned about |
-                         ┌─ Link to… ───────────────────────┐
-                         │ > rope_                           │
-                         │                                   │
-                         │ ▸ Text Editor Theory     #rust    │
-                         │   Rope Data Structures   #rust    │
-                         │   Rust Programming       #lang    │
-                         │                                   │
-                         │ ↵ select  ⎋ cancel  + new page   │
-                         └───────────────────────────────────┘
+                         ┌───────────────────────────────┐
+                         │ ▸ Text Editor Theory    #rust  │
+                         │   Rope Data Structures  #rust  │
+                         │   Rust Programming      #lang  │
+                         │                                │
+                         │ ↵ select  ⎋ cancel  + new     │
+                         └───────────────────────────────┘
 ```
 
 | Element | Content |
 |---------|---------|
-| Position | Anchored below cursor, inline |
-| Result row | Page title |
-| Marginalia | Tags (compact) |
-| Sort | Recency + fuzzy score |
-| No preview | Inline picker is compact — no preview pane |
-| On select (`Enter`) | Inserts `[[uuid\|title]]` at cursor |
-| Create new (`+` or `Ctrl+Enter` on non-matching query) | Creates new page with typed text as title, inserts link |
+| Trigger | `[[` typed in Insert mode |
+| Anchor | Below cursor |
+| Data | Page titles from index, sorted by recency + fuzzy score |
+| Right column | Tags (compact) |
+| On select (`Enter`/`Tab`) | Inserts `[[uuid\|title]]` at cursor |
+| Create new (`Ctrl+Enter`) | Creates new page with query as title, inserts link |
 | On cancel (`Escape`) | Leaves `[[` as typed text |
 
 ---
 
-## 10. Quick Capture — `SPC j a` / `SPC j t`
+## 10. Inline Tag Completion — `#` trigger
+
+Triggered while typing in Insert mode. Same inline menu, anchored to cursor. Completes tag names from the index.
+
+```
+   Reviewed the ropey crate API #ru|
+                                    ┌────────────────────┐
+                                    │ ▸ rust          12  │
+                                    │   ruby           3  │
+                                    │   runtime        1  │
+                                    └────────────────────┘
+```
+
+| Element | Content |
+|---------|---------|
+| Trigger | `#` followed by a letter in Insert mode |
+| Anchor | Below cursor |
+| Data | All tags from index, fuzzy-matched against text after `#` |
+| Right column | Usage count |
+| On select (`Enter`/`Tab`) | Completes the tag text (e.g. `ru` → `rust`), cursor moves past tag |
+| On cancel (`Escape`) | Leaves partial text as-is |
+
+---
+
+## 11. Command Completion — `:` command line
+
+Appears immediately when typing in Command mode. Anchored above the status bar. Replaces the which-key timeout-based hint grid for commands.
+
+```
+  ┌──────────────────────────────────────┐
+  │ ▸ theme        switch theme          │
+  │   theme-list   list all themes       │
+  └──────────────────────────────────────┘
+ ────────────────────────────────────────────
+ :th█
+```
+
+After `Tab` fills `:theme `, argument completion kicks in:
+
+```
+  ┌──────────────────────────────────────┐
+  │ ▸ bloom-dark                         │
+  │   bloom-dark-faded                   │
+  │   bloom-light                        │
+  │   parchment                          │
+  │   moss                               │
+  └──────────────────────────────────────┘
+ ────────────────────────────────────────────
+ :theme █
+```
+
+| Element | Content |
+|---------|---------|
+| Trigger | Entering Command mode (`:`) |
+| Anchor | Above status bar |
+| Data | Registered ex commands, prefix-filtered. After a known command + space, switches to argument completions (e.g. theme names). |
+| Right column | Description (commands) or — (arguments) |
+| `Tab` | Fills selected completion into command line (does not execute) |
+| `Enter` | Executes whatever is in the command line |
+| On cancel (`Escape`) | Exits Command mode |
+
+---
+
+## 12. Add Tag — `SPC t a`
+
+Inline menu anchored above the status bar. Adds a tag to the current page's frontmatter.
+
+```
+ ────────────────────────────────────────────
+ Tag: ru█
+  ┌──────────────────────────────────────┐
+  │ ▸ rust                           12  │
+  │   ruby                            3  │
+  └──────────────────────────────────────┘
+```
+
+| Element | Content |
+|---------|---------|
+| Trigger | `SPC t a` |
+| Anchor | Above status bar (single-line input) |
+| Data | All tags from index, fuzzy-matched |
+| Right column | Usage count |
+| On select (`Enter`) | Adds tag to current page frontmatter |
+| On cancel (`Escape`) | Closes without changes |
+
+---
+
+## 13. Remove Tag — `SPC t r`
+
+Same inline menu, but sourced from the current page's tags only.
+
+```
+ ────────────────────────────────────────────
+ Remove tag:
+  ┌──────────────────────────────────────┐
+  │ ▸ rust                               │
+  │   editors                            │
+  │   bloom                              │
+  └──────────────────────────────────────┘
+```
+
+| Element | Content |
+|---------|---------|
+| Trigger | `SPC t r` |
+| Anchor | Above status bar |
+| Data | Current page's frontmatter tags (no fuzzy filter — list is short) |
+| Right column | — |
+| On select (`Enter`) | Removes tag from current page frontmatter |
+| On cancel (`Escape`) | Closes without changes |
+
+---
+
+## 14. Quick Capture — `SPC j a` / `SPC j t`
 
 Not a full picker — a minimal single-line input anchored to the bottom of the screen.
 
@@ -494,12 +603,36 @@ Top/bottom:          gg / G
 | Unlinked Mentions | Source page | — | Context quote | unlinked mentions | ✓ |
 | All Commands | Command name | Keybinding | Category | commands | ✓ |
 | Inline Link | Page title | — | Tags | (hint line) | — |
+| Inline Tag | Tag name | — | Usage count | — | — |
+| Command Completion | Command name | — | Description | — | — |
+| Add Tag | Tag name | — | Usage count | — | — |
+| Remove Tag | Tag name | — | — | — | — |
 | Templates | Template name | — | Description | templates | ✓ |
 | Theme | Theme name | — | Description / `(current)` | themes | ✓ |
 
 ---
 
-## 11. Which-Key Popup — `SPC` + timeout / pending Vim key
+## Inline Menu — Shared Properties
+
+All inline menus (§9–§13) share one rendering component and one input handler:
+
+| Property | Value |
+|----------|-------|
+| Width | max(label + right) + padding, capped at 40 cols |
+| Height | min(item count, 8 rows) |
+| Background | `subtle` |
+| Border | `faded`, single-line box |
+| Selected row | `mild` background, `▸` marker |
+| Label | `foreground` |
+| Right column | `faded` |
+| Navigation | `↓`/`Ctrl+n` next, `↑`/`Ctrl+p` previous |
+| Accept | `Tab` fills input (no execute), `Enter` confirms |
+| Cancel | `Escape` closes |
+| Scrolling | Same `scrolloff` config as editor |
+
+---
+
+## 15. Which-Key Popup — `SPC` + timeout / pending Vim key
 
 Not a picker — a bottom-anchored panel that appears after a brief timeout (~500ms) when a key prefix is pending. Provides progressive disclosure of available next keys.
 
