@@ -8,10 +8,26 @@
 ## Design Principles
 
 1. **Real whitespace.** Alignment inserts actual spaces into the buffer, not virtual rendering. Files look aligned in any editor, round-trip through git cleanly.
-2. **Undo-able in one step.** The entire alignment operation is a single edit group — one `u` reverts the whole block.
-3. **Triggered on Esc.** When the user leaves Insert mode, Bloom detects alignable blocks around the cursor and formats them. Fast typists are never interrupted.
-4. **Conservative.** Only align within contiguous blocks of the same type. A blank line or different construct breaks the block. Never reformats content the user didn't just edit.
+2. **Undo-able in one step.** The entire alignment operation is a single edit group — one `u` reverts all changes across the page.
+3. **Triggered on Esc.** When the user leaves Insert mode, Bloom aligns the page (or the cursor's block, depending on config). Fast typists are never interrupted.
+4. **Block-scoped.** Each alignment type operates within contiguous blocks of the same kind. A blank line or different construct breaks the block.
 5. **Presentation-agnostic.** Alignment operates on buffer content only. Word wrapping and viewport width are frontend concerns — core never caps or adjusts for display width.
+6. **Configurable.** Users can choose the scope of alignment or disable it entirely.
+
+---
+
+## Configuration
+
+```toml
+# config.toml
+auto_align = "page"     # default
+```
+
+| Value | Behaviour |
+|-------|-----------|
+| `"page"` | On Esc, scan the entire buffer and align every block found. Ensures consistency across the whole file. |
+| `"block"` | On Esc, scan up/down from the cursor line and align only the block the cursor is in. Lighter touch — only what you just edited. |
+| `"none"` | Disabled. No alignment on Esc. |
 
 ---
 
@@ -147,8 +163,7 @@ Contiguous lines that end with `^block-id` (preceded by a space).
 
 ### Rule
 
-- Align the `^` to a common column across the block.
-- Same cap logic as timestamps — don't push beyond viewport.
+- Align the `^` to a common column across the block, same as timestamp alignment.
 
 ### Before
 
@@ -181,10 +196,12 @@ Contiguous lines that end with `^block-id` (preceded by a space).
 
 ## Implementation Notes
 
-- Each alignment type detects its block by scanning up/down from the cursor line until it hits a non-matching line or blank line.
-- All padding changes in a block are wrapped in `begin_edit_group()` / `end_edit_group()` for single-step undo.
+- **Page mode:** single pass over all lines, top to bottom. Track current block type — when a block ends (blank line, different construct), flush alignment for that block. O(n) where n is line count.
+- **Block mode:** scan up/down from cursor line to find block boundaries, align that block only.
+- All padding changes across the entire operation are wrapped in `begin_edit_group()` / `end_edit_group()` for single-step undo.
 - The alignment runs after the Insert→Normal mode change is applied but before the render frame is computed.
-- Alignment is idempotent — running it on an already-aligned block produces no changes.
+- Alignment is idempotent — running it on an already-aligned block produces no edits and does not dirty the undo tree.
+- Performance: a 200-line file is <1ms. The highlighter (which runs on every render) is heavier.
 
 ---
 
