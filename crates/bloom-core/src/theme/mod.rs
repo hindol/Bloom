@@ -1,7 +1,7 @@
 mod palette;
 mod resolve;
 
-pub use palette::{Rgb, ThemePalette, BLOOM_DARK, BLOOM_DARK_FADED, BLOOM_LIGHT, BLOOM_LIGHT_FADED, PARCHMENT, NEWSPRINT, AGED_PAPER};
+pub use palette::{Rgb, ThemePalette, BLOOM_DARK, BLOOM_DARK_FADED, BLOOM_LIGHT, BLOOM_LIGHT_FADED, PARCHMENT, NEWSPRINT, AGED_PAPER, MOSS, SLATE, SOLARIUM, INK};
 pub use resolve::{StyleProps, Chrome, resolve, resolve_status_bar, resolve_chrome};
 
 /// All built-in theme names, in display order.
@@ -13,6 +13,10 @@ pub const THEME_NAMES: &[&str] = &[
     "parchment",
     "newsprint",
     "aged-paper",
+    "moss",
+    "slate",
+    "solarium",
+    "ink",
 ];
 
 /// Look up a built-in palette by name.
@@ -25,6 +29,10 @@ pub fn palette_by_name(name: &str) -> Option<&'static ThemePalette> {
         "parchment" => Some(&PARCHMENT),
         "newsprint" => Some(&NEWSPRINT),
         "aged-paper" => Some(&AGED_PAPER),
+        "moss" => Some(&MOSS),
+        "slate" => Some(&SLATE),
+        "solarium" => Some(&SOLARIUM),
+        "ink" => Some(&INK),
         _ => None,
     }
 }
@@ -39,6 +47,10 @@ pub fn theme_description(name: &str) -> &'static str {
         "parchment" => "cream paper, sepia ink",
         "newsprint" => "cool grey paper, charcoal type",
         "aged-paper" => "dark brown, candlelight warmth",
+        "moss" => "dark green-grey, forest floor",
+        "slate" => "cool blue-grey, architectural",
+        "solarium" => "warm solarized cream",
+        "ink" => "pure monochrome, white on black",
         _ => "",
     }
 }
