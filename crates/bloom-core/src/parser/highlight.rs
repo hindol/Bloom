@@ -32,6 +32,43 @@ pub fn highlight_line(line: &str, context: &LineContext) -> Vec<StyledSpan> {
                 range: 0..level + 1,
                 style: Style::SyntaxNoise,
             });
+            // Check for trailing block ID (e.g. "## Heading ^block-id")
+            let content = &line[level + 1..];
+            if let Some(caret_rel) = content.rfind(" ^") {
+                let after_caret = &content[caret_rel + 2..];
+                if !after_caret.is_empty()
+                    && after_caret
+                        .trim_end()
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+                {
+                    let abs_caret = level + 1 + caret_rel;
+                    let block_end = line.trim_end().len();
+                    // Heading text before block ID
+                    if abs_caret > level + 1 {
+                        spans.push(StyledSpan {
+                            range: level + 1..abs_caret,
+                            style: Style::Heading { level: level as u8 },
+                        });
+                    }
+                    // Space before caret
+                    spans.push(StyledSpan {
+                        range: abs_caret..abs_caret + 1,
+                        style: Style::Heading { level: level as u8 },
+                    });
+                    // Caret
+                    spans.push(StyledSpan {
+                        range: abs_caret + 1..abs_caret + 2,
+                        style: Style::BlockIdCaret,
+                    });
+                    // ID text
+                    spans.push(StyledSpan {
+                        range: abs_caret + 2..block_end,
+                        style: Style::BlockId,
+                    });
+                    return spans;
+                }
+            }
             spans.push(StyledSpan {
                 range: level + 1..len,
                 style: Style::Heading { level: level as u8 },
@@ -572,6 +609,15 @@ mod tests {
         let spans = highlight_line("text ^my-block", &ctx);
         assert!(spans.iter().any(|s| s.style == Style::BlockId));
         assert!(spans.iter().any(|s| s.style == Style::BlockIdCaret));
+    }
+
+    #[test]
+    fn test_highlight_block_id_in_heading() {
+        let ctx = LineContext::default();
+        let spans = highlight_line("## My Heading ^sect-1", &ctx);
+        assert!(spans.iter().any(|s| s.style == Style::Heading { level: 2 }));
+        assert!(spans.iter().any(|s| s.style == Style::BlockIdCaret));
+        assert!(spans.iter().any(|s| s.style == Style::BlockId));
     }
 
     #[test]
