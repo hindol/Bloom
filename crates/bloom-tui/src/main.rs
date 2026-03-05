@@ -103,7 +103,10 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
                         let actions = editor.handle_key(bloom_key);
                         for action in actions {
                             match action {
-                                Action::Quit => return Ok(()),
+                                Action::Quit => {
+                                    let _ = editor.save_session();
+                                    return Ok(());
+                                }
                                 Action::Save => {
                                     let _ = editor.save_current();
                                 }

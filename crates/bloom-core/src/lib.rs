@@ -2419,9 +2419,57 @@ impl BloomEditor {
     }
 
     pub fn save_session(&self) -> Result<(), error::BloomError> {
-        Ok(())
+        let Some(root) = &self.vault_root else { return Ok(()) };
+        let session_path = root.join(".session.json");
+        let buffers: Vec<session::SessionBuffer> = self.buffer_mgr.open_buffers().iter().map(|info| {
+            let (cursor_line, cursor_col) = if Some(&info.page_id) == self.active_page.as_ref() {
+                self.cursor_position()
+            } else {
+                (0, 0)
+            };
+            session::SessionBuffer {
+                page_path: info.path.clone(),
+                cursor_line,
+                cursor_column: cursor_col,
+                scroll_offset: self.viewport.first_visible_line,
+                pane: 0,
+            }
+        }).collect();
+        let state = session::SessionState {
+            buffers,
+            layout: session::SessionLayout::Leaf(0),
+            active_pane: 0,
+        };
+        state.save(&session_path)
     }
+
     pub fn restore_session(&mut self) -> Result<(), error::BloomError> {
+        let Some(root) = &self.vault_root else { return Ok(()) };
+        let session_path = root.join(".session.json");
+        if !session_path.exists() { return Ok(()) }
+        let state = session::SessionState::load(&session_path)?;
+        for buf_state in &state.buffers {
+            if buf_state.page_path.exists() {
+                if let Ok(content) = std::fs::read_to_string(&buf_state.page_path) {
+                    let title = self.parser.parse_frontmatter(&content)
+                        .and_then(|fm| fm.title)
+                        .unwrap_or_else(|| buf_state.page_path.file_stem()
+                            .unwrap_or_default().to_string_lossy().to_string());
+                    let id = crate::uuid::generate_hex_id();
+                    self.open_page_with_content(&id, &title, &buf_state.page_path, &content);
+                    self.cursor = 0; // Restore cursor position via line/col
+                    if let Some(buf) = self.buffer_mgr.get(&id) {
+                        let rope = buf.text();
+                        if buf_state.cursor_line < rope.len_lines() {
+                            let line_start = rope.line_to_char(buf_state.cursor_line);
+                            self.cursor = line_start + buf_state.cursor_column.min(
+                                rope.line(buf_state.cursor_line).len_chars().saturating_sub(1)
+                            );
+                        }
+                    }
+                }
+            }
+        }
         Ok(())
     }
     pub fn rebuild_index(&mut self) -> Result<index::RebuildStats, error::BloomError> {
