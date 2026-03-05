@@ -150,14 +150,17 @@ fn align_timestamp_block(buf: &mut Buffer, start: usize, end: usize) {
         }
     }
 
-    // Compute alignment column: max text width + 1
+    // Compute alignment column: max text width across ALL lines + 1
+    // Lines without @ still contribute to the column so timestamps
+    // don't land in the middle of longer non-@ lines.
     let max_width = parsed.iter()
-        .filter(|p| p.has_at)
         .map(|p| p.text_before_at.len())
         .max()
         .unwrap_or(0);
 
-    if max_width == 0 {
+    // Only proceed if at least one line has a timestamp
+    let has_any_at = parsed.iter().any(|p| p.has_at);
+    if max_width == 0 || !has_any_at {
         return;
     }
 
@@ -499,5 +502,24 @@ mod tests {
         let mut buf = Buffer::from_text(input);
         auto_align_page(&mut buf);
         assert_eq!(buf.text().to_string(), input);
+    }
+
+    #[test]
+    fn test_longest_line_without_at_sets_column() {
+        let mut buf = Buffer::from_text(
+            "- [ ] Short @due(2026-03-05)\n\
+             - [ ] A really long task description without any timestamp\n\
+             - [ ] Medium @due(2026-03-10)\n"
+        );
+        auto_align_page(&mut buf);
+        let text = buf.text().to_string();
+        let lines: Vec<&str> = text.lines().collect();
+        // Lines with @due should be padded past the longest line
+        let at_pos_0 = lines[0].find("@due").unwrap();
+        let at_pos_2 = lines[2].find("@due").unwrap();
+        assert_eq!(at_pos_0, at_pos_2);
+        // The @ column should be after the longest line's text
+        let longest_len = lines[1].len();
+        assert!(at_pos_0 >= longest_len);
     }
 }
