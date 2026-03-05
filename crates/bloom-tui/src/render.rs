@@ -136,7 +136,7 @@ fn draw_pane(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
         if let Some((cx, cy)) = cursor {
             f.set_cursor_position((cx, cy));
         } else if matches!(&pane.kind, PaneKind::Editor) {
-            let line_number_width = 4u16;
+            let line_number_width = 5u16;
             let cursor_y = pane.cursor.line.saturating_sub(pane.scroll_offset);
             let cy = content_area.y + cursor_y as u16;
             let cx = content_area.x + line_number_width + pane.cursor.column as u16;
@@ -167,13 +167,14 @@ fn draw_pane_title(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme
 
 fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
     let height = area.height as usize;
-    let line_number_width = 4u16; // e.g. " 42 "
-    let content_width = area.width.saturating_sub(line_number_width);
+    let line_number_width = 5u16; // e.g. " 42  " (3-digit number + gutter gap)
+    let right_margin = 2u16;
+    let content_width = area.width.saturating_sub(line_number_width + right_margin);
 
     for row in 0..height {
         if row >= pane.visible_lines.len() {
             // Beyond EOF — show ~ in the gutter (where line numbers go)
-            let tilde = Span::styled("  ~ ", theme.faded_style());
+            let tilde = Span::styled("   ~ ", theme.faded_style());
             f.render_widget(
                 Paragraph::new(Line::from(tilde)),
                 Rect::new(area.x, area.y + row as u16, line_number_width, 1),
@@ -183,8 +184,8 @@ fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiT
 
         let rendered_line = &pane.visible_lines[row];
 
-        // Line number (right-aligned, faded)
-        let lnum = format!("{:>3} ", rendered_line.line_number + 1);
+        // Line number (right-aligned, faded, with gutter gap)
+        let lnum = format!("{:>3}  ", rendered_line.line_number + 1);
         let lnum_span = Span::styled(lnum, theme.faded_style());
         f.render_widget(
             Paragraph::new(Line::from(lnum_span)),
@@ -358,7 +359,7 @@ fn draw_normal_status(
         format!("{}:{}", status.line + 1, status.column + 1),
         pos_style,
     ));
-    right_spans.push(Span::styled(" ", RStyle::default().bg(bar_bg)));
+    right_spans.push(Span::styled("  ", RStyle::default().bg(bar_bg)));
 
     let right_width: usize = right_spans.iter().map(|s| s.content.len()).sum();
 
@@ -477,9 +478,9 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
     let separator_h = if has_preview { 1 } else { 0 };
     let top_h = inner.height.saturating_sub(preview_h).saturating_sub(separator_h);
 
-    // Query line
+    // Query line (indented)
     let query_line = Line::from(vec![
-        Span::styled("> ", theme.picker_style()),
+        Span::styled(" > ", theme.picker_style()),
         Span::styled(&picker.query, theme.picker_style().add_modifier(Modifier::BOLD)),
     ]);
     f.render_widget(Paragraph::new(query_line), Rect::new(inner.x, inner.y, inner.width, 1));
@@ -520,7 +521,7 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
 
     let right_zone = if max_right_w > 0 { max_right_w + 2 } else { 0 }; // +2 padding
     let middle_zone = if max_middle_w > 0 { max_middle_w + 2 } else { 0 };
-    let marker_w = 2; // "▸ " or "  "
+    let marker_w = 3; // " ▸ " or "   "
     let label_max = available.saturating_sub(marker_w + middle_zone + right_zone);
 
     let faded_style = theme.faded_style();
@@ -535,7 +536,7 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
         } else {
             theme.picker_style()
         };
-        let marker = if is_selected { "▸ " } else { "  " };
+        let marker = if is_selected { " ▸ " } else { "   " };
 
         let label = truncate_to_width(&row.label, label_max);
         let label_w = label.width();
