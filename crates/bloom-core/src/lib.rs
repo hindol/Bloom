@@ -132,6 +132,8 @@ pub struct BloomEditor {
     leader_keys: Vec<types::KeyEvent>,
     pending_since: Option<Instant>,
     active_theme: &'static theme::ThemePalette,
+    // Auto-save
+    autosave_tx: Option<crossbeam::channel::Sender<store::disk_writer::WriteRequest>>,
     terminal_height: u16,
     terminal_width: u16,
 }
@@ -363,6 +365,7 @@ impl BloomEditor {
             leader_keys: Vec::new(),
             pending_since: None,
             active_theme,
+            autosave_tx: None,
             terminal_height: 24,
             terminal_width: 80,
             config,
@@ -755,6 +758,14 @@ impl BloomEditor {
         let templates_dir = vault_root.join("templates");
         self.template_engine = Some(template::TemplateEngine::new(&templates_dir));
         self.vault_root = Some(vault_root.to_path_buf());
+
+        // Start auto-save disk writer thread
+        let (writer, tx) = store::disk_writer::DiskWriter::new(self.config.autosave_debounce_ms);
+        self.autosave_tx = Some(tx);
+        std::thread::Builder::new()
+            .name("bloom-disk-writer".into())
+            .spawn(move || writer.start())
+            .ok();
 
         // Mark index file as hidden on Windows
         #[cfg(windows)]
@@ -1632,6 +1643,19 @@ impl BloomEditor {
         self.cursor += text.len();
     }
 
+    /// Schedule an auto-save for the given page via the disk writer thread.
+    fn schedule_autosave(&self, page_id: &types::PageId) {
+        let Some(tx) = &self.autosave_tx else { return };
+        let Some(buf) = self.buffer_mgr.get(page_id) else { return };
+        let buffers = self.buffer_mgr.open_buffers();
+        let Some(info) = buffers.iter().find(|b| b.page_id == *page_id) else { return };
+        let content = buf.text().to_string();
+        let _ = tx.send(store::disk_writer::WriteRequest {
+            path: info.path.clone(),
+            content,
+        });
+    }
+
     /// Navigate to the previous or next journal entry.
     fn navigate_journal(&mut self, delta: i32) {
         let Some(journal) = &self.journal else { return };
@@ -1692,6 +1716,7 @@ impl BloomEditor {
                         }
                         self.cursor = edit.cursor_after;
                     }
+                    self.schedule_autosave(page_id);
                 }
                 vec![keymap::dispatch::Action::Edit(buffer::EditOp {
                     range: edit.range,
