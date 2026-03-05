@@ -120,6 +120,7 @@ pub struct BloomEditor {
     agenda: agenda::Agenda,
     timeline: timeline::Timeline,
     refactorer: refactor::Refactor,
+    note_store: Option<store::local::LocalFileStore>,
 
     // State
     cursor: usize,
@@ -379,6 +380,7 @@ impl BloomEditor {
             agenda: agenda::Agenda::new(),
             timeline: timeline::Timeline::new(),
             refactorer: refactor::Refactor::new(),
+            note_store: None,
             buffer_mgr: BufferManager::new(),
             cursor: 0,
             active_page: None,
@@ -783,6 +785,7 @@ impl BloomEditor {
         let index_path = vault_root.join(".index.db");
         self.index = Some(index::Index::open(&index_path)?);
         self.journal = Some(journal::Journal::new(vault_root));
+        self.note_store = Some(store::local::LocalFileStore::new(vault_root.to_path_buf())?);
         let templates_dir = vault_root.join("templates");
         self.template_engine = Some(template::TemplateEngine::new(&templates_dir));
         self.vault_root = Some(vault_root.to_path_buf());
@@ -2737,30 +2740,24 @@ impl BloomEditor {
         Ok(())
     }
     pub fn rebuild_index(&mut self) -> Result<index::RebuildStats, error::BloomError> {
+        use store::traits::NoteStore;
+
         let vault_root = match &self.vault_root {
             Some(r) => r.clone(),
             None => return Ok(index::RebuildStats { pages: 0, links: 0, tags: 0 }),
         };
+        let store = match &self.note_store {
+            Some(s) => s,
+            None => return Ok(index::RebuildStats { pages: 0, links: 0, tags: 0 }),
+        };
 
-        let mut all_paths = Vec::new();
-        for subdir in &["pages", "journal"] {
-            let dir = vault_root.join(subdir);
-            if dir.exists() {
-                if let Ok(entries) = std::fs::read_dir(&dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.extension().and_then(|e| e.to_str()) == Some("md") {
-                            all_paths.push(path);
-                        }
-                    }
-                }
-            }
-        }
+        let mut all_paths = store.list_pages().unwrap_or_default();
+        all_paths.extend(store.list_journals().unwrap_or_default());
 
         let mut entries = Vec::new();
         for path in &all_paths {
             let rel = path.strip_prefix(&vault_root).unwrap_or(path);
-            let content = match std::fs::read_to_string(path) {
+            let content = match store.read(rel) {
                 Ok(c) => c,
                 Err(_) => continue,
             };
