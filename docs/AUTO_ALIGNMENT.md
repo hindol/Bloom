@@ -11,7 +11,7 @@
 2. **Undo-able in one step.** The entire alignment operation is a single edit group — one `u` reverts the whole block.
 3. **Triggered on Esc.** When the user leaves Insert mode, Bloom detects alignable blocks around the cursor and formats them. Fast typists are never interrupted.
 4. **Conservative.** Only align within contiguous blocks of the same type. A blank line or different construct breaks the block. Never reformats content the user didn't just edit.
-5. **Viewport-aware.** Alignment respects a column cap to prevent artificial line wrapping. Lines already longer than the cap are left alone.
+5. **Presentation-agnostic.** Alignment operates on buffer content only. Word wrapping and viewport width are frontend concerns — core never caps or adjusts for display width.
 
 ---
 
@@ -24,7 +24,7 @@ Contiguous lines starting with `- [ ] ` or `- [x] ` that contain at least one `@
 ### Rule
 
 - Align the first `@` on each line to a common column.
-- The column is `min(max_text_width + 1, viewport_width - max_timestamp_length - right_margin)`.
+- The column is `max_text_width_in_block + 1` (the longest text-before-`@` sets the column).
 - Lines without any `@` keyword are left untouched.
 - If tags appear after a timestamp (e.g. `@due(2026-03-05) #rust`), relocate them before the first `@`.
 
@@ -56,49 +56,17 @@ Tags that are mid-sentence (e.g. `Review the #rust API`) stay in place — only 
 - [ ] Write tests #testing
 ```
 
-### Narrow viewport (cap kicks in)
+### Long lines
 
-If the alignment column would push content beyond the viewport width, the cap prevents wrapping. Three scenarios:
-
-### Scenario A: One line exceeds the cap
-
-Viewport is 70 columns. Most lines are short, but one is long:
+The alignment column is set by the longest text-before-`@` in the block. All other lines pad to match. If one line is much longer, the others get more padding — this is correct. Word wrapping of long lines is a frontend concern.
 
 ```
-- [ ] Fix bug                                  @due(2026-03-10)
-- [ ] Refactor the index module to support incremental updates @due(2026-03-20)
-- [x] Set up vault                              @due(2026-03-04)
+- [ ] Fix bug                                                   @due(2026-03-10)
+- [ ] Refactor the index module to support incremental updates   @due(2026-03-20)
+- [x] Set up vault                                              @due(2026-03-04)
 ```
 
-The long line (line 2) can't be padded without wrapping, so it keeps `@` right after its text with 1 space. Lines 1 and 3 align to the **cap column** (`viewport - max_timestamp - margin`), not to line 2's text width. The block is as aligned as possible without causing wraps.
-
-### Scenario B: The longest line IS the alignment target but fits
-
-```
-- [ ] Review the ropey crate API documentation   @due(2026-03-05)
-- [ ] Fix bug                                    @due(2026-03-10)
-- [x] Set up vault                               @due(2026-03-04)
-```
-
-Line 1 sets the column. Lines 2 and 3 pad to match. No cap issue — everything fits within viewport.
-
-### Scenario C: Multiple lines exceed the cap
-
-```
-- [ ] Refactor the index module to support incremental updates @due(2026-03-20)
-- [ ] Implement background re-indexing with progress reporting @due(2026-03-25)
-- [ ] Fix bug @due(2026-03-10)
-```
-
-Lines 1 and 2 both exceed the cap — they each keep `@` with 1 space after their text. Line 3 pads to the cap column. The result:
-
-```
-- [ ] Refactor the index module to support incremental updates @due(2026-03-20)
-- [ ] Implement background re-indexing with progress reporting @due(2026-03-25)
-- [ ] Fix bug                                @due(2026-03-10)
-```
-
-Lines that can align, do. Lines that can't, don't. No wrapping ever.
+Line 2 is the longest and sets the column. Lines 1 and 3 pad to match. If the terminal is narrow, lines 1 and 2 may word-wrap — that's the TUI's problem, not the alignment logic's.
 
 ---
 
