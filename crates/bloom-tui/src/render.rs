@@ -874,93 +874,133 @@ fn draw_agenda(
     let date_col_w = if max_date_w > 0 { max_date_w + 2 } else { 0 }; // +2 for left padding
 
     let mut y = area.y;
-    let mut flat_idx: usize = 0;
 
+    // Build flat visual rows: headers + items with their section colour
+    struct VisualRow<'a> {
+        kind: RowKind<'a>,
+        section_fg: ratatui::style::Color,
+    }
+    enum RowKind<'a> {
+        Header(&'a str),
+        Item { item: &'a bloom_core::render::AgendaItem, flat_idx: usize, is_overdue: bool },
+    }
+
+    let mut rows: Vec<VisualRow> = Vec::new();
+    let mut flat_idx: usize = 0;
     for section in &sections {
         if section.items.is_empty() {
             continue;
         }
+        rows.push(VisualRow {
+            kind: RowKind::Header(section.label),
+            section_fg: section.fg,
+        });
+        for item in section.items {
+            rows.push(VisualRow {
+                kind: RowKind::Item {
+                    item,
+                    flat_idx,
+                    is_overdue: std::ptr::eq(section.items, &*agenda.overdue),
+                },
+                section_fg: section.fg,
+            });
+            flat_idx += 1;
+        }
+    }
+
+    // Find the visual row of the selected item
+    let selected_visual_row = rows.iter().position(|r| {
+        matches!(&r.kind, RowKind::Item { flat_idx: fi, .. } if *fi == agenda.selected_index)
+    }).unwrap_or(0);
+
+    // Scroll offset with scrolloff=3 (Vim-style margin)
+    let viewport_h = list_h as usize;
+    let scrolloff: usize = 3;
+    let scroll_offset = {
+        // Ensure selected row is at least `scrolloff` from bottom
+        let min_offset_bottom = (selected_visual_row + scrolloff + 1).saturating_sub(viewport_h);
+        // Ensure selected row is at least `scrolloff` from top
+        let max_offset_top = selected_visual_row.saturating_sub(scrolloff);
+        // Clamp: offset must be >= min_offset_bottom and <= max_offset_top
+        // But if the list is short enough, no scrolling needed
+        let max_possible = rows.len().saturating_sub(viewport_h);
+        min_offset_bottom.min(max_possible).max(min_offset_bottom).min(max_offset_top.max(min_offset_bottom))
+    };
+
+    // Render visible rows
+    for row in rows.iter().skip(scroll_offset).take(viewport_h) {
         if y >= area.y + list_h {
             break;
         }
-        // Section header
-        let header_style = RStyle::default()
-            .fg(theme.salient())
-            .add_modifier(Modifier::BOLD);
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                format!("  {}", section.label),
-                header_style,
-            ))),
-            Rect::new(area.x, y, area.width, 1),
-        );
-        y += 1;
-
-        for item in section.items {
-            if y >= area.y + list_h {
-                break;
+        match &row.kind {
+            RowKind::Header(label) => {
+                let header_style = RStyle::default()
+                    .fg(theme.salient())
+                    .add_modifier(Modifier::BOLD);
+                f.render_widget(
+                    Paragraph::new(Line::from(Span::styled(
+                        format!("  {label}"),
+                        header_style,
+                    ))),
+                    Rect::new(area.x, y, area.width, 1),
+                );
+                y += 1;
             }
-            let is_selected = flat_idx == agenda.selected_index;
-            let base_style = if is_selected {
-                RStyle::default().fg(section.fg).bg(theme.mild())
-            } else {
-                RStyle::default().fg(section.fg)
-            };
+            RowKind::Item { item, flat_idx: fi, is_overdue } => {
+                let is_selected = *fi == agenda.selected_index;
+                let base_style = if is_selected {
+                    RStyle::default().fg(row.section_fg).bg(theme.mild())
+                } else {
+                    RStyle::default().fg(row.section_fg)
+                };
 
-            let marker = if is_selected { " ▸" } else { "  " };
-            let date_str = item.date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
-            let available = area.width as usize;
-            let marker_w = 5; // " ▸ ☐ "
-            let task_max = available.saturating_sub(marker_w + source_col_w + date_col_w);
-            let task_text = truncate_to_width(&item.task_text, task_max);
-            let task_w = task_text.width();
-            let task_pad = task_max.saturating_sub(task_w);
+                let marker = if is_selected { " ▸" } else { "  " };
+                let date_str = item.date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
+                let available = area.width as usize;
+                let marker_w = 5; // " ▸ ☐ "
+                let task_max = available.saturating_sub(marker_w + source_col_w + date_col_w);
+                let task_text = truncate_to_width(&item.task_text, task_max);
+                let task_w = task_text.width();
+                let task_pad = task_max.saturating_sub(task_w);
 
-            // Right-align source page within its fixed column
-            let source_padded = format!(
-                "{}{}",
-                " ".repeat(source_col_w.saturating_sub(item.source_page.width())),
-                truncate_to_width(&item.source_page, max_source_w),
-            );
-            // Right-align date within its fixed column
-            let date_padded = if date_col_w > 0 {
-                format!(
+                let source_padded = format!(
                     "{}{}",
-                    " ".repeat(date_col_w.saturating_sub(date_str.width())),
-                    date_str,
-                )
-            } else {
-                String::new()
-            };
+                    " ".repeat(source_col_w.saturating_sub(item.source_page.width())),
+                    truncate_to_width(&item.source_page, max_source_w),
+                );
+                let date_padded = if date_col_w > 0 {
+                    format!(
+                        "{}{}",
+                        " ".repeat(date_col_w.saturating_sub(date_str.width())),
+                        date_str,
+                    )
+                } else {
+                    String::new()
+                };
 
-            // Determine styles
-            let date_fg = if std::ptr::eq(*&section.items, &*agenda.overdue) {
-                theme.critical()
-            } else {
-                theme.faded()
-            };
-            let source_style = if is_selected {
-                RStyle::default().fg(theme.faded()).bg(theme.mild())
-            } else {
-                theme.faded_style()
-            };
-            let date_style = if is_selected {
-                RStyle::default().fg(date_fg).bg(theme.mild())
-            } else {
-                RStyle::default().fg(date_fg)
-            };
+                let date_fg = if *is_overdue { theme.critical() } else { theme.faded() };
+                let source_style = if is_selected {
+                    RStyle::default().fg(theme.faded()).bg(theme.mild())
+                } else {
+                    theme.faded_style()
+                };
+                let date_style = if is_selected {
+                    RStyle::default().fg(date_fg).bg(theme.mild())
+                } else {
+                    RStyle::default().fg(date_fg)
+                };
 
-            let left_part = format!("{marker} ☐ {task_text}");
+                let left_part = format!("{marker} ☐ {task_text}");
 
-            let line = Line::from(vec![
-                Span::styled(left_part, base_style),
-                Span::styled(" ".repeat(task_pad), base_style),
-                Span::styled(source_padded, source_style),
-                Span::styled(date_padded, date_style),
-            ]);
-            f.render_widget(Paragraph::new(line), Rect::new(area.x, y, area.width, 1));
-            y += 1;
-            flat_idx += 1;
+                let line = Line::from(vec![
+                    Span::styled(left_part, base_style),
+                    Span::styled(" ".repeat(task_pad), base_style),
+                    Span::styled(source_padded, source_style),
+                    Span::styled(date_padded, date_style),
+                ]);
+                f.render_widget(Paragraph::new(line), Rect::new(area.x, y, area.width, 1));
+                y += 1;
+            }
         }
     }
 
