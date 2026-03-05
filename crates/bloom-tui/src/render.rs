@@ -963,14 +963,20 @@ fn draw_agenda(
         // Preview
         let preview_y = sep_y + 1;
         if let Some(text) = &agenda.preview {
-            let preview_area = Rect::new(area.x, preview_y, area.width, preview_h);
-            f.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    format!("  {text}"),
-                    theme.faded_style(),
-                ))),
-                preview_area,
-            );
+            let preview_style = theme.faded_style();
+            for (i, line) in text.lines().enumerate() {
+                let ly = preview_y + i as u16;
+                if ly >= area.bottom() {
+                    break;
+                }
+                f.render_widget(
+                    Paragraph::new(Line::from(Span::styled(
+                        format!("  {line}"),
+                        preview_style,
+                    ))),
+                    Rect::new(area.x, ly, area.width, 1),
+                );
+            }
         }
     }
 }
