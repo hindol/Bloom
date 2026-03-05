@@ -933,9 +933,13 @@ fn draw_agenda(
 
     // Footer
     if footer_y < area.bottom() {
+        let selection = if agenda.total_open > 0 {
+            format!("{}", agenda.selected_index + 1)
+        } else {
+            "0".to_string()
+        };
         let footer = format!(
-            "  ▸ {}/{} tasks   {} pages   [x]toggle [Enter]jump [q]close",
-            agenda.selected_index + 1,
+            "  ▸ {selection}/{} tasks   {} pages   [x]toggle [Enter]jump [q]close",
             agenda.total_open,
             agenda.total_pages,
         );
