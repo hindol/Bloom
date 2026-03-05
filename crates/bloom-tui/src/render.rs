@@ -41,8 +41,11 @@ pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &TuiTheme) {
         None
     };
 
+    // Determine if a focus-stealing overlay is active (suppresses editor cursor)
+    let overlay_has_focus = frame.agenda.is_some() || frame.picker.is_some() || frame.dialog.is_some();
+
     // Draw panes (each pane includes its own status bar)
-    draw_panes(f, pane_area, &frame.panes, frame.maximized, frame.hidden_pane_count, theme);
+    draw_panes(f, pane_area, &frame.panes, frame.maximized, frame.hidden_pane_count, overlay_has_focus, theme);
 
     // Which-key drawer
     if let (Some(wk), Some(wk_rect)) = (&frame.which_key, wk_area) {
@@ -77,6 +80,7 @@ fn draw_panes(
     panes: &[PaneFrame],
     _maximized: bool,
     hidden_count: usize,
+    suppress_cursor: bool,
     theme: &TuiTheme,
 ) {
     if panes.is_empty() {
@@ -91,7 +95,7 @@ fn draw_panes(
             pane.rect.width,
             pane.rect.total_height,
         );
-        draw_pane(f, pane_area, pane, theme);
+        draw_pane(f, pane_area, pane, suppress_cursor, theme);
     }
 
     // Hidden pane count indicator (top-right)
@@ -109,7 +113,7 @@ fn draw_panes(
     }
 }
 
-fn draw_pane(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
+fn draw_pane(f: &mut Frame, area: Rect, pane: &PaneFrame, suppress_cursor: bool, theme: &TuiTheme) {
     if area.height < 2 {
         return;
     }
@@ -139,17 +143,19 @@ fn draw_pane(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
     // Status bar: slot-based for active pane, compact for inactive
     if pane.is_active {
         let cursor = draw_status_bar_slot(f, status_area, &pane.status_bar, theme);
-        // Cursor: status bar slots (command line, quick capture) take priority
-        if let Some((cx, cy)) = cursor {
-            f.set_cursor_position((cx, cy));
-        } else if matches!(&pane.kind, PaneKind::Editor) {
-            let line_number_width = 5u16;
-            let cursor_y = pane.cursor.line.saturating_sub(pane.scroll_offset);
-            let cy = content_area.y + cursor_y as u16;
-            let cx = content_area.x + line_number_width + pane.cursor.column as u16;
-            let frame_area = f.area();
-            if cy < content_area.bottom() && cx < frame_area.width {
+        if !suppress_cursor {
+            // Cursor: status bar slots (command line, quick capture) take priority
+            if let Some((cx, cy)) = cursor {
                 f.set_cursor_position((cx, cy));
+            } else if matches!(&pane.kind, PaneKind::Editor) {
+                let line_number_width = 5u16;
+                let cursor_y = pane.cursor.line.saturating_sub(pane.scroll_offset);
+                let cy = content_area.y + cursor_y as u16;
+                let cx = content_area.x + line_number_width + pane.cursor.column as u16;
+                let frame_area = f.area();
+                if cy < content_area.bottom() && cx < frame_area.width {
+                    f.set_cursor_position((cx, cy));
+                }
             }
         }
     } else {
