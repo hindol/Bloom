@@ -101,6 +101,31 @@ impl BufferManager {
 }
 
 // ---------------------------------------------------------------------------
+// Ex command registry (single source of truth)
+// ---------------------------------------------------------------------------
+
+/// All registered `:` commands with their descriptions.
+const EX_COMMANDS: &[(&str, &str)] = &[
+    ("w", "write (save)"),
+    ("write", "write (save)"),
+    ("q", "quit"),
+    ("quit", "quit"),
+    ("wq", "write and quit"),
+    ("x", "write and quit"),
+    ("q!", "quit without saving"),
+    ("e", "edit (find page)"),
+    ("edit", "edit (find page)"),
+    ("sp", "split horizontal"),
+    ("split", "split horizontal"),
+    ("vs", "vsplit vertical"),
+    ("vsplit", "vsplit vertical"),
+    ("bd", "close buffer"),
+    ("bdelete", "close buffer"),
+    ("theme", "switch theme"),
+    ("rebuild-index", "rebuild search index"),
+];
+
+// ---------------------------------------------------------------------------
 // BloomEditor — The Orchestrator
 // ---------------------------------------------------------------------------
 
@@ -932,14 +957,6 @@ impl BloomEditor {
             if key.code == types::KeyCode::Tab {
                 // Accept the selected completion into the command line
                 let input = self.vim_state.pending_keys().to_string();
-                let commands: &[(&str, &str)] = &[
-                    ("w", ""), ("write", ""), ("q", ""), ("quit", ""),
-                    ("wq", ""), ("x", ""), ("q!", ""), ("e", ""), ("edit", ""),
-                    ("sp", ""), ("split", ""), ("vs", ""), ("vsplit", ""),
-                    ("bd", ""), ("bdelete", ""), ("theme", ""),
-                    ("rebuild-index", ""),
-                ];
-
                 let completion = if let Some(arg_prefix) = input.strip_prefix("theme ") {
                     // Argument completion
                     theme::THEME_NAMES.iter()
@@ -948,7 +965,7 @@ impl BloomEditor {
                         .map(|name| format!("theme {name}"))
                 } else {
                     // Command completion
-                    commands.iter()
+                    EX_COMMANDS.iter()
                         .filter(|(cmd, _)| input.is_empty() || cmd.starts_with(&input))
                         .next()
                         .map(|(cmd, _)| cmd.to_string())
@@ -2394,25 +2411,6 @@ impl BloomEditor {
             },
             inline_menu: if matches!(self.vim_state.mode(), vim::Mode::Command) {
                 let input = self.vim_state.pending_keys();
-                let commands: &[(&str, &str)] = &[
-                    ("w", "write (save)"),
-                    ("write", "write (save)"),
-                    ("q", "quit"),
-                    ("quit", "quit"),
-                    ("wq", "write and quit"),
-                    ("x", "write and quit"),
-                    ("q!", "quit without saving"),
-                    ("e", "edit (find page)"),
-                    ("edit", "edit (find page)"),
-                    ("sp", "split horizontal"),
-                    ("split", "split horizontal"),
-                    ("vs", "vsplit vertical"),
-                    ("vsplit", "vsplit vertical"),
-                    ("bd", "close buffer"),
-                    ("bdelete", "close buffer"),
-                    ("theme", "switch theme"),
-                    ("rebuild-index", "rebuild search index"),
-                ];
 
                 // Detect argument completion: "theme <partial>"
                 let (items, selected) = if let Some(arg_prefix) = input.strip_prefix("theme ") {
@@ -2426,7 +2424,7 @@ impl BloomEditor {
                         .collect();
                     (items, 0)
                 } else {
-                    let items: Vec<render::InlineMenuItem> = commands.iter()
+                    let items: Vec<render::InlineMenuItem> = EX_COMMANDS.iter()
                         .filter(|(cmd, _)| input.is_empty() || cmd.starts_with(input))
                         .map(|(cmd, desc)| render::InlineMenuItem {
                             label: cmd.to_string(),
