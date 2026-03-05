@@ -140,7 +140,8 @@ fn draw_pane(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
             let cursor_y = pane.cursor.line.saturating_sub(pane.scroll_offset);
             let cy = content_area.y + cursor_y as u16;
             let cx = content_area.x + line_number_width + pane.cursor.column as u16;
-            if cy < content_area.bottom() && cx < content_area.right() {
+            let frame_area = f.area();
+            if cy < content_area.bottom() && cx < frame_area.width {
                 f.set_cursor_position((cx, cy));
             }
         }
@@ -279,7 +280,7 @@ fn draw_status_bar_slot(
                 );
             }
 
-            let cx = area.x + 1 + cmd.cursor_pos as u16;
+            let cx = (area.x + 1 + cmd.cursor_pos as u16).min(area.right().saturating_sub(1));
             Some((cx, area.y))
         }
         StatusBarContent::QuickCapture(qc) => {
@@ -292,7 +293,7 @@ fn draw_status_bar_slot(
                 area,
             );
 
-            let cx = area.x + qc.prompt.len() as u16 + qc.cursor_pos as u16;
+            let cx = (area.x + qc.prompt.len() as u16 + qc.cursor_pos as u16).min(area.right().saturating_sub(1));
             Some((cx, area.y))
         }
     }
