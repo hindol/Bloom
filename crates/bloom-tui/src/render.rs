@@ -956,15 +956,24 @@ fn draw_agenda(
         return;
     }
 
+    // Apply left/right margins
+    let margin_h = 3u16;
+    let padded = Rect::new(
+        area.x + margin_h,
+        area.y,
+        area.width.saturating_sub(margin_h * 2),
+        area.height,
+    );
+
     // Split: top ~60% for task list + footer, 1 separator, bottom ~40% for preview
-    let has_preview = agenda.preview.is_some() && area.height >= 10;
-    let preview_h = if has_preview { (area.height * 2 / 5).max(3) } else { 0 };
+    let has_preview = agenda.preview.is_some() && padded.height >= 10;
+    let preview_h = if has_preview { (padded.height * 2 / 5).max(3) } else { 0 };
     let separator_h: u16 = if has_preview { 1 } else { 0 };
-    let top_h = area.height.saturating_sub(preview_h).saturating_sub(separator_h);
+    let top_h = padded.height.saturating_sub(preview_h).saturating_sub(separator_h);
 
     // Footer takes 1 line at bottom of the top section
     let list_h = top_h.saturating_sub(1);
-    let footer_y = area.y + list_h;
+    let footer_y = padded.y + list_h;
 
     // Build flat list with section markers for rendering
     struct Section<'a> {
@@ -988,36 +997,40 @@ fn draw_agenda(
         .map(|i| i.source_page.width())
         .max()
         .unwrap_or(0)
-        .min(area.width as usize / 3); // cap at 1/3 of width
+        .min(padded.width as usize / 3);
     let max_date_w: usize = all_items
         .map(|i| i.date.map(|d| d.format("%Y-%m-%d").to_string().width()).unwrap_or(0))
         .max()
         .unwrap_or(0);
-    let source_col_w = max_source_w + 2; // +2 for left padding
-    let date_col_w = if max_date_w > 0 { max_date_w + 2 } else { 0 }; // +2 for left padding
+    let source_col_w = max_source_w + 2;
+    let date_col_w = if max_date_w > 0 { max_date_w + 2 } else { 0 };
 
-    let mut y = area.y;
-
-    // Build flat visual rows: headers + items with their section colour
+    // Build flat visual rows with spacing
     struct VisualRow<'a> {
         kind: RowKind<'a>,
         section_fg: ratatui::style::Color,
     }
     enum RowKind<'a> {
+        Blank,
         Header(&'a str),
         Item { item: &'a bloom_core::render::AgendaItem, flat_idx: usize, is_overdue: bool },
     }
 
     let mut rows: Vec<VisualRow> = Vec::new();
     let mut flat_idx: usize = 0;
+    let mut is_first_section = true;
     for section in &sections {
         if section.items.is_empty() {
             continue;
         }
+        // Blank line before section header (including first — gives top margin)
+        rows.push(VisualRow { kind: RowKind::Blank, section_fg: section.fg });
         rows.push(VisualRow {
             kind: RowKind::Header(section.label),
             section_fg: section.fg,
         });
+        // Blank line after header
+        rows.push(VisualRow { kind: RowKind::Blank, section_fg: section.fg });
         for item in section.items {
             rows.push(VisualRow {
                 kind: RowKind::Item {
@@ -1029,6 +1042,7 @@ fn draw_agenda(
             });
             flat_idx += 1;
         }
+        is_first_section = false;
     }
 
     // Find the visual row of the selected item
@@ -1039,32 +1053,32 @@ fn draw_agenda(
     // Scroll offset with Vim-style margin
     let viewport_h = list_h as usize;
     let scroll_offset = {
-        // Ensure selected row is at least `scrolloff` from bottom
         let min_offset_bottom = (selected_visual_row + scrolloff + 1).saturating_sub(viewport_h);
-        // Ensure selected row is at least `scrolloff` from top
         let max_offset_top = selected_visual_row.saturating_sub(scrolloff);
-        // Clamp: offset must be >= min_offset_bottom and <= max_offset_top
-        // But if the list is short enough, no scrolling needed
         let max_possible = rows.len().saturating_sub(viewport_h);
         min_offset_bottom.min(max_possible).max(min_offset_bottom).min(max_offset_top.max(min_offset_bottom))
     };
 
     // Render visible rows
+    let mut y = padded.y;
     for row in rows.iter().skip(scroll_offset).take(viewport_h) {
-        if y >= area.y + list_h {
+        if y >= padded.y + list_h {
             break;
         }
         match &row.kind {
+            RowKind::Blank => {
+                y += 1;
+            }
             RowKind::Header(label) => {
                 let header_style = RStyle::default()
                     .fg(theme.salient())
                     .add_modifier(Modifier::BOLD);
                 f.render_widget(
                     Paragraph::new(Line::from(Span::styled(
-                        format!("  {label}"),
+                        label.to_string(),
                         header_style,
                     ))),
-                    Rect::new(area.x, y, area.width, 1),
+                    Rect::new(padded.x, y, padded.width, 1),
                 );
                 y += 1;
             }
@@ -1076,10 +1090,10 @@ fn draw_agenda(
                     RStyle::default().fg(row.section_fg)
                 };
 
-                let marker = if is_selected { " ▸" } else { "  " };
+                let marker = if is_selected { "▸ " } else { "  " };
                 let date_str = item.date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
-                let available = area.width as usize;
-                let marker_w = 5; // " ▸ ☐ "
+                let available = padded.width as usize;
+                let marker_w = 5; // "▸ ☐ " or "  ☐ "
                 let task_max = available.saturating_sub(marker_w + source_col_w + date_col_w);
                 let task_text = truncate_to_width(&item.task_text, task_max);
                 let task_w = task_text.width();
@@ -1112,7 +1126,7 @@ fn draw_agenda(
                     RStyle::default().fg(date_fg)
                 };
 
-                let left_part = format!("{marker} ☐ {task_text}");
+                let left_part = format!("{marker}☐ {task_text}");
 
                 let line = Line::from(vec![
                     Span::styled(left_part, base_style),
@@ -1120,48 +1134,47 @@ fn draw_agenda(
                     Span::styled(source_padded, source_style),
                     Span::styled(date_padded, date_style),
                 ]);
-                f.render_widget(Paragraph::new(line), Rect::new(area.x, y, area.width, 1));
+                f.render_widget(Paragraph::new(line), Rect::new(padded.x, y, padded.width, 1));
                 y += 1;
             }
         }
     }
 
     // Footer
-    if footer_y < area.bottom() {
+    if footer_y < padded.bottom() {
         let selection = if agenda.total_open > 0 {
             format!("{}", agenda.selected_index + 1)
         } else {
             "0".to_string()
         };
         let footer = format!(
-            "  ▸ {selection}/{} tasks   {} pages   [x]toggle [Enter]jump [q]close",
+            "▸ {selection}/{} tasks   {} pages   [x]toggle [Enter]jump [q]close",
             agenda.total_open,
             agenda.total_pages,
         );
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(footer, theme.faded_style()))),
-            Rect::new(area.x, footer_y, area.width, 1),
+            Rect::new(padded.x, footer_y, padded.width, 1),
         );
     }
 
-    // Separator
+    // Separator + Preview
     if has_preview {
-        let sep_y = area.y + top_h;
-        if sep_y < area.bottom() {
-            let sep = "─".repeat(area.width as usize);
+        let sep_y = padded.y + top_h;
+        if sep_y < padded.bottom() {
+            let sep = "─".repeat(padded.width as usize);
             f.render_widget(
                 Paragraph::new(Line::from(Span::styled(sep, theme.faded_style()))),
-                Rect::new(area.x, sep_y, area.width, 1),
+                Rect::new(padded.x, sep_y, padded.width, 1),
             );
         }
 
-        // Preview
-        let preview_y = sep_y + 1;
+        let preview_y = sep_y + 2; // 1 blank line after separator
         if let Some(text) = &agenda.preview {
             let preview_style = theme.faded_style();
             for (i, line) in text.lines().enumerate() {
                 let ly = preview_y + i as u16;
-                if ly >= area.bottom() {
+                if ly >= padded.bottom() {
                     break;
                 }
                 f.render_widget(
@@ -1169,16 +1182,16 @@ fn draw_agenda(
                         format!("  {line}"),
                         preview_style,
                     ))),
-                    Rect::new(area.x, ly, area.width, 1),
+                    Rect::new(padded.x, ly, padded.width, 1),
                 );
             }
         }
     }
 
     // Place cursor on the selected item row (overrides editor cursor)
-    let selected_screen_y = area.y + (selected_visual_row.saturating_sub(scroll_offset)) as u16;
-    if selected_screen_y < area.y + list_h {
-        f.set_cursor_position((area.x + 2, selected_screen_y));
+    let selected_screen_y = padded.y + (selected_visual_row.saturating_sub(scroll_offset)) as u16;
+    if selected_screen_y < padded.y + list_h {
+        f.set_cursor_position((padded.x, selected_screen_y));
     }
 }
 
