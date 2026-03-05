@@ -167,6 +167,8 @@ The key insight from Lambda: **most text renders in `foreground` with typographi
 | `FrontmatterTags` | `faded` | — | — | Same weight as inline tags — meaningful for navigation |
 | `BrokenLink` | `critical` | — | ~~strikethrough~~ | Demands attention |
 | `SyntaxNoise` | `faded` | — | dim | Pure syntax markers — see Syntax Semantic Weight below |
+| `SearchMatch` | `foreground` | `ultralight` | — | Highlighted search match in preview/results |
+| `SearchMatchCurrent` | `foreground` | `popout` | — | The currently focused search match |
 
 ---
 
