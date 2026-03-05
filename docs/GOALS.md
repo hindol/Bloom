@@ -195,29 +195,13 @@ The journal is Bloom's default writing surface — the place you go when you don
 
 An aggregated view of tasks and scheduled items across all pages, inspired by Org-mode's agenda.
 
-- `SPC a a` opens the agenda view.
+- `SPC a a` opens the agenda view as a full-screen takeover.
 - Shows all unchecked `- [ ]` items and `@at` events from all pages.
 - Grouping uses timestamps: `@due` in the past = overdue, `@due` or `@start` today = today, future = upcoming. Tasks without timestamps grouped by source page date.
 - Filter by tag, page, or date range.
 - Act on tasks directly from the agenda: check off, reschedule (move to another day's journal), jump to source.
 
-```
-┌─ Agenda ────────────────────────────────────────────┐
-│                                                      │
-│  Overdue                                             │
-│  ☐ Read Xi Editor retrospective        Feb 25 #rust  │
-│  ☐ Set up CI pipeline for Bloom        Feb 22        │
-│                                                      │
-│  Today · Mar 1                                       │
-│  ☐ Review PR for authentication module               │
-│  ☐ Buy groceries                                     │
-│                                                      │
-│  Upcoming                                            │
-│  ☐ Prepare presentation for Monday     Mar 3         │
-│                                                      │
-│  5 open tasks across 4 pages                         │
-└──────────────────────────────────────────────────────┘
-```
+See [WINDOW_LAYOUTS.md](WINDOW_LAYOUTS.md#agenda-view) for the detailed wireframe and column layout.
 
 ### G16: Fuzzy Picker (Doom Emacs-style Narrowing)
 

@@ -450,16 +450,99 @@ If pane A has no other buffer in its history, it shows an empty state or closes.
 
 ## Special Pane Types
 
-Special views always open in a split (creating one if needed), never replace the current editor pane.
+Special views always open in a split (creating one if needed), never replace the current editor pane — except the agenda, which is a full-screen takeover.
 
 | View | Default split | Trigger |
 |------|--------------|---------|
 | Timeline | Vertical, right side | `SPC l t` |
-| Agenda | Full pane (replaces or new split) | `SPC a a` |
+| Agenda | Full-screen takeover | `SPC a a` |
 | Undo tree | Vertical, right side | `SPC u u` |
 | Backlinks panel | Vertical, right side | `SPC l b` |
 
-**Repeated trigger closes the view.** Pressing `SPC l t` while the timeline is open closes it. Same for `SPC u u` and undo tree.
+**Repeated trigger closes the view.** Pressing `SPC l t` while the timeline is open closes it. Same for `SPC u u` and undo tree. `q` or `Esc` closes the agenda.
+
+### Agenda View
+
+Full-screen takeover with a task list (top ~60%) and source preview (bottom ~40%), separated by a horizontal rule.
+
+```
+┌─ Agenda ──────────────────────────────────────────────────────────────────┐
+│                                                                           │
+│  Overdue                                                                  │
+│ ▸☐ Read Xi Editor retrospective #rust        Rust Notes          Feb 25  │
+│  ☐ Set up CI pipeline for Bloom              Bloom Dev           Feb 22  │
+│                                                                           │
+│  Today · Mar 5                                                            │
+│  ☐ Review PR for auth module                 Work Log            Today   │
+│  ☐ Buy groceries                             Mar 5               Today   │
+│                                                                           │
+│  Upcoming                                                                 │
+│  ☐ Prepare Monday presentation               Work Log            Mar 10  │
+│  ☐ Write blog post draft #writing            Blog Ideas          Mar 12  │
+│                                                                           │
+│  ▸ 1/6 tasks   4 pages   [x]toggle [Enter]jump [q]close                 │
+├───────────────────────────────────────────────────────────────────────────┤
+│  ## Resources to Review                                                   │
+│                                                                           │
+│  Some earlier context paragraph.                                          │
+│                                                                           │
+│  - [ ] Read Xi Editor retrospective @due(2026-02-25)     ← highlighted   │
+│                                                                           │
+│  More notes below the task in the source file.                            │
+│                                                                           │
+│  Rust Notes · line 14                                                     │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+**Column layout (task list area):**
+
+| Column | Content | Width | Style |
+|--------|---------|-------|-------|
+| Marker | `▸` or blank | 3 chars | — |
+| Checkbox | `☐` or `☑` | 2 chars | `accent_yellow` |
+| Task text + inline tags | Task description, tags appended naturally | flexible fill | varies by bucket (see below) |
+| Source page | Page the task lives in | right-aligned, max 20 chars | `faded` |
+| Date | Due date or "Today" | right-aligned, max 8 chars | `faded` (or `critical` for overdue) |
+
+Tags appear inline after the task text (e.g. `Read Xi Editor retrospective #rust`), not in a separate column. This matches how tags render in the editor and the auto-alignment engine.
+
+**Section headers:**
+
+- `"  Overdue"`, `"  Today · Mar 5"`, `"  Upcoming"` — `salient` + bold.
+- Section headers are not selectable — arrow keys skip them.
+- Empty sections are hidden entirely.
+
+**Styling per time bucket:**
+
+| Bucket | Task text | Date | Rationale |
+|--------|-----------|------|-----------|
+| Overdue | `critical` (red) | `critical` (red) | Demands attention |
+| Today | `foreground` | `faded` | Actionable now, normal weight |
+| Upcoming | `faded` | `faded` | Not yet relevant, recedes |
+
+Selected row gets `mild` background across the full width (same as picker selection).
+
+**Preview pane (below separator):**
+
+Shows ~5 lines of context around the selected task in its source page. The task line itself is highlighted with `SearchMatch` background. Footer line shows `"Source Page Title · line N"` in `faded`. Preview updates as you navigate.
+
+**Footer (bottom of task list, above separator):**
+
+```
+  ▸ 1/6 tasks   4 pages   [x]toggle [Enter]jump [q]close
+```
+
+Selection position updates live (same pattern as the picker footer).
+
+**Keyboard:**
+
+| Key | Action |
+|-----|--------|
+| `j` / `↓` / `Ctrl+n` | Next task (skip section headers) |
+| `k` / `↑` / `Ctrl+p` | Previous task |
+| `Enter` | Jump to task in source page (closes agenda) |
+| `x` | Toggle task done/undone |
+| `q` / `Esc` | Close agenda, return to previous view |
 
 ---
 
