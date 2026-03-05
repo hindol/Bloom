@@ -2179,8 +2179,7 @@ impl BloomEditor {
         // Reserve space for the which-key drawer only after timeout fires
         // (or if it's already visible from a previous render).
         let has_pending = !self.leader_keys.is_empty()
-            || self.vim_state.pending_keys().len() > 0
-            || matches!(self.vim_state.mode(), vim::Mode::Command);
+            || self.vim_state.pending_keys().len() > 0;
         let timeout = std::time::Duration::from_millis(self.config.which_key_timeout_ms);
         let timed_out = self.pending_since
             .map_or(false, |since| since.elapsed() >= timeout);
