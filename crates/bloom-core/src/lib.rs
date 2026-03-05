@@ -801,6 +801,9 @@ impl BloomEditor {
             let _ = set_hidden_attribute(&index_path);
         }
 
+        // Build index from vault files
+        let _ = self.rebuild_index();
+
         Ok(())
     }
 
@@ -991,6 +994,16 @@ impl BloomEditor {
                 keymap::dispatch::Action::CopyToClipboard(ref text) => {
                     // Pass through — TUI handles actual clipboard
                     result.push(keymap::dispatch::Action::CopyToClipboard(text.clone()));
+                }
+                keymap::dispatch::Action::RebuildIndex => {
+                    let stats = self.rebuild_index();
+                    if let Ok(s) = stats {
+                        self.notifications.push(render::Notification {
+                            message: format!("Index rebuilt: {} pages, {} links, {} tags", s.pages, s.links, s.tags),
+                            level: render::NotificationLevel::Info,
+                            expires_at: Instant::now() + std::time::Duration::from_secs(3),
+                        });
+                    }
                 }
                 // Pass through to TUI: Quit, Save, and others
                 _ => {
@@ -2724,11 +2737,86 @@ impl BloomEditor {
         Ok(())
     }
     pub fn rebuild_index(&mut self) -> Result<index::RebuildStats, error::BloomError> {
-        Ok(index::RebuildStats {
-            pages: 0,
-            links: 0,
-            tags: 0,
-        })
+        let vault_root = match &self.vault_root {
+            Some(r) => r.clone(),
+            None => return Ok(index::RebuildStats { pages: 0, links: 0, tags: 0 }),
+        };
+
+        let mut all_paths = Vec::new();
+        for subdir in &["pages", "journal"] {
+            let dir = vault_root.join(subdir);
+            if dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(&dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                            all_paths.push(path);
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut entries = Vec::new();
+        for path in &all_paths {
+            let rel = path.strip_prefix(&vault_root).unwrap_or(path);
+            let content = match std::fs::read_to_string(path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let doc = self.parser.parse(&content);
+            let fm = doc.frontmatter.as_ref();
+            let page_id = match fm.and_then(|f| f.id.clone()) {
+                Some(id) => id,
+                None => continue, // skip files without frontmatter ID
+            };
+            let title = fm
+                .and_then(|f| f.title.clone())
+                .unwrap_or_default();
+            let created = fm
+                .and_then(|f| f.created)
+                .unwrap_or_else(|| chrono::Local::now().date_naive());
+            let tags: Vec<types::TagName> = doc.tags.iter().map(|t| t.name.clone()).collect();
+
+            let links: Vec<types::LinkTarget> = doc.links.iter().map(|l| types::LinkTarget {
+                page: l.target.clone(),
+                section: l.section.clone(),
+                display_hint: l.display_hint.clone(),
+            }).collect();
+
+            let tasks: Vec<types::Task> = doc.tasks.iter().map(|t| types::Task {
+                text: t.text.clone(),
+                done: t.done,
+                timestamps: t.timestamps.clone(),
+                source_page: page_id.clone(),
+                line: t.line,
+            }).collect();
+
+            let block_ids: Vec<(types::BlockId, usize)> = doc.block_ids.iter()
+                .map(|b| (b.id.clone(), b.line))
+                .collect();
+
+            entries.push(index::IndexEntry {
+                meta: types::PageMeta {
+                    id: page_id,
+                    title,
+                    created,
+                    tags: tags.clone(),
+                    path: rel.to_path_buf(),
+                },
+                content,
+                links,
+                tags,
+                tasks,
+                block_ids,
+            });
+        }
+
+        let idx = match &mut self.index {
+            Some(i) => i,
+            None => return Ok(index::RebuildStats { pages: 0, links: 0, tags: 0 }),
+        };
+        idx.rebuild(&entries)
     }
 }
 
