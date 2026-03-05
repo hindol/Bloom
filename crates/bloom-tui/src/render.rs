@@ -1,4 +1,3 @@
-use bloom_core::parser::traits::Style as ContentStyle;
 use bloom_core::render::{
     DialogFrame, McpIndicator, NotificationLevel, PaneFrame, PaneKind,
     PickerFrame, RenderFrame, StatusBarContent, StatusBarFrame, WhichKeyFrame,

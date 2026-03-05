@@ -46,7 +46,15 @@ impl<'a> TuiTheme<'a> {
     }
 
     /// Resolve a content `Style` to ratatui `Style`.
+    /// TUI overrides H1 to use `salient` fg (hue contrast) on top of
+    /// `strong` bold, so H1 visually dominates H2. The GUI doesn't need
+    /// this because it uses font size (1.5× vs 1.3×) for hierarchy.
     pub fn style_for(&self, style: &Style) -> RStyle {
+        if matches!(style, Style::Heading { level: 1 }) {
+            let mut props = theme::resolve(style, self.palette);
+            props.fg = Some(self.palette.salient);
+            return to_rstyle(&props);
+        }
         to_rstyle(&theme::resolve(style, self.palette))
     }
 
