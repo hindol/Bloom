@@ -442,6 +442,99 @@ fn draw_inactive_pane_bar(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &T
     );
 }
 
+// ---------------------------------------------------------------------------
+// Shared: highlighted preview renderer
+// ---------------------------------------------------------------------------
+
+/// Render preview text with semantic highlighting and optional search term overlay.
+/// Used by both the picker preview pane and the agenda preview pane.
+fn render_highlighted_preview(
+    f: &mut Frame,
+    area: Rect,
+    text: &str,
+    search_query: &str,
+    theme: &TuiTheme,
+) {
+    let faded = theme.faded_style();
+    let match_style = theme.style_for(&bloom_core::parser::traits::Style::SearchMatch);
+    let search_spans = bloom_core::render::search_highlight::highlight_matches(text, search_query);
+    let match_ranges: Vec<std::ops::Range<usize>> =
+        search_spans.iter().map(|s| s.range.clone()).collect();
+
+    let parser = bloom_core::parser::BloomMarkdownParser::new();
+    use bloom_core::parser::traits::DocumentParser as _;
+    let mut line_ctx = bloom_core::parser::traits::LineContext::default();
+
+    let mut byte_offset = 0usize;
+    for (i, line) in text.lines().enumerate() {
+        if i as u16 >= area.height {
+            break;
+        }
+        let line_start = byte_offset;
+        let line_end = line_start + line.len();
+
+        if line.trim().starts_with("```") {
+            line_ctx.in_code_block = !line_ctx.in_code_block;
+        }
+
+        let syntax_spans = parser.highlight_line(line, &line_ctx);
+
+        // Build base spans from syntax highlighting
+        let mut base_spans: Vec<(std::ops::Range<usize>, RStyle)> = Vec::new();
+        if syntax_spans.is_empty() {
+            base_spans.push((0..line.len(), faded));
+        } else {
+            let mut last = 0;
+            for si in &syntax_spans {
+                let s = si.range.start.min(line.len());
+                let e = si.range.end.min(line.len());
+                if s > last {
+                    base_spans.push((last..s, faded));
+                }
+                if s < e {
+                    base_spans.push((s..e, theme.style_for(&si.style)));
+                }
+                last = e;
+            }
+            if last < line.len() {
+                base_spans.push((last..line.len(), faded));
+            }
+        }
+
+        // Overlay search match highlighting
+        let mut spans: Vec<Span> = Vec::new();
+        for (range, style) in &base_spans {
+            let mut pos = range.start;
+            for mr in &match_ranges {
+                if mr.end <= line_start || mr.start >= line_end {
+                    continue;
+                }
+                let rel_start = mr.start.saturating_sub(line_start).max(range.start).min(range.end);
+                let rel_end = mr.end.saturating_sub(line_start).max(range.start).min(range.end);
+                if rel_start > pos && pos < range.end {
+                    spans.push(Span::styled(&line[pos..rel_start.min(range.end)], *style));
+                }
+                if rel_start < rel_end {
+                    spans.push(Span::styled(&line[rel_start..rel_end], match_style));
+                }
+                pos = rel_end;
+            }
+            if pos < range.end {
+                spans.push(Span::styled(&line[pos..range.end], *style));
+            }
+        }
+        if spans.is_empty() {
+            spans.push(Span::styled(line, faded));
+        }
+
+        f.render_widget(
+            Paragraph::new(Line::from(spans)),
+            Rect::new(area.x, area.y + i as u16, area.width, 1),
+        );
+        byte_offset = line_end + 1;
+    }
+}
+
 fn truncate_with_ellipsis(s: &str, max: usize) -> String {
     truncate_to_width(s, max)
 }
@@ -637,97 +730,13 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
             Rect::new(inner.x, sep_y, inner.width, 1),
         );
 
-        // Preview content with semantic highlighting + search term overlay
         let preview_area = Rect::new(
             inner.x + 2,
             sep_y + 1,
             inner.width.saturating_sub(4),
             preview_h.saturating_sub(1),
         );
-        let faded = theme.faded_style();
-        let match_style = theme.style_for(&bloom_core::parser::traits::Style::SearchMatch);
-        let search_spans = bloom_core::render::search_highlight::highlight_matches(
-            preview_text,
-            &picker.query,
-        );
-        let match_ranges: Vec<std::ops::Range<usize>> =
-            search_spans.iter().map(|s| s.range.clone()).collect();
-
-        let parser = bloom_core::parser::BloomMarkdownParser::new();
-        use bloom_core::parser::traits::DocumentParser as _;
-        let mut line_ctx = bloom_core::parser::traits::LineContext::default();
-
-        let mut byte_offset = 0usize;
-        for (i, line) in preview_text.lines().enumerate() {
-            if i as u16 >= preview_area.height {
-                break;
-            }
-            let line_start = byte_offset;
-            let line_end = line_start + line.len();
-
-            // Track code fences
-            if line.trim().starts_with("```") {
-                line_ctx.in_code_block = !line_ctx.in_code_block;
-            }
-
-            // Semantic highlighting as base
-            let syntax_spans = parser.highlight_line(line, &line_ctx);
-
-            // Build base spans from syntax highlighting
-            let mut base_spans: Vec<(std::ops::Range<usize>, RStyle)> = Vec::new();
-            if syntax_spans.is_empty() {
-                base_spans.push((0..line.len(), faded));
-            } else {
-                let mut last = 0;
-                for si in &syntax_spans {
-                    let s = si.range.start.min(line.len());
-                    let e = si.range.end.min(line.len());
-                    if s > last {
-                        base_spans.push((last..s, faded));
-                    }
-                    if s < e {
-                        base_spans.push((s..e, theme.style_for(&si.style)));
-                    }
-                    last = e;
-                }
-                if last < line.len() {
-                    base_spans.push((last..line.len(), faded));
-                }
-            }
-
-            // Overlay search match highlighting
-            let mut spans: Vec<Span> = Vec::new();
-            for (range, style) in &base_spans {
-                // Check if any search match overlaps this span
-                let mut pos = range.start;
-                for mr in &match_ranges {
-                    if mr.end <= line_start || mr.start >= line_end {
-                        continue;
-                    }
-                    let rel_start = mr.start.saturating_sub(line_start).max(range.start).min(range.end);
-                    let rel_end = mr.end.saturating_sub(line_start).max(range.start).min(range.end);
-                    if rel_start > pos && pos < range.end {
-                        spans.push(Span::styled(&line[pos..rel_start.min(range.end)], *style));
-                    }
-                    if rel_start < rel_end {
-                        spans.push(Span::styled(&line[rel_start..rel_end], match_style));
-                    }
-                    pos = rel_end;
-                }
-                if pos < range.end {
-                    spans.push(Span::styled(&line[pos..range.end], *style));
-                }
-            }
-            if spans.is_empty() {
-                spans.push(Span::styled(line, faded));
-            }
-
-            f.render_widget(
-                Paragraph::new(Line::from(spans)),
-                Rect::new(preview_area.x, preview_area.y + i as u16, preview_area.width, 1),
-            );
-            byte_offset = line_end + 1;
-        }
+        render_highlighted_preview(f, preview_area, preview_text, &picker.query, theme);
     }
 }
 
@@ -1240,54 +1249,13 @@ fn draw_agenda(
 
         let preview_y = sep_y + 2; // 1 blank line after separator
         if let Some(text) = &agenda.preview {
-            let parser = bloom_core::parser::BloomMarkdownParser::new();
-            use bloom_core::parser::traits::DocumentParser as _;
-            let mut line_ctx = bloom_core::parser::traits::LineContext::default();
-            let faded = theme.faded_style();
-
-            for (i, line_text) in text.lines().enumerate() {
-                let ly = preview_y + i as u16;
-                if ly >= padded.bottom() {
-                    break;
-                }
-                let padded_line = format!("  {line_text}");
-                let styled_spans = parser.highlight_line(&padded_line, &line_ctx);
-
-                // Track code fences for context
-                let trimmed = line_text.trim();
-                if trimmed.starts_with("```") {
-                    line_ctx.in_code_block = !line_ctx.in_code_block;
-                }
-
-                let mut spans: Vec<Span> = Vec::new();
-                if styled_spans.is_empty() {
-                    spans.push(Span::styled(&padded_line, faded));
-                } else {
-                    let mut last_end = 0usize;
-                    for si in &styled_spans {
-                        let s = si.range.start.min(padded_line.len());
-                        let e = si.range.end.min(padded_line.len());
-                        if s > last_end {
-                            spans.push(Span::styled(&padded_line[last_end..s], faded));
-                        }
-                        if s < e {
-                            spans.push(Span::styled(
-                                &padded_line[s..e],
-                                theme.style_for(&si.style),
-                            ));
-                        }
-                        last_end = e;
-                    }
-                    if last_end < padded_line.len() {
-                        spans.push(Span::styled(&padded_line[last_end..], faded));
-                    }
-                }
-
-                f.render_widget(
-                    Paragraph::new(Line::from(spans)),
-                    Rect::new(padded.x, ly, padded.width, 1),
-                );
-            }
+            let preview_area = Rect::new(
+                padded.x + 2,
+                preview_y,
+                padded.width.saturating_sub(4),
+                padded.bottom().saturating_sub(preview_y),
+            );
+            render_highlighted_preview(f, preview_area, text, "", theme);
         }
     }
 
