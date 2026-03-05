@@ -24,6 +24,19 @@ pub struct Config {
     pub autosave_debounce_ms: u64,
     #[serde(default = "default_which_key_timeout")]
     pub which_key_timeout_ms: u64,
+    #[serde(default)]
+    pub auto_align: AutoAlignMode,
+}
+
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+pub enum AutoAlignMode {
+    #[default]
+    #[serde(rename = "page")]
+    Page,
+    #[serde(rename = "block")]
+    Block,
+    #[serde(rename = "none")]
+    None,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -107,6 +120,7 @@ impl Config {
             mcp: McpConfig::default(),
             autosave_debounce_ms: default_autosave_debounce(),
             which_key_timeout_ms: default_which_key_timeout(),
+            auto_align: AutoAlignMode::default(),
         }
     }
 }

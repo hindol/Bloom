@@ -1,6 +1,7 @@
 // Bloom core library
 
 pub mod agenda;
+pub mod align;
 pub mod buffer;
 pub mod config;
 pub mod error;
@@ -1762,6 +1763,25 @@ impl BloomEditor {
                         if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
                             buf.end_edit_group();
                         }
+                    }
+                    // Auto-align on Insert→Normal transition
+                    match self.config.auto_align {
+                        config::AutoAlignMode::Page => {
+                            if let Some(page_id) = &self.active_page {
+                                if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                                    align::auto_align_page(buf);
+                                }
+                            }
+                        }
+                        config::AutoAlignMode::Block => {
+                            let cursor_line = self.cursor_position().0;
+                            if let Some(page_id) = &self.active_page {
+                                if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                                    align::auto_align_block(buf, cursor_line);
+                                }
+                            }
+                        }
+                        config::AutoAlignMode::None => {}
                     }
                 }
                 vec![keymap::dispatch::Action::ModeChange(mode.clone())]
