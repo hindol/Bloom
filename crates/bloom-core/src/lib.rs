@@ -1744,6 +1744,7 @@ impl BloomEditor {
                 )]
             }
             vim::VimAction::ModeChange(ref mode) => {
+                let was_insert = matches!(self.vim_state.mode(), vim::Mode::Insert);
                 if matches!(mode, vim::Mode::Command) {
                     self.pending_since = Some(Instant::now());
                 } else {
@@ -1764,24 +1765,26 @@ impl BloomEditor {
                             buf.end_edit_group();
                         }
                     }
-                    // Auto-align on Insert→Normal transition
-                    match self.config.auto_align {
-                        config::AutoAlignMode::Page => {
-                            if let Some(page_id) = &self.active_page {
-                                if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
-                                    align::auto_align_page(buf);
+                    // Auto-align only on Insert→Normal transition
+                    if was_insert {
+                        match self.config.auto_align {
+                            config::AutoAlignMode::Page => {
+                                if let Some(page_id) = &self.active_page {
+                                    if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                                        align::auto_align_page(buf);
+                                    }
                                 }
                             }
-                        }
-                        config::AutoAlignMode::Block => {
-                            let cursor_line = self.cursor_position().0;
-                            if let Some(page_id) = &self.active_page {
-                                if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
-                                    align::auto_align_block(buf, cursor_line);
+                            config::AutoAlignMode::Block => {
+                                let cursor_line = self.cursor_position().0;
+                                if let Some(page_id) = &self.active_page {
+                                    if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                                        align::auto_align_block(buf, cursor_line);
+                                    }
                                 }
                             }
+                            config::AutoAlignMode::None => {}
                         }
-                        config::AutoAlignMode::None => {}
                     }
                 }
                 vec![keymap::dispatch::Action::ModeChange(mode.clone())]
