@@ -361,7 +361,7 @@ fn align_frontmatter_block(buf: &mut Buffer, lines: &[String]) {
             let key = &old_trimmed[..colon];
             let value = old_trimmed[colon + 1..].trim_start();
             let padding = max_key_len.saturating_sub(key.trim().width());
-            let new_line = format!("{}:{}{}", key.trim(), " ".repeat(padding + 2), value);
+            let new_line = format!("{}:{}{}", key.trim(), " ".repeat(padding + 1), value);
 
             if new_line != old_trimmed {
                 let line_start = buf.text().line_to_char(i);
