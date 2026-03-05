@@ -187,7 +187,7 @@ fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiT
     for row in 0..height {
         if row >= pane.visible_lines.len() {
             // Beyond EOF — show ~ in the gutter (where line numbers go)
-            let tilde = Span::styled("   ~ ", theme.faded_style());
+            let tilde = Span::styled("  ~  ", theme.faded_style());
             f.render_widget(
                 Paragraph::new(Line::from(tilde)),
                 Rect::new(area.x, area.y + row as u16, line_number_width, 1),
