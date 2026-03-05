@@ -41,18 +41,15 @@ pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &TuiTheme) {
         None
     };
 
-    // Determine if a focus-stealing overlay is active (suppresses editor cursor)
-    let overlay_has_focus = frame.agenda.is_some() || frame.picker.is_some() || frame.dialog.is_some();
-
     // Draw panes (each pane includes its own status bar)
-    draw_panes(f, pane_area, &frame.panes, frame.maximized, frame.hidden_pane_count, overlay_has_focus, theme);
+    draw_panes(f, pane_area, &frame.panes, frame.maximized, frame.hidden_pane_count, theme);
 
     // Which-key drawer
     if let (Some(wk), Some(wk_rect)) = (&frame.which_key, wk_area) {
         draw_which_key(f, wk_rect, wk, theme);
     }
 
-    // Overlays
+    // Overlays — drawn after panes, so their set_cursor_position() wins.
     if let Some(agenda) = &frame.agenda {
         draw_agenda(f, area, agenda, theme, frame.scrolloff);
     }
@@ -80,14 +77,12 @@ fn draw_panes(
     panes: &[PaneFrame],
     _maximized: bool,
     hidden_count: usize,
-    suppress_cursor: bool,
     theme: &TuiTheme,
 ) {
     if panes.is_empty() {
         return;
     }
 
-    // Each pane carries its own rect from the core layout engine — just draw them.
     for pane in panes {
         let pane_area = Rect::new(
             pane.rect.x,
@@ -95,7 +90,7 @@ fn draw_panes(
             pane.rect.width,
             pane.rect.total_height,
         );
-        draw_pane(f, pane_area, pane, suppress_cursor, theme);
+        draw_pane(f, pane_area, pane, theme);
     }
 
     // Hidden pane count indicator (top-right)
@@ -113,7 +108,7 @@ fn draw_panes(
     }
 }
 
-fn draw_pane(f: &mut Frame, area: Rect, pane: &PaneFrame, suppress_cursor: bool, theme: &TuiTheme) {
+fn draw_pane(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
     if area.height < 2 {
         return;
     }
@@ -143,19 +138,17 @@ fn draw_pane(f: &mut Frame, area: Rect, pane: &PaneFrame, suppress_cursor: bool,
     // Status bar: slot-based for active pane, compact for inactive
     if pane.is_active {
         let cursor = draw_status_bar_slot(f, status_area, &pane.status_bar, theme);
-        if !suppress_cursor {
-            // Cursor: status bar slots (command line, quick capture) take priority
-            if let Some((cx, cy)) = cursor {
+        // Cursor: status bar slots (command line, quick capture) take priority
+        if let Some((cx, cy)) = cursor {
+            f.set_cursor_position((cx, cy));
+        } else if matches!(&pane.kind, PaneKind::Editor) {
+            let line_number_width = 5u16;
+            let cursor_y = pane.cursor.line.saturating_sub(pane.scroll_offset);
+            let cy = content_area.y + cursor_y as u16;
+            let cx = content_area.x + line_number_width + pane.cursor.column as u16;
+            let frame_area = f.area();
+            if cy < content_area.bottom() && cx < frame_area.width {
                 f.set_cursor_position((cx, cy));
-            } else if matches!(&pane.kind, PaneKind::Editor) {
-                let line_number_width = 5u16;
-                let cursor_y = pane.cursor.line.saturating_sub(pane.scroll_offset);
-                let cy = content_area.y + cursor_y as u16;
-                let cx = content_area.x + line_number_width + pane.cursor.column as u16;
-                let frame_area = f.area();
-                if cy < content_area.bottom() && cx < frame_area.width {
-                    f.set_cursor_position((cx, cy));
-                }
             }
         }
     } else {
@@ -492,6 +485,9 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
         Span::styled(&picker.query, theme.picker_style().add_modifier(Modifier::BOLD)),
     ]);
     f.render_widget(Paragraph::new(query_line), Rect::new(inner.x, inner.y, inner.width, 1));
+    // Place cursor at end of query input (overrides editor cursor)
+    let query_cx = inner.x + 3 + picker.query.len() as u16;
+    f.set_cursor_position((query_cx, inner.y));
 
     // Results (between query and footer)
     let results_h = top_h.saturating_sub(2); // -1 query, -1 footer
@@ -796,6 +792,9 @@ fn draw_dialog(f: &mut Frame, area: Rect, dialog: &DialogFrame, theme: &TuiTheme
             Rect::new(inner.x, inner.y + 1, inner.width, 1),
         );
     }
+
+    // Place cursor on the selected choice (overrides editor cursor)
+    f.set_cursor_position((inner.x + 1, inner.y + 1));
 }
 
 // ---------------------------------------------------------------------------
@@ -1168,6 +1167,12 @@ fn draw_agenda(
                 );
             }
         }
+    }
+
+    // Place cursor on the selected item row (overrides editor cursor)
+    let selected_screen_y = area.y + (selected_visual_row.saturating_sub(scroll_offset)) as u16;
+    if selected_screen_y < area.y + list_h {
+        f.set_cursor_position((area.x + 2, selected_screen_y));
     }
 }
 
