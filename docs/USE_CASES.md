@@ -475,8 +475,8 @@ Verifies: G4
 
 1. User is in Insert mode.
 2. User types `- [ ] Review the ropey crate API @due(2026-03-05)`.
-3. The `- [ ]` renders in `accent_yellow` (Tier 1 — structural).
-4. `@due` renders in `faded`, the parentheses in `SyntaxNoise`, the date in `faded`.
+3. The `-` renders as `ListMarker` (`foreground`), `[ ]` renders in `accent_yellow` (Tier 1 — structural).
+4. `@due` renders in `faded` (`TimestampKeyword`), the parentheses in `faded` + dim (`TimestampParens`), the date in `foreground` (`TimestampDate`). Overdue dates render in `accent_red` (`TimestampOverdue`).
 5. The task appears in the agenda (UC-43).
 
 ### UC-42: Toggle a task
@@ -484,9 +484,9 @@ Verifies: G4
 Verifies: G15
 
 1. User's cursor is on a `- [ ] Review the ropey crate API` line in Normal mode.
-2. User presses `x` (or a designated toggle key).
+2. User triggers `Action::ToggleTask` (via leader key, ex-command, or agenda view `x`).
 3. The line changes to `- [x] Review the ropey crate API`.
-4. The line renders in `accent_green` + strikethrough.
+4. The `[x]` renders in `accent_green` + strikethrough (`CheckboxChecked`). The task text renders in `faded` + strikethrough (`CheckedTaskText`).
 5. The index is updated — the task moves from "open" to "done" in the agenda.
 
 ### UC-43: Open the agenda
