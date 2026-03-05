@@ -924,8 +924,10 @@ impl BloomEditor {
                     self.window_mgr.navigate(dir, cursor_line);
                 }
                 keymap::dispatch::Action::OpenAgenda => {
-                    // TODO: open agenda in split pane
-                    result.push(action);
+                    self.window_mgr.open_special_view(
+                        window::PaneKind::Agenda,
+                        window::SplitDirection::Vertical,
+                    );
                 }
                 keymap::dispatch::Action::OpenUndoTree => {
                     // TODO: open undo tree in split pane
@@ -1969,6 +1971,76 @@ impl BloomEditor {
 
         for rect in &pane_rects {
             let is_active = rect.pane_id == self.window_mgr.active_pane();
+
+            // Agenda pane: build AgendaFrame instead of Editor
+            if self.window_mgr.pane_kind(rect.pane_id) == Some(&window::PaneKind::Agenda) {
+                let today = chrono::Local::now().date_naive();
+                let filters = index::AgendaFilters { tags: vec![], page: None, date_range: None };
+                let agenda_frame = if let Some(idx) = &self.index {
+                    let view = self.agenda.build(today, idx, &filters);
+                    let to_item = |task: &types::Task| {
+                        let source_title = idx.find_page_by_id(&task.source_page)
+                            .map(|m| m.title)
+                            .unwrap_or_default();
+                        let due = task.timestamps.iter().find_map(|ts| match ts {
+                            types::Timestamp::Due(d) => Some(*d),
+                            _ => None,
+                        });
+                        render::AgendaItem {
+                            task_text: task.text.clone(),
+                            source_page: source_title,
+                            date: due,
+                            tags: vec![],
+                        }
+                    };
+                    render::AgendaFrame {
+                        overdue: view.overdue.iter().map(&to_item).collect(),
+                        today: view.today.iter().map(&to_item).collect(),
+                        upcoming: view.upcoming.iter().map(&to_item).collect(),
+                        selected_index: 0,
+                        total_open: view.total_open,
+                        total_pages: view.total_pages,
+                    }
+                } else {
+                    render::AgendaFrame {
+                        overdue: vec![], today: vec![], upcoming: vec![],
+                        selected_index: 0, total_open: 0, total_pages: 0,
+                    }
+                };
+                panes.push(render::PaneFrame {
+                    id: rect.pane_id,
+                    kind: render::PaneKind::Agenda(agenda_frame),
+                    visible_lines: Vec::new(),
+                    cursor: render::CursorState {
+                        line: 0, column: 0,
+                        shape: render::CursorShape::Block,
+                    },
+                    scroll_offset: 0,
+                    is_active,
+                    title: "Agenda".to_string(),
+                    dirty: false,
+                    status_bar: render::StatusBarFrame {
+                        content: render::StatusBarContent::Normal(render::NormalStatus {
+                            title: "Agenda".to_string(),
+                            dirty: false,
+                            line: 0,
+                            column: 0,
+                            pending_keys: String::new(),
+                            recording_macro: None,
+                            mcp: render::McpIndicator::Off,
+                        }),
+                        mode: "NORMAL".to_string(),
+                    },
+                    rect: render::PaneRectFrame {
+                        x: rect.x,
+                        y: rect.y,
+                        width: rect.width,
+                        content_height: rect.content_height,
+                        total_height: rect.height,
+                    },
+                });
+                continue;
+            }
 
             let (title, dirty, visible_lines) = if let Some(page_id) = &self.active_page {
                 if let Some(buf) = self.buffer_mgr.get(page_id) {
