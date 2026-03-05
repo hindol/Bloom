@@ -10,9 +10,32 @@
 
 ```rust
 pub struct PageId(pub [u8; 4]);           // 8-char hex UUID (4 bytes)
+pub struct PaneId(pub u64);               // unique pane identifier
 pub struct BlockId(pub String);            // e.g., "rope-perf"
 pub struct TagName(pub String);            // e.g., "rust"
 pub type Version = u64;                    // monotonically increasing per buffer
+pub type UndoNodeId = u64;                 // identifies a node in the undo tree
+
+/// Keyboard input types used throughout the dispatch pipeline.
+pub struct KeyEvent {
+    pub code: KeyCode,
+    pub modifiers: Modifiers,
+}
+
+pub enum KeyCode {
+    Char(char),
+    Enter, Esc, Tab, Backspace, Delete,
+    Up, Down, Left, Right,
+    Home, End, PageUp, PageDown,
+    F(u8),
+}
+
+pub struct Modifiers {
+    pub ctrl: bool,
+    pub alt: bool,
+    pub shift: bool,
+    pub meta: bool,
+}
 
 #[derive(Clone)]
 pub struct PageMeta {
@@ -53,6 +76,12 @@ pub enum BloomError {
     MergeConflict(PathBuf),
     IoError(std::io::Error),
     IndexError(String),
+    ParseError(String),
+    InvalidPageId(String),
+    PaneTooSmall,
+    LastPane,
+    ConfigError(String),
+    WatcherError,
 }
 ```
 
@@ -82,6 +111,11 @@ impl Buffer {
 
     // Search within buffer
     pub fn find_text(&self, needle: &str) -> Vec<Range<usize>>;
+
+    // Edit groups — batch multiple edits into one undo node
+    pub fn begin_edit_group(&mut self);
+    pub fn end_edit_group(&mut self);
+    pub fn restore_edit_group_checkpoint(&mut self) -> bool;
 
     // Undo / redo
     pub fn undo(&mut self) -> bool;               // returns false if at root
@@ -145,6 +179,8 @@ pub enum VimAction {
     Unhandled,
     /// Composite: mode change + edit (e.g., `cc` = delete line + enter insert).
     Composite(Vec<VimAction>),
+    /// Restore buffer to a prior edit-group checkpoint.
+    RestoreCheckpoint,
 }
 
 pub struct EditOp {
@@ -241,14 +277,54 @@ pub struct StyledSpan {
 }
 
 pub enum Style {
+    // Basic text
     Normal,
     Heading { level: u8 },
     Bold, Italic,
     Code, CodeBlock,
-    Link, Tag, Timestamp, BlockId,
-    ListMarker, CheckboxUnchecked, CheckboxChecked,
-    Frontmatter, BrokenLink,
+
+    // Links & references
+    LinkText,                       // visible link text
+    LinkChrome,                     // surrounding syntax: [[ ]] | etc.
+    Tag,
+
+    // Timestamps (broken into sub-spans)
+    TimestampKeyword,               // @due, @start, @at
+    TimestampDate,                  // the date string itself
+    TimestampOverdue,               // overdue date highlight
+    TimestampParens,                // surrounding ( )
+
+    // Block IDs
+    BlockId,
+    BlockIdCaret,                   // the ^ prefix
+
+    // Lists & tasks
+    ListMarker,
+    CheckboxUnchecked,
+    CheckboxChecked,
+    CheckedTaskText,                // dimmed text of completed tasks
+
+    // Block quotes
+    Blockquote,
+    BlockquoteMarker,               // the > character
+
+    // Tables
+    TablePipe,                      // | separators
+    TableAlignmentRow,              // :--- style alignment rows
+
+    // Frontmatter (broken into sub-spans)
+    Frontmatter,
+    FrontmatterKey,
+    FrontmatterTitle,
+    FrontmatterId,
+    FrontmatterDate,
+    FrontmatterTags,
+
+    // Diagnostics & search
+    BrokenLink,
     SyntaxNoise,                    // Tier 3 markers: **, *, ##, [[ ]] etc.
+    SearchMatch,                    // highlighted search result
+    SearchMatchCurrent,             // the currently-focused search match
 }
 
 /// Context for line-level highlighting (is this inside a code block? frontmatter?)
@@ -455,9 +531,15 @@ pub trait PickerItem: Clone {
     fn preview(&self) -> Option<String>;   // preview content (if any)
 }
 
+pub struct PickerColumn {
+    pub text: String,
+    pub style: ColumnStyle,                // Normal, Faded
+}
+
 pub struct PickerRow {
     pub label: String,
-    pub marginalia: Vec<String>,           // right-aligned metadata
+    pub middle: Option<PickerColumn>,
+    pub right: Option<PickerColumn>,
 }
 
 impl<T: PickerItem> Picker<T> {
@@ -499,6 +581,7 @@ pub struct PickerFrame {
     pub preview: Option<String>,
     pub total_count: usize,
     pub filtered_count: usize,
+    pub status_noun: String,                // e.g., "pages", "commands", "tags"
 }
 ```
 
@@ -516,6 +599,7 @@ pub struct WhichKeyTree {
 impl WhichKeyTree {
     pub fn new() -> Self;
     pub fn register(&mut self, keys: &str, label: &str, action: ActionId);
+    pub fn set_group_label(&mut self, key: &str, label: &str);
     pub fn lookup(&self, prefix: &[KeyEvent]) -> WhichKeyLookup;
 }
 
@@ -547,6 +631,8 @@ pub enum WhichKeyContext {
     /// Pending Vim operator (d, c, y, >, <, = etc.).
     /// Entries include both motions and text objects.
     VimOperator { operator: String },
+    /// The `:` command line is active.
+    CommandLine,
 }
 ```
 
@@ -585,15 +671,14 @@ pub enum CommandArgs {
     None,
     Required(String),               // label, e.g., "<path>"
     Optional(String),               // label, e.g., "<name>?"
-    Completable(fn() -> Vec<String>), // dynamic completions, e.g., theme names
 }
 
 impl CommandRegistry {
     pub fn new() -> Self;
     pub fn register(&mut self, def: CommandDef);
+    pub fn find(&self, name: &str) -> Option<&CommandDef>;
     pub fn complete(&self, prefix: &str) -> Vec<Completion>;
     pub fn complete_args(&self, command: &str, arg_prefix: &str) -> Vec<Completion>;
-    pub fn execute(&self, input: &str) -> Result<Action, String>;
 }
 ```
 
@@ -684,11 +769,21 @@ pub struct TimelineEntryFrame {
 pub struct SetupWizardFrame {
     pub step: SetupStep,
     pub vault_path: String,
+    pub vault_path_cursor: usize,
+    pub logseq_path: String,
+    pub logseq_path_cursor: usize,
+    pub import_choice: Option<bool>,        // true = import, false = skip
+    pub import_progress: Option<(usize, usize)>,  // (done, total)
+    pub stats: Option<RebuildStats>,
+    pub error: Option<String>,
 }
 
 pub enum SetupStep {
+    Welcome,
     ChooseVaultLocation,
-    ImportFromLogseq,
+    ImportChoice,
+    ImportPath,
+    ImportRunning,
     Complete,
 }
 
@@ -813,7 +908,15 @@ pub enum Action {
 pub enum PickerKind {
     FindPage, SwitchBuffer, Search, Journal, Tags,
     Backlinks(PageId), UnlinkedMentions(PageId),
-    AllCommands, InlineLink, Templates,
+    AllCommands, InlineLink, Templates, Theme,
+}
+
+pub enum PickerInputAction {
+    UpdateQuery(String),
+    MoveSelection(i32),
+    Select,
+    ToggleMark,
+    Cancel,
 }
 
 pub enum DatePickerPurpose {
@@ -1186,9 +1289,14 @@ pub struct ThemeConfig {
     pub overrides: HashMap<String, String>,  // slot → hex colour
 }
 
+pub enum McpMode {
+    ReadOnly,
+    ReadWrite,
+}
+
 pub struct McpConfig {
     pub enabled: bool,
-    pub mode: McpMode,            // ReadOnly, ReadWrite
+    pub mode: McpMode,
     pub exclude_paths: Vec<String>,  // glob patterns
 }
 
@@ -1318,18 +1426,28 @@ impl BloomEditor {
     /// Process a key event from the UI.
     pub fn handle_key(&mut self, key: KeyEvent) -> Vec<Action>;
 
-    /// Process an MCP tool call.
-    pub fn handle_mcp(&mut self, call: McpToolCall) -> Result<McpToolResult, BloomError>;
-
     /// Produce the current render frame.
     pub fn render(&self) -> RenderFrame;
 
     /// Tick — called periodically (e.g., 60fps). Handles timers, debounce, notifications.
     pub fn tick(&mut self, now: Instant);
 
+    // Startup & setup
+    pub fn startup(&mut self) -> Result<(), BloomError>;
+    pub fn needs_setup(&self) -> bool;
+    pub fn start_wizard(&mut self);
+    pub fn wizard_active(&self) -> bool;
+    pub fn init_vault(&mut self, path: &Path) -> Result<(), BloomError>;
+    pub fn resize(&mut self, width: u16, height: u16);
+
+    // Theme
+    pub fn theme(&self) -> &ThemeConfig;
+    pub fn set_theme(&mut self, name: &str);
+    pub fn cycle_theme(&mut self);
+
     // Buffer management
     pub fn open_page(&mut self, id: &PageId) -> Result<(), BloomError>;
-    pub fn open_journal(&mut self, date: NaiveDate) -> Result<(), BloomError>;
+    pub fn open_page_with_content(&mut self, id: &PageId, content: &str) -> Result<(), BloomError>;
     pub fn create_page(&mut self, title: &str, template: Option<&str>) -> Result<PageId, BloomError>;
     pub fn close_buffer(&mut self, pane: PaneId) -> Result<(), BloomError>;
     pub fn save_current(&mut self) -> Result<(), BloomError>;
@@ -1337,9 +1455,6 @@ impl BloomEditor {
     /// Apply a batch of text edits across multiple files atomically.
     /// Used by refactoring ops, tag rename, and display hint updates.
     pub fn apply_edits(&mut self, edits: Vec<TextEdit>) -> Result<(), BloomError>;
-
-    /// Copy text to system clipboard (platform-delegated).
-    pub fn copy_to_clipboard(&self, text: &str) -> Result<(), BloomError>;
 
     // Session
     pub fn save_session(&self) -> Result<(), BloomError>;
