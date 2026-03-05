@@ -857,6 +857,22 @@ fn draw_agenda(
         Section { label: "Upcoming", items: &agenda.upcoming, fg: theme.faded() },
     ];
 
+    // Pre-compute max column widths across all items for alignment
+    let all_items = agenda.overdue.iter()
+        .chain(agenda.today.iter())
+        .chain(agenda.upcoming.iter());
+    let max_source_w: usize = all_items.clone()
+        .map(|i| i.source_page.width())
+        .max()
+        .unwrap_or(0)
+        .min(area.width as usize / 3); // cap at 1/3 of width
+    let max_date_w: usize = all_items
+        .map(|i| i.date.map(|d| d.format("%Y-%m-%d").to_string().width()).unwrap_or(0))
+        .max()
+        .unwrap_or(0);
+    let source_col_w = max_source_w + 2; // +2 for left padding
+    let date_col_w = if max_date_w > 0 { max_date_w + 2 } else { 0 }; // +2 for left padding
+
     let mut y = area.y;
     let mut flat_idx: usize = 0;
 
@@ -894,12 +910,30 @@ fn draw_agenda(
             let marker = if is_selected { " ▸" } else { "  " };
             let date_str = item.date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
             let available = area.width as usize;
-            let left_part = format!("{marker} ☐ {}", item.task_text);
-            let left_w = left_part.width();
+            let marker_w = 5; // " ▸ ☐ "
+            let task_max = available.saturating_sub(marker_w + source_col_w + date_col_w);
+            let task_text = truncate_to_width(&item.task_text, task_max);
+            let task_w = task_text.width();
+            let task_pad = task_max.saturating_sub(task_w);
 
-            // Source page is always faded; date is critical for overdue, faded otherwise
-            let source_str = format!("  {}", item.source_page);
-            let date_str_padded = format!("  {date_str}");
+            // Right-align source page within its fixed column
+            let source_padded = format!(
+                "{}{}",
+                " ".repeat(source_col_w.saturating_sub(item.source_page.width())),
+                truncate_to_width(&item.source_page, max_source_w),
+            );
+            // Right-align date within its fixed column
+            let date_padded = if date_col_w > 0 {
+                format!(
+                    "{}{}",
+                    " ".repeat(date_col_w.saturating_sub(date_str.width())),
+                    date_str,
+                )
+            } else {
+                String::new()
+            };
+
+            // Determine styles
             let date_fg = if std::ptr::eq(*&section.items, &*agenda.overdue) {
                 theme.critical()
             } else {
@@ -916,14 +950,13 @@ fn draw_agenda(
                 RStyle::default().fg(date_fg)
             };
 
-            let right_w = source_str.width() + date_str_padded.width();
-            let pad = if available > left_w + right_w { available - left_w - right_w } else { 1 };
+            let left_part = format!("{marker} ☐ {task_text}");
 
             let line = Line::from(vec![
                 Span::styled(left_part, base_style),
-                Span::styled(" ".repeat(pad), base_style),
-                Span::styled(source_str, source_style),
-                Span::styled(date_str_padded, date_style),
+                Span::styled(" ".repeat(task_pad), base_style),
+                Span::styled(source_padded, source_style),
+                Span::styled(date_padded, date_style),
             ]);
             f.render_widget(Paragraph::new(line), Rect::new(area.x, y, area.width, 1));
             y += 1;

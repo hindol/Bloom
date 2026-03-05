@@ -28,6 +28,9 @@ impl Agenda {
         let mut page_ids = std::collections::HashSet::new();
 
         for task in &tasks {
+            if task.done {
+                continue;
+            }
             page_ids.insert(task.source_page.clone());
 
             let due_date = task.timestamps.iter().find_map(|ts| match ts {
