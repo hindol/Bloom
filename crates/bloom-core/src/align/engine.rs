@@ -188,12 +188,10 @@ fn align_timestamp_block(buf: &mut Buffer, start: usize, end: usize) {
 }
 
 fn find_first_timestamp_pos(line: &str) -> Option<usize> {
-    for prefix in &["@due(", "@start(", "@at("] {
-        if let Some(pos) = line.find(prefix) {
-            return Some(pos);
-        }
-    }
-    None
+    ["@due(", "@start(", "@at("]
+        .iter()
+        .filter_map(|prefix| line.find(prefix))
+        .min()
 }
 
 /// Move #tags that appear after @timestamps to before the first @.
@@ -359,9 +357,9 @@ fn align_frontmatter_block(buf: &mut Buffer, lines: &[String]) {
 
         if let Some(colon) = old_trimmed.find(": ") {
             let key = &old_trimmed[..colon];
-            let value = &old_trimmed[colon + 2..];
+            let value = old_trimmed[colon + 1..].trim_start();
             let padding = max_key_len.saturating_sub(key.trim().len());
-            let new_line = format!("{}:{} {}", key.trim(), " ".repeat(padding + 1), value);
+            let new_line = format!("{}:{}{}", key.trim(), " ".repeat(padding + 2), value);
 
             if new_line != old_trimmed {
                 let line_start = buf.text().line_to_char(i);
@@ -521,5 +519,44 @@ mod tests {
         // The @ column should be after the longest line's text
         let longest_len = lines[1].len();
         assert!(at_pos_0 >= longest_len);
+    }
+
+    #[test]
+    fn test_start_before_due_aligns_on_earliest() {
+        let mut buf = Buffer::from_text(
+            "- [ ] Finish FTS5 integration for Bloom @start(2026-03-02) @due(2026-03-07)\n\
+             - [ ] Read chapters 7-9 of DDIA @due(2026-03-07)\n\
+             - [ ] Schedule dentist appointment @due(2026-03-05)\n"
+        );
+        auto_align_page(&mut buf);
+        let text = buf.text().to_string();
+        let lines: Vec<&str> = text.lines().collect();
+        // Line 0 has @start before @due — alignment should be on @start position
+        let at_pos_0 = lines[0].find("@start").unwrap();
+        let at_pos_1 = lines[1].find("@due").unwrap();
+        let at_pos_2 = lines[2].find("@due").unwrap();
+        assert_eq!(at_pos_0, at_pos_1);
+        assert_eq!(at_pos_1, at_pos_2);
+    }
+
+    #[test]
+    fn test_frontmatter_no_extra_space() {
+        let mut buf = Buffer::from_text(
+            "---\nid: abc\ntitle: \"My Page\"\ncreated: 2026-03-01\ntags: [rust]\n---\n"
+        );
+        auto_align_page(&mut buf);
+        let text = buf.text().to_string();
+        for line in text.lines() {
+            if line.contains(':') && line != "---" {
+                let colon_pos = line.find(':').unwrap();
+                let after_colon = &line[colon_pos + 1..];
+                let value_start = after_colon.find(|c: char| c != ' ').unwrap_or(0);
+                assert!(value_start >= 1, "value should have at least 1 space after colon");
+            }
+        }
+        // Idempotent
+        let first = text.clone();
+        auto_align_page(&mut buf);
+        assert_eq!(buf.text().to_string(), first);
     }
 }
