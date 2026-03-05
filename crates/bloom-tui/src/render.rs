@@ -1,3 +1,4 @@
+use bloom_core::parser::traits::Style as ContentStyle;
 use bloom_core::render::{
     DialogFrame, McpIndicator, NotificationLevel, PaneFrame, PaneKind,
     PickerFrame, RenderFrame, StatusBarContent, StatusBarFrame, WhichKeyFrame,
@@ -196,7 +197,15 @@ fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiT
         // Is this the cursor line? Apply current-line highlight as base
         let is_cursor_line = pane.is_active
             && rendered_line.line_number == pane.cursor.line;
-        let base_style = if is_cursor_line {
+
+        // Is this an H1 line? Apply full-width background wash so H1
+        // visually dominates H2 (which only has hue contrast).
+        // The GUI uses font size for this; TUI uses area instead.
+        let is_h1 = rendered_line.spans.iter().any(|s| {
+            matches!(s.style, ContentStyle::Heading { level: 1 })
+        });
+
+        let base_style = if is_cursor_line || is_h1 {
             theme.current_line_style()
         } else {
             RStyle::default()
