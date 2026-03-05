@@ -1,7 +1,7 @@
 mod palette;
 mod resolve;
 
-pub use palette::{Rgb, ThemePalette, BLOOM_DARK, BLOOM_DARK_FADED, BLOOM_LIGHT, BLOOM_LIGHT_FADED, PARCHMENT, NEWSPRINT, AGED_PAPER, MOSS, SLATE, SOLARIUM, INK};
+pub use palette::{Rgb, ThemePalette, BLOOM_DARK, BLOOM_DARK_FADED, BLOOM_LIGHT, BLOOM_LIGHT_FADED, PARCHMENT, NEWSPRINT, AGED_PAPER, MOSS, SLATE, SOLARIUM, INK, DRIFTWOOD, TWILIGHT, LICHEN, EMBER};
 pub use resolve::{StyleProps, Chrome, resolve, resolve_status_bar, resolve_chrome};
 
 /// All built-in theme names, in display order.
@@ -17,6 +17,10 @@ pub const THEME_NAMES: &[&str] = &[
     "slate",
     "solarium",
     "ink",
+    "driftwood",
+    "twilight",
+    "lichen",
+    "ember",
 ];
 
 /// Look up a built-in palette by name.
@@ -33,6 +37,10 @@ pub fn palette_by_name(name: &str) -> Option<&'static ThemePalette> {
         "slate" => Some(&SLATE),
         "solarium" => Some(&SOLARIUM),
         "ink" => Some(&INK),
+        "driftwood" => Some(&DRIFTWOOD),
+        "twilight" => Some(&TWILIGHT),
+        "lichen" => Some(&LICHEN),
+        "ember" => Some(&EMBER),
         _ => None,
     }
 }
@@ -51,6 +59,10 @@ pub fn theme_description(name: &str) -> &'static str {
         "slate" => "cool blue-grey, architectural",
         "solarium" => "warm solarized cream",
         "ink" => "pure monochrome, white on black",
+        "driftwood" => "warm sand, bleached wood",
+        "twilight" => "deep blue-purple, edge of night",
+        "lichen" => "pale green-grey stone",
+        "ember" => "charcoal with warm orange glow",
         _ => "",
     }
 }
