@@ -1126,14 +1126,60 @@ fn draw_agenda(
                     RStyle::default().fg(date_fg)
                 };
 
-                let left_part = format!("{marker}☐ {task_text}");
+                let left_prefix = format!("{marker}☐ ");
 
-                let line = Line::from(vec![
-                    Span::styled(left_part, base_style),
-                    Span::styled(" ".repeat(task_pad), base_style),
-                    Span::styled(source_padded, source_style),
-                    Span::styled(date_padded, date_style),
-                ]);
+                // Apply semantic highlighting to task text (tags, timestamps, links)
+                let parser = bloom_core::parser::BloomMarkdownParser::new();
+                let ctx = bloom_core::parser::traits::LineContext::default();
+                use bloom_core::parser::traits::DocumentParser as _;
+                let styled_spans = parser.highlight_line(&task_text, &ctx);
+
+                let sel_bg = if is_selected { Some(theme.mild()) } else { None };
+                let mut task_spans: Vec<Span> = Vec::new();
+                task_spans.push(Span::styled(left_prefix, base_style));
+
+                if styled_spans.is_empty() {
+                    task_spans.push(Span::styled(task_text.as_str(), base_style));
+                } else {
+                    let mut last_end = 0usize;
+                    for si in &styled_spans {
+                        let s = si.range.start.min(task_text.len());
+                        let e = si.range.end.min(task_text.len());
+                        if s > last_end {
+                            task_spans.push(Span::styled(&task_text[last_end..s], base_style));
+                        }
+                        if s < e {
+                            use bloom_core::parser::traits::Style as PStyle;
+                            // Only apply Bloom-extension styles; fallback to base for prose
+                            let span_style = match &si.style {
+                                PStyle::Tag | PStyle::TimestampKeyword
+                                | PStyle::TimestampDate | PStyle::TimestampOverdue
+                                | PStyle::TimestampParens | PStyle::LinkText
+                                | PStyle::LinkChrome | PStyle::SyntaxNoise
+                                | PStyle::CheckboxUnchecked | PStyle::CheckboxChecked
+                                | PStyle::CheckedTaskText => {
+                                    let mut resolved = theme.style_for(&si.style);
+                                    if let Some(bg) = sel_bg {
+                                        resolved = resolved.bg(bg);
+                                    }
+                                    resolved
+                                }
+                                _ => base_style,
+                            };
+                            task_spans.push(Span::styled(&task_text[s..e], span_style));
+                        }
+                        last_end = e;
+                    }
+                    if last_end < task_text.len() {
+                        task_spans.push(Span::styled(&task_text[last_end..], base_style));
+                    }
+                }
+
+                task_spans.push(Span::styled(" ".repeat(task_pad), base_style));
+                task_spans.push(Span::styled(source_padded, source_style));
+                task_spans.push(Span::styled(date_padded, date_style));
+
+                let line = Line::from(task_spans);
                 f.render_widget(Paragraph::new(line), Rect::new(padded.x, y, padded.width, 1));
                 y += 1;
             }
