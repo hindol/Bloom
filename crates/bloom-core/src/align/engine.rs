@@ -199,26 +199,27 @@ fn find_first_timestamp_pos(line: &str) -> Option<usize> {
 fn relocate_post_at_tags(before: &str, after: &str) -> (String, String) {
     let mut tags = Vec::new();
     let mut cleaned = String::new();
-    let mut i = 0;
-    let bytes = after.as_bytes();
-    let len = bytes.len();
 
-    while i < len {
-        if bytes[i] == b'#' {
-            // Check if this looks like a tag
+    let mut chars_iter = after.char_indices().peekable();
+    while let Some((i, ch)) = chars_iter.next() {
+        if ch == '#' {
             let tag_start = i;
-            i += 1;
-            while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'-' || bytes[i] == b'_') {
-                i += 1;
+            let mut tag_end = i + ch.len_utf8();
+            while let Some(&(j, c)) = chars_iter.peek() {
+                if c.is_alphanumeric() || c == '-' || c == '_' {
+                    tag_end = j + c.len_utf8();
+                    chars_iter.next();
+                } else {
+                    break;
+                }
             }
-            if i > tag_start + 1 {
-                tags.push(&after[tag_start..i]);
+            if tag_end > tag_start + 1 {
+                tags.push(&after[tag_start..tag_end]);
             } else {
-                cleaned.push_str(&after[tag_start..i]);
+                cleaned.push_str(&after[tag_start..tag_end]);
             }
         } else {
-            cleaned.push(bytes[i] as char);
-            i += 1;
+            cleaned.push(ch);
         }
     }
 

@@ -283,8 +283,9 @@ fn around_nested_pair(buffer: &Buffer, cursor: usize, open: char, close: char) -
 
 fn find_link_bounds(buffer: &Buffer, cursor: usize) -> Option<(usize, usize)> {
     let text: String = buffer.text().slice(..).to_string();
+    let cursor_byte = buffer.text().char_to_byte(cursor.min(buffer.len_chars().saturating_sub(1)));
     // Find [[ before or at cursor
-    let before = &text[..=cursor.min(text.len().saturating_sub(1))];
+    let before = &text[..=cursor_byte.min(text.len().saturating_sub(1))];
     let open_byte = before.rfind("[[")?;
     let open_char = buffer.text().byte_to_char(open_byte);
     // Find ]] after cursor
@@ -357,8 +358,9 @@ fn around_tag(buffer: &Buffer, cursor: usize) -> Option<Range<usize>> {
 
 fn inner_timestamp(buffer: &Buffer, cursor: usize) -> Option<Range<usize>> {
     let text: String = buffer.text().slice(..).to_string();
+    let cursor_byte = buffer.text().char_to_byte(cursor.min(buffer.len_chars().saturating_sub(1)));
     // Find @word( before cursor
-    let before = &text[..=cursor.min(text.len().saturating_sub(1))];
+    let before = &text[..=cursor_byte.min(text.len().saturating_sub(1))];
     // Search backward for @
     let at_byte = before.rfind('@')?;
     let paren_byte = text[at_byte..].find('(')?;
@@ -375,7 +377,8 @@ fn inner_timestamp(buffer: &Buffer, cursor: usize) -> Option<Range<usize>> {
 
 fn around_timestamp(buffer: &Buffer, cursor: usize) -> Option<Range<usize>> {
     let text: String = buffer.text().slice(..).to_string();
-    let before = &text[..=cursor.min(text.len().saturating_sub(1))];
+    let cursor_byte = buffer.text().char_to_byte(cursor.min(buffer.len_chars().saturating_sub(1)));
+    let before = &text[..=cursor_byte.min(text.len().saturating_sub(1))];
     let at_byte = before.rfind('@')?;
     let close = text[at_byte..].find(')')? + at_byte + 1;
     let at_char = buffer.text().byte_to_char(at_byte);

@@ -136,7 +136,7 @@ pub fn parse_tags(line: &str, line_number: usize) -> Vec<ParsedTag> {
 
         if bytes[i] == b'#' {
             // Must be preceded by whitespace or start of line
-            let preceded_by_ws = i == 0 || line.as_bytes()[i - 1].is_ascii_whitespace();
+            let preceded_by_ws = i == 0 || line[..i].chars().last().map_or(true, |c| c.is_whitespace());
             if preceded_by_ws {
                 // Check if this is a heading (# at start of line followed by space)
                 if i == 0 {

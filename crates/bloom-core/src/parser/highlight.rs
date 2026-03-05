@@ -284,7 +284,7 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
 
         // Tags #tagname
         if bytes[i] == b'#' {
-            let preceded_by_ws = i == 0 || bytes[i - 1].is_ascii_whitespace();
+            let preceded_by_ws = i == 0 || line[..i].chars().last().map_or(true, |c| c.is_whitespace());
             if preceded_by_ws {
                 let tag_start = i;
                 i += 1;
