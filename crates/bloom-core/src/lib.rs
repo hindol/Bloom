@@ -244,13 +244,14 @@ fn expand_tilde(path: &str) -> String {
 
 /// Extract the link ID from a `[[id|text]]` pattern at the given column in a line.
 fn extract_link_at_col(line: &str, col: usize) -> Option<String> {
+    let byte_col = line.char_indices().nth(col).map(|(i, _)| i).unwrap_or(line.len());
     let bytes = line.as_bytes();
     let len = bytes.len();
-    if col >= len { return None; }
+    if byte_col >= len { return None; }
 
     // Search backwards for [[
     let mut start = None;
-    let mut i = col.min(len.saturating_sub(1));
+    let mut i = byte_col.min(len.saturating_sub(1));
     while i > 0 {
         if i > 0 && bytes[i - 1] == b'[' && bytes[i] == b'[' {
             start = Some(i + 1);
@@ -1423,14 +1424,15 @@ impl BloomEditor {
                     wiz.step = WizardStep::Welcome;
                 }
                 KeyCode::Char(c) => {
-                    let pos = wiz.vault_path_cursor;
-                    wiz.vault_path.insert(pos, *c);
+                    let byte_pos = wiz.vault_path.char_indices().nth(wiz.vault_path_cursor).map(|(i, _)| i).unwrap_or(wiz.vault_path.len());
+                    wiz.vault_path.insert(byte_pos, *c);
                     wiz.vault_path_cursor += 1;
                 }
                 KeyCode::Backspace => {
                     if wiz.vault_path_cursor > 0 {
                         wiz.vault_path_cursor -= 1;
-                        wiz.vault_path.remove(wiz.vault_path_cursor);
+                        let byte_pos = wiz.vault_path.char_indices().nth(wiz.vault_path_cursor).map(|(i, _)| i).unwrap_or(wiz.vault_path.len());
+                        wiz.vault_path.remove(byte_pos);
                     }
                 }
                 KeyCode::Left => {
@@ -1484,14 +1486,15 @@ impl BloomEditor {
                     wiz.step = WizardStep::ImportChoice;
                 }
                 KeyCode::Char(c) => {
-                    let pos = wiz.logseq_path_cursor;
-                    wiz.logseq_path.insert(pos, *c);
+                    let byte_pos = wiz.logseq_path.char_indices().nth(wiz.logseq_path_cursor).map(|(i, _)| i).unwrap_or(wiz.logseq_path.len());
+                    wiz.logseq_path.insert(byte_pos, *c);
                     wiz.logseq_path_cursor += 1;
                 }
                 KeyCode::Backspace => {
                     if wiz.logseq_path_cursor > 0 {
                         wiz.logseq_path_cursor -= 1;
-                        wiz.logseq_path.remove(wiz.logseq_path_cursor);
+                        let byte_pos = wiz.logseq_path.char_indices().nth(wiz.logseq_path_cursor).map(|(i, _)| i).unwrap_or(wiz.logseq_path.len());
+                        wiz.logseq_path.remove(byte_pos);
                     }
                 }
                 KeyCode::Left => {
@@ -1647,7 +1650,7 @@ impl BloomEditor {
         let Some(page_id) = &self.active_page else { return };
         let Some(buf) = self.buffer_mgr.get_mut(page_id) else { return };
         buf.insert(self.cursor, text);
-        self.cursor += text.len();
+        self.cursor += text.chars().count();
     }
 
     /// Schedule an auto-save for the given page via the disk writer thread.

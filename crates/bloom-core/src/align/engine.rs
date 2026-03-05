@@ -1,4 +1,5 @@
 use crate::buffer::Buffer;
+use unicode_width::UnicodeWidthStr;
 
 /// Align all blocks in the entire buffer.
 pub fn auto_align_page(buf: &mut Buffer) {
@@ -154,7 +155,7 @@ fn align_timestamp_block(buf: &mut Buffer, start: usize, end: usize) {
     // Lines without @ still contribute to the column so timestamps
     // don't land in the middle of longer non-@ lines.
     let max_width = parsed.iter()
-        .map(|p| p.text_before_at.len())
+        .map(|p| p.text_before_at.width())
         .max()
         .unwrap_or(0);
 
@@ -173,7 +174,7 @@ fn align_timestamp_block(buf: &mut Buffer, start: usize, end: usize) {
         let old_trimmed = old_line.trim_end_matches('\n');
 
         let new_line = if p.has_at {
-            let padding = align_col.saturating_sub(p.text_before_at.len());
+            let padding = align_col.saturating_sub(p.text_before_at.width());
             format!("{}{}{}", p.text_before_at, " ".repeat(padding), p.at_and_after)
         } else {
             p.text_before_at.clone()
@@ -278,7 +279,7 @@ fn align_table_block(buf: &mut Buffer, start: usize, end: usize) {
             continue;
         }
         for (col_idx, cell) in row.iter().enumerate() {
-            col_widths[col_idx] = col_widths[col_idx].max(cell.len());
+            col_widths[col_idx] = col_widths[col_idx].max(cell.width());
         }
     }
 
@@ -342,7 +343,7 @@ fn align_frontmatter_block(buf: &mut Buffer, lines: &[String]) {
     for i in 1..end {
         if let Some(colon) = lines[i].find(": ") {
             let key = lines[i][..colon].trim();
-            max_key_len = max_key_len.max(key.len());
+            max_key_len = max_key_len.max(key.width());
         }
     }
 
@@ -358,7 +359,7 @@ fn align_frontmatter_block(buf: &mut Buffer, lines: &[String]) {
         if let Some(colon) = old_trimmed.find(": ") {
             let key = &old_trimmed[..colon];
             let value = old_trimmed[colon + 1..].trim_start();
-            let padding = max_key_len.saturating_sub(key.trim().len());
+            let padding = max_key_len.saturating_sub(key.trim().width());
             let new_line = format!("{}:{}{}", key.trim(), " ".repeat(padding + 2), value);
 
             if new_line != old_trimmed {

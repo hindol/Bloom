@@ -91,12 +91,12 @@ fn draw_panes(
     if hidden_count > 0 {
         let area = f.area();
         let indicator = format!("[{hidden_count} hidden]");
-        let x = area.right().saturating_sub(indicator.len() as u16 + 1);
+        let x = area.right().saturating_sub(indicator.width() as u16 + 1);
         if x > area.x {
             let span = Span::styled(&indicator, theme.faded_style());
             f.render_widget(
                 Paragraph::new(Line::from(span)),
-                Rect::new(x, area.y, indicator.len() as u16, 1),
+                Rect::new(x, area.y, indicator.width() as u16, 1),
             );
         }
     }
@@ -293,7 +293,7 @@ fn draw_status_bar_slot(
                 area,
             );
 
-            let cx = (area.x + qc.prompt.len() as u16 + qc.cursor_pos as u16).min(area.right().saturating_sub(1));
+            let cx = (area.x + qc.prompt.width() as u16 + qc.cursor_pos as u16).min(area.right().saturating_sub(1));
             Some((cx, area.y))
         }
     }
@@ -362,7 +362,7 @@ fn draw_normal_status(
     ));
     right_spans.push(Span::styled("  ", RStyle::default().bg(bar_bg)));
 
-    let right_width: usize = right_spans.iter().map(|s| s.content.len()).sum();
+    let right_width: usize = right_spans.iter().map(|s| s.content.width()).sum();
 
     // --- Build left-side spans with individual weights ---
     // Mode badge: bold, uses the mode-specific style (already has bg color)
@@ -380,9 +380,9 @@ fn draw_normal_status(
 
     let dirty_mark = if status.dirty { " [+]" } else { "" };
     let title_max = width
-        .saturating_sub(mode_text.len())
+        .saturating_sub(mode_text.width())
         .saturating_sub(3)  // " │ "
-        .saturating_sub(dirty_mark.len())
+        .saturating_sub(dirty_mark.width())
         .saturating_sub(right_width);
     let title = truncate_with_ellipsis(&status.title, title_max);
 
@@ -394,7 +394,7 @@ fn draw_normal_status(
         left_spans.push(Span::styled(dirty_mark, dirty_style));
     }
 
-    let left_width: usize = left_spans.iter().map(|s| s.content.len()).sum();
+    let left_width: usize = left_spans.iter().map(|s| s.content.width()).sum();
 
     // Render left
     f.render_widget(
@@ -431,13 +431,7 @@ fn draw_inactive_pane_bar(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &T
 }
 
 fn truncate_with_ellipsis(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else if max <= 1 {
-        String::new()
-    } else {
-        format!("{}…", &s[..max - 1])
-    }
+    truncate_to_width(s, max)
 }
 
 // ---------------------------------------------------------------------------
@@ -493,12 +487,12 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
     // Show hint when query is below minimum length
     if picker.results.is_empty() && picker.min_query_len > 0 && picker.query.len() < picker.min_query_len {
         let hint = "Type to search…";
-        let hx = results_area.x + (results_area.width.saturating_sub(hint.len() as u16)) / 2;
+        let hx = results_area.x + (results_area.width.saturating_sub(hint.width() as u16)) / 2;
         let hy = results_area.y + results_area.height / 2;
         if hy < results_area.bottom() {
             f.render_widget(
                 Paragraph::new(Line::from(Span::styled(hint, theme.faded_style()))),
-                Rect::new(hx, hy, hint.len() as u16, 1),
+                Rect::new(hx, hy, hint.width() as u16, 1),
             );
         }
     }
@@ -581,12 +575,12 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
         spans.push(Span::styled(" ".repeat(label_gap), style));
 
         if middle_zone > 0 {
-            let mid_padded = format!("{:<width$}", middle_text, width = middle_zone);
+            let mid_padded = format!("{}{}", middle_text, " ".repeat(middle_zone.saturating_sub(middle_text.width())));
             spans.push(Span::styled(mid_padded, if is_selected { style } else { faded_style }));
         }
 
         if right_zone > 0 {
-            let right_padded = format!("{:>width$}", right_text, width = right_zone);
+            let right_padded = format!("{}{}", " ".repeat(right_zone.saturating_sub(right_text.width())), right_text);
             spans.push(Span::styled(right_padded, if is_selected { style } else { faded_style }));
         }
 
@@ -1245,7 +1239,7 @@ fn draw_setup_wizard(
 fn render_line(f: &mut Frame, x: u16, y: u16, _max_w: u16, text: &str, style: RStyle) {
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(text, style))),
-        Rect::new(x, y, text.len() as u16 + 1, 1),
+        Rect::new(x, y, text.width() as u16 + 1, 1),
     );
 }
 
