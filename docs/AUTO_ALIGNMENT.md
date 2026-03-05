@@ -58,7 +58,47 @@ Tags that are mid-sentence (e.g. `Review the #rust API`) stay in place — only 
 
 ### Narrow viewport (cap kicks in)
 
-If the alignment column would push content beyond the viewport width, lines exceeding the cap keep their `@` right after the text with 1 space. Shorter lines still align to the cap.
+If the alignment column would push content beyond the viewport width, the cap prevents wrapping. Three scenarios:
+
+### Scenario A: One line exceeds the cap
+
+Viewport is 70 columns. Most lines are short, but one is long:
+
+```
+- [ ] Fix bug                                  @due(2026-03-10)
+- [ ] Refactor the index module to support incremental updates @due(2026-03-20)
+- [x] Set up vault                              @due(2026-03-04)
+```
+
+The long line (line 2) can't be padded without wrapping, so it keeps `@` right after its text with 1 space. Lines 1 and 3 align to the **cap column** (`viewport - max_timestamp - margin`), not to line 2's text width. The block is as aligned as possible without causing wraps.
+
+### Scenario B: The longest line IS the alignment target but fits
+
+```
+- [ ] Review the ropey crate API documentation   @due(2026-03-05)
+- [ ] Fix bug                                    @due(2026-03-10)
+- [x] Set up vault                               @due(2026-03-04)
+```
+
+Line 1 sets the column. Lines 2 and 3 pad to match. No cap issue — everything fits within viewport.
+
+### Scenario C: Multiple lines exceed the cap
+
+```
+- [ ] Refactor the index module to support incremental updates @due(2026-03-20)
+- [ ] Implement background re-indexing with progress reporting @due(2026-03-25)
+- [ ] Fix bug @due(2026-03-10)
+```
+
+Lines 1 and 2 both exceed the cap — they each keep `@` with 1 space after their text. Line 3 pads to the cap column. The result:
+
+```
+- [ ] Refactor the index module to support incremental updates @due(2026-03-20)
+- [ ] Implement background re-indexing with progress reporting @due(2026-03-25)
+- [ ] Fix bug                                @due(2026-03-10)
+```
+
+Lines that can align, do. Lines that can't, don't. No wrapping ever.
 
 ---
 
