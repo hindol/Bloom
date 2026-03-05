@@ -9,6 +9,9 @@ fn default_autosave_debounce() -> u64 {
 fn default_which_key_timeout() -> u64 {
     500
 }
+fn default_scrolloff() -> usize {
+    3
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -26,6 +29,8 @@ pub struct Config {
     pub which_key_timeout_ms: u64,
     #[serde(default)]
     pub auto_align: AutoAlignMode,
+    #[serde(default = "default_scrolloff")]
+    pub scrolloff: usize,
 }
 
 #[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
@@ -121,6 +126,7 @@ impl Config {
             autosave_debounce_ms: default_autosave_debounce(),
             which_key_timeout_ms: default_which_key_timeout(),
             auto_align: AutoAlignMode::default(),
+            scrolloff: default_scrolloff(),
         }
     }
 }

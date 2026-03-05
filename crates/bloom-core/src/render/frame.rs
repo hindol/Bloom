@@ -19,6 +19,7 @@ pub struct RenderFrame {
     pub date_picker: Option<DatePickerFrame>,
     pub dialog: Option<DialogFrame>,
     pub notification: Option<Notification>,
+    pub scrolloff: usize,
 }
 
 // ---------------------------------------------------------------------------

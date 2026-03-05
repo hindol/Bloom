@@ -50,7 +50,7 @@ pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &TuiTheme) {
 
     // Overlays
     if let Some(agenda) = &frame.agenda {
-        draw_agenda(f, area, agenda, theme);
+        draw_agenda(f, area, agenda, theme, frame.scrolloff);
     }
     if let Some(picker) = &frame.picker {
         draw_picker(f, area, picker, theme);
@@ -126,7 +126,7 @@ fn draw_pane(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
 
     match &pane.kind {
         PaneKind::Editor => draw_editor_content(f, content_area, pane, theme),
-        PaneKind::Agenda(agenda) => draw_agenda(f, content_area, agenda, theme),
+        PaneKind::Agenda(agenda) => draw_agenda(f, content_area, agenda, theme, 0),
         PaneKind::Timeline(tl) => draw_timeline(f, content_area, tl, theme),
         PaneKind::UndoTree(ut) => draw_undo_tree(f, content_area, ut, theme),
         PaneKind::SetupWizard(sw) => draw_setup_wizard(f, content_area, sw, theme),
@@ -821,6 +821,7 @@ fn draw_agenda(
     area: Rect,
     agenda: &AgendaFrame,
     theme: &TuiTheme,
+    scrolloff: usize,
 ) {
     // Full-screen overlay
     f.render_widget(Clear, area);
@@ -913,9 +914,8 @@ fn draw_agenda(
         matches!(&r.kind, RowKind::Item { flat_idx: fi, .. } if *fi == agenda.selected_index)
     }).unwrap_or(0);
 
-    // Scroll offset with scrolloff=3 (Vim-style margin)
+    // Scroll offset with Vim-style margin
     let viewport_h = list_h as usize;
-    let scrolloff: usize = 3;
     let scroll_offset = {
         // Ensure selected row is at least `scrolloff` from bottom
         let min_offset_bottom = (selected_visual_row + scrolloff + 1).saturating_sub(viewport_h);

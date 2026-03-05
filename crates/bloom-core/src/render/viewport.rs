@@ -13,13 +13,20 @@ impl Viewport {
         }
     }
 
-    /// Ensure cursor line is visible, adjusting scroll if needed.
-    pub fn ensure_visible(&mut self, cursor_line: usize) {
-        if cursor_line < self.first_visible_line {
-            self.first_visible_line = cursor_line;
-        } else if cursor_line >= self.first_visible_line + self.height {
-            self.first_visible_line = cursor_line.saturating_sub(self.height.saturating_sub(1));
+    /// Ensure cursor line is visible with a scrolloff margin.
+    pub fn ensure_visible_with_scrolloff(&mut self, cursor_line: usize, scrolloff: usize) {
+        let top_margin = self.first_visible_line + scrolloff;
+        let bottom_margin = self.first_visible_line + self.height.saturating_sub(1).saturating_sub(scrolloff);
+        if cursor_line < top_margin {
+            self.first_visible_line = cursor_line.saturating_sub(scrolloff);
+        } else if cursor_line > bottom_margin {
+            self.first_visible_line = (cursor_line + scrolloff + 1).saturating_sub(self.height);
         }
+    }
+
+    /// Ensure cursor line is visible (no margin).
+    pub fn ensure_visible(&mut self, cursor_line: usize) {
+        self.ensure_visible_with_scrolloff(cursor_line, 0);
     }
 
     /// Get range of visible lines.

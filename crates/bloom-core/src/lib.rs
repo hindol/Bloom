@@ -2110,6 +2110,7 @@ impl BloomEditor {
                 date_picker: None,
                 dialog: None,
                 notification: None,
+                scrolloff: self.config.scrolloff,
             };
         }
 
@@ -2157,7 +2158,7 @@ impl BloomEditor {
 
         // Ensure cursor is visible (scrolls the viewport if needed)
         let (cursor_line, cursor_col) = self.cursor_position();
-        self.viewport.ensure_visible(cursor_line);
+        self.viewport.ensure_visible_with_scrolloff(cursor_line, self.config.scrolloff);
 
         for rect in &pane_rects {
             let is_active = rect.pane_id == self.window_mgr.active_pane();
@@ -2490,6 +2491,7 @@ impl BloomEditor {
             date_picker: None,
             dialog: None,
             notification: self.notifications.last().cloned(),
+            scrolloff: self.config.scrolloff,
         }
     }
 
