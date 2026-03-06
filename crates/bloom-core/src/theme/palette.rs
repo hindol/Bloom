@@ -179,7 +179,7 @@ pub static AGED_PAPER: ThemePalette = ThemePalette {
 pub static MOSS: ThemePalette = ThemePalette {
     name: "moss",
     foreground: Rgb(0xCC, 0xD4, 0xC4),
-    background: Rgb(0x1A, 0x1E, 0x1A),
+    background: Rgb(0x1B, 0x1F, 0x1B),
     modeline: Rgb(0x22, 0x28, 0x22),
     highlight: Rgb(0x24, 0x2A, 0x24),
     critical: Rgb(0xDC, 0x66, 0x52),
