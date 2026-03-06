@@ -587,10 +587,10 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
 
     // Query line (indented)
     let query_style = if picker.query_selected && !picker.query.is_empty() {
-        // Popout background indicates select-all — typing replaces the query
+        // Mild background indicates select-all — typing replaces the query
         RStyle::default()
             .fg(theme.foreground())
-            .bg(theme.popout())
+            .bg(theme.mild())
     } else {
         theme.picker_style().add_modifier(Modifier::BOLD)
     };
