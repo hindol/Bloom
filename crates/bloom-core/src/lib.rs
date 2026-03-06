@@ -170,7 +170,7 @@ pub struct BloomEditor {
     indexer_rx: Option<crossbeam::channel::Receiver<index::indexer::IndexComplete>>,
     indexing: bool,
     last_index_timing: Option<index::indexer::IndexTiming>,
-    last_search_query: String,
+    last_picker_queries: std::collections::HashMap<String, String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -358,6 +358,24 @@ struct ActivePicker {
     query_selected: bool,
 }
 
+/// Stable key for storing per-picker-kind state.
+fn picker_kind_key(kind: &keymap::dispatch::PickerKind) -> String {
+    use keymap::dispatch::PickerKind;
+    match kind {
+        PickerKind::FindPage => "find_page".into(),
+        PickerKind::SwitchBuffer => "switch_buffer".into(),
+        PickerKind::Search => "search".into(),
+        PickerKind::Journal => "journal".into(),
+        PickerKind::Tags => "tags".into(),
+        PickerKind::Backlinks(_) => "backlinks".into(),
+        PickerKind::UnlinkedMentions(_) => "unlinked_mentions".into(),
+        PickerKind::AllCommands => "all_commands".into(),
+        PickerKind::InlineLink => "inline_link".into(),
+        PickerKind::Templates => "templates".into(),
+        PickerKind::Theme => "theme".into(),
+    }
+}
+
 #[derive(Clone)]
 struct GenericPickerItem {
     id: String,
@@ -434,7 +452,7 @@ impl BloomEditor {
             indexer_rx: None,
             indexing: false,
             last_index_timing: None,
-            last_search_query: String::new(),
+            last_picker_queries: std::collections::HashMap::new(),
             config,
         })
     }
@@ -554,13 +572,20 @@ impl BloomEditor {
             query_selected: false,
         });
 
-        // Search: restore last query and run FTS
-        if matches!(kind, PickerKind::Search) && !self.last_search_query.is_empty() {
-            if let Some(ap) = &mut self.picker_state {
-                ap.query = self.last_search_query.clone();
-                ap.query_selected = true;
+        // Restore last query for this picker kind (select-all so typing replaces)
+        let key = picker_kind_key(&kind);
+        if let Some(last_query) = self.last_picker_queries.get(&key).cloned() {
+            if !last_query.is_empty() {
+                if let Some(ap) = &mut self.picker_state {
+                    ap.query = last_query;
+                    ap.query_selected = true;
+                    ap.picker.set_query(&ap.query);
+                }
+                // Search uses FTS re-query instead of client-side filtering
+                if matches!(kind, PickerKind::Search) {
+                    self.refresh_search_picker();
+                }
             }
-            self.refresh_search_picker();
         }
     }
 
@@ -1538,8 +1563,11 @@ impl BloomEditor {
                 if is_theme {
                     self.theme_picker_confirm();
                 } else if let Some(ap) = self.picker_state.take() {
-                    if matches!(ap.kind, keymap::dispatch::PickerKind::Search) {
-                        self.last_search_query = ap.query.clone();
+                    if !ap.query.is_empty() {
+                        self.last_picker_queries.insert(
+                            picker_kind_key(&ap.kind),
+                            ap.query.clone(),
+                        );
                     }
                     if let Some(selected) = ap.picker.selected() {
                         self.handle_picker_selection(&ap.kind, selected.clone());
@@ -1604,8 +1632,11 @@ impl BloomEditor {
 
     fn save_picker_query(&mut self) {
         if let Some(ap) = &self.picker_state {
-            if matches!(ap.kind, keymap::dispatch::PickerKind::Search) {
-                self.last_search_query = ap.query.clone();
+            if !ap.query.is_empty() {
+                self.last_picker_queries.insert(
+                    picker_kind_key(&ap.kind),
+                    ap.query.clone(),
+                );
             }
         }
     }
@@ -2623,6 +2654,7 @@ impl BloomEditor {
                     filtered_count: if below_min { 0 } else { ap.picker.filtered_count() },
                     status_noun: ap.status_noun.clone(),
                     min_query_len: ap.min_query_len,
+                    query_selected: ap.query_selected,
                 })
             } else {
                 None

@@ -341,6 +341,8 @@ pub struct PickerFrame {
     pub status_noun: String,
     /// Minimum query length before showing results (0 = show immediately).
     pub min_query_len: usize,
+    /// Whether the query text is selected (visual highlight, typing replaces).
+    pub query_selected: bool,
 }
 
 pub struct PickerRow {

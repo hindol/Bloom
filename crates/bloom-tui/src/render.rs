@@ -586,13 +586,21 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
     let top_h = inner.height.saturating_sub(preview_h).saturating_sub(separator_h);
 
     // Query line (indented)
+    let query_style = if picker.query_selected && !picker.query.is_empty() {
+        // Popout background indicates select-all — typing replaces the query
+        RStyle::default()
+            .fg(theme.foreground())
+            .bg(theme.popout())
+    } else {
+        theme.picker_style().add_modifier(Modifier::BOLD)
+    };
     let query_line = Line::from(vec![
         Span::styled(" > ", theme.picker_style()),
-        Span::styled(&picker.query, theme.picker_style().add_modifier(Modifier::BOLD)),
+        Span::styled(&picker.query, query_style),
     ]);
     f.render_widget(Paragraph::new(query_line), Rect::new(inner.x, inner.y, inner.width, 1));
     // Place cursor at end of query input (overrides editor cursor)
-    let query_cx = inner.x + 3 + picker.query.len() as u16;
+    let query_cx = inner.x + 3 + picker.query.width() as u16;
     f.set_cursor_position((query_cx, inner.y));
 
     // Results (between query and footer)
