@@ -87,11 +87,10 @@ fn indexer_main(
     while let Ok(request) = request_rx.recv() {
         match request {
             IndexRequest::FullRebuild => {
-                // Invalidate all fingerprints to force full re-scan
-                let _ = index.clear_fingerprints();
-                match run_incremental(vault_root, &mut index, &parser) {
-                    Ok(mut complete) => {
-                        // Prune orphaned frecency data
+                // True wipe-and-reinsert: read all files, nuke DB, rebuild.
+                // This corrects any DB drift — the point of :rebuild-index.
+                match run_full_rebuild(vault_root, &mut index, &parser) {
+                    Ok(complete) => {
                         let _ = index.prune_orphaned_access();
                         let _ = completion_tx.send(complete);
                     }
@@ -123,6 +122,61 @@ fn send_empty_completion(tx: &Sender<IndexComplete>) {
             files_scanned: 0, files_changed: 0,
         },
     });
+}
+
+/// Full wipe-and-reinsert: read ALL files, delete all index data, rebuild from scratch.
+/// Ignores fingerprints entirely — every file is re-read and re-parsed.
+fn run_full_rebuild(
+    vault_root: &Path,
+    index: &mut Index,
+    parser: &parser::BloomMarkdownParser,
+) -> Result<IndexComplete, BloomError> {
+    let t_total = Instant::now();
+
+    // Phase 1: List all files
+    let t_scan = Instant::now();
+    let store = store::local::LocalFileStore::new(vault_root.to_path_buf())?;
+    use store::traits::NoteStore;
+    let mut all_paths = store.list_pages().unwrap_or_default();
+    all_paths.extend(store.list_journals().unwrap_or_default());
+    let files_scanned = all_paths.len();
+    let rel_paths: Vec<PathBuf> = all_paths.iter()
+        .map(|p| p.strip_prefix(vault_root).unwrap_or(p).to_path_buf())
+        .collect();
+    let scan_ms = t_scan.elapsed().as_millis() as u64;
+
+    // Phase 2: Read + Parse ALL files (no fingerprint check)
+    let t_read = Instant::now();
+    let entries = parse_paths(vault_root, &rel_paths, parser);
+    let read_parse_ms = t_read.elapsed().as_millis() as u64;
+
+    // Phase 3: Wipe all index tables and reinsert
+    let t_write = Instant::now();
+    let stats = index.rebuild(&entries)?;
+
+    // Rebuild all fingerprints from scratch
+    for rel in &rel_paths {
+        let full = vault_root.join(rel);
+        if let Ok(meta) = std::fs::metadata(&full) {
+            let mtime = meta.modified().ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let fp = FileFingerprint { mtime_secs: mtime, size_bytes: meta.len() };
+            index.set_fingerprint(&rel.display().to_string(), &fp);
+        }
+    }
+    let write_ms = t_write.elapsed().as_millis() as u64;
+    let total_ms = t_total.elapsed().as_millis() as u64;
+
+    Ok(IndexComplete {
+        stats,
+        timing: IndexTiming {
+            scan_ms, read_parse_ms, write_ms, total_ms,
+            files_scanned,
+            files_changed: files_scanned, // all files re-indexed
+        },
+    })
 }
 
 /// Incremental scan: compare fingerprints, read/parse changed files, write to index.
