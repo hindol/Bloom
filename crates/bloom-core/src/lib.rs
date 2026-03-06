@@ -831,7 +831,7 @@ impl BloomEditor {
                     if line_num < body_start || line_text.trim().is_empty() {
                         continue;
                     }
-                    if let Some(score) = picker::nucleo::fuzzy_score(&query, line_text) {
+                    if let Some(score) = picker::nucleo::fuzzy_words_score(&query, line_text) {
                         page_set.insert(meta.id.clone());
                         scored.push((
                             GenericPickerItem {

@@ -75,6 +75,33 @@ pub fn all_words_score(query: &str, candidate: &str) -> Option<u32> {
     Some(score)
 }
 
+/// Score a candidate by fuzzy-matching each query word independently.
+/// Every whitespace-separated word in the query must fuzzy-match (subsequence)
+/// somewhere in the candidate. Returns None if any word fails to match.
+/// "mem pat re" matches "Deep research on memory usage patterns".
+pub fn fuzzy_words_score(query: &str, candidate: &str) -> Option<u32> {
+    let mut total_score: u32 = 0;
+    let mut word_count: u32 = 0;
+
+    for word in query.split_whitespace() {
+        if word.is_empty() {
+            continue;
+        }
+        match fuzzy_score(word, candidate) {
+            Some(s) => {
+                total_score += s;
+                word_count += 1;
+            }
+            None => return None,
+        }
+    }
+
+    if word_count == 0 {
+        return Some(0);
+    }
+    Some(total_score)
+}
+
 /// Fuzzy match a query against multiple items. Returns (index, score) pairs sorted by score desc.
 pub fn fuzzy_match(query: &str, items: &[&str]) -> Vec<(usize, u32)> {
     let mut results: Vec<(usize, u32)> = items
@@ -115,5 +142,26 @@ mod tests {
     #[test]
     fn all_words_case_insensitive() {
         assert!(all_words_score("RUST", "rust programming").is_some());
+    }
+
+    #[test]
+    fn fuzzy_words_matches_partial_words() {
+        // "mem pat re" should match — each word fuzzy-matches independently
+        assert!(fuzzy_words_score("mem pat re", "Deep research on memory usage patterns").is_some());
+    }
+
+    #[test]
+    fn fuzzy_words_matches_single_word() {
+        assert!(fuzzy_words_score("rop", "Rope data structures are fast").is_some());
+    }
+
+    #[test]
+    fn fuzzy_words_rejects_missing_word() {
+        assert!(fuzzy_words_score("mem xyz", "Deep research on memory usage patterns").is_none());
+    }
+
+    #[test]
+    fn fuzzy_words_empty_query() {
+        assert!(fuzzy_words_score("", "anything").is_some());
     }
 }
