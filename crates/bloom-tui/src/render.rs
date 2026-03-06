@@ -175,88 +175,84 @@ fn draw_pane_title(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme
 }
 
 fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
-    // Clear the entire content area to prevent stale cells on buffer switch
-    f.render_widget(
-        Block::default().style(RStyle::default().bg(theme.background())),
-        area,
-    );
-
     let height = area.height as usize;
-    let line_number_width = 5u16; // e.g. " 42  " (3-digit number + gutter gap)
-    let right_margin = 2u16;
-    let content_width = area.width.saturating_sub(line_number_width + right_margin);
+    let line_number_width = 5u16;
+    let total_width = area.width as usize;
+    let content_width = total_width.saturating_sub(line_number_width as usize);
 
-    let faded_with_bg = theme.faded_style().bg(theme.background());
+    let bg = theme.background();
+    let base_normal = RStyle::default().fg(theme.foreground()).bg(bg);
+    let faded_bg = theme.faded_style().bg(bg);
 
     for row in 0..height {
+        let y = area.y + row as u16;
+
         if row >= pane.visible_lines.len() {
-            // Beyond EOF — show ~ in the gutter (where line numbers go)
-            let tilde = Span::styled("  ~  ", faded_with_bg);
-            f.render_widget(
-                Paragraph::new(Line::from(tilde)),
-                Rect::new(area.x, area.y + row as u16, line_number_width, 1),
-            );
+            // Beyond EOF: full-width row with tilde in gutter, spaces in content
+            let tilde_pad = " ".repeat(total_width.saturating_sub(5));
+            let line = Line::from(vec![
+                Span::styled("  ~  ", faded_bg),
+                Span::styled(tilde_pad, RStyle::default().bg(bg)),
+            ]);
+            f.render_widget(Paragraph::new(line), Rect::new(area.x, y, area.width, 1));
             continue;
         }
 
         let rendered_line = &pane.visible_lines[row];
 
-        // Line number (right-aligned, faded, with gutter gap)
-        let lnum = format!("{:>3}  ", rendered_line.line_number + 1);
-        let lnum_span = Span::styled(lnum, faded_with_bg);
-        f.render_widget(
-            Paragraph::new(Line::from(lnum_span)),
-            Rect::new(area.x, area.y + row as u16, line_number_width, 1),
-        );
-
-        // Is this the cursor line? Apply current-line highlight as base
+        // Determine base style (cursor line highlight or normal)
         let is_cursor_line = pane.is_active
             && rendered_line.line_number == pane.cursor.line;
         let base_style = if is_cursor_line {
             theme.current_line_style()
         } else {
-            RStyle::default().fg(theme.foreground()).bg(theme.background())
+            base_normal
         };
 
-        let text = &rendered_line.text;
-        let mut line_spans: Vec<Span> = Vec::new();
-        let mut last_end = 0usize;
+        // Build the full row: line_number + content + padding
+        let mut spans: Vec<Span> = Vec::new();
+
+        // Line number gutter
+        let lnum = format!("{:>3}  ", rendered_line.line_number + 1);
+        let lnum_style = if is_cursor_line { base_style } else { faded_bg };
+        spans.push(Span::styled(lnum, lnum_style));
+
+        // Content text with syntax highlighting
+        let text = rendered_line.text.trim_end_matches('\n');
+        let mut text_width = 0usize;
 
         if rendered_line.spans.is_empty() {
-            // No styled spans — render the whole line in base style
-            line_spans.push(Span::styled(text.trim_end_matches('\n'), base_style));
+            text_width = text.len();
+            spans.push(Span::styled(text, base_style));
         } else {
+            let mut last_end = 0usize;
             for span_info in &rendered_line.spans {
                 let start = span_info.range.start.min(text.len());
                 let end = span_info.range.end.min(text.len());
-                // Fill gap before this span with base style
                 if last_end < start {
                     let gap = &text[last_end..start];
-                    line_spans.push(Span::styled(gap.to_string(), base_style));
+                    spans.push(Span::styled(gap.to_string(), base_style));
                 }
                 let slice = &text[start..end];
                 let style = base_style.patch(theme.style_for(&span_info.style));
-                line_spans.push(Span::styled(slice.to_string(), style));
+                spans.push(Span::styled(slice.to_string(), style));
                 last_end = end;
             }
-            // Trailing text after last span
             if last_end < text.len() {
-                let tail = text[last_end..].trim_end_matches('\n');
-                if !tail.is_empty() {
-                    line_spans.push(Span::styled(tail.to_string(), base_style));
-                }
+                spans.push(Span::styled(&text[last_end..], base_style));
             }
+            text_width = text.len();
         }
 
-        let content_line = Line::from(line_spans);
+        // Pad remaining width with spaces in base_style
+        let used = line_number_width as usize + text_width;
+        if used < total_width {
+            spans.push(Span::styled(" ".repeat(total_width - used), base_style));
+        }
+
         f.render_widget(
-            Paragraph::new(content_line),
-            Rect::new(
-                area.x + line_number_width,
-                area.y + row as u16,
-                content_width,
-                1,
-            ),
+            Paragraph::new(Line::from(spans)),
+            Rect::new(area.x, y, area.width, 1),
         );
     }
 }
