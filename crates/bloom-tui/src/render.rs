@@ -574,18 +574,29 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
         return;
     }
 
-    // Split inner into results zone and optional preview zone.
-    // Layout: query (1) | results | footer (1) | separator (1) | preview
-    let has_preview = picker.preview.is_some() && inner.height >= 8;
-    let preview_h = if has_preview {
+    // Determine layout: side-by-side preview (wide) or bottom preview (compact)
+    let side_preview = picker_area.width >= 80 && area.width >= 160;
+    let (content_area, side_preview_area) = if side_preview {
+        let left_w = inner.width * 60 / 100;
+        let right_w = inner.width.saturating_sub(left_w + 1); // 1 for separator
+        let left = Rect::new(inner.x, inner.y, left_w, inner.height);
+        let right = Rect::new(inner.x + left_w + 1, inner.y, right_w, inner.height);
+        (left, Some(right))
+    } else {
+        (inner, None)
+    };
+
+    // Bottom preview only when not using side-by-side layout
+    let has_bottom_preview = !side_preview && picker.preview.is_some() && inner.height >= 8;
+    let preview_h = if has_bottom_preview {
         // Give roughly 1/3 of inner height to preview, minimum 3 lines
         (inner.height / 3).max(3)
     } else {
         0
     };
     // 1 line for the separator between results and preview
-    let separator_h = if has_preview { 1 } else { 0 };
-    let top_h = inner.height.saturating_sub(preview_h).saturating_sub(separator_h);
+    let separator_h = if has_bottom_preview { 1 } else { 0 };
+    let top_h = content_area.height.saturating_sub(preview_h).saturating_sub(separator_h);
 
     // Query line (indented)
     let query_style = if picker.query_selected && !picker.query.is_empty() {
@@ -600,14 +611,14 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
         Span::styled(" > ", theme.picker_style()),
         Span::styled(&picker.query, query_style),
     ]);
-    f.render_widget(Paragraph::new(query_line), Rect::new(inner.x, inner.y, inner.width, 1));
+    f.render_widget(Paragraph::new(query_line), Rect::new(content_area.x, content_area.y, content_area.width, 1));
     // Place cursor at end of query input (overrides editor cursor)
-    let query_cx = inner.x + 3 + picker.query.width() as u16;
-    f.set_cursor_position((query_cx, inner.y));
+    let query_cx = content_area.x + 3 + picker.query.width() as u16;
+    f.set_cursor_position((query_cx, content_area.y));
 
     // Results (between query and footer)
     let results_h = top_h.saturating_sub(2); // -1 query, -1 footer
-    let results_area = Rect::new(inner.x, inner.y + 1, inner.width, results_h);
+    let results_area = Rect::new(content_area.x, content_area.y + 1, content_area.width, results_h);
 
     // Show hint when query is below minimum length
     if picker.results.is_empty() && picker.min_query_len > 0 && picker.query.len() < picker.min_query_len {
@@ -624,102 +635,17 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
 
     let available = results_area.width as usize;
 
-    // Scroll offset: keep selected_index visible within the results viewport
-    let viewport_h = results_h as usize;
-    let scroll_offset = if picker.selected_index >= viewport_h {
-        picker.selected_index - viewport_h + 1
+    // Multi-column grid (ADAPTIVE_LAYOUT.md §4): for short items on wide screens
+    let max_item_w: usize = picker.results.iter()
+        .map(|r| r.label.width() + r.right.as_deref().map_or(0, |s| s.width() + 2))
+        .max()
+        .unwrap_or(0);
+    let multi_col = area.width >= 140 && max_item_w <= 30 && !picker.results.is_empty();
+
+    if multi_col {
+        draw_picker_multi_column(f, results_area, picker, theme);
     } else {
-        0
-    };
-
-    // Compute fixed right-column width from the visible results
-    let visible_end = (scroll_offset + viewport_h).min(picker.results.len());
-    let visible_slice = &picker.results[scroll_offset..visible_end];
-    let max_right_w: usize = visible_slice
-        .iter()
-        .map(|row| row.right.as_deref().unwrap_or("").width())
-        .max()
-        .unwrap_or(0)
-        .min(available * 2 / 5); // cap at 40% of available width
-    let max_middle_w: usize = visible_slice
-        .iter()
-        .map(|row| row.middle.as_deref().unwrap_or("").width())
-        .max()
-        .unwrap_or(0)
-        .min(available / 4); // cap at 25%
-
-    let right_zone = if max_right_w > 0 { max_right_w + 2 } else { 0 }; // +2 padding
-    let middle_zone = if max_middle_w > 0 { max_middle_w + 2 } else { 0 };
-    let marker_w = 3; // " ▸ " or "   "
-    let label_max = available.saturating_sub(marker_w + middle_zone + right_zone);
-
-    let faded_style = theme.faded_style();
-
-    for (vi, row) in visible_slice.iter().enumerate() {
-        let abs_i = scroll_offset + vi;
-        let is_selected = abs_i == picker.selected_index;
-        let style = if is_selected {
-            theme.picker_selected()
-        } else {
-            theme.picker_style()
-        };
-        let marker = if is_selected { " ▸ " } else { "   " };
-
-        let label = truncate_to_width(&row.label, label_max);
-        let label_w = label.width();
-        let middle_text = row.middle.as_deref().unwrap_or("");
-        let right_text = row.right.as_deref().unwrap_or("");
-
-        // Gap between label and middle/right columns
-        let label_gap = available.saturating_sub(marker_w + label_w + middle_zone + right_zone);
-
-        let mut spans: Vec<Span> = Vec::new();
-        spans.push(Span::styled(marker, style));
-
-        // Highlight query matches in the label
-        if !picker.query.is_empty() && !is_selected {
-            let match_spans = bloom_core::render::search_highlight::highlight_matches(
-                &label, &picker.query,
-            );
-            let match_style = theme.style_for(&bloom_core::parser::traits::Style::SearchMatch);
-            if match_spans.is_empty() {
-                spans.push(Span::styled(label.clone(), style));
-            } else {
-                let mut pos = 0;
-                for ms in &match_spans {
-                    let s = ms.range.start.min(label.len());
-                    let e = ms.range.end.min(label.len());
-                    if s > pos {
-                        spans.push(Span::styled(&label[pos..s], style));
-                    }
-                    if s < e {
-                        spans.push(Span::styled(&label[s..e], match_style));
-                    }
-                    pos = e;
-                }
-                if pos < label.len() {
-                    spans.push(Span::styled(&label[pos..], style));
-                }
-            }
-        } else {
-            spans.push(Span::styled(label.clone(), style));
-        }
-        spans.push(Span::styled(" ".repeat(label_gap), style));
-
-        if middle_zone > 0 {
-            let mid_padded = format!("{}{}", middle_text, " ".repeat(middle_zone.saturating_sub(middle_text.width())));
-            spans.push(Span::styled(mid_padded, if is_selected { style } else { faded_style }));
-        }
-
-        if right_zone > 0 {
-            let right_padded = format!("{}{}", " ".repeat(right_zone.saturating_sub(right_text.width())), right_text);
-            spans.push(Span::styled(right_padded, if is_selected { style } else { faded_style }));
-        }
-
-        f.render_widget(
-            Paragraph::new(Line::from(spans)),
-            Rect::new(results_area.x, results_area.y + vi as u16, results_area.width, 1),
-        );
+        draw_picker_single_column(f, results_area, picker, area, theme);
     }
 
     // Footer: count with selection position
@@ -731,15 +657,35 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
     } else {
         format!("  0 / {} {}", picker.total_count, picker.status_noun)
     };
-    let footer_y = inner.y + top_h.saturating_sub(1);
+    let footer_y = content_area.y + top_h.saturating_sub(1);
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(footer, theme.faded_style()))),
-        Rect::new(inner.x, footer_y, inner.width, 1),
+        Rect::new(content_area.x, footer_y, content_area.width, 1),
     );
 
-    // Preview pane
-    if let (true, Some(preview_text)) = (has_preview, &picker.preview) {
-        let sep_y = inner.y + top_h;
+    // Side-by-side preview (wide layout)
+    if let (Some(right_area), Some(preview_text)) = (side_preview_area, &picker.preview) {
+        // Vertical separator
+        let sep_x = right_area.x.saturating_sub(1);
+        for row in 0..inner.height {
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled("│", theme.border_style()))),
+                Rect::new(sep_x, inner.y + row, 1, 1),
+            );
+        }
+        // Preview with 1-cell padding
+        let preview_area = Rect::new(
+            right_area.x + 1,
+            right_area.y,
+            right_area.width.saturating_sub(2),
+            right_area.height,
+        );
+        render_highlighted_preview(f, preview_area, preview_text, &picker.query, theme);
+    }
+
+    // Bottom preview (compact fallback)
+    if let (true, Some(preview_text)) = (has_bottom_preview, &picker.preview) {
+        let sep_y = content_area.y + top_h;
         // Horizontal separator
         let sep_line = "─".repeat(inner.width as usize);
         f.render_widget(
@@ -754,6 +700,160 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
             preview_h.saturating_sub(1),
         );
         render_highlighted_preview(f, preview_area, preview_text, &picker.query, theme);
+    }
+}
+
+/// Single-column result list (standard layout).
+fn draw_picker_single_column(
+    f: &mut Frame,
+    results_area: Rect,
+    picker: &PickerFrame,
+    terminal_area: Rect,
+    theme: &TuiTheme,
+) {
+    let available = results_area.width as usize;
+    let viewport_h = results_area.height as usize;
+    let scroll_offset = if picker.selected_index >= viewport_h {
+        picker.selected_index - viewport_h + 1
+    } else {
+        0
+    };
+
+    let visible_end = (scroll_offset + viewport_h).min(picker.results.len());
+    let visible_slice = &picker.results[scroll_offset..visible_end];
+    let max_right_w: usize = visible_slice
+        .iter()
+        .map(|row| row.right.as_deref().unwrap_or("").width())
+        .max()
+        .unwrap_or(0)
+        .min(available * 2 / 5);
+    let max_middle_w: usize = visible_slice
+        .iter()
+        .map(|row| row.middle.as_deref().unwrap_or("").width())
+        .max()
+        .unwrap_or(0)
+        .min(available / 4);
+
+    let right_zone = if max_right_w > 0 { max_right_w + 2 } else { 0 };
+    // Compact: hide middle (tags) column when terminal < 100 cols (inner < 60)
+    let middle_zone = if terminal_area.width < 100 || max_middle_w == 0 { 0 } else { max_middle_w + 2 };
+    let marker_w = 3;
+    let label_max = available.saturating_sub(marker_w + middle_zone + right_zone);
+
+    let faded_style = theme.faded_style();
+
+    for (vi, row) in visible_slice.iter().enumerate() {
+        let abs_i = scroll_offset + vi;
+        let is_selected = abs_i == picker.selected_index;
+        let style = if is_selected { theme.picker_selected() } else { theme.picker_style() };
+        let marker = if is_selected { " ▸ " } else { "   " };
+
+        let label = truncate_to_width(&row.label, label_max);
+        let label_w = label.width();
+        let middle_text = row.middle.as_deref().unwrap_or("");
+        let right_text = row.right.as_deref().unwrap_or("");
+        let label_gap = available.saturating_sub(marker_w + label_w + middle_zone + right_zone);
+
+        let mut spans: Vec<Span> = Vec::new();
+        spans.push(Span::styled(marker, style));
+
+        if !picker.query.is_empty() && !is_selected {
+            let match_spans = bloom_core::render::search_highlight::highlight_matches(&label, &picker.query);
+            let match_style = theme.style_for(&bloom_core::parser::traits::Style::SearchMatch);
+            if match_spans.is_empty() {
+                spans.push(Span::styled(label.clone(), style));
+            } else {
+                let mut pos = 0;
+                for ms in &match_spans {
+                    let s = ms.range.start.min(label.len());
+                    let e = ms.range.end.min(label.len());
+                    if s > pos { spans.push(Span::styled(&label[pos..s], style)); }
+                    if s < e { spans.push(Span::styled(&label[s..e], match_style)); }
+                    pos = e;
+                }
+                if pos < label.len() { spans.push(Span::styled(&label[pos..], style)); }
+            }
+        } else {
+            spans.push(Span::styled(label.clone(), style));
+        }
+        spans.push(Span::styled(" ".repeat(label_gap), style));
+
+        if middle_zone > 0 {
+            let mid_padded = format!("{}{}", middle_text, " ".repeat(middle_zone.saturating_sub(middle_text.width())));
+            spans.push(Span::styled(mid_padded, if is_selected { style } else { faded_style }));
+        }
+        if right_zone > 0 {
+            let right_padded = format!("{}{}", " ".repeat(right_zone.saturating_sub(right_text.width())), right_text);
+            spans.push(Span::styled(right_padded, if is_selected { style } else { faded_style }));
+        }
+
+        f.render_widget(
+            Paragraph::new(Line::from(spans)),
+            Rect::new(results_area.x, results_area.y + vi as u16, results_area.width, 1),
+        );
+    }
+}
+
+/// Multi-column grid layout for short-item pickers (Tags, Commands, Templates).
+/// Per ADAPTIVE_LAYOUT.md §4: newspaper flow, ↑↓ within column, max 4 columns.
+fn draw_picker_multi_column(
+    f: &mut Frame,
+    results_area: Rect,
+    picker: &PickerFrame,
+    theme: &TuiTheme,
+) {
+    if picker.results.is_empty() {
+        return;
+    }
+
+    // Column sizing per spec: col_width = max(item_width) + 4, col_count = min(4, width/col_width)
+    let max_item_w: usize = picker.results.iter()
+        .map(|r| r.label.width() + r.right.as_deref().map_or(0, |s| s.width() + 2))
+        .max()
+        .unwrap_or(10);
+    let col_width = (max_item_w + 6).max(12); // +4 padding + 2 for marker
+    let col_count = (results_area.width as usize / col_width).max(1).min(4);
+    let rows_per_col = results_area.height as usize;
+    let items_per_page = col_count * rows_per_col;
+
+    // Scroll: which page of items is visible
+    let page_start = (picker.selected_index / items_per_page) * items_per_page;
+
+    let faded_style = theme.faded_style();
+    let actual_col_w = results_area.width as usize / col_count;
+
+    for (i, row) in picker.results.iter().enumerate().skip(page_start).take(items_per_page) {
+        let local_i = i - page_start;
+        let col = local_i / rows_per_col;
+        let row_in_col = local_i % rows_per_col;
+
+        let is_selected = i == picker.selected_index;
+        let style = if is_selected { theme.picker_selected() } else { theme.picker_style() };
+        let marker = if is_selected { " ▸ " } else { "   " };
+
+        let right_text = row.right.as_deref().unwrap_or("");
+        let right_w = right_text.width();
+        let label_max = actual_col_w.saturating_sub(3 + right_w + 2); // marker + right + gap
+        let label = truncate_to_width(&row.label, label_max);
+        let label_w = label.width();
+        let gap = actual_col_w.saturating_sub(3 + label_w + right_w);
+
+        let mut spans: Vec<Span> = Vec::new();
+        spans.push(Span::styled(marker, style));
+        spans.push(Span::styled(label, style));
+        spans.push(Span::styled(" ".repeat(gap), style));
+        if right_w > 0 {
+            spans.push(Span::styled(right_text, if is_selected { style } else { faded_style }));
+        }
+
+        let cx = results_area.x + (col * actual_col_w) as u16;
+        let cy = results_area.y + row_in_col as u16;
+        if cy < results_area.bottom() {
+            f.render_widget(
+                Paragraph::new(Line::from(spans)),
+                Rect::new(cx, cy, actual_col_w as u16, 1),
+            );
+        }
     }
 }
 
