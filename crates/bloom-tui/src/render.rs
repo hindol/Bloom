@@ -16,7 +16,9 @@ use crate::theme::TuiTheme;
 pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &TuiTheme) {
     let area = f.area();
 
-    // Fill background
+    // Layer 1: Clear all cells (reset content), then fill with background colour.
+    // This prevents stale characters from previous frames bleeding through.
+    f.render_widget(Clear, area);
     f.render_widget(
         Block::default().style(RStyle::default().bg(theme.background())),
         area,

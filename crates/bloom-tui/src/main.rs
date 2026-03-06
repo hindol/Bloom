@@ -68,8 +68,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
         // Build TuiTheme from the editor's active palette (may change at runtime)
         let theme = TuiTheme::new(editor.theme());
 
-        // Render
-        let frame = editor.render();
+        // Render — dimensions flow from terminal size into editor.render()
+        let size = terminal.size()?;
+        let frame = editor.render(size.width, size.height);
 
         // Apply cursor shape from active pane
         if let Some(pane) = frame.panes.iter().find(|p| p.is_active) {

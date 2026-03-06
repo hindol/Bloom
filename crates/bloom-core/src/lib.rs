@@ -2137,7 +2137,10 @@ impl BloomEditor {
     }
 
     /// Produce the render frame
-    pub fn render(&mut self) -> render::RenderFrame {
+    /// Produce the render frame. `width` and `height` are the actual terminal
+    /// dimensions — used directly for layout computation so pane rects always
+    /// tile the exact screen area.
+    pub fn render(&mut self, width: u16, height: u16) -> render::RenderFrame {
         // If wizard is active, render wizard as a full-screen pane
         if let Some(wiz) = &self.wizard {
             return render::RenderFrame {
@@ -2191,15 +2194,15 @@ impl BloomEditor {
 
         let wk_h = if show_wk {
             let col_width = 24u16;
-            let cols = (self.terminal_width.saturating_sub(4) / col_width).max(1);
+            let cols = (width.saturating_sub(4) / col_width).max(1);
             let entry_count = 12u16;
             let rows_needed = (entry_count + cols - 1) / cols;
-            (rows_needed + 2).min(self.terminal_height / 3).max(3)
+            (rows_needed + 2).min(height / 3).max(3)
         } else {
             0
         };
-        let pane_area_h = self.terminal_height.saturating_sub(wk_h);
-        let pane_rects = self.window_mgr.compute_pane_rects(self.terminal_width, pane_area_h);
+        let pane_area_h = height.saturating_sub(wk_h);
+        let pane_rects = self.window_mgr.compute_pane_rects(width, pane_area_h);
 
         // Update viewport from the active pane's content height
         if let Some(active_rect) = pane_rects.iter().find(|r| r.pane_id == self.window_mgr.active_pane()) {
@@ -2906,7 +2909,7 @@ mod tests {
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
         editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "# Hello\n\nWorld\n");
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         assert!(!frame.panes.is_empty());
         assert_eq!(frame.panes[0].status_bar.mode, "NORMAL");
         assert!(!frame.panes[0].title.is_empty());
@@ -2923,7 +2926,7 @@ mod tests {
         // Move down twice: line 0 → line 1 → line 2 (empty last line)
         editor.handle_key(KeyEvent::char('j'));
         editor.handle_key(KeyEvent::char('j'));
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         // Cursor should be on line 2, column 0 (the empty last line)
         assert_eq!(frame.panes[0].cursor.line, 2);
         assert_eq!(frame.panes[0].cursor.column, 0);
@@ -2937,7 +2940,7 @@ mod tests {
         let id = crate::uuid::generate_hex_id();
         editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
         editor.handle_key(KeyEvent::char('i'));
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
         assert!(matches!(frame.panes[0].cursor.shape, render::CursorShape::Bar));
     }
@@ -3002,7 +3005,7 @@ mod tests {
         let buf = editor.buffer_mgr.get(&id).unwrap();
         assert_eq!(buf.text().to_string(), "abc");
         // Still in insert mode
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
     }
 
@@ -3015,7 +3018,7 @@ mod tests {
         editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello\nworld\n");
         editor.handle_key(KeyEvent::char('o'));
         // Should be in insert mode on a new line below "hello"
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
         assert_eq!(frame.panes[0].cursor.line, 1);
         assert_eq!(frame.panes[0].cursor.column, 0);
@@ -3034,7 +3037,7 @@ mod tests {
         let id = crate::uuid::generate_hex_id();
         editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello\nworld\n");
         editor.handle_key(KeyEvent::char('O'));
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
         assert_eq!(frame.panes[0].cursor.line, 0);
         assert_eq!(frame.panes[0].cursor.column, 0);
@@ -3052,7 +3055,7 @@ mod tests {
         let id = crate::uuid::generate_hex_id();
         editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
         editor.handle_key(KeyEvent::char('o'));
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
         assert_eq!(frame.panes[0].cursor.line, 1);
         assert_eq!(frame.panes[0].cursor.column, 0);
@@ -3071,7 +3074,7 @@ mod tests {
         editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
         editor.handle_key(KeyEvent::char('i'));
         editor.handle_key(KeyEvent::esc());
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         assert_eq!(frame.panes[0].status_bar.mode, "NORMAL");
         assert!(matches!(frame.panes[0].cursor.shape, render::CursorShape::Block));
     }
@@ -3096,7 +3099,7 @@ mod tests {
         editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
 
         // Count initial panes
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         let initial_count = frame.panes.len();
         assert_eq!(initial_count, 1);
     }
@@ -3173,7 +3176,7 @@ mod tests {
         editor.handle_key(KeyEvent::char('x'));
         editor.handle_key(KeyEvent::esc());
         editor.save_current().unwrap();
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         assert!(!frame.panes[0].dirty);
     }
 
@@ -3207,12 +3210,12 @@ mod tests {
         let config = config::Config::defaults(); // default is Journal
         let mut editor = BloomEditor::new(config).unwrap();
         editor.startup();
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         assert!(!frame.panes.is_empty());
         assert!(frame.panes[0].visible_lines.len() > 0 || frame.panes[0].title.contains("20"));
         // Keys should work — enter insert mode
         editor.handle_key(KeyEvent::char('i'));
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
     }
 
@@ -3223,12 +3226,12 @@ mod tests {
         config.startup.mode = config::StartupMode::Blank;
         let mut editor = BloomEditor::new(config).unwrap();
         editor.startup();
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         assert!(!frame.panes.is_empty());
         assert_eq!(frame.panes[0].title, "[scratch]");
         // Keys should work
         editor.handle_key(KeyEvent::char('i'));
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
     }
 
@@ -3239,13 +3242,13 @@ mod tests {
         config.startup.mode = config::StartupMode::Restore;
         let mut editor = BloomEditor::new(config).unwrap();
         editor.startup();
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         assert!(!frame.panes.is_empty());
         // Falls back to scratch since restore_session is a stub
         assert_eq!(frame.panes[0].title, "[scratch]");
         // Keys should work
         editor.handle_key(KeyEvent::char('i'));
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
     }
 
@@ -3255,7 +3258,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         editor.start_wizard();
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         assert!(matches!(
             frame.panes[0].kind,
             render::PaneKind::SetupWizard(_)
@@ -3272,7 +3275,7 @@ mod tests {
         let mut editor = BloomEditor::new(config).unwrap();
         editor.start_wizard();
         editor.handle_key(KeyEvent::enter());
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         if let render::PaneKind::SetupWizard(sw) = &frame.panes[0].kind {
             assert!(matches!(sw.step, render::SetupStep::ChooseVaultLocation));
             assert!(!sw.vault_path.is_empty()); // default path populated
@@ -3296,7 +3299,7 @@ mod tests {
         });
         // Type 'x'
         editor.handle_key(KeyEvent::char('x'));
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         if let render::PaneKind::SetupWizard(sw) = &frame.panes[0].kind {
             assert!(sw.vault_path.starts_with('x'));
         } else {
@@ -3312,7 +3315,7 @@ mod tests {
         editor.start_wizard();
         editor.handle_key(KeyEvent::enter()); // → ChooseVault
         editor.handle_key(KeyEvent::esc());   // → Welcome
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         if let render::PaneKind::SetupWizard(sw) = &frame.panes[0].kind {
             assert!(matches!(sw.step, render::SetupStep::Welcome));
         } else {
@@ -3337,7 +3340,7 @@ mod tests {
         }
         editor.handle_key(KeyEvent::enter()); // → ImportChoice
 
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         if let render::PaneKind::SetupWizard(sw) = &frame.panes[0].kind {
             assert!(matches!(sw.step, render::SetupStep::ImportChoice));
             assert_eq!(sw.import_choice, render::ImportChoice::No);
@@ -3347,7 +3350,7 @@ mod tests {
 
         // Toggle to Yes
         editor.handle_key(KeyEvent::char('j'));
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         if let render::PaneKind::SetupWizard(sw) = &frame.panes[0].kind {
             assert_eq!(sw.import_choice, render::ImportChoice::Yes);
         } else {
@@ -3374,7 +3377,7 @@ mod tests {
 
         // Wizard should be gone, normal editor active
         assert!(!editor.wizard_active());
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         assert!(!frame.panes.is_empty());
         assert!(matches!(frame.panes[0].kind, render::PaneKind::Editor));
         // Vault dirs should exist
@@ -3405,7 +3408,7 @@ mod tests {
         // Picker should now be open
         assert!(editor.picker_state.is_some());
         assert_eq!(editor.picker_state.as_ref().unwrap().title, "Find Page");
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         assert!(frame.picker.is_some());
     }
 
@@ -3418,7 +3421,7 @@ mod tests {
         let id = crate::uuid::generate_hex_id();
         editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
         editor.handle_key(KeyEvent::char(' ')); // SPC
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         assert!(frame.which_key.is_some());
         let wk = frame.which_key.unwrap();
         assert_eq!(wk.prefix, "SPC");
@@ -3434,7 +3437,7 @@ mod tests {
         editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
         editor.handle_key(KeyEvent::char(' ')); // SPC
         editor.handle_key(KeyEvent::esc());     // Cancel
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         assert!(frame.which_key.is_none());
     }
 
@@ -3540,7 +3543,7 @@ mod tests {
 
         // Picker should be open (unified picker_state)
         assert!(editor.picker_state.is_some());
-        let frame = editor.render();
+        let frame = editor.render(80, 24);
         assert!(frame.picker.is_some());
         let picker = frame.picker.unwrap();
         assert_eq!(picker.title, "Theme");
