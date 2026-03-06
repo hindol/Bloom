@@ -55,6 +55,14 @@ pub(crate) fn create_tables(conn: &Connection) -> Result<(), BloomError> {
         CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
             title, content, page_id UNINDEXED
         );
+
+        CREATE TABLE IF NOT EXISTS page_access (
+            page_id TEXT PRIMARY KEY,
+            visit_count INTEGER NOT NULL DEFAULT 0,
+            last_accessed_ms INTEGER NOT NULL DEFAULT 0,
+            frecency_score REAL NOT NULL DEFAULT 0.0,
+            FOREIGN KEY (page_id) REFERENCES pages(id)
+        );
         ",
     )
     .map_err(|e| BloomError::IndexError(e.to_string()))

@@ -55,11 +55,12 @@ impl<T: PickerItem> Picker<T> {
 
     fn refilter(&mut self) {
         if self.query.is_empty() {
+            // Empty query: preserve original order, apply score_boost for ranking
             self.filtered = self
                 .all_items
                 .iter()
                 .enumerate()
-                .map(|(i, _)| (i, 0))
+                .map(|(i, item)| (i, item.score_boost()))
                 .collect();
         } else {
             let scorer = match self.match_mode {
@@ -71,7 +72,8 @@ impl<T: PickerItem> Picker<T> {
                 .iter()
                 .enumerate()
                 .filter_map(|(i, item)| {
-                    scorer(&self.query, item.match_text()).map(|score| (i, score))
+                    scorer(&self.query, item.match_text())
+                        .map(|score| (i, score + item.score_boost()))
                 })
                 .collect();
             self.filtered.sort_by(|a, b| b.1.cmp(&a.1));

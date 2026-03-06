@@ -551,9 +551,11 @@ fn truncate_with_ellipsis(s: &str, max: usize) -> String {
 // ---------------------------------------------------------------------------
 
 fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme) {
-    // Center the picker: 60% width, 70% height
-    let w = (area.width * 3 / 5).max(30).min(area.width);
-    let h = (area.height * 7 / 10).max(10).min(area.height);
+    // Adaptive sizing per ADAPTIVE_LAYOUT.md
+    let w_pct = if area.width >= 180 { 75 } else if area.width >= 140 { 65 } else if area.width < 80 { 90 } else { 60 };
+    let h_pct = if area.height >= 50 { 75 } else if area.height >= 30 { 70 } else { 60 };
+    let w = (area.width * w_pct / 100).max(30).min(area.width);
+    let h = (area.height * h_pct / 100).max(10).min(area.height);
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 2;
     let picker_area = Rect::new(x, y, w, h);

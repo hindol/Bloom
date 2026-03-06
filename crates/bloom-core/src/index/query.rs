@@ -519,4 +519,71 @@ impl Index {
             })
             .collect()
     }
+
+    /// Record a page access for frecency scoring.
+    /// Updates visit_count, last_accessed_ms, and recomputes frecency_score.
+    pub fn record_access(&self, page_id: &PageId) {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        let hex = page_id.to_hex();
+
+        // Upsert: increment visit_count, update timestamp, recompute score
+        let _ = self.conn.execute(
+            "INSERT INTO page_access (page_id, visit_count, last_accessed_ms, frecency_score)
+             VALUES (?1, 1, ?2, 100.0)
+             ON CONFLICT(page_id) DO UPDATE SET
+               visit_count = visit_count + 1,
+               last_accessed_ms = ?2,
+               frecency_score = (visit_count + 1) * (
+                 CASE
+                   WHEN (?2 - last_accessed_ms) < 14400000 THEN 100  -- 4 hours
+                   WHEN (?2 - last_accessed_ms) < 86400000 THEN 70   -- 1 day
+                   WHEN (?2 - last_accessed_ms) < 604800000 THEN 50  -- 1 week
+                   WHEN (?2 - last_accessed_ms) < 2592000000 THEN 30 -- 1 month
+                   ELSE 10
+                 END
+               )",
+            rusqlite::params![hex, now_ms],
+        );
+    }
+
+    /// Get top N pages by frecency score (for zero-query state).
+    pub fn frecency_top(&self, limit: usize) -> Vec<PageMeta> {
+        let mut stmt = match self.conn.prepare(
+            "SELECT p.id, p.title, p.created, p.path
+             FROM page_access a
+             JOIN pages p ON p.id = a.page_id
+             ORDER BY a.frecency_score DESC
+             LIMIT ?1",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let rows = match stmt.query_map(rusqlite::params![limit as i64], |row| {
+            Ok(self.row_to_page_meta(
+                &row.get::<_, String>(0)?,
+                &row.get::<_, String>(1)?,
+                &row.get::<_, String>(2)?,
+                &row.get::<_, String>(3)?,
+            ))
+        }) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        rows.filter_map(|r| r.ok()).collect()
+    }
+
+    /// Get frecency score for a page (0.0 if never accessed).
+    pub fn frecency_score(&self, page_id: &PageId) -> f64 {
+        let hex = page_id.to_hex();
+        self.conn
+            .query_row(
+                "SELECT frecency_score FROM page_access WHERE page_id = ?1",
+                rusqlite::params![hex],
+                |row| row.get(0),
+            )
+            .unwrap_or(0.0)
+    }
 }

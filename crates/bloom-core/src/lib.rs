@@ -383,6 +383,7 @@ struct GenericPickerItem {
     middle: Option<String>,
     right: Option<String>,
     preview_text: Option<String>,
+    score_boost: u32,
 }
 
 impl picker::PickerItem for GenericPickerItem {
@@ -404,6 +405,9 @@ impl picker::PickerItem for GenericPickerItem {
     }
     fn preview(&self) -> Option<String> {
         self.preview_text.clone()
+    }
+    fn score_boost(&self) -> u32 {
+        self.score_boost
     }
 }
 
@@ -495,6 +499,7 @@ impl BloomEditor {
                         middle: Some("[+]".to_string()),
                         right: Some(info.path.display().to_string()),
                         preview_text: None,
+                        score_boost: 0,
                     }
                 }).collect();
                 ("Switch Buffer".to_string(), "open buffers".to_string(), items)
@@ -514,6 +519,7 @@ impl BloomEditor {
                             middle: None,
                             right: Some(format!("{count} pages")),
                             preview_text: None,
+                            score_boost: 0,
                         }
                     }).collect()
                 } else {
@@ -542,6 +548,7 @@ impl BloomEditor {
                         middle: Some(keys.to_string()),
                         right: None,
                         preview_text: None,
+                        score_boost: 0,
                     }
                 }).collect();
                 ("All Commands".to_string(), "commands".to_string(), items)
@@ -592,19 +599,45 @@ impl BloomEditor {
     fn collect_page_items(&self) -> Vec<GenericPickerItem> {
         // Prefer the SQLite index (instant) over disk scan (reads every file).
         if let Some(idx) = &self.index {
-            let pages = idx.list_pages(None);
-            if !pages.is_empty() {
-                return pages.into_iter().map(|meta| {
-                    let tags = meta.tags.iter().map(|t| format!("#{}", t.0)).collect::<Vec<_>>().join(" ");
-                    let date = Some(meta.created.format("%b %d").to_string());
-                    GenericPickerItem {
-                        id: meta.id.to_hex(),
-                        label: meta.title,
-                        middle: if tags.is_empty() { None } else { Some(tags) },
-                        right: date,
-                        preview_text: None,
-                    }
-                }).collect();
+            // Zero-query: show frecency-ordered pages (recently used first).
+            // The picker's fuzzy filter re-ranks when the user types.
+            let frecent = idx.frecency_top(20);
+            let frecent_ids: std::collections::HashSet<_> = frecent.iter()
+                .map(|m| m.id.clone()).collect();
+
+            let mut items: Vec<GenericPickerItem> = frecent.into_iter().map(|meta| {
+                let tags = meta.tags.iter().map(|t| format!("#{}", t.0)).collect::<Vec<_>>().join(" ");
+                let date = Some(meta.created.format("%b %d").to_string());
+                GenericPickerItem {
+                    id: meta.id.to_hex(),
+                    label: meta.title,
+                    middle: if tags.is_empty() { None } else { Some(tags) },
+                    right: date,
+                    preview_text: None,
+                    score_boost: 0,
+                }
+            }).collect();
+
+            // Append remaining pages after the frecent ones
+            let all_pages = idx.list_pages(None);
+            for meta in all_pages {
+                if frecent_ids.contains(&meta.id) {
+                    continue;
+                }
+                let tags = meta.tags.iter().map(|t| format!("#{}", t.0)).collect::<Vec<_>>().join(" ");
+                let date = Some(meta.created.format("%b %d").to_string());
+                items.push(GenericPickerItem {
+                    id: meta.id.to_hex(),
+                    label: meta.title,
+                    middle: if tags.is_empty() { None } else { Some(tags) },
+                    right: date,
+                    preview_text: None,
+                    score_boost: 0,
+                });
+            }
+
+            if !items.is_empty() {
+                return items;
             }
         }
 
@@ -631,6 +664,7 @@ impl BloomEditor {
                             middle: if tags.is_empty() { None } else { Some(tags) },
                             right: date,
                             preview_text: Some(preview),
+                            score_boost: 0,
                         })
                     }).collect();
                 }
@@ -652,6 +686,7 @@ impl BloomEditor {
                         middle: None,
                         right: Some("journal".to_string()),
                         preview_text: None,
+                        score_boost: 0,
                     }
                 }).collect();
                 items.sort_by(|a, b| b.label.cmp(&a.label)); // most recent first
@@ -677,6 +712,7 @@ impl BloomEditor {
                             middle: None,
                             right: Some("journal".to_string()),
                             preview_text: preview,
+                            score_boost: 0,
                         })
                     }).collect();
                     items.sort_by(|a, b| b.label.cmp(&a.label)); // most recent first
@@ -772,6 +808,7 @@ impl BloomEditor {
                             middle: None,
                             right: Some(display_title.clone()),
                             preview_text: Some(preview),
+                            score_boost: 0,
                         });
                         page_has_items = true;
                     }
@@ -840,6 +877,7 @@ impl BloomEditor {
                                 middle: Some(format!("L{}", line_num + 1)),
                                 right: Some(meta.title.clone()),
                                 preview_text: None,
+                                score_boost: 0,
                             },
                             score,
                         ));
@@ -899,6 +937,7 @@ impl BloomEditor {
                     middle: None,
                     right,
                     preview_text: Some(sample.to_string()),
+                    score_boost: 0,
                 }
             })
             .collect();
@@ -3038,6 +3077,10 @@ impl BloomEditor {
         self.buffer_mgr.open(id, title, path, content);
         self.active_page = Some(id.clone());
         self.cursor = 0;
+        // Record access for frecency scoring
+        if let Some(idx) = &self.index {
+            idx.record_access(id);
+        }
     }
 
     pub fn create_page(
