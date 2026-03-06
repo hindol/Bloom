@@ -466,9 +466,9 @@ impl VimState {
                 count,
             } => {
                 self.update_find_state(&motion);
-                let target =
-                    motion::execute_motion(&motion, buffer, cursor, count, &self.last_find);
-                let range = ordered_range(cursor, target);
+                let spec =
+                    motion::execute_operator_motion(operator, &motion, buffer, cursor, count, &self.last_find);
+                let range = motion::range_from_operator_spec(cursor, spec);
                 self.apply_operator(operator, buffer, &range, cursor)
             }
             // ── operator doubled (line-wise) ─────────────────────────
@@ -794,9 +794,9 @@ impl VimState {
 
 fn ordered_range(a: usize, b: usize) -> Range<usize> {
     if a <= b {
-        a..b + 1
+        a..b.saturating_add(1)
     } else {
-        b..a + 1
+        b..a.saturating_add(1)
     }
 }
 
@@ -1057,9 +1057,118 @@ mod tests {
         match action {
             VimAction::Edit(edit) => {
                 assert!(edit.replacement.is_empty());
-                assert!(edit.range.start == 0);
+                assert_eq!(edit.range, 0..1);
+                assert_eq!(edit.cursor_after, 0);
             }
             _ => panic!("expected Edit for x, got {:?}", action),
+        }
+    }
+
+    #[test]
+    fn test_2x_deletes_two_chars() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello");
+        vim.process_key(key('2'), &buf, 0);
+        let action = vim.process_key(key('x'), &buf, 0);
+        match action {
+            VimAction::Edit(edit) => {
+                assert!(edit.replacement.is_empty());
+                assert_eq!(edit.range, 0..2);
+                assert_eq!(edit.cursor_after, 0);
+            }
+            _ => panic!("expected Edit for 2x, got {:?}", action),
+        }
+    }
+
+    #[test]
+    fn test_s_changes_one_char_and_enters_insert() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello");
+        let action = vim.process_key(key('s'), &buf, 0);
+        assert!(matches!(vim.mode(), Mode::Insert));
+        match action {
+            VimAction::Composite(actions) => {
+                let edit = actions
+                    .iter()
+                    .find_map(|action| match action {
+                        VimAction::Edit(edit) => Some(edit),
+                        _ => None,
+                    })
+                    .expect("expected edit action for s");
+                assert!(edit.replacement.is_empty());
+                assert_eq!(edit.range, 0..1);
+                assert_eq!(edit.cursor_after, 0);
+                assert!(actions
+                    .iter()
+                    .any(|action| matches!(action, VimAction::ModeChange(Mode::Insert))));
+            }
+            _ => panic!("expected Composite for s, got {:?}", action),
+        }
+    }
+
+    #[test]
+    fn test_dw_deletes_word() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello world");
+        assert!(matches!(vim.process_key(key('d'), &buf, 0), VimAction::Pending));
+        let action = vim.process_key(key('w'), &buf, 0);
+        match action {
+            VimAction::Edit(edit) => {
+                assert!(edit.replacement.is_empty());
+                assert_eq!(edit.range, 0..6);
+                assert_eq!(edit.cursor_after, 0);
+            }
+            _ => panic!("expected Edit for dw, got {:?}", action),
+        }
+    }
+
+    #[test]
+    fn test_cw_changes_word_and_enters_insert() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello world");
+        assert!(matches!(vim.process_key(key('c'), &buf, 0), VimAction::Pending));
+        let action = vim.process_key(key('w'), &buf, 0);
+        assert!(matches!(vim.mode(), Mode::Insert));
+        match action {
+            VimAction::Composite(actions) => {
+                let edit = actions
+                    .iter()
+                    .find_map(|action| match action {
+                        VimAction::Edit(edit) => Some(edit),
+                        _ => None,
+                    })
+                    .expect("expected edit action for cw");
+                assert!(edit.replacement.is_empty());
+                assert_eq!(edit.range, 0..5);
+                assert_eq!(edit.cursor_after, 0);
+                assert!(actions
+                    .iter()
+                    .any(|action| matches!(action, VimAction::ModeChange(Mode::Insert))));
+            }
+            _ => panic!("expected Composite for cw, got {:?}", action),
+        }
+    }
+
+    #[test]
+    fn test_cw_single_letter_word_stays_on_current_word() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("a b");
+        assert!(matches!(vim.process_key(key('c'), &buf, 0), VimAction::Pending));
+        let action = vim.process_key(key('w'), &buf, 0);
+        assert!(matches!(vim.mode(), Mode::Insert));
+        match action {
+            VimAction::Composite(actions) => {
+                let edit = actions
+                    .iter()
+                    .find_map(|action| match action {
+                        VimAction::Edit(edit) => Some(edit),
+                        _ => None,
+                    })
+                    .expect("expected edit action for cw on a single-letter word");
+                assert_eq!(edit.range, 0..1);
+                assert_eq!(edit.cursor_after, 0);
+            }
+            _ => panic!("expected Composite for cw on a single-letter word, got {:?}", action),
         }
     }
 

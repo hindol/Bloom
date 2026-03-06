@@ -1,4 +1,8 @@
+use std::ops::Range;
+
 use crate::buffer::Buffer;
+
+use super::operator::Operator;
 
 /// Types of motions the grammar parser can identify.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +37,12 @@ pub enum MotionType {
 pub struct FindCommand {
     pub char_target: char,
     pub forward: bool,
+    pub inclusive: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OperatorRangeSpec {
+    pub target: usize,
     pub inclusive: bool,
 }
 
@@ -89,6 +99,18 @@ fn line_last(buffer: &Buffer, cursor: usize) -> usize {
     }
 }
 
+fn line_end_exclusive(buffer: &Buffer, cursor: usize) -> usize {
+    let rope = buffer.text();
+    let line_idx = rope.char_to_line(cursor);
+    let start = rope.line_to_char(line_idx);
+    let line = rope.line(line_idx);
+    let mut end = line.len_chars();
+    while end > 0 && matches!(line.char(end - 1), '\n' | '\r') {
+        end -= 1;
+    }
+    start + end
+}
+
 // ── individual motions ───────────────────────────────────────────────
 
 fn motion_h(buffer: &Buffer, cursor: usize, count: usize) -> usize {
@@ -98,6 +120,11 @@ fn motion_h(buffer: &Buffer, cursor: usize, count: usize) -> usize {
 
 fn motion_l(buffer: &Buffer, cursor: usize, count: usize) -> usize {
     let end = line_last(buffer, cursor);
+    (cursor + count).min(end)
+}
+
+fn motion_l_boundary(buffer: &Buffer, cursor: usize, count: usize) -> usize {
+    let end = line_end_exclusive(buffer, cursor);
     (cursor + count).min(end)
 }
 
@@ -131,7 +158,7 @@ fn motion_k(buffer: &Buffer, cursor: usize, count: usize) -> usize {
     target_start + col.min(max_col)
 }
 
-fn motion_w(buffer: &Buffer, cursor: usize, count: usize) -> usize {
+fn motion_w_boundary(buffer: &Buffer, cursor: usize, count: usize) -> usize {
     let len = buffer.len_chars();
     let mut pos = cursor;
     for _ in 0..count {
@@ -148,7 +175,12 @@ fn motion_w(buffer: &Buffer, cursor: usize, count: usize) -> usize {
             pos += 1;
         }
     }
-    pos.min(len.saturating_sub(1))
+    pos
+}
+
+fn motion_w(buffer: &Buffer, cursor: usize, count: usize) -> usize {
+    let len = buffer.len_chars();
+    motion_w_boundary(buffer, cursor, count).min(len.saturating_sub(1))
 }
 
 fn motion_b(buffer: &Buffer, cursor: usize, count: usize) -> usize {
@@ -195,11 +227,45 @@ fn motion_e(buffer: &Buffer, cursor: usize, count: usize) -> usize {
     pos.min(len.saturating_sub(1))
 }
 
+fn skip_blank_chars(buffer: &Buffer, mut pos: usize) -> usize {
+    let len = buffer.len_chars();
+    while pos < len && matches!(classify(buffer.text().char(pos)), CharClass::Whitespace | CharClass::Newline) {
+        pos += 1;
+    }
+    pos
+}
+
+fn motion_change_word_end(buffer: &Buffer, cursor: usize, count: usize) -> usize {
+    let len = buffer.len_chars();
+    if len == 0 {
+        return 0;
+    }
+
+    let mut pos = cursor.min(len.saturating_sub(1));
+    for step in 0..count {
+        pos = skip_blank_chars(buffer, pos);
+        if pos >= len {
+            return len.saturating_sub(1);
+        }
+
+        let cls = classify(buffer.text().char(pos));
+        while pos + 1 < len && classify(buffer.text().char(pos + 1)) == cls {
+            pos += 1;
+        }
+
+        if step + 1 < count {
+            pos = skip_blank_chars(buffer, pos.saturating_add(1));
+        }
+    }
+
+    pos
+}
+
 fn is_word_boundary_for_big(c: char) -> bool {
     c.is_whitespace()
 }
 
-fn motion_big_w(buffer: &Buffer, cursor: usize, count: usize) -> usize {
+fn motion_big_w_boundary(buffer: &Buffer, cursor: usize, count: usize) -> usize {
     let len = buffer.len_chars();
     let mut pos = cursor;
     for _ in 0..count {
@@ -212,7 +278,12 @@ fn motion_big_w(buffer: &Buffer, cursor: usize, count: usize) -> usize {
             pos += 1;
         }
     }
-    pos.min(len.saturating_sub(1))
+    pos
+}
+
+fn motion_big_w(buffer: &Buffer, cursor: usize, count: usize) -> usize {
+    let len = buffer.len_chars();
+    motion_big_w_boundary(buffer, cursor, count).min(len.saturating_sub(1))
 }
 
 fn motion_big_b(buffer: &Buffer, cursor: usize, count: usize) -> usize {
@@ -248,6 +319,39 @@ fn motion_big_e(buffer: &Buffer, cursor: usize, count: usize) -> usize {
         }
     }
     pos.min(len.saturating_sub(1))
+}
+
+fn skip_big_word_whitespace(buffer: &Buffer, mut pos: usize) -> usize {
+    let len = buffer.len_chars();
+    while pos < len && is_word_boundary_for_big(buffer.text().char(pos)) {
+        pos += 1;
+    }
+    pos
+}
+
+fn motion_change_big_word_end(buffer: &Buffer, cursor: usize, count: usize) -> usize {
+    let len = buffer.len_chars();
+    if len == 0 {
+        return 0;
+    }
+
+    let mut pos = cursor.min(len.saturating_sub(1));
+    for step in 0..count {
+        pos = skip_big_word_whitespace(buffer, pos);
+        if pos >= len {
+            return len.saturating_sub(1);
+        }
+
+        while pos + 1 < len && !is_word_boundary_for_big(buffer.text().char(pos + 1)) {
+            pos += 1;
+        }
+
+        if step + 1 < count {
+            pos = skip_big_word_whitespace(buffer, pos.saturating_add(1));
+        }
+    }
+
+    pos
 }
 
 fn motion_0(buffer: &Buffer, cursor: usize) -> usize {
@@ -339,10 +443,10 @@ fn motion_to(buffer: &Buffer, cursor: usize, target: char, forward: bool, count:
     })
 }
 
-fn motion_matching_bracket(buffer: &Buffer, cursor: usize) -> usize {
+fn motion_matching_bracket(buffer: &Buffer, cursor: usize) -> Option<usize> {
     let c = match char_at(buffer, cursor) {
         Some(c) => c,
-        None => return cursor,
+        None => return None,
     };
     let (target, forward) = match c {
         '(' => (')', true),
@@ -351,7 +455,7 @@ fn motion_matching_bracket(buffer: &Buffer, cursor: usize) -> usize {
         ']' => ('[', false),
         '{' => ('}', true),
         '}' => ('{', false),
-        _ => return cursor,
+        _ => return None,
     };
     let len = buffer.len_chars();
     let mut depth: i32 = 1;
@@ -364,7 +468,7 @@ fn motion_matching_bracket(buffer: &Buffer, cursor: usize) -> usize {
             } else if ch == target {
                 depth -= 1;
                 if depth == 0 {
-                    return pos;
+                    return Some(pos);
                 }
             }
             pos += 1;
@@ -379,15 +483,15 @@ fn motion_matching_bracket(buffer: &Buffer, cursor: usize) -> usize {
             } else if ch == target {
                 depth -= 1;
                 if depth == 0 {
-                    return pos;
+                    return Some(pos);
                 }
             }
         }
     }
-    cursor
+    None
 }
 
-fn motion_paragraph_forward(buffer: &Buffer, cursor: usize, count: usize) -> usize {
+fn motion_paragraph_forward_boundary(buffer: &Buffer, cursor: usize, count: usize) -> usize {
     let rope = buffer.text();
     let len = buffer.len_chars();
     let mut pos = cursor;
@@ -403,7 +507,7 @@ fn motion_paragraph_forward(buffer: &Buffer, cursor: usize, count: usize) -> usi
             }
             let next_line = line_idx + 1;
             if next_line >= rope.len_lines() {
-                return len.saturating_sub(1);
+                return len;
             }
             pos = rope.line_to_char(next_line);
         }
@@ -418,12 +522,17 @@ fn motion_paragraph_forward(buffer: &Buffer, cursor: usize, count: usize) -> usi
             }
             let next_line = line_idx + 1;
             if next_line >= rope.len_lines() {
-                return len.saturating_sub(1);
+                return len;
             }
             pos = rope.line_to_char(next_line);
         }
     }
-    pos.min(len.saturating_sub(1))
+    pos
+}
+
+fn motion_paragraph_forward(buffer: &Buffer, cursor: usize, count: usize) -> usize {
+    let len = buffer.len_chars();
+    motion_paragraph_forward_boundary(buffer, cursor, count).min(len.saturating_sub(1))
 }
 
 fn motion_paragraph_backward(buffer: &Buffer, cursor: usize, count: usize) -> usize {
@@ -491,7 +600,7 @@ pub fn execute_motion(
         MotionType::FindBackward(ch) => motion_find(buffer, cursor, *ch, false, c).unwrap_or(cursor),
         MotionType::ToForward(ch) => motion_to(buffer, cursor, *ch, true, c).unwrap_or(cursor),
         MotionType::ToBackward(ch) => motion_to(buffer, cursor, *ch, false, c).unwrap_or(cursor),
-        MotionType::MatchingBracket => motion_matching_bracket(buffer, cursor),
+        MotionType::MatchingBracket => motion_matching_bracket(buffer, cursor).unwrap_or(cursor),
         MotionType::ParagraphForward => motion_paragraph_forward(buffer, cursor, c),
         MotionType::ParagraphBackward => motion_paragraph_backward(buffer, cursor, c),
         MotionType::RepeatFind => {
@@ -516,5 +625,216 @@ pub fn execute_motion(
                 cursor
             }
         }
+    }
+}
+
+pub fn execute_operator_motion(
+    operator: Operator,
+    motion: &MotionType,
+    buffer: &Buffer,
+    cursor: usize,
+    count: Option<usize>,
+    last_find: &Option<FindCommand>,
+) -> OperatorRangeSpec {
+    let c = count.unwrap_or(1);
+
+    match motion {
+        MotionType::Left => OperatorRangeSpec {
+            target: motion_h(buffer, cursor, c),
+            inclusive: false,
+        },
+        MotionType::Right => OperatorRangeSpec {
+            target: motion_l_boundary(buffer, cursor, c),
+            inclusive: false,
+        },
+        MotionType::Down => OperatorRangeSpec {
+            target: motion_j(buffer, cursor, c),
+            inclusive: false,
+        },
+        MotionType::Up => OperatorRangeSpec {
+            target: motion_k(buffer, cursor, c),
+            inclusive: false,
+        },
+        MotionType::WordForward => {
+            if operator == Operator::Change && change_uses_word_end(buffer, cursor) {
+                OperatorRangeSpec {
+                    target: motion_change_word_end(buffer, cursor, c),
+                    inclusive: true,
+                }
+            } else {
+                OperatorRangeSpec {
+                    target: motion_w_boundary(buffer, cursor, c),
+                    inclusive: false,
+                }
+            }
+        }
+        MotionType::WordBackward => OperatorRangeSpec {
+            target: motion_b(buffer, cursor, c),
+            inclusive: false,
+        },
+        MotionType::WordEnd => OperatorRangeSpec {
+            target: motion_e(buffer, cursor, c),
+            inclusive: true,
+        },
+        MotionType::WORDForward => {
+            if operator == Operator::Change && change_uses_word_end(buffer, cursor) {
+                OperatorRangeSpec {
+                    target: motion_change_big_word_end(buffer, cursor, c),
+                    inclusive: true,
+                }
+            } else {
+                OperatorRangeSpec {
+                    target: motion_big_w_boundary(buffer, cursor, c),
+                    inclusive: false,
+                }
+            }
+        }
+        MotionType::WORDBackward => OperatorRangeSpec {
+            target: motion_big_b(buffer, cursor, c),
+            inclusive: false,
+        },
+        MotionType::WORDEnd => OperatorRangeSpec {
+            target: motion_big_e(buffer, cursor, c),
+            inclusive: true,
+        },
+        MotionType::LineStart => OperatorRangeSpec {
+            target: motion_0(buffer, cursor),
+            inclusive: false,
+        },
+        MotionType::LineEnd => OperatorRangeSpec {
+            target: motion_dollar(buffer, cursor),
+            inclusive: true,
+        },
+        MotionType::FirstNonWhitespace => OperatorRangeSpec {
+            target: motion_caret(buffer, cursor),
+            inclusive: false,
+        },
+        MotionType::DocumentStart => OperatorRangeSpec {
+            target: motion_gg(buffer, count),
+            inclusive: false,
+        },
+        MotionType::DocumentEnd => OperatorRangeSpec {
+            target: motion_big_g(buffer, count),
+            inclusive: false,
+        },
+        MotionType::FindForward(ch) => motion_find(buffer, cursor, *ch, true, c)
+            .map(|target| OperatorRangeSpec {
+                target,
+                inclusive: true,
+            })
+            .unwrap_or(OperatorRangeSpec {
+                target: cursor,
+                inclusive: false,
+            }),
+        MotionType::FindBackward(ch) => motion_find(buffer, cursor, *ch, false, c)
+            .map(|target| OperatorRangeSpec {
+                target,
+                inclusive: true,
+            })
+            .unwrap_or(OperatorRangeSpec {
+                target: cursor,
+                inclusive: false,
+            }),
+        MotionType::ToForward(ch) => motion_to(buffer, cursor, *ch, true, c)
+            .map(|target| OperatorRangeSpec {
+                target,
+                inclusive: true,
+            })
+            .unwrap_or(OperatorRangeSpec {
+                target: cursor,
+                inclusive: false,
+            }),
+        MotionType::ToBackward(ch) => motion_to(buffer, cursor, *ch, false, c)
+            .map(|target| OperatorRangeSpec {
+                target,
+                inclusive: true,
+            })
+            .unwrap_or(OperatorRangeSpec {
+                target: cursor,
+                inclusive: false,
+            }),
+        MotionType::MatchingBracket => motion_matching_bracket(buffer, cursor)
+            .map(|target| OperatorRangeSpec {
+                target,
+                inclusive: true,
+            })
+            .unwrap_or(OperatorRangeSpec {
+                target: cursor,
+                inclusive: false,
+            }),
+        MotionType::ParagraphForward => OperatorRangeSpec {
+            target: motion_paragraph_forward_boundary(buffer, cursor, c),
+            inclusive: false,
+        },
+        MotionType::ParagraphBackward => OperatorRangeSpec {
+            target: motion_paragraph_backward(buffer, cursor, c),
+            inclusive: false,
+        },
+        MotionType::RepeatFind => repeat_find_operator_motion(buffer, cursor, c, last_find, false),
+        MotionType::RepeatFindReverse => {
+            repeat_find_operator_motion(buffer, cursor, c, last_find, true)
+        }
+    }
+}
+
+fn change_uses_word_end(buffer: &Buffer, cursor: usize) -> bool {
+    matches!(
+        char_at(buffer, cursor).map(classify),
+        Some(CharClass::Word | CharClass::Punctuation)
+    )
+}
+
+fn repeat_find_operator_motion(
+    buffer: &Buffer,
+    cursor: usize,
+    count: usize,
+    last_find: &Option<FindCommand>,
+    reverse: bool,
+) -> OperatorRangeSpec {
+    let Some(fc) = last_find else {
+        return OperatorRangeSpec {
+            target: cursor,
+            inclusive: false,
+        };
+    };
+
+    let target = if fc.inclusive {
+        motion_find(buffer, cursor, fc.char_target, fc.forward ^ reverse, count)
+    } else {
+        motion_to(buffer, cursor, fc.char_target, fc.forward ^ reverse, count)
+    };
+
+    target
+        .map(|target| OperatorRangeSpec {
+            target,
+            inclusive: true,
+        })
+        .unwrap_or(OperatorRangeSpec {
+            target: cursor,
+            inclusive: false,
+        })
+}
+
+pub fn range_from_operator_spec(anchor: usize, spec: OperatorRangeSpec) -> Range<usize> {
+    if spec.inclusive {
+        ordered_inclusive_range(anchor, spec.target)
+    } else {
+        ordered_exclusive_range(anchor, spec.target)
+    }
+}
+
+fn ordered_inclusive_range(a: usize, b: usize) -> Range<usize> {
+    if a <= b {
+        a..b.saturating_add(1)
+    } else {
+        b..a.saturating_add(1)
+    }
+}
+
+fn ordered_exclusive_range(a: usize, b: usize) -> Range<usize> {
+    if a <= b {
+        a..b
+    } else {
+        b..a
     }
 }
