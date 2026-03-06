@@ -10,13 +10,14 @@ impl Index {
             return Vec::new();
         }
 
-        // Convert query words to FTS5 prefix terms: "rop data" → "rop* AND data*"
+        // Convert query words to FTS5 prefix terms: "rop data" → "rop* OR data*"
+        // Use OR to cast a wide net; nucleo handles precision in phase 2.
         let fts_query: String = query
             .split_whitespace()
             .filter(|w| !w.is_empty())
             .map(|w| format!("{}*", w.replace('"', "")))
             .collect::<Vec<_>>()
-            .join(" AND ");
+            .join(" OR ");
 
         if fts_query.is_empty() {
             return Vec::new();
