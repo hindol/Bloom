@@ -9,14 +9,13 @@ fn rgb(c: Rgb) -> Color {
 }
 
 /// Convert core `StyleProps` to ratatui `Style`.
-pub fn to_rstyle(props: &StyleProps) -> RStyle {
+/// If `bg` is not set in props, falls back to `fallback_bg`.
+pub fn to_rstyle_with_bg(props: &StyleProps, fallback_bg: Rgb) -> RStyle {
     let mut s = RStyle::default();
     if let Some(fg) = props.fg {
         s = s.fg(rgb(fg));
     }
-    if let Some(bg) = props.bg {
-        s = s.bg(rgb(bg));
-    }
+    s = s.bg(rgb(props.bg.unwrap_or(fallback_bg)));
     if props.bold {
         s = s.add_modifier(Modifier::BOLD);
     }
@@ -46,21 +45,19 @@ impl<'a> TuiTheme<'a> {
     }
 
     /// Resolve a content `Style` to ratatui `Style`.
-    /// TUI overrides H1 to use `salient` fg (hue contrast) on top of
-    /// `strong` bold, so H1 visually dominates H2. The GUI doesn't need
-    /// this because it uses font size (1.5× vs 1.3×) for hierarchy.
+    /// Every returned style carries an explicit bg (defaults to palette background).
     pub fn style_for(&self, style: &Style) -> RStyle {
         if matches!(style, Style::Heading { level: 1 }) {
             let mut props = theme::resolve(style, self.palette);
             props.fg = Some(self.palette.salient);
-            return to_rstyle(&props);
+            return to_rstyle_with_bg(&props, self.palette.background);
         }
-        to_rstyle(&theme::resolve(style, self.palette))
+        to_rstyle_with_bg(&theme::resolve(style, self.palette), self.palette.background)
     }
 
     /// Status bar style.
     pub fn status_bar_style(&self, mode: &str, active: bool) -> RStyle {
-        to_rstyle(&theme::resolve_status_bar(mode, active, self.palette))
+        to_rstyle_with_bg(&theme::resolve_status_bar(mode, active, self.palette), self.palette.background)
     }
 
     /// Background colour for filling.
@@ -124,27 +121,27 @@ impl<'a> TuiTheme<'a> {
     }
 
     pub fn faded_style(&self) -> RStyle {
-        to_rstyle(&theme::resolve_chrome(Chrome::Faded, self.palette))
+        to_rstyle_with_bg(&theme::resolve_chrome(Chrome::Faded, self.palette), self.palette.background)
     }
 
     pub fn border_style(&self) -> RStyle {
-        to_rstyle(&theme::resolve_chrome(Chrome::WindowBorder, self.palette))
+        to_rstyle_with_bg(&theme::resolve_chrome(Chrome::WindowBorder, self.palette), self.palette.background)
     }
 
     pub fn picker_style(&self) -> RStyle {
-        to_rstyle(&theme::resolve_chrome(Chrome::PickerSurface, self.palette))
+        to_rstyle_with_bg(&theme::resolve_chrome(Chrome::PickerSurface, self.palette), self.palette.background)
     }
 
     pub fn picker_selected(&self) -> RStyle {
-        to_rstyle(&theme::resolve_chrome(Chrome::PickerSelected, self.palette))
+        to_rstyle_with_bg(&theme::resolve_chrome(Chrome::PickerSelected, self.palette), self.palette.background)
     }
 
     pub fn which_key_style(&self) -> RStyle {
-        to_rstyle(&theme::resolve_chrome(Chrome::WhichKey, self.palette))
+        to_rstyle_with_bg(&theme::resolve_chrome(Chrome::WhichKey, self.palette), self.palette.background)
     }
 
     pub fn current_line_style(&self) -> RStyle {
-        to_rstyle(&theme::resolve_chrome(Chrome::CurrentLine, self.palette))
+        to_rstyle_with_bg(&theme::resolve_chrome(Chrome::CurrentLine, self.palette), self.palette.background)
     }
 
     pub fn notification_style(&self, level: &NotificationLevel) -> RStyle {
@@ -153,6 +150,6 @@ impl<'a> TuiTheme<'a> {
             NotificationLevel::Warning => Chrome::NotificationWarning,
             NotificationLevel::Error => Chrome::NotificationError,
         };
-        to_rstyle(&theme::resolve_chrome(chrome, self.palette))
+        to_rstyle_with_bg(&theme::resolve_chrome(chrome, self.palette), self.palette.background)
     }
 }

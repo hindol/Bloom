@@ -213,7 +213,7 @@ fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiT
         let base_style = if is_cursor_line {
             theme.current_line_style()
         } else {
-            RStyle::default().bg(theme.background())
+            theme.style_for(&bloom_core::parser::traits::Style::Normal)
         };
 
         let text = &rendered_line.text;
