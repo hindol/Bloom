@@ -64,13 +64,6 @@ impl Index {
             stats.tags += entry.tags.len();
         }
 
-        // Prune orphaned frecency data for pages that no longer exist
-        tx.execute(
-            "DELETE FROM page_access WHERE page_id NOT IN (SELECT id FROM pages)",
-            [],
-        )
-        .map_err(|e| BloomError::IndexError(e.to_string()))?;
-
         tx.commit()
             .map_err(|e| BloomError::IndexError(e.to_string()))?;
         Ok(stats)
@@ -180,6 +173,22 @@ impl Index {
             }
         }
         map
+    }
+
+    /// Clear all fingerprints (forces full re-scan on next incremental run).
+    pub fn clear_fingerprints(&self) -> Result<(), BloomError> {
+        self.conn.execute("DELETE FROM file_fingerprints", [])
+            .map_err(|e| BloomError::IndexError(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Remove page_access rows for pages that no longer exist in the index.
+    pub fn prune_orphaned_access(&self) -> Result<usize, BloomError> {
+        self.conn.execute(
+            "DELETE FROM page_access WHERE page_id NOT IN (SELECT id FROM pages)",
+            [],
+        )
+        .map_err(|e| BloomError::IndexError(e.to_string()))
     }
 }
 

@@ -168,9 +168,13 @@ pub struct BloomEditor {
     terminal_width: u16,
     // Background indexer
     indexer_rx: Option<crossbeam::channel::Receiver<index::indexer::IndexComplete>>,
+    indexer_tx: Option<crossbeam::channel::Sender<index::indexer::IndexRequest>>,
     indexing: bool,
     last_index_timing: Option<index::indexer::IndexTiming>,
     last_picker_queries: std::collections::HashMap<String, String>,
+    // File watcher debounce
+    pending_file_events: std::collections::HashSet<std::path::PathBuf>,
+    file_event_deadline: Option<Instant>,
 }
 
 // ---------------------------------------------------------------------------
@@ -454,9 +458,12 @@ impl BloomEditor {
             terminal_height: 24,
             terminal_width: 80,
             indexer_rx: None,
+            indexer_tx: None,
             indexing: false,
             last_index_timing: None,
             last_picker_queries: std::collections::HashMap::new(),
+            pending_file_events: std::collections::HashSet::new(),
+            file_event_deadline: None,
             config,
         })
     }
@@ -1042,15 +1049,16 @@ impl BloomEditor {
             let _ = set_hidden_attribute(&index_path);
         }
 
-        // Spawn background indexer thread
-        let (idx_tx, idx_rx) = crossbeam::channel::bounded(1);
-        self.indexer_rx = Some(idx_rx);
+        // Spawn long-lived background indexer thread
+        let (idx_completion_tx, idx_completion_rx) = crossbeam::channel::bounded(4);
+        self.indexer_rx = Some(idx_completion_rx);
         self.indexing = true;
-        index::indexer::spawn_indexer(
+        let indexer_tx = index::indexer::spawn_indexer(
             vault_root.to_path_buf(),
             index_path,
-            idx_tx,
+            idx_completion_tx,
         );
+        self.indexer_tx = Some(indexer_tx);
 
         Ok(())
     }
@@ -1112,6 +1120,56 @@ impl BloomEditor {
     /// Whether background indexing is in progress.
     pub fn is_indexing(&self) -> bool {
         self.indexing
+    }
+
+    /// Drain file watcher events, debounce, and forward to the indexer thread.
+    /// Returns true if a batch was sent (triggers needs_render for ⟳ indicator).
+    pub fn poll_file_events(&mut self) -> bool {
+        // Drain watcher channel
+        if let Some(store) = &self.note_store {
+            use store::traits::NoteStore;
+            let rx = store.watch();
+            while let Ok(event) = rx.try_recv() {
+                let path = match &event {
+                    store::traits::FileEvent::Created(p)
+                    | store::traits::FileEvent::Modified(p)
+                    | store::traits::FileEvent::Deleted(p) => p.clone(),
+                    store::traits::FileEvent::Renamed { to, .. } => to.clone(),
+                };
+                // Only .md files in pages/ or journal/
+                if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                    continue;
+                }
+                if let Some(vault_root) = &self.vault_root {
+                    if let Ok(rel) = path.strip_prefix(vault_root) {
+                        let first = rel.components().next()
+                            .and_then(|c| c.as_os_str().to_str());
+                        if matches!(first, Some("pages") | Some("journal")) {
+                            self.pending_file_events.insert(rel.to_path_buf());
+                            // Reset debounce timer: 300ms from now
+                            self.file_event_deadline =
+                                Some(Instant::now() + std::time::Duration::from_millis(300));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check if debounce timer has fired
+        if let Some(deadline) = self.file_event_deadline {
+            if Instant::now() >= deadline && !self.pending_file_events.is_empty() {
+                let paths: Vec<std::path::PathBuf> =
+                    self.pending_file_events.drain().collect();
+                self.file_event_deadline = None;
+                if let Some(tx) = &self.indexer_tx {
+                    let _ = tx.send(index::indexer::IndexRequest::IncrementalBatch(paths));
+                    self.indexing = true;
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 
     /// Show vault and index stats as a notification.
@@ -1348,13 +1406,9 @@ impl BloomEditor {
                     result.push(keymap::dispatch::Action::CopyToClipboard(text.clone()));
                 }
                 keymap::dispatch::Action::RebuildIndex => {
-                    let stats = self.rebuild_index();
-                    if let Ok(s) = stats {
-                        self.notifications.push(render::Notification {
-                            message: format!("Index rebuilt: {} pages, {} links, {} tags", s.pages, s.links, s.tags),
-                            level: render::NotificationLevel::Info,
-                            expires_at: Instant::now() + std::time::Duration::from_secs(3),
-                        });
+                    if let Some(tx) = &self.indexer_tx {
+                        let _ = tx.send(index::indexer::IndexRequest::FullRebuild);
+                        self.indexing = true;
                     }
                 }
                 // Pass through to TUI: Quit, Save, and others

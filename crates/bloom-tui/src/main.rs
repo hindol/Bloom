@@ -102,6 +102,11 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
             needs_render = true;
         }
 
+        // Poll file watcher events (debounced → forwarded to indexer)
+        if editor.poll_file_events() {
+            needs_render = true;
+        }
+
         // Wait for input up to the remaining frame budget
         let wait = frame_budget.saturating_sub(last_render.elapsed());
         if event::poll(wait)? {

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use crossbeam::channel::Sender;
+use crossbeam::channel::{Receiver, Sender};
 use rayon::prelude::*;
 
 use crate::error::BloomError;
@@ -10,6 +10,16 @@ use crate::index::{FileFingerprint, Index, IndexEntry, RebuildStats};
 use crate::parser::{self, traits::DocumentParser};
 use crate::store;
 use crate::types::*;
+
+/// Requests sent from the UI thread to the indexer thread.
+pub enum IndexRequest {
+    /// Full rebuild: invalidate all fingerprints, re-scan everything.
+    FullRebuild,
+    /// Re-index specific files (from file watcher, debounced).
+    IncrementalBatch(Vec<PathBuf>),
+    /// Shut down the indexer thread.
+    Shutdown,
+}
 
 /// Result sent from the indexer thread to the UI thread on completion.
 #[derive(Debug)]
@@ -28,48 +38,102 @@ pub struct IndexTiming {
     pub files_changed: usize,
 }
 
-/// Spawn the background indexer thread. Returns immediately.
-/// The indexer sends an `IndexComplete` on the provided channel when done.
+/// Spawn the long-lived indexer thread. Returns the request sender.
+/// The indexer performs an initial incremental scan, then loops waiting
+/// for IndexRequest messages until Shutdown.
 pub fn spawn_indexer(
     vault_root: PathBuf,
     index_path: PathBuf,
-    tx: Sender<IndexComplete>,
-) {
+    completion_tx: Sender<IndexComplete>,
+) -> Sender<IndexRequest> {
+    let (request_tx, request_rx) = crossbeam::channel::unbounded();
+
     std::thread::Builder::new()
         .name("bloom-indexer".into())
         .spawn(move || {
-            let result = run_incremental(&vault_root, &index_path);
-            match result {
-                Ok(complete) => {
-                    let _ = tx.send(complete);
-                }
-                Err(e) => {
-                    tracing::error!("indexer error: {:?}", e);
-                    // Send a zero-stats completion so the UI knows indexing finished
-                    let _ = tx.send(IndexComplete {
-                        stats: RebuildStats { pages: 0, links: 0, tags: 0 },
-                        timing: IndexTiming {
-                            scan_ms: 0,
-                            read_parse_ms: 0,
-                            write_ms: 0,
-                            total_ms: 0,
-                            files_scanned: 0,
-                            files_changed: 0,
-                        },
-                    });
-                }
-            }
+            indexer_main(&vault_root, &index_path, &request_rx, &completion_tx);
         })
         .expect("failed to spawn indexer thread");
+
+    request_tx
 }
 
-fn run_incremental(vault_root: &Path, index_path: &Path) -> Result<IndexComplete, BloomError> {
-    let t_total = Instant::now();
-
-    let mut index = Index::open(index_path)?;
+fn indexer_main(
+    vault_root: &Path,
+    index_path: &Path,
+    request_rx: &Receiver<IndexRequest>,
+    completion_tx: &Sender<IndexComplete>,
+) {
+    let mut index = match Index::open(index_path) {
+        Ok(i) => i,
+        Err(e) => {
+            tracing::error!("indexer: failed to open index: {:?}", e);
+            send_empty_completion(completion_tx);
+            return;
+        }
+    };
     let parser = parser::BloomMarkdownParser::new();
 
-    // Phase 1: Scan — list files and compare fingerprints
+    // Initial startup scan
+    match run_incremental(vault_root, &mut index, &parser) {
+        Ok(complete) => { let _ = completion_tx.send(complete); }
+        Err(e) => {
+            tracing::error!("indexer startup error: {:?}", e);
+            send_empty_completion(completion_tx);
+        }
+    }
+
+    // Long-lived loop: process requests until Shutdown
+    while let Ok(request) = request_rx.recv() {
+        match request {
+            IndexRequest::FullRebuild => {
+                // Invalidate all fingerprints to force full re-scan
+                let _ = index.clear_fingerprints();
+                match run_incremental(vault_root, &mut index, &parser) {
+                    Ok(mut complete) => {
+                        // Prune orphaned frecency data
+                        let _ = index.prune_orphaned_access();
+                        let _ = completion_tx.send(complete);
+                    }
+                    Err(e) => {
+                        tracing::error!("indexer rebuild error: {:?}", e);
+                        send_empty_completion(completion_tx);
+                    }
+                }
+            }
+            IndexRequest::IncrementalBatch(paths) => {
+                match run_batch(vault_root, &mut index, &parser, &paths) {
+                    Ok(complete) => { let _ = completion_tx.send(complete); }
+                    Err(e) => {
+                        tracing::error!("indexer batch error: {:?}", e);
+                        send_empty_completion(completion_tx);
+                    }
+                }
+            }
+            IndexRequest::Shutdown => break,
+        }
+    }
+}
+
+fn send_empty_completion(tx: &Sender<IndexComplete>) {
+    let _ = tx.send(IndexComplete {
+        stats: RebuildStats { pages: 0, links: 0, tags: 0 },
+        timing: IndexTiming {
+            scan_ms: 0, read_parse_ms: 0, write_ms: 0, total_ms: 0,
+            files_scanned: 0, files_changed: 0,
+        },
+    });
+}
+
+/// Incremental scan: compare fingerprints, read/parse changed files, write to index.
+fn run_incremental(
+    vault_root: &Path,
+    index: &mut Index,
+    parser: &parser::BloomMarkdownParser,
+) -> Result<IndexComplete, BloomError> {
+    let t_total = Instant::now();
+
+    // Phase 1: Scan
     let t_scan = Instant::now();
 
     let store = store::local::LocalFileStore::new(vault_root.to_path_buf())?;
@@ -107,17 +171,15 @@ fn run_incremental(vault_root: &Path, index_path: &Path) -> Result<IndexComplete
         };
         current_fps.insert(rel_str.clone(), fp.clone());
 
-        // Compare against stored fingerprint
         let changed = match stored_fps.get(&rel_str) {
             Some(stored) => stored.mtime_secs != fp.mtime_secs || stored.size_bytes != fp.size_bytes,
-            None => true, // new file
+            None => true,
         };
         if changed {
             changed_paths.push(rel.to_path_buf());
         }
     }
 
-    // Find deleted files (in stored but not in current)
     let deleted_paths: Vec<String> = stored_fps
         .keys()
         .filter(|k| !current_path_set.contains(*k))
@@ -128,10 +190,106 @@ fn run_incremental(vault_root: &Path, index_path: &Path) -> Result<IndexComplete
     let files_changed = changed_paths.len() + deleted_paths.len();
     let scan_ms = t_scan.elapsed().as_millis() as u64;
 
-    // Phase 2: Read + Parse changed files in parallel
+    // Phase 2: Read + Parse
     let t_read = Instant::now();
+    let entries = parse_paths(vault_root, &changed_paths, parser);
+    let read_parse_ms = t_read.elapsed().as_millis() as u64;
 
-    let entries: Vec<IndexEntry> = changed_paths
+    // Phase 3: Write
+    let t_write = Instant::now();
+
+    index.incremental_update(&entries, &deleted_paths)?;
+
+    let fp_batch: Vec<(String, FileFingerprint)> = changed_paths
+        .iter()
+        .filter_map(|rel| {
+            let rel_str = rel.display().to_string();
+            current_fps.get(&rel_str).map(|fp| (rel_str, fp.clone()))
+        })
+        .collect();
+    index.set_fingerprints_batch(&fp_batch);
+
+    let write_ms = t_write.elapsed().as_millis() as u64;
+    let total_ms = t_total.elapsed().as_millis() as u64;
+
+    Ok(IndexComplete {
+        stats: RebuildStats {
+            pages: entries.len(),
+            links: entries.iter().map(|e| e.links.len()).sum(),
+            tags: entries.iter().map(|e| e.tags.len()).sum(),
+        },
+        timing: IndexTiming {
+            scan_ms, read_parse_ms, write_ms, total_ms,
+            files_scanned, files_changed,
+        },
+    })
+}
+
+/// Process a batch of specific file paths (from file watcher).
+fn run_batch(
+    vault_root: &Path,
+    index: &mut Index,
+    parser: &parser::BloomMarkdownParser,
+    rel_paths: &[PathBuf],
+) -> Result<IndexComplete, BloomError> {
+    let t_total = Instant::now();
+
+    // Separate existing files from deleted files
+    let mut existing: Vec<PathBuf> = Vec::new();
+    let mut deleted: Vec<String> = Vec::new();
+    for rel in rel_paths {
+        let full = vault_root.join(rel);
+        if full.exists() {
+            existing.push(rel.clone());
+        } else {
+            deleted.push(rel.display().to_string());
+        }
+    }
+
+    let t_read = Instant::now();
+    let entries = parse_paths(vault_root, &existing, parser);
+    let read_parse_ms = t_read.elapsed().as_millis() as u64;
+
+    let t_write = Instant::now();
+    index.incremental_update(&entries, &deleted)?;
+
+    // Update fingerprints for changed files
+    for rel in &existing {
+        let full = vault_root.join(rel);
+        if let Ok(meta) = std::fs::metadata(&full) {
+            let mtime = meta.modified().ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let fp = FileFingerprint { mtime_secs: mtime, size_bytes: meta.len() };
+            index.set_fingerprint(&rel.display().to_string(), &fp);
+        }
+    }
+
+    let write_ms = t_write.elapsed().as_millis() as u64;
+    let total_ms = t_total.elapsed().as_millis() as u64;
+
+    Ok(IndexComplete {
+        stats: RebuildStats {
+            pages: entries.len(),
+            links: entries.iter().map(|e| e.links.len()).sum(),
+            tags: entries.iter().map(|e| e.tags.len()).sum(),
+        },
+        timing: IndexTiming {
+            scan_ms: 0, read_parse_ms, write_ms, total_ms,
+            files_scanned: rel_paths.len(),
+            files_changed: entries.len() + deleted.len(),
+        },
+    })
+}
+
+/// Read and parse a set of relative paths into IndexEntry objects.
+fn parse_paths(
+    vault_root: &Path,
+    rel_paths: &[PathBuf],
+    parser: &parser::BloomMarkdownParser,
+) -> Vec<IndexEntry> {
+    rel_paths
         .par_iter()
         .filter_map(|rel_path| {
             let full = vault_root.join(rel_path);
@@ -175,41 +333,5 @@ fn run_incremental(vault_root: &Path, index_path: &Path) -> Result<IndexComplete
                 block_ids,
             })
         })
-        .collect();
-
-    let read_parse_ms = t_read.elapsed().as_millis() as u64;
-
-    // Phase 3: Batch write to SQLite
-    let t_write = Instant::now();
-
-    index.incremental_update(&entries, &deleted_paths)?;
-
-    // Update fingerprints for changed files
-    let fp_batch: Vec<(String, FileFingerprint)> = changed_paths
-        .iter()
-        .filter_map(|rel| {
-            let rel_str = rel.display().to_string();
-            current_fps.get(&rel_str).map(|fp| (rel_str, fp.clone()))
-        })
-        .collect();
-    index.set_fingerprints_batch(&fp_batch);
-
-    let write_ms = t_write.elapsed().as_millis() as u64;
-    let total_ms = t_total.elapsed().as_millis() as u64;
-
-    Ok(IndexComplete {
-        stats: RebuildStats {
-            pages: entries.len(),
-            links: entries.iter().map(|e| e.links.len()).sum(),
-            tags: entries.iter().map(|e| e.tags.len()).sum(),
-        },
-        timing: IndexTiming {
-            scan_ms,
-            read_parse_ms,
-            write_ms,
-            total_ms,
-            files_scanned,
-            files_changed,
-        },
-    })
+        .collect()
 }
