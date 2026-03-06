@@ -173,6 +173,7 @@ pub struct BloomEditor {
     last_index_timing: Option<index::indexer::IndexTiming>,
     last_picker_queries: std::collections::HashMap<String, String>,
     // File watcher debounce
+    watcher_rx: Option<crossbeam::channel::Receiver<store::traits::FileEvent>>,
     pending_file_events: std::collections::HashSet<std::path::PathBuf>,
     file_event_deadline: Option<Instant>,
 }
@@ -462,6 +463,7 @@ impl BloomEditor {
             indexing: false,
             last_index_timing: None,
             last_picker_queries: std::collections::HashMap::new(),
+            watcher_rx: None,
             pending_file_events: std::collections::HashSet::new(),
             file_event_deadline: None,
             config,
@@ -1030,7 +1032,13 @@ impl BloomEditor {
         let index_path = vault_root.join(".index.db");
         self.index = Some(index::Index::open(&index_path)?);
         self.journal = Some(journal::Journal::new(vault_root));
-        self.note_store = Some(store::local::LocalFileStore::new(vault_root.to_path_buf())?);
+        let file_store = store::local::LocalFileStore::new(vault_root.to_path_buf())?;
+        // Grab the watcher receiver once — must not call watch() repeatedly
+        {
+            use store::traits::NoteStore;
+            self.watcher_rx = Some(file_store.watch());
+        }
+        self.note_store = Some(file_store);
         let templates_dir = vault_root.join("templates");
         self.template_engine = Some(template::TemplateEngine::new(&templates_dir));
         self.vault_root = Some(vault_root.to_path_buf());
@@ -1125,10 +1133,8 @@ impl BloomEditor {
     /// Drain file watcher events, debounce, and forward to the indexer thread.
     /// Returns true if a batch was sent (triggers needs_render for ⟳ indicator).
     pub fn poll_file_events(&mut self) -> bool {
-        // Drain watcher channel
-        if let Some(store) = &self.note_store {
-            use store::traits::NoteStore;
-            let rx = store.watch();
+        // Drain watcher channel (receiver obtained once in init_vault)
+        if let Some(rx) = &self.watcher_rx {
             while let Ok(event) = rx.try_recv() {
                 let path = match &event {
                     store::traits::FileEvent::Created(p)
@@ -1146,7 +1152,6 @@ impl BloomEditor {
                             .and_then(|c| c.as_os_str().to_str());
                         if matches!(first, Some("pages") | Some("journal")) {
                             self.pending_file_events.insert(rel.to_path_buf());
-                            // Reset debounce timer: 300ms from now
                             self.file_event_deadline =
                                 Some(Instant::now() + std::time::Duration::from_millis(300));
                         }
