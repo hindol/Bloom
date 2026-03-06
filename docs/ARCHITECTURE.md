@@ -188,45 +188,47 @@ Search match highlighting overlays on top via `render::search_highlight::highlig
 │  ┌─ Event Loop ─────────────────────────────────┐    │
 │  │  1. Poll for input (crossterm)               │    │
 │  │  2. Poll indexer completion channel           │    │
-│  │  3. Dispatch key → BloomEditor::handle_key() │    │
-│  │  4. Process Vim grammar, apply edits to rope  │    │
-│  │  5. Call editor.render(w, h) → RenderFrame    │    │
-│  │  6. TUI draws RenderFrame into ratatui buffer │    │
-│  │  7. ratatui diffs and flushes to terminal     │    │
+│  │  3. Poll MCP edit channel (if enabled)        │    │
+│  │  4. Dispatch key → BloomEditor::handle_key() │    │
+│  │  5. Process Vim grammar, apply edits to rope  │    │
+│  │  6. Call editor.render(w, h) → RenderFrame    │    │
+│  │  7. TUI draws RenderFrame into ratatui buffer │    │
+│  │  8. ratatui diffs and flushes to terminal     │    │
 │  └──────────────────────────────────────────────┘    │
 │                                                      │
 │  Rule: NEVER blocks. All I/O dispatched via channels.│
 │  Rope edits are O(log n) ≈ microseconds.             │
 │  Render produces a snapshot — no locks held.         │
 │  Index queries are read-only — no write contention.  │
-└────────┬─────────────────┬──────────────┬────────────┘
-    channel            channel        channel
-         │                 │              │
-         ▼                 ▼              ▼
-┌────────────┐    ┌────────────┐   ┌────────────┐
-│ Disk Writer│    │  Indexer   │   │File Watcher│
-│ (OS thread)│    │ (OS thread)│   │ (OS thread)│
-│            │    │            │   │            │
-│ Receives   │    │ Orchestrat-│   │ Watches    │
-│ write reqs │    │ or thread  │   │ vault dir, │
-│ via channel│    │ that coord-│   │ sends file │
-│ Debounced  │    │ inates     │   │ events via │
-│ 300ms,     │    │ NoteStore, │   │ channel to │
-│ atomic     │    │ Parser,    │   │ UI thread  │
-│ write→     │    │ and Index  │   │            │
-│ fsync→     │    │ layers.    │   │ Uses notify│
-│ rename     │    │ See below. │   │ crate      │
-└────────────┘    └────────────┘   └────────────┘
+└──────┬──────────┬──────────────┬──────────┬──────────┘
+  channel     channel        channel    channel
+       │          │              │          │
+       ▼          ▼              ▼          ▼
+┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐
+│Disk Writer│ │ Indexer  │ │  File    │ │ MCP Server   │
+│(OS thread)│ │(OS thread)│ │ Watcher │ │ (OS thread)  │
+│           │ │          │ │(OS thread)│ │              │
+│ Debounced │ │ Scan →   │ │          │ │ Listens on   │
+│ atomic    │ │ Read →   │ │ Watches  │ │ localhost.   │
+│ write→    │ │ Write    │ │ vault,   │ │ Translates   │
+│ fsync→    │ │ pipeline.│ │ sends    │ │ MCP tool     │
+│ rename    │ │ See      │ │ events   │ │ calls into   │
+│           │ │ below.   │ │ to UI.   │ │ edit requests│
+│           │ │          │ │          │ │ via channel  │
+│           │ │          │ │          │ │ to UI thread.│
+│           │ │          │ │          │ │ Opt-in only. │
+└──────────┘ └──────────┘ └──────────┘ └──────────────┘
 ```
 
 ### Thread Responsibilities
 
 | Thread | Input | Output | Blocking? |
 |--------|-------|--------|-----------|
-| **UI** | Terminal key events, file watcher events, indexer completion | Rope edits, RenderFrame, write/index requests | Never — all I/O via channels |
+| **UI** | Terminal key events, file watcher events, indexer completion, MCP edits | Rope edits, RenderFrame, write/index requests | Never — all I/O via channels |
 | **Disk Writer** | `WriteRequest` via channel | Atomic file writes (write→fsync→rename) | Blocks on disk I/O (own thread) |
 | **Indexer** | Triggered on startup and on file change events | Updated SQLite FTS5 index, completion notification | Blocks on file I/O + SQLite (own thread) |
 | **File Watcher** | Filesystem notifications (notify crate) | `FileEvent` via channel to UI thread | Blocks waiting for OS events (own thread) |
+| **MCP Server** | HTTP/stdio MCP tool calls on localhost | Edit requests via channel to UI thread, responses back to client | Blocks on network I/O (own thread, opt-in) |
 
 ### Indexer Architecture
 
@@ -274,6 +276,7 @@ All inter-thread communication uses `crossbeam` channels (bounded, lock-free):
 - **UI → Disk Writer**: `crossbeam::Sender<WriteRequest>` — fire-and-forget, debounced
 - **Indexer → UI**: `crossbeam::Sender<IndexComplete>` — completion notification with timing
 - **File Watcher → UI**: `crossbeam::Receiver<FileEvent>` — polled in event loop; triggers re-index of changed files
+- **MCP Server → UI**: `crossbeam::Sender<McpEditRequest>` — edit requests applied to the shared rope buffer; results sent back via a one-shot channel
 - **No shared mutable state** — threads communicate exclusively via channels
 - **SQLite access** — the Index handle lives on the indexer thread during writes, UI thread reads use a separate read-only connection (SQLite WAL mode supports concurrent readers)
 
