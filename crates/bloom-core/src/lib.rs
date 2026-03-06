@@ -2711,7 +2711,42 @@ impl BloomEditor {
                 let preview = if below_min {
                     None
                 } else {
-                    ap.picker.selected().and_then(|item| item.preview_text.clone())
+                    ap.picker.selected().and_then(|item| {
+                        // 1. Pre-set preview (e.g., search context, theme sample)
+                        if item.preview_text.is_some() {
+                            return item.preview_text.clone();
+                        }
+                        // 2. Try in-memory buffer (already open pages — free)
+                        if let Some(page_id) = types::PageId::from_hex(&item.id) {
+                            if let Some(buf) = self.buffer_mgr.get(&page_id) {
+                                let text = buf.text();
+                                let lines: Vec<_> = text.lines()
+                                    .take(20)
+                                    .map(|l| l.to_string())
+                                    .collect();
+                                if !lines.is_empty() {
+                                    return Some(lines.join("\n"));
+                                }
+                            }
+                            // 3. Read from disk via vault path + index metadata
+                            if let Some(idx) = &self.index {
+                                if let Some(meta) = idx.find_page_by_id(&page_id) {
+                                    let full = self.vault_root.as_ref()
+                                        .map(|r| r.join(&meta.path));
+                                    if let Some(path) = full {
+                                        if let Ok(content) = std::fs::read_to_string(&path) {
+                                            let preview: String = content.lines()
+                                                .take(20)
+                                                .collect::<Vec<_>>()
+                                                .join("\n");
+                                            return Some(preview);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        None
+                    })
                 };
                 Some(render::PickerFrame {
                     title: ap.title.clone(),
