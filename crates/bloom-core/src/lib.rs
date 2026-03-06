@@ -1178,20 +1178,30 @@ impl BloomEditor {
                         if matches!(first, Some("pages") | Some("journal")) {
                             // Check if this file has an open buffer
                             if let Some(page_id) = self.buffer_mgr.find_by_path(&path).cloned() {
-                                let is_dirty = self.buffer_mgr.get(&page_id)
-                                    .map_or(false, |b| b.is_dirty());
-                                if is_dirty {
-                                    // Dirty buffer: prompt user
-                                    self.active_dialog = Some(ActiveDialog::FileChanged {
-                                        page_id,
-                                        path: path.clone(),
-                                        selected: 0,
-                                    });
-                                } else {
-                                    // Clean buffer: auto-reload silently
-                                    if let Ok(content) = std::fs::read_to_string(&path) {
-                                        self.buffer_mgr.reload(&page_id, &content);
-                                        self.cursor = 0;
+                                if let Ok(disk_content) = std::fs::read_to_string(&path) {
+                                    let buf_content = self.buffer_mgr.get(&page_id)
+                                        .map(|b| b.text().to_string());
+                                    if buf_content.as_deref() == Some(disk_content.as_str()) {
+                                        // Disk matches buffer — this was our own save.
+                                        // Mark clean silently; no prompt, no reload needed.
+                                        if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                                            buf.mark_clean();
+                                        }
+                                    } else {
+                                        let is_dirty = self.buffer_mgr.get(&page_id)
+                                            .map_or(false, |b| b.is_dirty());
+                                        if is_dirty {
+                                            // Dirty buffer with different disk content: real conflict
+                                            self.active_dialog = Some(ActiveDialog::FileChanged {
+                                                page_id,
+                                                path: path.clone(),
+                                                selected: 0,
+                                            });
+                                        } else {
+                                            // Clean buffer, different content: external change
+                                            self.buffer_mgr.reload(&page_id, &disk_content);
+                                            self.cursor = 0;
+                                        }
                                     }
                                 }
                             }

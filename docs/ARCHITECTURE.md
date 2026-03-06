@@ -349,7 +349,8 @@ The core library has **zero dependency on any async runtime**. All concurrency i
 
 - **Atomic writes**: The disk writer uses a write→fsync→rename pattern. Content is written to a temporary file, fsynced to disk, then atomically renamed over the target. A crash at any point leaves either the old or new file intact — never a half-written file.
 - **Auto-save**: Debounced at 300ms after last keystroke. Dirty-buffer indicator shown in the status bar (dot or [+] next to filename).
-- **External file changes vs dirty buffer**: If the file watcher detects an external change to a file with unsaved in-memory edits, Bloom shows a prompt: "File changed on disk. Reload (losing edits) or keep buffer version?" This also handles `git checkout` scenarios.
+- **Self-write detection**: When the file watcher reports a change to an open buffer, Bloom reads the file and compares the disk content to the in-memory rope. If they match, the change was our own save — the buffer is marked clean silently (no prompt, no reload). This avoids false "file changed on disk" prompts after auto-save or manual save.
+- **External file changes vs dirty buffer**: If the disk content *differs* from the buffer and the buffer has unsaved edits, Bloom shows a prompt: "File changed on disk. Reload (losing edits) or keep buffer version?" If the buffer is clean (no unsaved edits), Bloom silently reloads the new content. This handles `git checkout`, Syncthing sync, and manual external edits.
 
 ---
 
