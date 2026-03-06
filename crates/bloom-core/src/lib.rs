@@ -123,7 +123,6 @@ const EX_COMMANDS: &[(&str, &str)] = &[
     ("bdelete", "close buffer"),
     ("theme", "switch theme"),
     ("rebuild-index", "rebuild search index"),
-    ("profile", "profile startup and render performance"),
 ];
 
 // ---------------------------------------------------------------------------
@@ -851,6 +850,26 @@ impl BloomEditor {
     /// Whether the wizard is currently active.
     pub fn wizard_active(&self) -> bool {
         self.wizard.is_some()
+    }
+
+    /// Show a startup timing notification.
+    pub fn notify_startup_time(&mut self, duration: std::time::Duration, file_count: usize) {
+        let ms = duration.as_millis();
+        let message = format!("Bloom ready in {}ms ({} files indexed)", ms, file_count);
+        self.notifications.push(render::Notification {
+            message,
+            level: render::NotificationLevel::Info,
+            expires_at: Instant::now() + std::time::Duration::from_secs(5),
+        });
+    }
+
+    /// Count of files in the vault (pages + journals).
+    pub fn indexed_file_count(&self) -> usize {
+        use store::traits::NoteStore;
+        self.note_store.as_ref().map_or(0, |s| {
+            s.list_pages().unwrap_or_default().len()
+                + s.list_journals().unwrap_or_default().len()
+        })
     }
 
     /// Perform startup according to config. Guarantees `active_page` is `Some` on return.
@@ -2130,10 +2149,6 @@ impl BloomEditor {
                 window::SplitDirection::Vertical,
             )],
             "rebuild-index" => vec![keymap::dispatch::Action::RebuildIndex],
-            "profile" => {
-                self.run_profile();
-                vec![keymap::dispatch::Action::Noop]
-            }
             _ => {
                 // Unknown command — noop
                 vec![keymap::dispatch::Action::Noop]
@@ -2899,65 +2914,6 @@ impl BloomEditor {
             None => return Ok(index::RebuildStats { pages: 0, links: 0, tags: 0 }),
         };
         idx.rebuild(&entries)
-    }
-
-    /// Run a profile of key operations and show results as a notification.
-    fn run_profile(&mut self) {
-        use std::time::Instant;
-        use store::traits::NoteStore;
-
-        let mut lines = Vec::new();
-
-        // Count vault files
-        let file_count = self.note_store.as_ref().map_or(0, |s| {
-            s.list_pages().unwrap_or_default().len()
-                + s.list_journals().unwrap_or_default().len()
-        });
-        lines.push(format!("vault: {} files", file_count));
-
-        // Profile: rebuild index
-        let t0 = Instant::now();
-        let stats = self.rebuild_index().ok();
-        let t1 = Instant::now();
-        let idx_ms = (t1 - t0).as_millis();
-        if let Some(s) = stats {
-            lines.push(format!("rebuild-index: {}ms ({} pages, {} links, {} tags)",
-                idx_ms, s.pages, s.links, s.tags));
-        } else {
-            lines.push(format!("rebuild-index: {}ms (no vault)", idx_ms));
-        }
-
-        // Profile: render
-        let t2 = Instant::now();
-        let _frame = self.render(
-            self.terminal_width.max(80),
-            self.terminal_height.max(24),
-        );
-        let t3 = Instant::now();
-        lines.push(format!("render: {}ms", (t3 - t2).as_millis()));
-
-        // Profile: collect search items
-        let t4 = Instant::now();
-        let (noun, items) = self.collect_search_items();
-        let t5 = Instant::now();
-        lines.push(format!("collect-search: {}ms ({} items)", (t5 - t4).as_millis(), items.len()));
-
-        // Profile: collect page items
-        let t6 = Instant::now();
-        let pages = self.collect_page_items();
-        let t7 = Instant::now();
-        lines.push(format!("collect-pages: {}ms ({} items)", (t7 - t6).as_millis(), pages.len()));
-
-        // Buffer stats
-        let buf_count = self.buffer_mgr.open_buffers().len();
-        lines.push(format!("open buffers: {}", buf_count));
-
-        let message = lines.join("  │  ");
-        self.notifications.push(render::Notification {
-            message,
-            level: render::NotificationLevel::Info,
-            expires_at: Instant::now() + std::time::Duration::from_secs(10),
-        });
     }
 }
 
