@@ -37,6 +37,8 @@ impl Index {
             .transaction()
             .map_err(|e| BloomError::IndexError(e.to_string()))?;
 
+        // Clear all index-derived tables. Do NOT clear page_access —
+        // it contains user-accumulated frecency data that must survive rebuilds.
         tx.execute_batch(
             "DELETE FROM pages_fts;
              DELETE FROM block_ids;

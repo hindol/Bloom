@@ -56,12 +56,14 @@ pub(crate) fn create_tables(conn: &Connection) -> Result<(), BloomError> {
             title, content, page_id UNINDEXED
         );
 
+        -- page_access is USER DATA, not index-derived. It stores frecency
+        -- scores accumulated over time. It must NEVER be cleared or dropped
+        -- during index rebuilds. Orphaned rows (page deleted) are harmless.
         CREATE TABLE IF NOT EXISTS page_access (
             page_id TEXT PRIMARY KEY,
             visit_count INTEGER NOT NULL DEFAULT 0,
             last_accessed_ms INTEGER NOT NULL DEFAULT 0,
-            frecency_score REAL NOT NULL DEFAULT 0.0,
-            FOREIGN KEY (page_id) REFERENCES pages(id)
+            frecency_score REAL NOT NULL DEFAULT 0.0
         );
         ",
     )
