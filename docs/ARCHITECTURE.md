@@ -59,63 +59,158 @@
 
 ### RenderFrame Abstraction
 
-The core library produces a `RenderFrame` — a UI-agnostic snapshot of everything to draw. Frontends never query editor state directly; they consume frames.
+The core library produces a `RenderFrame` — a UI-agnostic snapshot of everything to draw. Frontends never query editor state directly; they consume frames. The core owns layout computation (Vim/Emacs model); the TUI reads positions from the frame.
 
 ```
-EditorState::render() → RenderFrame
-    │
-    ├─→ bloom-tui    (ratatui reads RenderFrame → terminal cells)
-    ├─→ bloom-gui    (Tauri reads RenderFrame → HTML/CSS)
-    └─→ tests        (assert directly on RenderFrame fields)
+terminal.draw(|f| {
+    let (w, h) = f.area();
+    let frame = editor.render(w, h);    // core computes layout for this exact size
+    tui::draw(f, &frame, &theme);       // TUI reads rects, renders widgets
+});
 ```
 
 A `RenderFrame` contains:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `visible_lines` | `Vec<RenderedLine>` | Lines in the viewport with syntax spans |
-| `cursor` | `CursorState` | Position, shape (block/bar/underline), blink |
-| `status_bar` | `StatusBar` | Mode, filename, dirty flag, cursor pos, pending keys |
-| `picker` | `Option<PickerFrame>` | Active picker: query, results, selected index, filter pills |
+| `panes` | `Vec<PaneFrame>` | Pane content, cursor, status bar, and **layout rect** |
+| `maximized` | `bool` | Whether a pane is maximized (hides others) |
+| `hidden_pane_count` | `usize` | Number of hidden panes when maximized |
+| `picker` | `Option<PickerFrame>` | Active picker: query, results, selected index, preview |
+| `agenda` | `Option<AgendaFrame>` | Agenda overlay: tasks grouped by overdue/today/upcoming |
 | `which_key` | `Option<WhichKeyFrame>` | Popup: available key bindings in current prefix |
-| `diagnostics` | `Vec<Diagnostic>` | Orphaned links, broken refs (inline indicators) |
-| `splits` | `Vec<PaneFrame>` | Window layout tree (for multi-pane) |
+| `dialog` | `Option<DialogFrame>` | Confirmation dialog |
+| `notification` | `Option<Notification>` | Transient status message |
+
+Each `PaneFrame` includes a `PaneRectFrame` with `x, y, width, content_height, total_height` — concrete cell positions computed by the core's `WindowManager::compute_pane_rects()`. The TUI reads these directly instead of computing its own layout.
 
 This means:
 - **Tests assert on `RenderFrame`** — no terminal or browser needed.
 - **TUI and GUI are thin** — they map `RenderFrame` fields to their native primitives.
+- **Layout lives in one place** — the core computes pane dimensions; the TUI never splits areas.
 - **Design issues surface early** — both frontends consume the same contract.
+
+---
+
+## Rendering Model
+
+### Render Loop
+
+The TUI render loop runs synchronously on the UI thread at ~60fps (or on input):
+
+```
+loop {
+    terminal.draw(|f| {
+        let area = f.area();                        // actual terminal dimensions
+        let frame = editor.render(area.w, area.h);  // core: layout + viewport + content
+        tui::draw(f, &frame, &theme);               // TUI: widgets into ratatui buffer
+    });                                              // ratatui diffs and flushes to terminal
+    wait_for_input_or_tick();
+}
+```
+
+**Key property:** The terminal dimensions (`f.area()`) flow directly into `render()`, which uses them to compute pane rects. The same dimensions are used by the TUI to draw. No stored state to drift.
+
+### Cell Painting Strategy
+
+ratatui uses **differential rendering** — it maintains an in-memory buffer and only flushes cells that changed since the last frame to the terminal. This makes full-screen repaints cheap in the common case (most cells don't change).
+
+Each frame follows a three-layer painting strategy:
+
+```
+Layer 1: Clear + Background    ← writes ' ' with bg to every cell (clean slate)
+Layer 2: Pane content          ← editor lines, status bars, written into pane rects
+Layer 3: Overlays              ← picker, agenda, dialog, notification (drawn last, wins)
+```
+
+**Layer 1** ensures no stale content from previous frames bleeds through. `Clear` writes space characters (content reset), then `Block::default().style(bg)` sets the background colour. Both operate on the in-memory buffer — the terminal only receives the final diff.
+
+**Layer 2** renders each pane into its core-computed rect. The pane content (editor lines, syntax-highlighted spans) overwrites the background layer. Each pane includes its own status bar at the bottom of its rect.
+
+**Layer 3** renders overlays on top of panes. Overlays draw last, so their `set_cursor_position()` calls override the pane cursor — each overlay owns its cursor (picker query input, agenda selected row, dialog choice).
+
+### Viewport and Scrolling
+
+The viewport tracks which lines of the buffer are visible. On each `render()` call:
+
+1. `compute_pane_rects(w, h)` → active pane's `content_height`
+2. `viewport.height = content_height` (always matches the real screen area)
+3. `viewport.ensure_visible(cursor_line)` (scrolls if cursor moved past the edge)
+4. `render_buffer_lines()` produces `RenderedLine`s for the visible range
+
+The viewport height is never guessed or stored separately — it's derived from the layout computation on every frame, using the actual terminal dimensions.
+
+### Semantic Highlighting Pipeline
+
+All content — editor, picker preview, agenda tasks — uses the same highlighting path:
+
+```
+text line → parser.highlight_line(line, context) → Vec<StyledSpan>
+         → theme.style_for(span.style)           → ratatui::Style
+         → Span::styled(text_slice, style)        → rendered
+```
+
+Search match highlighting overlays on top via `render::search_highlight::highlight_matches()`, which produces `SearchMatch` spans that split or override base syntax spans.
 
 ---
 
 ## Threading Model
 
 ```
-┌────────────────────────────────────────────────────┐
-│                   UI Thread                         │
-│  Renders UI, handles input, edits rope buffer       │
-│  Rule: NEVER blocks. All I/O is async via channels. │
-└───────────┬──────────────┬──────────────┬──────────┘
-      channel         channel        channel
-            │              │              │
-            ▼              ▼              ▼
-   ┌────────────┐  ┌────────────┐  ┌────────────┐
-   │ Disk Writer│  │  Indexer   │  │File Watcher│
-   │ (OS thread)│  │ (OS thread)│  │ (OS thread)│
-   │            │  │            │  │            │
-   │ Single     │  │ Rebuilds   │  │ Watches    │
-   │ writer,    │  │ search     │  │ notes dir, │
-   │ debounced  │  │ index,     │  │ detects    │
-   │ auto-save, │  │ backlinks, │  │ external   │
-   │ no write   │  │ unlinked   │  │ changes    │
-   │ conflicts  │  │ mentions   │  │            │
-   └────────────┘  └────────────┘  └────────────┘
+┌──────────────────────────────────────────────────────┐
+│                    UI Thread                          │
+│                                                      │
+│  ┌─ Event Loop ─────────────────────────────────┐    │
+│  │  1. Poll for input (crossterm)               │    │
+│  │  2. Dispatch key → BloomEditor::handle_key() │    │
+│  │  3. Process Vim grammar, apply edits to rope  │    │
+│  │  4. Call editor.render(w, h) → RenderFrame    │    │
+│  │  5. TUI draws RenderFrame into ratatui buffer │    │
+│  │  6. ratatui diffs and flushes to terminal     │    │
+│  └──────────────────────────────────────────────┘    │
+│                                                      │
+│  Rule: NEVER blocks. All I/O dispatched via channels.│
+│  Rope edits are O(log n) ≈ microseconds.             │
+│  Render produces a snapshot — no locks held.         │
+└────────┬─────────────────┬──────────────┬────────────┘
+    channel            channel        channel
+         │                 │              │
+         ▼                 ▼              ▼
+┌────────────┐    ┌────────────┐   ┌────────────┐
+│ Disk Writer│    │  Indexer   │   │File Watcher│
+│ (OS thread)│    │ (OS thread)│   │ (OS thread)│
+│            │    │            │   │            │
+│ Receives   │    │ Receives   │   │ Watches    │
+│ write reqs │    │ index reqs │   │ vault dir, │
+│ via channel│    │ via channel│   │ sends file │
+│ Debounced  │    │ Rebuilds   │   │ events via │
+│ 300ms,     │    │ FTS5 index,│   │ channel to │
+│ atomic     │    │ backlinks, │   │ UI thread  │
+│ write→     │    │ tags,      │   │            │
+│ fsync→     │    │ unlinked   │   │ Uses notify│
+│ rename     │    │ mentions   │   │ crate      │
+└────────────┘    └────────────┘   └────────────┘
 ```
 
-- All threads are OS threads.
-- Inter-thread communication via `crossbeam` channels.
-- The core library has zero dependency on any async runtime.
-- Rope edits are O(log n) ≈ microseconds → safe on the UI thread.
+### Thread Responsibilities
+
+| Thread | Input | Output | Blocking? |
+|--------|-------|--------|-----------|
+| **UI** | Terminal key events, file watcher events | Rope edits, RenderFrame, write/index requests | Never — all I/O via channels |
+| **Disk Writer** | `WriteRequest` via channel | Atomic file writes (write→fsync→rename) | Blocks on disk I/O (own thread) |
+| **Indexer** | `IndexRequest` via channel | Updated SQLite FTS5 index | Blocks on SQLite writes (own thread) |
+| **File Watcher** | Filesystem notifications (notify crate) | `FileEvent` via channel to UI thread | Blocks waiting for OS events (own thread) |
+
+### Communication Pattern
+
+All inter-thread communication uses `crossbeam` channels (bounded, lock-free):
+
+- **UI → Disk Writer**: `crossbeam::Sender<WriteRequest>` — fire-and-forget, debounced
+- **UI → Indexer**: `crossbeam::Sender<IndexRequest>` — fire-and-forget
+- **File Watcher → UI**: `crossbeam::Receiver<FileEvent>` — polled in event loop
+- **No shared mutable state** — threads communicate exclusively via channels
+
+The core library has **zero dependency on any async runtime**. All concurrency is OS threads + channels. This keeps the dependency tree small, debugging straightforward, and latency predictable.
 
 ---
 
