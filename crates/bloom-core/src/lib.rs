@@ -795,7 +795,6 @@ impl BloomEditor {
         };
 
         if query.len() < 2 {
-            // Below min_query_len — show empty results
             if let Some(ap) = &mut self.picker_state {
                 ap.picker.replace_items(Vec::new());
                 ap.status_noun = "matches".to_string();
@@ -803,23 +802,55 @@ impl BloomEditor {
             return;
         }
 
-        // Query FTS index
+        // Two-phase search: FTS5 prefix candidates → nucleo fuzzy scoring
         let items = if let Some(idx) = &self.index {
             let vault_root = self.vault_root.clone().unwrap_or_default();
-            let filters = index::SearchFilters::default();
-            let results = idx.search(&query, &filters);
+
+            // Phase 1: FTS5 prefix query for candidate pages + content
+            let candidates = idx.search_candidates(&query);
+
+            // Phase 2: Fuzzy-score individual lines with nucleo
+            let mut scored: Vec<(GenericPickerItem, u32)> = Vec::new();
             let mut page_set = std::collections::HashSet::new();
-            let items: Vec<GenericPickerItem> = results.iter().take(500).map(|sr| {
-                page_set.insert(sr.page.id.clone());
-                let full_path = vault_root.join(&sr.page.path);
-                GenericPickerItem {
-                    id: format!("{}:{}", full_path.display(), sr.line),
-                    label: sr.line_text.trim().to_string(),
-                    middle: Some(format!("L{}", sr.line + 1)),
-                    right: Some(sr.page.title.clone()),
-                    preview_text: None,
+
+            for (meta, content) in &candidates {
+                let full_path = vault_root.join(&meta.path);
+                let lines: Vec<&str> = content.lines().collect();
+
+                // Skip frontmatter
+                let body_start = if lines.first().map_or(false, |l| l.trim() == "---") {
+                    lines.iter().skip(1)
+                        .position(|l| l.trim() == "---")
+                        .map(|i| i + 2)
+                        .unwrap_or(0)
+                } else {
+                    0
+                };
+
+                for (line_num, line_text) in lines.iter().enumerate() {
+                    if line_num < body_start || line_text.trim().is_empty() {
+                        continue;
+                    }
+                    if let Some(score) = picker::nucleo::fuzzy_score(&query, line_text) {
+                        page_set.insert(meta.id.clone());
+                        scored.push((
+                            GenericPickerItem {
+                                id: format!("{}:{}", full_path.display(), line_num),
+                                label: line_text.trim().to_string(),
+                                middle: Some(format!("L{}", line_num + 1)),
+                                right: Some(meta.title.clone()),
+                                preview_text: None,
+                            },
+                            score,
+                        ));
+                    }
                 }
-            }).collect();
+            }
+
+            // Sort by score descending, cap at 500
+            scored.sort_by(|a, b| b.1.cmp(&a.1));
+            scored.truncate(500);
+
             let page_count = page_set.len();
             if let Some(ap) = &mut self.picker_state {
                 ap.status_noun = format!(
@@ -828,7 +859,7 @@ impl BloomEditor {
                     if page_count == 1 { "page" } else { "pages" },
                 );
             }
-            items
+            scored.into_iter().map(|(item, _)| item).collect()
         } else {
             // Index not ready — fall back to disk scan
             let (_noun, items) = self.collect_search_items();

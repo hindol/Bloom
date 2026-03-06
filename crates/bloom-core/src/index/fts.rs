@@ -3,6 +3,55 @@ use rusqlite::types::ToSql;
 use super::{Index, SearchFilters, SearchResult};
 
 impl Index {
+    /// Phase 1: FTS5 prefix query to retrieve candidate pages and their content.
+    /// Returns (PageMeta, full_content) pairs for pages matching the prefix terms.
+    pub fn search_candidates(&self, query: &str) -> Vec<(crate::types::PageMeta, String)> {
+        if query.trim().is_empty() {
+            return Vec::new();
+        }
+
+        // Convert query words to FTS5 prefix terms: "rop data" → "rop* AND data*"
+        let fts_query: String = query
+            .split_whitespace()
+            .filter(|w| !w.is_empty())
+            .map(|w| format!("{}*", w.replace('"', "")))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+
+        if fts_query.is_empty() {
+            return Vec::new();
+        }
+
+        let sql = "SELECT p.id, p.title, p.created, p.path, f.content \
+                    FROM pages_fts f \
+                    JOIN pages p ON p.id = f.page_id \
+                    WHERE pages_fts MATCH ?1";
+
+        let mut stmt = match self.conn.prepare(sql) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+
+        let rows: Vec<_> = match stmt.query_map(rusqlite::params![&fts_query], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        }) {
+            Ok(r) => r.filter_map(|r| r.ok()).collect(),
+            Err(_) => return Vec::new(),
+        };
+
+        rows.into_iter()
+            .map(|(id, title, created, path, content)| {
+                (self.row_to_page_meta(&id, &title, &created, &path), content)
+            })
+            .collect()
+    }
+
     pub fn search(&self, query: &str, filters: &SearchFilters) -> Vec<SearchResult> {
         let mut sql = String::from(
             "SELECT p.id, p.title, p.created, p.path, f.content, f.rank \
