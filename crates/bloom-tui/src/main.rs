@@ -53,15 +53,11 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
         editor.start_wizard();
     } else {
         // Existing vault — initialize and startup normally
-        let t_start = Instant::now();
         let vault_path = default_vault_path();
-        let _ = editor.init_vault(std::path::Path::new(&vault_path));
+        if let Ok(timing) = editor.init_vault(std::path::Path::new(&vault_path)) {
+            editor.notify_startup_timing(&timing);
+        }
         editor.startup();
-        let init_duration = t_start.elapsed();
-
-        // Count indexed files for the startup message
-        let file_count = editor.indexed_file_count();
-        editor.notify_startup_time(init_duration, file_count);
     }
 
     // Update viewport to terminal size

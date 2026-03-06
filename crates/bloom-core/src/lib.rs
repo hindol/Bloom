@@ -129,6 +129,14 @@ const EX_COMMANDS: &[(&str, &str)] = &[
 // BloomEditor — The Orchestrator
 // ---------------------------------------------------------------------------
 
+/// Timing breakdown from init_vault().
+pub struct StartupTiming {
+    pub total_ms: u64,
+    pub init_ms: u64,
+    pub index_ms: u64,
+    pub file_count: usize,
+}
+
 pub struct BloomEditor {
     pub config: config::Config,
     buffer_mgr: BufferManager,
@@ -806,7 +814,9 @@ impl BloomEditor {
     }
 
     /// Initialize with a vault path — sets up index, journal, template engine
-    pub fn init_vault(&mut self, vault_root: &std::path::Path) -> Result<(), error::BloomError> {
+    pub fn init_vault(&mut self, vault_root: &std::path::Path) -> Result<StartupTiming, error::BloomError> {
+        let t0 = Instant::now();
+
         let index_path = vault_root.join(".index.db");
         self.index = Some(index::Index::open(&index_path)?);
         self.journal = Some(journal::Journal::new(vault_root));
@@ -814,6 +824,8 @@ impl BloomEditor {
         let templates_dir = vault_root.join("templates");
         self.template_engine = Some(template::TemplateEngine::new(&templates_dir));
         self.vault_root = Some(vault_root.to_path_buf());
+
+        let init_ms = t0.elapsed().as_millis() as u64;
 
         // Start auto-save disk writer thread
         let (writer, tx) = store::disk_writer::DiskWriter::new(self.config.autosave_debounce_ms);
@@ -830,9 +842,18 @@ impl BloomEditor {
         }
 
         // Build index from vault files
-        let _ = self.rebuild_index();
+        let t_index = Instant::now();
+        let stats = self.rebuild_index().unwrap_or(index::RebuildStats { pages: 0, links: 0, tags: 0 });
+        let index_ms = t_index.elapsed().as_millis() as u64;
 
-        Ok(())
+        let total_ms = t0.elapsed().as_millis() as u64;
+
+        Ok(StartupTiming {
+            total_ms,
+            init_ms,
+            index_ms,
+            file_count: stats.pages,
+        })
     }
 
     /// Check if the setup wizard should run (no vault at default path).
@@ -852,24 +873,17 @@ impl BloomEditor {
         self.wizard.is_some()
     }
 
-    /// Show a startup timing notification.
-    pub fn notify_startup_time(&mut self, duration: std::time::Duration, file_count: usize) {
-        let ms = duration.as_millis();
-        let message = format!("Bloom ready in {}ms ({} files indexed)", ms, file_count);
+    /// Show a startup timing notification with stage breakdown.
+    pub fn notify_startup_timing(&mut self, timing: &StartupTiming) {
+        let message = format!(
+            "Bloom ready in {}ms  │  init {}ms  │  index {}ms ({} files)",
+            timing.total_ms, timing.init_ms, timing.index_ms, timing.file_count,
+        );
         self.notifications.push(render::Notification {
             message,
             level: render::NotificationLevel::Info,
-            expires_at: Instant::now() + std::time::Duration::from_secs(5),
+            expires_at: Instant::now() + std::time::Duration::from_secs(8),
         });
-    }
-
-    /// Count of files in the vault (pages + journals).
-    pub fn indexed_file_count(&self) -> usize {
-        use store::traits::NoteStore;
-        self.note_store.as_ref().map_or(0, |s| {
-            s.list_pages().unwrap_or_default().len()
-                + s.list_journals().unwrap_or_default().len()
-        })
     }
 
     /// Perform startup according to config. Guarantees `active_page` is `Some` on return.
