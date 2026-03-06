@@ -218,11 +218,11 @@ fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiT
         spans.push(Span::styled(lnum, lnum_style));
 
         // Content text with syntax highlighting
-        let text = rendered_line.text.trim_end_matches('\n');
+        let text = rendered_line.text.trim_end_matches(['\n', '\r']);
         let mut text_width = 0usize;
 
         if rendered_line.spans.is_empty() {
-            text_width = text.len();
+            text_width = text.width();
             spans.push(Span::styled(text, base_style));
         } else {
             let mut last_end = 0usize;
@@ -241,7 +241,7 @@ fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiT
             if last_end < text.len() {
                 spans.push(Span::styled(&text[last_end..], base_style));
             }
-            text_width = text.len();
+            text_width = text.width();
         }
 
         // Pad remaining width with spaces in base_style
@@ -863,7 +863,7 @@ fn draw_notification(
     level: &NotificationLevel,
     theme: &TuiTheme,
 ) {
-    let w = (message.len() as u16 + 4).min(area.width);
+    let w = (message.width() as u16 + 4).min(area.width);
     let x = area.right().saturating_sub(w + 1);
     let y = area.y;
     let notif_area = Rect::new(x, y, w, 1);
@@ -1868,6 +1868,55 @@ mod tests {
             let sample: Vec<_> = issues.iter().take(20).collect();
             panic!(
                 "Found {} cells with bg=Reset. First 20:\n{}",
+                issues.len(),
+                sample.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n")
+            );
+        }
+    }
+
+    /// Regression: CRLF line endings must not cause short rows.
+    #[test]
+    fn test_no_reset_bg_with_crlf() {
+        let config = Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = bloom_core::uuid::generate_hex_id();
+        editor.open_page_with_content(
+            &id,
+            "Test",
+            std::path::Path::new("test.md"),
+            "# Hello\r\n\r\nWorld\r\nLine four\r\nLine five with **bold** and #tag\r\n",
+        );
+
+        let backend = TestBackend::new(60, 15);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = crate::theme::TuiTheme::new(editor.theme());
+
+        terminal
+            .draw(|tf| {
+                let area = tf.area();
+                let frame = editor.render(area.width, area.height);
+                draw(tf, &frame, &theme);
+            })
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        let mut issues = Vec::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                let cell = &buf[(x, y)];
+                if cell.bg == Color::Reset {
+                    issues.push(format!(
+                        "({},{}) sym={:?} fg={:?}",
+                        x, y, cell.symbol(), cell.fg
+                    ));
+                }
+            }
+        }
+
+        if !issues.is_empty() {
+            let sample: Vec<_> = issues.iter().take(20).collect();
+            panic!(
+                "Found {} cells with bg=Reset (CRLF content). First 20:\n{}",
                 issues.len(),
                 sample.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n")
             );
