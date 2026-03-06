@@ -123,6 +123,7 @@ const EX_COMMANDS: &[(&str, &str)] = &[
     ("bdelete", "close buffer"),
     ("theme", "switch theme"),
     ("rebuild-index", "rebuild search index"),
+    ("stats", "show vault and index stats"),
 ];
 
 // ---------------------------------------------------------------------------
@@ -168,6 +169,7 @@ pub struct BloomEditor {
     // Background indexer
     indexer_rx: Option<crossbeam::channel::Receiver<index::indexer::IndexComplete>>,
     indexing: bool,
+    last_index_timing: Option<index::indexer::IndexTiming>,
 }
 
 // ---------------------------------------------------------------------------
@@ -428,6 +430,7 @@ impl BloomEditor {
             terminal_width: 80,
             indexer_rx: None,
             indexing: false,
+            last_index_timing: None,
             config,
         })
     }
@@ -967,13 +970,21 @@ impl BloomEditor {
                 self.indexing = false;
                 let t = &complete.timing;
                 let message = format!(
-                    "Index ready: {} files in {}ms  │  scan {}ms  │  read {}ms  │  write {}ms  │  {} changed",
-                    t.files_scanned, t.total_ms, t.scan_ms, t.read_parse_ms, t.write_ms, t.files_changed,
+                    "Index ready — {} files, {}ms",
+                    t.files_scanned, t.total_ms,
                 );
+                self.last_index_timing = Some(index::indexer::IndexTiming {
+                    scan_ms: t.scan_ms,
+                    read_parse_ms: t.read_parse_ms,
+                    write_ms: t.write_ms,
+                    total_ms: t.total_ms,
+                    files_scanned: t.files_scanned,
+                    files_changed: t.files_changed,
+                });
                 self.notifications.push(render::Notification {
                     message,
                     level: render::NotificationLevel::Info,
-                    expires_at: Instant::now() + std::time::Duration::from_secs(8),
+                    expires_at: Instant::now() + std::time::Duration::from_secs(4),
                 });
                 // Reload the index connection to pick up changes from the indexer thread
                 if let Some(vault_root) = &self.vault_root {
@@ -991,6 +1002,42 @@ impl BloomEditor {
     /// Whether background indexing is in progress.
     pub fn is_indexing(&self) -> bool {
         self.indexing
+    }
+
+    /// Show vault and index stats as a notification.
+    fn show_stats(&mut self) {
+        let mut parts: Vec<String> = Vec::new();
+
+        // Page/journal counts from index
+        if let Some(idx) = &self.index {
+            let pages = idx.list_pages(None).len();
+            let tags = idx.all_tags().len();
+            let tasks = idx.all_open_tasks().len();
+            parts.push(format!("{pages} pages  │  {tags} tags  │  {tasks} open tasks"));
+        }
+
+        // Last index timing
+        if let Some(t) = &self.last_index_timing {
+            parts.push(format!(
+                "Index: {}ms total  │  scan {}ms  │  read {}ms  │  write {}ms  │  {} scanned, {} changed",
+                t.total_ms, t.scan_ms, t.read_parse_ms, t.write_ms, t.files_scanned, t.files_changed,
+            ));
+        } else if self.indexing {
+            parts.push("Indexing in progress…".to_string());
+        } else {
+            parts.push("No index stats yet".to_string());
+        }
+
+        // Open buffers
+        let buf_count = self.buffer_mgr.open_buffers().len();
+        parts.push(format!("{buf_count} open buffers"));
+
+        let message = parts.join("  ·  ");
+        self.notifications.push(render::Notification {
+            message,
+            level: render::NotificationLevel::Info,
+            expires_at: Instant::now() + std::time::Duration::from_secs(10),
+        });
     }
 
     /// Perform startup according to config. Guarantees `active_page` is `Some` on return.
@@ -2278,6 +2325,10 @@ impl BloomEditor {
                 window::SplitDirection::Vertical,
             )],
             "rebuild-index" => vec![keymap::dispatch::Action::RebuildIndex],
+            "stats" => {
+                self.show_stats();
+                vec![keymap::dispatch::Action::Noop]
+            }
             _ => {
                 // Unknown command — noop
                 vec![keymap::dispatch::Action::Noop]
