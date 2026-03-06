@@ -144,19 +144,35 @@ The viewport height is never guessed or stored separately — it's derived from 
 
 All content — editor, picker preview, agenda tasks — uses the same highlighting path:
 
-```mermaid
-flowchart LR
-    A["text line"] --> B["parser.highlight_line()"]
-    B --> C["Vec&lt;StyledSpan&gt;"]
-    C --> D["theme.style_for()"]
-    D --> E["ratatui::Style"]
-    E --> F["Span::styled()"]
-    F --> G["rendered cell"]
-
-    H["search query"] --> I["search_highlight::highlight_matches()"]
-    I --> J["SearchMatch spans"]
-    J --> K["overlay onto syntax spans"]
-    K --> F
+```
+                        ┌─────────────────────┐
+                        │     text line        │
+                        └──────────┬──────────┘
+                                   │
+                                   ▼
+                    ┌──────────────────────────────┐
+                    │  parser.highlight_line(line)  │
+                    └──────────────┬───────────────┘
+                                   │
+                                   ▼
+                          Vec<StyledSpan>
+                                   │
+                    ┌──────────────┴───────────────┐
+                    │                              │
+                    ▼                              ▼
+         ┌──────────────────┐           ┌──────────────────────┐
+         │ theme.style_for()│           │ search_highlight::   │
+         │ (syntax styles)  │           │ highlight_matches()  │
+         └────────┬─────────┘           │ (SearchMatch spans)  │
+                  │                     └──────────┬───────────┘
+                  │                                │
+                  └──────────┬─────────────────────┘
+                             │  overlay / merge
+                             ▼
+                    ┌──────────────────┐
+                    │  Span::styled()  │
+                    │  → rendered cell │
+                    └──────────────────┘
 ```
 
 Search match highlighting overlays on top via `render::search_highlight::highlight_matches()`, which produces `SearchMatch` spans that split or override base syntax spans.
