@@ -612,6 +612,87 @@ Top/bottom:          gg / G
 
 ---
 
+## Ranking & Large Vault Ergonomics
+
+With 1000+ pages, raw fuzzy matching alone produces too many results. Every modal picker uses a **multi-signal ranking** pipeline that combines fuzzy score with contextual signals. The goal: the page you want is almost always in the first 3 results — even before you type.
+
+### Zero-query state: curated, not overwhelming
+
+When a picker opens with an empty query (or a restored query), results are not "all 1000 pages sorted alphabetically." Instead, each picker shows a **curated default list**:
+
+| Picker | Zero-query results |
+|--------|-------------------|
+| Find Page | Last 10 recently accessed pages |
+| Switch Buffer | Open buffers, most recently focused first |
+| Search | Restored previous query results, or "Type to search…" |
+| Journal | Last 30 journal entries, reverse chronological |
+| Tags | All tags, sorted by usage frequency |
+
+As the user types, the curated list transitions smoothly to full fuzzy search results. The transition is seamless — the same ranking pipeline handles both states.
+
+### Frecency: frequency × recency
+
+The primary ranking signal for Find Page is **frecency** — a score combining how often and how recently a page was accessed. Inspired by Firefox's awesome bar:
+
+```
+frecency_score = Σ (weight × recency_bucket)
+
+Recency buckets:
+  Accessed in the last 4 hours  → weight × 100
+  Accessed in the last day      → weight × 70
+  Accessed in the last week     → weight × 50
+  Accessed in the last month    → weight × 30
+  Accessed longer ago           → weight × 10
+
+Weight: each access adds 1 visit. Pages visited 5× this week rank
+higher than pages visited 1× today.
+```
+
+Frecency scores are stored in the SQLite index (`page_access` table) and updated on every `open_page`. The score is cheap to compute — a single `UPDATE` on page open, a `JOIN` on picker query.
+
+### Multi-signal ranking pipeline
+
+When a query is present, the final score combines multiple signals:
+
+```
+final_score = fuzzy_score(query, title)
+            + 0.3 × frecency_normalized
+            + word_boundary_bonus
+            + exact_prefix_bonus
+```
+
+| Signal | Weight | Purpose |
+|--------|--------|---------|
+| Fuzzy score | 1.0 | Core relevance — how well the query matches |
+| Frecency | 0.3 | Personal relevance — pages you use more rank higher |
+| Word boundary | bonus | "ed th" → "**Ed**itor **Th**eory" ranks above "r**ed** pa**th**" |
+| Exact prefix | bonus | "Rust" → "**Rust** Notes" ranks above "T**rust** Issues" |
+
+The 0.3 weight for frecency means: a perfect fuzzy match always wins, but among similarly-scored results, your frequently-used pages bubble up.
+
+### Search picker: FTS5 candidates → fuzzy re-rank
+
+Search (`SPC s s`) uses a two-phase pipeline optimized for large vaults:
+
+1. **Phase 1 — FTS5 prefix candidates**: Query words become prefix terms (`"mem pat"` → `"mem* OR pat*"`). FTS5 returns matching pages + content from SQLite. This narrows 1000 pages to ~20 candidates in <1ms.
+
+2. **Phase 2 — Per-word fuzzy scoring**: Each candidate's content lines are scored with `fuzzy_words_score()` — every query word is fuzzy-matched independently against the line. `"mem pat re"` matches `"Deep research on memory usage patterns"` because `mem→memory`, `pat→patterns`, `re→research`.
+
+Results are ranked by fuzzy score, capped at 500 for responsiveness. The search query is persisted across sessions — reopening `SPC s s` restores the last query with select-all highlighting (typing replaces, arrows preserve).
+
+### Preview pane: lazy content loading
+
+Preview panes show content for the highlighted result. For index-backed pickers, content is loaded lazily:
+
+- **Find Page**: First ~20 lines from the page file, with semantic highlighting
+- **Search**: ±5 lines of context around the matching line, with `❯` marker on the match
+- **Journal**: Full journal content with semantic highlighting
+- **Backlinks**: Source page with the linking line highlighted
+
+Preview content is loaded on highlight change (not upfront for all results). For pages already in a buffer, preview reads from the in-memory rope. For others, a single file read from disk (the OS page cache makes this fast after indexing).
+
+---
+
 ## Inline Menu — Shared Properties
 
 All inline menus (§9–§13) share one rendering component and one input handler:
