@@ -324,6 +324,11 @@ Within the active pane's status bar, each element has its own typographic weight
 | Line:col | `faded` | — | Faded | Reference info — glance-at, not stare-at |
 | MCP `⚡` (idle) | `faded` | — | Faded | Background service, not active |
 | MCP `⚡` (editing) | `salient` | — | Signal | LLM is writing to this buffer right now |
+| Indexer `⟳` (active) | `salient` | — | Signal | Index rebuild in progress |
+| Disk Writer `⏍` (active) | `salient` | — | Signal | File being written |
+| File Watcher `◉` (active) | `salient` | — | Signal | Processing external change |
+
+All thread indicators use the same two-tier styling: `faded` when idle/static, `salient` when animating. Hidden when the thread is off or has no work.
 
 All elements share the status bar background (`highlight` for Normal mode, mode-specific colour for Insert/Visual/Command). The inactive pane bar uses `faded` on `subtle` with just the page title — no mode, position, or pending keys.
 

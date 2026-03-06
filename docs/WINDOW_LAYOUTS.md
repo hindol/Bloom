@@ -291,25 +291,31 @@ Just the page title. No mode, no position, no pending keys. `subtle` background 
 | VISUAL | `background` | `popout` | Selection is happening — needs to stand out |
 | COMMAND | `background` | `accent_blue` | Informational — you're talking to the editor |
 
-### MCP Status Indicator
+### Background Thread Indicators
 
-When the MCP server (G17) is enabled, a small indicator appears in the right section of the **active pane's** status bar, between pending keys and cursor position.
+The right section of the active pane's status bar shows icons for background threads. Icons are **hidden when idle** (except MCP, which shows a persistent icon when enabled). Icons **animate when active** — the spinner tells the user "something is happening" without being intrusive.
 
 ```
-│ NORMAL │ Text Editor Theory                    ⚡    12:1 │
-                                                 ↑
-                                           MCP indicator
+│ NORMAL │ Text Editor Theory [+]       ⟳  ⏍  ⚡    12:1 │
+                                        ↑   ↑   ↑
+                                   indexer  disk  MCP
 ```
 
-| State | Icon | Description |
-|-------|------|-------------|
-| Off | *(nothing)* | MCP server is not running |
-| Idle | `⚡` | MCP server running, no activity |
-| Editing this buffer | `⚡` animated | MCP is writing to the buffer you're viewing |
+| Thread | Icon | When shown | When animating |
+|--------|------|------------|----------------|
+| **Indexer** | `⟳` | During index rebuild (startup or `:rebuild-index`) | Spinner: `⟳◐◑◒◓` while scanning/parsing/writing |
+| **Disk Writer** | `⏍` | During file write | Brief flash on each atomic write (debounced 300ms) |
+| **File Watcher** | `◉` | Processing external file change | Pulse while reloading changed buffer |
+| **MCP Server** | `⚡` | Whenever MCP is enabled (opt-in) | Spinner: `⚡◐◑◒◓` when LLM is editing the active buffer |
 
-**Animation:** When an MCP edit arrives on the active buffer, the indicator cycles through a spinner sequence (`⚡◐◑◒◓`) at the tick rate (~100ms). The animation plays for approximately 1 second after the last MCP edit, then returns to the static `⚡`. This tells the user "the LLM is changing this file right now" without being intrusive.
+**Animation:** Active indicators cycle through a spinner sequence at the tick rate (~100ms). The animation plays while the thread is working and returns to idle (or hidden) when work completes. Each thread sends heartbeat messages via its channel; the `tick()` method advances the animation frame.
 
-If the MCP server is editing a *different* buffer (not the one in the active pane), the indicator stays at static `⚡` — no animation. The user only sees activity when it's happening in their viewport.
+**Layout order:** Indicators appear between pending keys and cursor position, left-to-right: indexer → disk → watcher → MCP. Only visible indicators take space — the bar doesn't reserve room for hidden icons.
+
+**Styling:**
+- Idle/static icons: `faded` — background service, not demanding attention
+- Animating icons: `salient` — "something is happening right now"
+- All icons share the status bar background
 
 ### Separator
 
