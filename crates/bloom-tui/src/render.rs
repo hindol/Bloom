@@ -213,7 +213,7 @@ fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiT
         let base_style = if is_cursor_line {
             theme.current_line_style()
         } else {
-            RStyle::default()
+            RStyle::default().bg(theme.background())
         };
 
         let text = &rendered_line.text;
@@ -233,7 +233,7 @@ fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiT
                     line_spans.push(Span::styled(gap.to_string(), base_style));
                 }
                 let slice = &text[start..end];
-                let style = theme.style_for(&span_info.style).patch(base_style);
+                let style = base_style.patch(theme.style_for(&span_info.style));
                 line_spans.push(Span::styled(slice.to_string(), style));
                 last_end = end;
             }
