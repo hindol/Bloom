@@ -170,6 +170,7 @@ pub struct BloomEditor {
     indexer_rx: Option<crossbeam::channel::Receiver<index::indexer::IndexComplete>>,
     indexing: bool,
     last_index_timing: Option<index::indexer::IndexTiming>,
+    last_search_query: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -353,6 +354,8 @@ struct ActivePicker {
     min_query_len: usize,
     /// For theme picker: the theme to revert to on cancel.
     previous_theme: Option<&'static theme::ThemePalette>,
+    /// When true, the next character typed replaces the query (select-all UX).
+    query_selected: bool,
 }
 
 #[derive(Clone)]
@@ -431,6 +434,7 @@ impl BloomEditor {
             indexer_rx: None,
             indexing: false,
             last_index_timing: None,
+            last_search_query: String::new(),
             config,
         })
     }
@@ -540,14 +544,24 @@ impl BloomEditor {
             _ => picker::MatchMode::Fuzzy,
         };
         self.picker_state = Some(ActivePicker {
-            kind,
+            kind: kind.clone(),
             picker: picker::Picker::with_match_mode(items, match_mode),
             title,
             query: String::new(),
             status_noun,
             min_query_len,
             previous_theme: None,
+            query_selected: false,
         });
+
+        // Search: restore last query and run FTS
+        if matches!(kind, PickerKind::Search) && !self.last_search_query.is_empty() {
+            if let Some(ap) = &mut self.picker_state {
+                ap.query = self.last_search_query.clone();
+                ap.query_selected = true;
+            }
+            self.refresh_search_picker();
+        }
     }
 
     fn collect_page_items(&self) -> Vec<GenericPickerItem> {
@@ -849,6 +863,7 @@ impl BloomEditor {
             status_noun: "themes".to_string(),
             min_query_len: 0,
             previous_theme: Some(previous_theme),
+            query_selected: false,
         });
     }
 
@@ -1514,6 +1529,7 @@ impl BloomEditor {
                 if is_theme {
                     self.theme_picker_cancel();
                 } else {
+                    self.save_picker_query();
                     self.picker_state = None;
                 }
                 vec![keymap::dispatch::Action::Noop]
@@ -1522,6 +1538,9 @@ impl BloomEditor {
                 if is_theme {
                     self.theme_picker_confirm();
                 } else if let Some(ap) = self.picker_state.take() {
+                    if matches!(ap.kind, keymap::dispatch::PickerKind::Search) {
+                        self.last_search_query = ap.query.clone();
+                    }
                     if let Some(selected) = ap.picker.selected() {
                         self.handle_picker_selection(&ap.kind, selected.clone());
                     }
@@ -1550,19 +1569,26 @@ impl BloomEditor {
             }
             KeyCode::Backspace => {
                 if let Some(ap) = &mut self.picker_state {
-                    if !ap.query.is_empty() {
+                    if ap.query_selected {
+                        ap.query.clear();
+                        ap.query_selected = false;
+                    } else if !ap.query.is_empty() {
                         ap.query.pop();
-                        if matches!(ap.kind, keymap::dispatch::PickerKind::Search) {
-                            self.refresh_search_picker();
-                        } else {
-                            ap.picker.set_query(&ap.query);
-                        }
+                    }
+                    if matches!(ap.kind, keymap::dispatch::PickerKind::Search) {
+                        self.refresh_search_picker();
+                    } else if let Some(ap) = &mut self.picker_state {
+                        ap.picker.set_query(&ap.query);
                     }
                 }
                 vec![keymap::dispatch::Action::Noop]
             }
             KeyCode::Char(c) => {
                 if let Some(ap) = &mut self.picker_state {
+                    if ap.query_selected {
+                        ap.query.clear();
+                        ap.query_selected = false;
+                    }
                     ap.query.push(*c);
                     if matches!(ap.kind, keymap::dispatch::PickerKind::Search) {
                         self.refresh_search_picker();
@@ -1576,6 +1602,14 @@ impl BloomEditor {
         }
     }
 
+    fn save_picker_query(&mut self) {
+        if let Some(ap) = &self.picker_state {
+            if matches!(ap.kind, keymap::dispatch::PickerKind::Search) {
+                self.last_search_query = ap.query.clone();
+            }
+        }
+    }
+
     fn handle_picker_selection(
         &mut self,
         kind: &keymap::dispatch::PickerKind,
@@ -1584,14 +1618,38 @@ impl BloomEditor {
         use keymap::dispatch::PickerKind;
         match kind {
             PickerKind::FindPage | PickerKind::Journal => {
-                // Open the selected page
-                let path = std::path::PathBuf::from(&item.id);
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    let fm = self.parser.parse_frontmatter(&content);
-                    let title = fm.and_then(|f| f.title).unwrap_or_else(|| item.label.clone());
-                    let id = crate::uuid::generate_hex_id();
-                    self.open_page_with_content(&id, &title, &path, &content);
-                }
+                // item.id is either a PageId hex (from index) or a full path (disk fallback).
+                // Try index lookup first, then fall back to treating id as a path.
+                let (path, content, title) = if let Some(page_id) = types::PageId::from_hex(&item.id) {
+                    if let Some(idx) = &self.index {
+                        if let Some(meta) = idx.find_page_by_id(&page_id) {
+                            let full = self.vault_root.as_ref()
+                                .map(|r| r.join(&meta.path))
+                                .unwrap_or_else(|| meta.path.clone());
+                            match std::fs::read_to_string(&full) {
+                                Ok(c) => (full, c, meta.title),
+                                Err(_) => return,
+                            }
+                        } else {
+                            return;
+                        }
+                    } else {
+                        return;
+                    }
+                } else {
+                    // Disk fallback: id is a full file path
+                    let path = std::path::PathBuf::from(&item.id);
+                    match std::fs::read_to_string(&path) {
+                        Ok(c) => {
+                            let fm = self.parser.parse_frontmatter(&c);
+                            let title = fm.and_then(|f| f.title).unwrap_or_else(|| item.label.clone());
+                            (path, c, title)
+                        }
+                        Err(_) => return,
+                    }
+                };
+                let id = crate::uuid::generate_hex_id();
+                self.open_page_with_content(&id, &title, &path, &content);
             }
             PickerKind::Search => {
                 // item.id is "path:line_number" — open page and jump to line
@@ -3615,6 +3673,44 @@ mod tests {
         assert_eq!(editor.picker_state.as_ref().unwrap().title, "Find Page");
         let frame = editor.render(80, 24);
         assert!(frame.picker.is_some());
+    }
+
+    // Regression: selecting a page from FindPage picker should open it.
+    // Tests both the index path (item.id = hex) and disk fallback (item.id = path).
+    #[test]
+    fn test_find_page_selection_opens_page() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let pages_dir = dir.path().join("pages");
+        std::fs::create_dir_all(&pages_dir).unwrap();
+        std::fs::write(
+            pages_dir.join("test-page.md"),
+            "---\nid: aabb1122\ntitle: Test Page\ncreated: 2026-01-01\ntags: []\n---\n\n# Test Page\n\nBody text.\n",
+        ).unwrap();
+
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let _ = editor.init_vault(dir.path());
+
+        // Wait for indexer (in tests, it completes quickly)
+        for _ in 0..100 {
+            if editor.poll_indexer() { break; }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(!editor.is_indexing(), "indexer should have completed");
+
+        // Open find page picker
+        editor.handle_key(KeyEvent::char(' '));
+        editor.handle_key(KeyEvent::char('f'));
+        editor.handle_key(KeyEvent::char('f'));
+        assert!(editor.picker_state.is_some());
+
+        // Select the first (only) result
+        editor.handle_key(KeyEvent::enter());
+        assert!(editor.picker_state.is_none(), "picker should close after selection");
+        assert!(editor.active_page.is_some(), "a page should be open after selection");
+
+        let frame = editor.render(80, 24);
+        assert!(!frame.panes[0].visible_lines.is_empty(), "page content should be visible");
     }
 
     // SPC shows which-key popup in render
