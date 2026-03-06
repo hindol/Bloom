@@ -64,6 +64,13 @@ impl Index {
             stats.tags += entry.tags.len();
         }
 
+        // Prune orphaned frecency data for pages that no longer exist
+        tx.execute(
+            "DELETE FROM page_access WHERE page_id NOT IN (SELECT id FROM pages)",
+            [],
+        )
+        .map_err(|e| BloomError::IndexError(e.to_string()))?;
+
         tx.commit()
             .map_err(|e| BloomError::IndexError(e.to_string()))?;
         Ok(stats)
