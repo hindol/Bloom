@@ -475,8 +475,7 @@ impl BloomEditor {
                 ("Switch Buffer".to_string(), "open buffers".to_string(), items)
             }
             PickerKind::Search => {
-                let (noun, items) = self.collect_search_items();
-                ("Search".to_string(), noun, items)
+                ("Search".to_string(), "matches".to_string(), Vec::new())
             }
             PickerKind::Journal => {
                 ("Journal".to_string(), "journal entries".to_string(), self.collect_journal_items())
@@ -743,6 +742,63 @@ impl BloomEditor {
         let page_count = page_titles.len();
         let noun = format!("matches across {} {}", page_count, if page_count == 1 { "page" } else { "pages" });
         (noun, items)
+    }
+
+    /// Re-query the FTS index for the current search picker query.
+    /// Called on each keystroke instead of client-side filtering.
+    fn refresh_search_picker(&mut self) {
+        let query = match &self.picker_state {
+            Some(ap) => ap.query.clone(),
+            None => return,
+        };
+
+        if query.len() < 2 {
+            // Below min_query_len — show empty results
+            if let Some(ap) = &mut self.picker_state {
+                ap.picker.replace_items(Vec::new());
+                ap.status_noun = "matches".to_string();
+            }
+            return;
+        }
+
+        // Query FTS index
+        let items = if let Some(idx) = &self.index {
+            let vault_root = self.vault_root.clone().unwrap_or_default();
+            let filters = index::SearchFilters::default();
+            let results = idx.search(&query, &filters);
+            let mut page_set = std::collections::HashSet::new();
+            let items: Vec<GenericPickerItem> = results.iter().take(500).map(|sr| {
+                page_set.insert(sr.page.id.clone());
+                let full_path = vault_root.join(&sr.page.path);
+                GenericPickerItem {
+                    id: format!("{}:{}", full_path.display(), sr.line),
+                    label: sr.line_text.trim().to_string(),
+                    middle: Some(format!("L{}", sr.line + 1)),
+                    right: Some(sr.page.title.clone()),
+                    preview_text: None,
+                }
+            }).collect();
+            let page_count = page_set.len();
+            if let Some(ap) = &mut self.picker_state {
+                ap.status_noun = format!(
+                    "matches across {} {}",
+                    page_count,
+                    if page_count == 1 { "page" } else { "pages" },
+                );
+            }
+            items
+        } else {
+            // Index not ready — fall back to disk scan
+            let (_noun, items) = self.collect_search_items();
+            if let Some(ap) = &mut self.picker_state {
+                ap.status_noun = _noun;
+            }
+            items
+        };
+
+        if let Some(ap) = &mut self.picker_state {
+            ap.picker.replace_items(items);
+        }
     }
 
     fn open_theme_picker(&mut self) {
@@ -1449,7 +1505,11 @@ impl BloomEditor {
                 if let Some(ap) = &mut self.picker_state {
                     if !ap.query.is_empty() {
                         ap.query.pop();
-                        ap.picker.set_query(&ap.query);
+                        if matches!(ap.kind, keymap::dispatch::PickerKind::Search) {
+                            self.refresh_search_picker();
+                        } else {
+                            ap.picker.set_query(&ap.query);
+                        }
                     }
                 }
                 vec![keymap::dispatch::Action::Noop]
@@ -1457,7 +1517,11 @@ impl BloomEditor {
             KeyCode::Char(c) => {
                 if let Some(ap) = &mut self.picker_state {
                     ap.query.push(*c);
-                    ap.picker.set_query(&ap.query);
+                    if matches!(ap.kind, keymap::dispatch::PickerKind::Search) {
+                        self.refresh_search_picker();
+                    } else {
+                        ap.picker.set_query(&ap.query);
+                    }
                 }
                 vec![keymap::dispatch::Action::Noop]
             }

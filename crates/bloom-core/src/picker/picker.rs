@@ -45,6 +45,14 @@ impl<T: PickerItem> Picker<T> {
         self.refilter();
     }
 
+    /// Replace all items (e.g., after a live FTS query). Resets selection.
+    pub fn replace_items(&mut self, items: Vec<T>) {
+        self.filtered = items.iter().enumerate().map(|(i, _)| (i, 0)).collect();
+        self.all_items = items;
+        self.selected_index = 0;
+        self.marked.clear();
+    }
+
     fn refilter(&mut self) {
         if self.query.is_empty() {
             self.filtered = self
