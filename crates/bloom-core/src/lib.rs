@@ -98,6 +98,20 @@ impl BufferManager {
     pub fn is_open(&self, page_id: &types::PageId) -> bool {
         self.buffers.contains_key(&page_id.to_hex())
     }
+
+    /// Find a buffer by its file path (for file watcher conflict detection).
+    pub fn find_by_path(&self, path: &std::path::Path) -> Option<&types::PageId> {
+        self.buffers.values()
+            .find(|(_, info)| info.path == path)
+            .map(|(_, info)| &info.page_id)
+    }
+
+    /// Reload a buffer's content from a string (external file change).
+    pub fn reload(&mut self, page_id: &types::PageId, content: &str) {
+        if let Some((buf, _)) = self.buffers.get_mut(&page_id.to_hex()) {
+            *buf = buffer::Buffer::from_text(content);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -176,6 +190,16 @@ pub struct BloomEditor {
     watcher_rx: Option<crossbeam::channel::Receiver<store::traits::FileEvent>>,
     pending_file_events: std::collections::HashSet<std::path::PathBuf>,
     file_event_deadline: Option<Instant>,
+    // External file change dialog
+    active_dialog: Option<ActiveDialog>,
+}
+
+enum ActiveDialog {
+    FileChanged {
+        page_id: types::PageId,
+        path: std::path::PathBuf,
+        selected: usize,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -466,6 +490,7 @@ impl BloomEditor {
             watcher_rx: None,
             pending_file_events: std::collections::HashSet::new(),
             file_event_deadline: None,
+            active_dialog: None,
             config,
         })
     }
@@ -1151,6 +1176,25 @@ impl BloomEditor {
                         let first = rel.components().next()
                             .and_then(|c| c.as_os_str().to_str());
                         if matches!(first, Some("pages") | Some("journal")) {
+                            // Check if this file has an open buffer
+                            if let Some(page_id) = self.buffer_mgr.find_by_path(&path).cloned() {
+                                let is_dirty = self.buffer_mgr.get(&page_id)
+                                    .map_or(false, |b| b.is_dirty());
+                                if is_dirty {
+                                    // Dirty buffer: prompt user
+                                    self.active_dialog = Some(ActiveDialog::FileChanged {
+                                        page_id,
+                                        path: path.clone(),
+                                        selected: 0,
+                                    });
+                                } else {
+                                    // Clean buffer: auto-reload silently
+                                    if let Ok(content) = std::fs::read_to_string(&path) {
+                                        self.buffer_mgr.reload(&page_id, &content);
+                                        self.cursor = 0;
+                                    }
+                                }
+                            }
                             self.pending_file_events.insert(rel.to_path_buf());
                             self.file_event_deadline =
                                 Some(Instant::now() + std::time::Duration::from_millis(300));
@@ -1272,6 +1316,11 @@ impl BloomEditor {
         // If wizard is active, route all keys there
         if self.wizard.is_some() {
             return self.handle_wizard_key(&key);
+        }
+
+        // If dialog is active, handle dialog input
+        if self.active_dialog.is_some() {
+            return self.handle_dialog_key(&key);
         }
 
         // Check platform shortcuts first
@@ -1768,6 +1817,44 @@ impl BloomEditor {
                 );
             }
         }
+    }
+
+    fn handle_dialog_key(&mut self, key: &types::KeyEvent) -> Vec<keymap::dispatch::Action> {
+        use types::KeyCode;
+        match &key.code {
+            KeyCode::Esc => {
+                // Dismiss dialog (keep buffer version)
+                self.active_dialog = None;
+            }
+            KeyCode::Enter => {
+                if let Some(dialog) = self.active_dialog.take() {
+                    match dialog {
+                        ActiveDialog::FileChanged { page_id, path, selected } => {
+                            if selected == 0 {
+                                // Reload from disk
+                                if let Ok(content) = std::fs::read_to_string(&path) {
+                                    self.buffer_mgr.reload(&page_id, &content);
+                                    self.cursor = 0;
+                                }
+                            }
+                            // selected == 1: keep buffer (do nothing)
+                        }
+                    }
+                }
+            }
+            KeyCode::Left | KeyCode::Char('h') => {
+                if let Some(ActiveDialog::FileChanged { ref mut selected, .. }) = self.active_dialog {
+                    *selected = 0;
+                }
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                if let Some(ActiveDialog::FileChanged { ref mut selected, .. }) = self.active_dialog {
+                    *selected = 1;
+                }
+            }
+            _ => {}
+        }
+        vec![keymap::dispatch::Action::Noop]
     }
 
     fn handle_picker_selection(
@@ -3009,7 +3096,19 @@ impl BloomEditor {
                 }
             }}, // which_key
             date_picker: None,
-            dialog: None,
+            dialog: match &self.active_dialog {
+                Some(ActiveDialog::FileChanged { path, selected, .. }) => {
+                    let filename = path.file_name()
+                        .map(|f| f.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "file".to_string());
+                    Some(render::DialogFrame {
+                        message: format!("{} changed on disk. Reload?", filename),
+                        choices: vec!["Reload".to_string(), "Keep buffer".to_string()],
+                        selected: *selected,
+                    })
+                }
+                None => None,
+            },
             notification: self.notifications.last().cloned(),
             scrolloff: self.config.scrolloff,
         }
