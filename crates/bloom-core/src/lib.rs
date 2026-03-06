@@ -2724,8 +2724,11 @@ impl BloomEditor {
     }
 
     /// Tick for timers, notifications, debounce
-    pub fn tick(&mut self, now: std::time::Instant) {
+    /// Tick for timers, notifications, debounce. Returns true if state changed.
+    pub fn tick(&mut self, now: std::time::Instant) -> bool {
+        let before = self.notifications.len();
         self.notifications.retain(|n| n.expires_at > now);
+        self.notifications.len() != before
     }
 
     /// Update the terminal size (e.g. on terminal resize).
