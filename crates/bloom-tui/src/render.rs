@@ -1689,3 +1689,134 @@ fn strip_timestamps(s: &str) -> String {
     }
     result.trim().to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bloom_core::config::Config;
+    use bloom_core::BloomEditor;
+    use ratatui::backend::TestBackend;
+    use ratatui::style::Color;
+    use ratatui::Terminal;
+
+    /// Render a frame and verify every cell has the theme background colour.
+    /// No cell should retain Style::Reset (terminal default).
+    #[test]
+    fn test_all_cells_have_background() {
+        let config = Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = bloom_core::uuid::generate_hex_id();
+        editor.open_page_with_content(
+            &id,
+            "Test",
+            std::path::Path::new("test.md"),
+            "# Hello\n\nWorld\n",
+        );
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = crate::theme::TuiTheme::new(editor.theme());
+        let expected_bg = Color::Rgb(
+            editor.theme().background.0,
+            editor.theme().background.1,
+            editor.theme().background.2,
+        );
+
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                let frame = editor.render(area.width, area.height);
+                draw(f, &frame, &theme);
+            })
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        let mut uncovered = Vec::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                let cell = &buf[(x, y)];
+                // Every cell should have an explicit bg set (not Reset/default)
+                if cell.bg == Color::Reset {
+                    uncovered.push((x, y, cell.symbol().to_string()));
+                }
+            }
+        }
+        assert!(
+            uncovered.is_empty(),
+            "Found {} cells with no background set (Style::Reset). First 10: {:?}",
+            uncovered.len(),
+            &uncovered[..uncovered.len().min(10)]
+        );
+    }
+
+    /// After switching to a shorter buffer, no stale content from the
+    /// previous buffer should remain.
+    #[test]
+    fn test_no_stale_content_after_buffer_switch() {
+        let config = Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+
+        // Open a long file
+        let id1 = bloom_core::uuid::generate_hex_id();
+        let long_content = (0..50)
+            .map(|i| format!("Line number {i} with some content here"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        editor.open_page_with_content(
+            &id1,
+            "Long",
+            std::path::Path::new("long.md"),
+            &long_content,
+        );
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = crate::theme::TuiTheme::new(editor.theme());
+
+        // Render the long file
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                let frame = editor.render(area.width, area.height);
+                draw(f, &frame, &theme);
+            })
+            .unwrap();
+
+        // Open a short file
+        let id2 = bloom_core::uuid::generate_hex_id();
+        editor.open_page_with_content(
+            &id2,
+            "Short",
+            std::path::Path::new("short.md"),
+            "# Short\n",
+        );
+
+        // Render again
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                let frame = editor.render(area.width, area.height);
+                draw(f, &frame, &theme);
+            })
+            .unwrap();
+
+        // Check: no cell below the short file's content should contain
+        // text from the long file (e.g., "Line number")
+        let buf = terminal.backend().buffer();
+        let mut stale = Vec::new();
+        for y in 0..buf.area.height {
+            let mut row_text = String::new();
+            for x in 0..buf.area.width {
+                row_text.push_str(buf[(x, y)].symbol());
+            }
+            if row_text.contains("Line number") {
+                stale.push((y, row_text.trim().to_string()));
+            }
+        }
+        assert!(
+            stale.is_empty(),
+            "Found stale content from previous buffer: {:?}",
+            stale
+        );
+    }
+}
