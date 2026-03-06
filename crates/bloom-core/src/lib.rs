@@ -3002,7 +3002,17 @@ impl BloomEditor {
     pub fn tick(&mut self, now: std::time::Instant) -> bool {
         let before = self.notifications.len();
         self.notifications.retain(|n| n.expires_at > now);
-        self.notifications.len() != before
+        let notif_changed = self.notifications.len() != before;
+
+        // Check if which-key drawer should appear (timeout elapsed)
+        let wk_changed = if !self.which_key_visible && !self.leader_keys.is_empty() {
+            let timeout = std::time::Duration::from_millis(self.config.which_key_timeout_ms);
+            self.pending_since.map_or(false, |since| now.duration_since(since) >= timeout)
+        } else {
+            false
+        };
+
+        notif_changed || wk_changed
     }
 
     /// Update the terminal size (e.g. on terminal resize).
