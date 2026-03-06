@@ -186,10 +186,12 @@ fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiT
     let right_margin = 2u16;
     let content_width = area.width.saturating_sub(line_number_width + right_margin);
 
+    let faded_with_bg = theme.faded_style().bg(theme.background());
+
     for row in 0..height {
         if row >= pane.visible_lines.len() {
             // Beyond EOF — show ~ in the gutter (where line numbers go)
-            let tilde = Span::styled("  ~  ", theme.faded_style());
+            let tilde = Span::styled("  ~  ", faded_with_bg);
             f.render_widget(
                 Paragraph::new(Line::from(tilde)),
                 Rect::new(area.x, area.y + row as u16, line_number_width, 1),
@@ -201,7 +203,7 @@ fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiT
 
         // Line number (right-aligned, faded, with gutter gap)
         let lnum = format!("{:>3}  ", rendered_line.line_number + 1);
-        let lnum_span = Span::styled(lnum, theme.faded_style());
+        let lnum_span = Span::styled(lnum, faded_with_bg);
         f.render_widget(
             Paragraph::new(Line::from(lnum_span)),
             Rect::new(area.x, area.y + row as u16, line_number_width, 1),
@@ -213,7 +215,7 @@ fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiT
         let base_style = if is_cursor_line {
             theme.current_line_style()
         } else {
-            theme.style_for(&bloom_core::parser::traits::Style::Normal)
+            RStyle::default().fg(theme.foreground()).bg(theme.background())
         };
 
         let text = &rendered_line.text;
@@ -1825,5 +1827,54 @@ mod tests {
             "Found stale content from previous buffer: {:?}",
             stale
         );
+    }
+
+    /// Diagnostic: check every cell has an explicit bg (not Reset).
+    #[test]
+    fn test_no_reset_bg_anywhere() {
+        let config = Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = bloom_core::uuid::generate_hex_id();
+        editor.open_page_with_content(
+            &id,
+            "Test",
+            std::path::Path::new("test.md"),
+            "# Hello\n\nWorld\nLine four\nLine five with **bold** and #tag\n",
+        );
+
+        let backend = TestBackend::new(60, 15);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let theme = crate::theme::TuiTheme::new(editor.theme());
+
+        terminal
+            .draw(|tf| {
+                let area = tf.area();
+                let frame = editor.render(area.width, area.height);
+                draw(tf, &frame, &theme);
+            })
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        let mut issues = Vec::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                let cell = &buf[(x, y)];
+                if cell.bg == Color::Reset {
+                    issues.push(format!(
+                        "({},{}) sym={:?} fg={:?}",
+                        x, y, cell.symbol(), cell.fg
+                    ));
+                }
+            }
+        }
+
+        if !issues.is_empty() {
+            let sample: Vec<_> = issues.iter().take(20).collect();
+            panic!(
+                "Found {} cells with bg=Reset. First 20:\n{}",
+                issues.len(),
+                sample.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n")
+            );
+        }
     }
 }
