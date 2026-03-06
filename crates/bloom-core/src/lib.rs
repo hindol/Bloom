@@ -549,7 +549,25 @@ impl BloomEditor {
     }
 
     fn collect_page_items(&self) -> Vec<GenericPickerItem> {
-        // Scan vault directory for .md files in pages/
+        // Prefer the SQLite index (instant) over disk scan (reads every file).
+        if let Some(idx) = &self.index {
+            let pages = idx.list_pages(None);
+            if !pages.is_empty() {
+                return pages.into_iter().map(|meta| {
+                    let tags = meta.tags.iter().map(|t| format!("#{}", t.0)).collect::<Vec<_>>().join(" ");
+                    let date = Some(meta.created.format("%b %d").to_string());
+                    GenericPickerItem {
+                        id: meta.id.to_hex(),
+                        label: meta.title,
+                        middle: if tags.is_empty() { None } else { Some(tags) },
+                        right: date,
+                        preview_text: None,
+                    }
+                }).collect();
+            }
+        }
+
+        // Fallback: scan disk (index not ready yet or empty)
         if let Some(root) = &self.vault_root {
             let pages_dir = root.join("pages");
             if pages_dir.exists() {
@@ -581,6 +599,26 @@ impl BloomEditor {
     }
 
     fn collect_journal_items(&self) -> Vec<GenericPickerItem> {
+        // Prefer index — journal pages are tagged "journal" and stored in journal/ path.
+        if let Some(idx) = &self.index {
+            let tag = types::TagName("journal".to_string());
+            let pages = idx.pages_with_tag(&tag);
+            if !pages.is_empty() {
+                let mut items: Vec<GenericPickerItem> = pages.into_iter().map(|meta| {
+                    GenericPickerItem {
+                        id: meta.id.to_hex(),
+                        label: meta.title,
+                        middle: None,
+                        right: Some("journal".to_string()),
+                        preview_text: None,
+                    }
+                }).collect();
+                items.sort_by(|a, b| b.label.cmp(&a.label)); // most recent first
+                return items;
+            }
+        }
+
+        // Fallback: scan disk
         if let Some(root) = &self.vault_root {
             let journal_dir = root.join("journal");
             if journal_dir.exists() {
