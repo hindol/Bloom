@@ -1,4 +1,5 @@
 mod fts;
+pub mod indexer;
 mod query;
 mod schema;
 mod writer;
@@ -77,6 +78,12 @@ pub struct RebuildStats {
     pub pages: usize,
     pub links: usize,
     pub tags: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct FileFingerprint {
+    pub mtime_secs: i64,
+    pub size_bytes: u64,
 }
 
 impl Index {

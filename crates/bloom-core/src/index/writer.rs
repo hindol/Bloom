@@ -1,7 +1,7 @@
 use crate::error::BloomError;
 use crate::types::*;
 
-use super::{Index, IndexEntry, RebuildStats};
+use super::{FileFingerprint, Index, IndexEntry, RebuildStats};
 
 impl Index {
     pub fn index_page(&mut self, entry: &IndexEntry) -> Result<(), BloomError> {
@@ -43,7 +43,8 @@ impl Index {
              DELETE FROM tasks;
              DELETE FROM links;
              DELETE FROM tags;
-             DELETE FROM pages;",
+             DELETE FROM pages;
+             DELETE FROM file_fingerprints;",
         )
         .map_err(|e| BloomError::IndexError(e.to_string()))?;
 
@@ -64,6 +65,112 @@ impl Index {
         tx.commit()
             .map_err(|e| BloomError::IndexError(e.to_string()))?;
         Ok(stats)
+    }
+
+    /// Incremental update: process only changed and deleted files in a single transaction.
+    pub fn incremental_update(
+        &mut self,
+        changed: &[IndexEntry],
+        deleted_paths: &[String],
+    ) -> Result<RebuildStats, BloomError> {
+        let tx = self
+            .conn
+            .transaction()
+            .map_err(|e| BloomError::IndexError(e.to_string()))?;
+
+        // Remove deleted pages (look up page ID by path)
+        for path in deleted_paths {
+            let page_id: Option<String> = tx
+                .query_row(
+                    "SELECT id FROM pages WHERE path = ?1",
+                    rusqlite::params![path],
+                    |row| row.get(0),
+                )
+                .ok();
+            if let Some(pid) = page_id {
+                remove_page_data(&tx, &pid)?;
+            }
+            tx.execute(
+                "DELETE FROM file_fingerprints WHERE path = ?1",
+                rusqlite::params![path],
+            )
+            .map_err(|e| BloomError::IndexError(e.to_string()))?;
+        }
+
+        let mut stats = RebuildStats {
+            pages: 0,
+            links: 0,
+            tags: 0,
+        };
+
+        // Upsert changed pages
+        for entry in changed {
+            let page_id = entry.meta.id.to_hex();
+            remove_page_data(&tx, &page_id)?;
+            insert_page_data(&tx, &page_id, entry)?;
+            stats.pages += 1;
+            stats.links += entry.links.len();
+            stats.tags += entry.tags.len();
+        }
+
+        tx.commit()
+            .map_err(|e| BloomError::IndexError(e.to_string()))?;
+        Ok(stats)
+    }
+
+    // Fingerprint methods
+
+    pub fn get_fingerprint(&self, path: &str) -> Option<FileFingerprint> {
+        self.conn
+            .query_row(
+                "SELECT mtime_secs, size_bytes FROM file_fingerprints WHERE path = ?1",
+                rusqlite::params![path],
+                |row| {
+                    Ok(FileFingerprint {
+                        mtime_secs: row.get(0)?,
+                        size_bytes: row.get(1)?,
+                    })
+                },
+            )
+            .ok()
+    }
+
+    pub fn set_fingerprint(&self, path: &str, fp: &FileFingerprint) {
+        let _ = self.conn.execute(
+            "INSERT OR REPLACE INTO file_fingerprints (path, mtime_secs, size_bytes) VALUES (?1, ?2, ?3)",
+            rusqlite::params![path, fp.mtime_secs, fp.size_bytes],
+        );
+    }
+
+    /// Batch-set fingerprints within an existing transaction scope.
+    pub fn set_fingerprints_batch(&self, fingerprints: &[(String, FileFingerprint)]) {
+        for (path, fp) in fingerprints {
+            let _ = self.conn.execute(
+                "INSERT OR REPLACE INTO file_fingerprints (path, mtime_secs, size_bytes) VALUES (?1, ?2, ?3)",
+                rusqlite::params![path, fp.mtime_secs, fp.size_bytes],
+            );
+        }
+    }
+
+    /// Get all stored fingerprints as a map.
+    pub fn all_fingerprints(&self) -> std::collections::HashMap<String, FileFingerprint> {
+        let mut map = std::collections::HashMap::new();
+        if let Ok(mut stmt) = self.conn.prepare("SELECT path, mtime_secs, size_bytes FROM file_fingerprints") {
+            if let Ok(rows) = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    FileFingerprint {
+                        mtime_secs: row.get(1)?,
+                        size_bytes: row.get(2)?,
+                    },
+                ))
+            }) {
+                for row in rows.flatten() {
+                    map.insert(row.0, row.1);
+                }
+            }
+        }
+        map
     }
 }
 

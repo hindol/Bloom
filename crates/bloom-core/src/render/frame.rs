@@ -266,6 +266,7 @@ pub struct NormalStatus {
     pub pending_keys: String,
     pub recording_macro: Option<char>,
     pub mcp: McpIndicator,
+    pub indexing: bool,
 }
 
 pub struct CommandLineSlot {
@@ -299,6 +300,7 @@ impl Default for StatusBarFrame {
                 pending_keys: String::new(),
                 recording_macro: None,
                 mcp: McpIndicator::Off,
+                indexing: false,
             }),
             mode: String::from("NORMAL"),
         }

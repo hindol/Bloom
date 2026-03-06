@@ -129,14 +129,6 @@ const EX_COMMANDS: &[(&str, &str)] = &[
 // BloomEditor — The Orchestrator
 // ---------------------------------------------------------------------------
 
-/// Timing breakdown from init_vault().
-pub struct StartupTiming {
-    pub total_ms: u64,
-    pub init_ms: u64,
-    pub index_ms: u64,
-    pub file_count: usize,
-}
-
 pub struct BloomEditor {
     pub config: config::Config,
     buffer_mgr: BufferManager,
@@ -173,6 +165,9 @@ pub struct BloomEditor {
     autosave_tx: Option<crossbeam::channel::Sender<store::disk_writer::WriteRequest>>,
     terminal_height: u16,
     terminal_width: u16,
+    // Background indexer
+    indexer_rx: Option<crossbeam::channel::Receiver<index::indexer::IndexComplete>>,
+    indexing: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -431,6 +426,8 @@ impl BloomEditor {
             autosave_tx: None,
             terminal_height: 24,
             terminal_width: 80,
+            indexer_rx: None,
+            indexing: false,
             config,
         })
     }
@@ -813,10 +810,9 @@ impl BloomEditor {
         }
     }
 
-    /// Initialize with a vault path — sets up index, journal, template engine
-    pub fn init_vault(&mut self, vault_root: &std::path::Path) -> Result<StartupTiming, error::BloomError> {
-        let t0 = Instant::now();
-
+    /// Initialize with a vault path — sets up index, journal, template engine.
+    /// Spawns the background indexer thread (non-blocking).
+    pub fn init_vault(&mut self, vault_root: &std::path::Path) -> Result<(), error::BloomError> {
         let index_path = vault_root.join(".index.db");
         self.index = Some(index::Index::open(&index_path)?);
         self.journal = Some(journal::Journal::new(vault_root));
@@ -824,8 +820,6 @@ impl BloomEditor {
         let templates_dir = vault_root.join("templates");
         self.template_engine = Some(template::TemplateEngine::new(&templates_dir));
         self.vault_root = Some(vault_root.to_path_buf());
-
-        let init_ms = t0.elapsed().as_millis() as u64;
 
         // Start auto-save disk writer thread
         let (writer, tx) = store::disk_writer::DiskWriter::new(self.config.autosave_debounce_ms);
@@ -841,19 +835,17 @@ impl BloomEditor {
             let _ = set_hidden_attribute(&index_path);
         }
 
-        // Build index from vault files
-        let t_index = Instant::now();
-        let stats = self.rebuild_index().unwrap_or(index::RebuildStats { pages: 0, links: 0, tags: 0 });
-        let index_ms = t_index.elapsed().as_millis() as u64;
+        // Spawn background indexer thread
+        let (idx_tx, idx_rx) = crossbeam::channel::bounded(1);
+        self.indexer_rx = Some(idx_rx);
+        self.indexing = true;
+        index::indexer::spawn_indexer(
+            vault_root.to_path_buf(),
+            index_path,
+            idx_tx,
+        );
 
-        let total_ms = t0.elapsed().as_millis() as u64;
-
-        Ok(StartupTiming {
-            total_ms,
-            init_ms,
-            index_ms,
-            file_count: stats.pages,
-        })
+        Ok(())
     }
 
     /// Check if the setup wizard should run (no vault at default path).
@@ -873,17 +865,38 @@ impl BloomEditor {
         self.wizard.is_some()
     }
 
-    /// Show a startup timing notification with stage breakdown.
-    pub fn notify_startup_timing(&mut self, timing: &StartupTiming) {
-        let message = format!(
-            "Bloom ready in {}ms  │  init {}ms  │  index {}ms ({} files)",
-            timing.total_ms, timing.init_ms, timing.index_ms, timing.file_count,
-        );
-        self.notifications.push(render::Notification {
-            message,
-            level: render::NotificationLevel::Info,
-            expires_at: Instant::now() + std::time::Duration::from_secs(8),
-        });
+    /// Poll the background indexer for completion. Called from the event loop.
+    /// Returns true if indexing just completed.
+    pub fn poll_indexer(&mut self) -> bool {
+        if let Some(rx) = &self.indexer_rx {
+            if let Ok(complete) = rx.try_recv() {
+                self.indexing = false;
+                let t = &complete.timing;
+                let message = format!(
+                    "Index ready: {} files in {}ms  │  scan {}ms  │  read {}ms  │  write {}ms  │  {} changed",
+                    t.files_scanned, t.total_ms, t.scan_ms, t.read_parse_ms, t.write_ms, t.files_changed,
+                );
+                self.notifications.push(render::Notification {
+                    message,
+                    level: render::NotificationLevel::Info,
+                    expires_at: Instant::now() + std::time::Duration::from_secs(8),
+                });
+                // Reload the index connection to pick up changes from the indexer thread
+                if let Some(vault_root) = &self.vault_root {
+                    let index_path = vault_root.join(".index.db");
+                    if let Ok(idx) = index::Index::open(&index_path) {
+                        self.index = Some(idx);
+                    }
+                }
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Whether background indexing is in progress.
+    pub fn is_indexing(&self) -> bool {
+        self.indexing
     }
 
     /// Perform startup according to config. Guarantees `active_page` is `Some` on return.
@@ -2313,6 +2326,7 @@ impl BloomEditor {
                             None
                         },
                         mcp: render::McpIndicator::Off,
+                        indexing: self.indexing,
                     })
                 };
                 render::StatusBarFrame {
@@ -2330,6 +2344,7 @@ impl BloomEditor {
                         pending_keys: String::new(),
                         recording_macro: None,
                         mcp: render::McpIndicator::Off,
+                        indexing: self.indexing,
                     }),
                     mode: mode_str.to_string(),
                 }

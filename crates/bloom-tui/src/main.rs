@@ -52,11 +52,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
     if editor.needs_setup() {
         editor.start_wizard();
     } else {
-        // Existing vault — initialize and startup normally
+        // Existing vault — initialize and spawn background indexer
         let vault_path = default_vault_path();
-        if let Ok(timing) = editor.init_vault(std::path::Path::new(&vault_path)) {
-            editor.notify_startup_timing(&timing);
-        }
+        let _ = editor.init_vault(std::path::Path::new(&vault_path));
         editor.startup();
     }
 
@@ -93,6 +91,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
         terminal.draw(|f| {
             render::draw(f, &frame, &theme);
         })?;
+
+        // Poll background indexer for completion
+        editor.poll_indexer();
 
         // Event handling with tick timeout
         if event::poll(tick_rate)? {

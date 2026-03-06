@@ -46,6 +46,12 @@ pub(crate) fn create_tables(conn: &Connection) -> Result<(), BloomError> {
             FOREIGN KEY (page_id) REFERENCES pages(id)
         );
 
+        CREATE TABLE IF NOT EXISTS file_fingerprints (
+            path TEXT PRIMARY KEY,
+            mtime_secs INTEGER NOT NULL,
+            size_bytes INTEGER NOT NULL
+        );
+
         CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
             title, content, page_id UNINDEXED
         );

@@ -351,6 +351,13 @@ fn draw_normal_status(
         right_spans.push(Span::raw("  "));
     }
 
+    // Indexer indicator: visible only while indexing
+    if status.indexing {
+        let idx_style = RStyle::default().fg(theme.salient()).bg(bar_bg);
+        right_spans.push(Span::styled("⟳", idx_style));
+        right_spans.push(Span::raw("  "));
+    }
+
     let mcp_animating = matches!(&status.mcp, McpIndicator::Editing { .. });
     let mcp_str = match &status.mcp {
         McpIndicator::Off => String::new(),
