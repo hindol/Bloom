@@ -343,18 +343,36 @@ pub struct LineContext {
 
 ```rust
 /// SQLite-backed index for search, backlinks, tags, and unlinked mentions.
+/// Read-only queries are called from the UI thread.
+/// Mutations are called from the indexer thread.
+/// SQLite WAL mode supports concurrent readers + single writer.
 pub struct Index {
     // internal: rusqlite connection
 }
 
 impl Index {
     pub fn open(path: &Path) -> Result<Self, BloomError>;
+
+    /// Full rebuild — drops and recreates all index data.
+    /// Used by :rebuild-index command for recovery.
     pub fn rebuild(&mut self, pages: &[IndexEntry]) -> Result<RebuildStats, BloomError>;
 
-    // Page queries
+    /// Incremental update — only process changed/deleted files.
+    /// Called by the indexer thread on startup and on file change events.
+    pub fn incremental_update(
+        &mut self,
+        changed: &[IndexEntry],
+        deleted: &[PageId],
+    ) -> Result<RebuildStats, BloomError>;
+
+    // Fingerprint queries (for incremental indexing)
+    pub fn get_fingerprint(&self, path: &Path) -> Option<FileFingerprint>;
+    pub fn set_fingerprint(&mut self, path: &Path, fp: &FileFingerprint);
+
+    // Page queries (read-only, called from UI thread)
     pub fn find_page_by_title(&self, title: &str) -> Option<PageMeta>;
     pub fn find_page_by_id(&self, id: &PageId) -> Option<PageMeta>;
-    pub fn find_page_fuzzy(&self, query: &str) -> Vec<PageMeta>;  // fuzzy title match
+    pub fn find_page_fuzzy(&self, query: &str) -> Vec<PageMeta>;
     pub fn list_pages(&self, filter: Option<&TagName>) -> Vec<PageMeta>;
 
     // Link queries
@@ -366,7 +384,7 @@ impl Index {
     pub fn unlinked_mentions(&self, page_title: &str) -> Vec<UnlinkedMention>;
 
     // Tag queries
-    pub fn all_tags(&self) -> Vec<(TagName, usize)>;             // tag + page count
+    pub fn all_tags(&self) -> Vec<(TagName, usize)>;
     pub fn pages_with_tag(&self, tag: &TagName) -> Vec<PageMeta>;
 
     // Full-text search (FTS5)
@@ -376,15 +394,22 @@ impl Index {
     pub fn all_open_tasks(&self) -> Vec<Task>;
     pub fn tasks_filtered(&self, filters: &AgendaFilters) -> Vec<Task>;
 
-    // Mutation (called by indexer thread)
+    // Mutation (called by indexer thread, within a transaction)
     pub fn index_page(&mut self, entry: &IndexEntry) -> Result<(), BloomError>;
     pub fn remove_page(&mut self, id: &PageId) -> Result<(), BloomError>;
     pub fn rename_tag(&mut self, old: &TagName, new: &TagName) -> Result<usize, BloomError>;
 }
 
+/// File fingerprint for incremental indexing.
+/// Stored in SQLite alongside index data.
+pub struct FileFingerprint {
+    pub mtime_secs: i64,
+    pub size_bytes: u64,
+}
+
 pub struct Backlink {
     pub source_page: PageMeta,
-    pub context: String,            // surrounding text around the link
+    pub context: String,
     pub line: usize,
 }
 
@@ -392,7 +417,7 @@ pub struct UnlinkedMention {
     pub source_page: PageMeta,
     pub context: String,
     pub line: usize,
-    pub match_range: Range<usize>,  // byte range of the mention in context
+    pub match_range: Range<usize>,
 }
 
 pub struct SearchResult {
@@ -406,7 +431,7 @@ pub struct SearchFilters {
     pub tags: Vec<TagName>,
     pub date_range: Option<(NaiveDate, NaiveDate)>,
     pub links_to: Option<PageId>,
-    pub task_status: Option<bool>,  // Some(false) = open, Some(true) = done
+    pub task_status: Option<bool>,
 }
 
 pub struct AgendaFilters {
@@ -421,7 +446,7 @@ pub struct IndexEntry {
     pub links: Vec<LinkTarget>,
     pub tags: Vec<TagName>,
     pub tasks: Vec<Task>,
-    pub block_ids: Vec<(BlockId, usize)>,  // (id, line number)
+    pub block_ids: Vec<(BlockId, usize)>,
 }
 
 pub struct RebuildStats {
@@ -432,6 +457,59 @@ pub struct RebuildStats {
 ```
 
 **Use cases served:** UC-08 (find page), UC-27 (backlinks), UC-28 (unlinked mentions), UC-34–UC-36 (tags), UC-37–UC-40 (search/filters), UC-43–UC-46 (agenda), UC-65–UC-66 (MCP search/read), UC-76 (rebuild index), UC-79 (broken links).
+
+---
+
+## Indexer Orchestrator (`index/`)
+
+The indexer is the background thread that coordinates NoteStore, DocumentParser, and Index to build and maintain the search index without blocking the UI.
+
+```rust
+/// Background indexer that runs on its own OS thread.
+/// Coordinates file scanning, parsing, and index updates.
+pub struct Indexer {
+    // internal: vault root, parser, index connection
+}
+
+/// Result sent from the indexer thread to the UI thread on completion.
+pub struct IndexComplete {
+    pub stats: RebuildStats,
+    pub timing: IndexTiming,
+}
+
+pub struct IndexTiming {
+    pub scan_ms: u64,       // Phase 1: stat files, compare fingerprints
+    pub read_parse_ms: u64, // Phase 2: read + parse changed files (parallel)
+    pub write_ms: u64,      // Phase 3: batch SQLite writes
+    pub total_ms: u64,
+    pub files_scanned: usize,
+    pub files_changed: usize,
+}
+
+impl Indexer {
+    pub fn new(
+        vault_root: PathBuf,
+        index_path: PathBuf,
+    ) -> Result<Self, BloomError>;
+
+    /// Run a full index build (used on first launch or :rebuild-index).
+    pub fn full_rebuild(&mut self) -> Result<IndexComplete, BloomError>;
+
+    /// Run an incremental update (used on startup with existing index
+    /// and on file change events from the watcher).
+    pub fn incremental_update(&mut self) -> Result<IndexComplete, BloomError>;
+}
+```
+
+**Lifecycle:**
+
+1. `init_vault()` spawns the indexer thread, which runs `incremental_update()`
+2. The UI is immediately usable — index-dependent features return empty results
+3. On completion, the indexer sends `IndexComplete` via channel to the UI thread
+4. The UI shows "Index ready: N files in Xms" and index-dependent features light up
+5. File watcher events trigger incremental re-indexing of changed files
+
+**Use cases served:** All index-dependent UCs (search, backlinks, tags, agenda) — the indexer ensures the index is built and maintained without blocking the UI thread.
 
 ---
 

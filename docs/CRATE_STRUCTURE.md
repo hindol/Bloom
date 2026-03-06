@@ -113,12 +113,13 @@ bloom-core/src/
 │   ├── extensions.rs       # [[links]], ^block-ids, #tags, @timestamps
 │   └── highlight.rs        # Per-line scan → StyledSpan[] for rendering
 │
-├── index/                  # SQLite-backed index
+├── index/                  # SQLite-backed index + background indexer
 │   ├── mod.rs
-│   ├── schema.rs           # Table definitions, migrations
-│   ├── writer.rs           # Index update operations (called by indexer thread)
-│   ├── query.rs            # Search queries, backlink lookups, tag queries
-│   └── fts.rs              # FTS5 full-text search, unlinked mentions
+│   ├── schema.rs           # Table definitions, migrations, fingerprint table
+│   ├── writer.rs           # Index mutations (called by indexer thread)
+│   ├── query.rs            # Read-only queries (called from UI thread)
+│   ├── fts.rs              # FTS5 full-text search, unlinked mentions
+│   └── indexer.rs          # Background indexer orchestrator thread
 │
 ├── linker/                 # Link resolution and management
 │   ├── mod.rs

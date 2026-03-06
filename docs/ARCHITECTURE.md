@@ -187,16 +187,18 @@ Search match highlighting overlays on top via `render::search_highlight::highlig
 │                                                      │
 │  ┌─ Event Loop ─────────────────────────────────┐    │
 │  │  1. Poll for input (crossterm)               │    │
-│  │  2. Dispatch key → BloomEditor::handle_key() │    │
-│  │  3. Process Vim grammar, apply edits to rope  │    │
-│  │  4. Call editor.render(w, h) → RenderFrame    │    │
-│  │  5. TUI draws RenderFrame into ratatui buffer │    │
-│  │  6. ratatui diffs and flushes to terminal     │    │
+│  │  2. Poll indexer completion channel           │    │
+│  │  3. Dispatch key → BloomEditor::handle_key() │    │
+│  │  4. Process Vim grammar, apply edits to rope  │    │
+│  │  5. Call editor.render(w, h) → RenderFrame    │    │
+│  │  6. TUI draws RenderFrame into ratatui buffer │    │
+│  │  7. ratatui diffs and flushes to terminal     │    │
 │  └──────────────────────────────────────────────┘    │
 │                                                      │
 │  Rule: NEVER blocks. All I/O dispatched via channels.│
 │  Rope edits are O(log n) ≈ microseconds.             │
 │  Render produces a snapshot — no locks held.         │
+│  Index queries are read-only — no write contention.  │
 └────────┬─────────────────┬──────────────┬────────────┘
     channel            channel        channel
          │                 │              │
@@ -205,15 +207,15 @@ Search match highlighting overlays on top via `render::search_highlight::highlig
 │ Disk Writer│    │  Indexer   │   │File Watcher│
 │ (OS thread)│    │ (OS thread)│   │ (OS thread)│
 │            │    │            │   │            │
-│ Receives   │    │ Receives   │   │ Watches    │
-│ write reqs │    │ index reqs │   │ vault dir, │
-│ via channel│    │ via channel│   │ sends file │
-│ Debounced  │    │ Rebuilds   │   │ events via │
-│ 300ms,     │    │ FTS5 index,│   │ channel to │
-│ atomic     │    │ backlinks, │   │ UI thread  │
-│ write→     │    │ tags,      │   │            │
-│ fsync→     │    │ unlinked   │   │ Uses notify│
-│ rename     │    │ mentions   │   │ crate      │
+│ Receives   │    │ Orchestrat-│   │ Watches    │
+│ write reqs │    │ or thread  │   │ vault dir, │
+│ via channel│    │ that coord-│   │ sends file │
+│ Debounced  │    │ inates     │   │ events via │
+│ 300ms,     │    │ NoteStore, │   │ channel to │
+│ atomic     │    │ Parser,    │   │ UI thread  │
+│ write→     │    │ and Index  │   │            │
+│ fsync→     │    │ layers.    │   │ Uses notify│
+│ rename     │    │ See below. │   │ crate      │
 └────────────┘    └────────────┘   └────────────┘
 ```
 
@@ -221,19 +223,59 @@ Search match highlighting overlays on top via `render::search_highlight::highlig
 
 | Thread | Input | Output | Blocking? |
 |--------|-------|--------|-----------|
-| **UI** | Terminal key events, file watcher events | Rope edits, RenderFrame, write/index requests | Never — all I/O via channels |
+| **UI** | Terminal key events, file watcher events, indexer completion | Rope edits, RenderFrame, write/index requests | Never — all I/O via channels |
 | **Disk Writer** | `WriteRequest` via channel | Atomic file writes (write→fsync→rename) | Blocks on disk I/O (own thread) |
-| **Indexer** | `IndexRequest` via channel | Updated SQLite FTS5 index | Blocks on SQLite writes (own thread) |
+| **Indexer** | Triggered on startup and on file change events | Updated SQLite FTS5 index, completion notification | Blocks on file I/O + SQLite (own thread) |
 | **File Watcher** | Filesystem notifications (notify crate) | `FileEvent` via channel to UI thread | Blocks waiting for OS events (own thread) |
+
+### Indexer Architecture
+
+The indexer is a background thread that coordinates three existing layers to build the search index without blocking the UI:
+
+```
+Indexer Thread
+    │
+    ├── Phase 1: Scan
+    │   NoteStore::list_pages() + list_journals()
+    │   stat() each file for (mtime, size)
+    │   Compare against fingerprints stored in SQLite
+    │   → changed[], deleted[], unchanged[]
+    │
+    ├── Phase 2: Read + Parse (parallel via rayon)
+    │   For each changed file:
+    │     NoteStore::read(path) → content
+    │     DocumentParser::parse(content) → Document
+    │     Extract IndexEntry (frontmatter, links, tags, tasks)
+    │   Multiple files processed concurrently on the rayon thread pool
+    │
+    ├── Phase 3: Write (batched single transaction)
+    │   BEGIN TRANSACTION
+    │     DELETE entries for deleted files
+    │     INSERT/REPLACE entries for changed files
+    │     UPDATE fingerprints (mtime, size)
+    │   COMMIT
+    │   Single fsync instead of one per file
+    │
+    └── Send IndexComplete { timing, stats } to UI via channel
+```
+
+**Fingerprint cache:** The index stores `(path, mtime_secs, size_bytes)` for each indexed file. On startup, the indexer `stat()`s each file (fast — no content read) and compares against stored fingerprints. Only files with changed mtime or size are re-read. For the common "nothing changed" case, startup goes from reading 1050 files to 1050 `stat()` calls — typically <10ms.
+
+**Parallel reads:** Changed files are read and parsed concurrently using `rayon::par_iter()`. This mitigates NTFS per-file overhead on Windows where sequential small-file reads are slow. On a 4-core machine, 4 files are read simultaneously.
+
+**Batched writes:** All SQLite mutations happen in a single `BEGIN ... COMMIT` transaction. This turns N fsyncs into 1, which is the largest SQLite bulk-insert optimization (~100x for 1000+ rows).
+
+**Graceful degradation:** While the indexer runs, the editor is fully usable. Features that depend on the index (backlinks, unlinked mentions, agenda, tag queries) return empty results gracefully. Features that read files directly (find page, search, buffer editing) work immediately. The status bar shows `⟳` while indexing and a "Index ready" notification on completion.
 
 ### Communication Pattern
 
 All inter-thread communication uses `crossbeam` channels (bounded, lock-free):
 
 - **UI → Disk Writer**: `crossbeam::Sender<WriteRequest>` — fire-and-forget, debounced
-- **UI → Indexer**: `crossbeam::Sender<IndexRequest>` — fire-and-forget
-- **File Watcher → UI**: `crossbeam::Receiver<FileEvent>` — polled in event loop
+- **Indexer → UI**: `crossbeam::Sender<IndexComplete>` — completion notification with timing
+- **File Watcher → UI**: `crossbeam::Receiver<FileEvent>` — polled in event loop; triggers re-index of changed files
 - **No shared mutable state** — threads communicate exclusively via channels
+- **SQLite access** — the Index handle lives on the indexer thread during writes, UI thread reads use a separate read-only connection (SQLite WAL mode supports concurrent readers)
 
 The core library has **zero dependency on any async runtime**. All concurrency is OS threads + channels. This keeps the dependency tree small, debugging straightforward, and latency predictable.
 
