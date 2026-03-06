@@ -80,6 +80,14 @@ Contributions are welcome! To get started:
 
 Please follow the existing code style: Rust 2021 edition, `thiserror` for errors, `tracing` for instrumentation, and trait-based abstractions where the docs call for them. The design documents in `docs/` are the source of truth for architecture decisions — read them before proposing structural changes.
 
+## Known Bugs
+
+| Bug | Root Cause | Impact |
+|-----|-----------|--------|
+| `x` in Normal mode deletes 2 chars instead of 1 | `ordered_range()` adds `+1` for inclusive Vim semantics, but `motion_l` already returns an exclusive position. Double-counting. Affects all operator+motion combos — needs careful audit of every motion before fixing. | All `d`+motion commands delete one char too many |
+| File watcher not connected | `LocalFileStore::new()` starts the watcher, but `poll_file_events()` calls `store.watch()` which clones the receiver — events go to a dropped clone. The stored receiver in the struct is never exposed. | External file changes (git checkout, syncthing) don't trigger re-indexing. Saves still work via the watcher picking up disk writes. |
+| Picker composable filters not wired | `PickerFilter` types defined (Tag, DateRange, LinksTo, TaskStatus) but Ctrl+T/D/L/S not handled in `handle_picker_key()`. No filter pill UI. | Users can't narrow results by tag/date in pickers |
+
 ## License
 
 Bloom is licensed under the [GNU Affero General Public License v3.0](LICENSE).
