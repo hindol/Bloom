@@ -96,9 +96,7 @@ impl BloomEditor {
             let action = self.vim_state.process_key(key.clone(), buf, self.cursor);
 
             // Esc in Normal mode with no overlays: dismiss persistent notifications
-            if key.code == types::KeyCode::Esc
-                && matches!(mode_before_key, vim::Mode::Normal)
-            {
+            if key.code == types::KeyCode::Esc && matches!(mode_before_key, vim::Mode::Normal) {
                 self.dismiss_notifications();
             }
 

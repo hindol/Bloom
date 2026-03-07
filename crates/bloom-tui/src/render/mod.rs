@@ -24,7 +24,12 @@ use unicode_width::UnicodeWidthStr;
 use crate::theme::TuiTheme;
 
 /// Render the full RenderFrame to the terminal.
-pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &TuiTheme) {
+pub fn draw(
+    f: &mut Frame,
+    frame: &RenderFrame,
+    theme: &TuiTheme,
+    config: &bloom_core::config::Config,
+) {
     let area = f.area();
 
     // Layer 1: Clear all cells (reset content), then fill with background colour.
@@ -62,6 +67,7 @@ pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &TuiTheme) {
         frame.maximized,
         frame.hidden_pane_count,
         theme,
+        config,
     );
 
     // Which-key drawer
@@ -162,12 +168,13 @@ mod tests {
             editor.theme().background.1,
             editor.theme().background.2,
         );
+        let cfg = editor.config.clone();
 
         terminal
             .draw(|f| {
                 let area = f.area();
                 let frame = editor.render(area.width, area.height);
-                draw(f, &frame, &theme);
+                draw(f, &frame, &theme, &cfg);
             })
             .unwrap();
 
@@ -208,13 +215,14 @@ mod tests {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         let theme = crate::theme::TuiTheme::new(editor.theme());
+        let cfg = editor.config.clone();
 
         // Render the long file
         terminal
             .draw(|f| {
                 let area = f.area();
                 let frame = editor.render(area.width, area.height);
-                draw(f, &frame, &theme);
+                draw(f, &frame, &theme, &cfg);
             })
             .unwrap();
 
@@ -227,7 +235,7 @@ mod tests {
             .draw(|f| {
                 let area = f.area();
                 let frame = editor.render(area.width, area.height);
-                draw(f, &frame, &theme);
+                draw(f, &frame, &theme, &cfg);
             })
             .unwrap();
 
@@ -267,12 +275,13 @@ mod tests {
         let backend = TestBackend::new(60, 15);
         let mut terminal = Terminal::new(backend).unwrap();
         let theme = crate::theme::TuiTheme::new(editor.theme());
+        let cfg = editor.config.clone();
 
         terminal
             .draw(|tf| {
                 let area = tf.area();
                 let frame = editor.render(area.width, area.height);
-                draw(tf, &frame, &theme);
+                draw(tf, &frame, &theme, &cfg);
             })
             .unwrap();
 
@@ -323,12 +332,13 @@ mod tests {
         let backend = TestBackend::new(60, 15);
         let mut terminal = Terminal::new(backend).unwrap();
         let theme = crate::theme::TuiTheme::new(editor.theme());
+        let cfg = editor.config.clone();
 
         terminal
             .draw(|tf| {
                 let area = tf.area();
                 let frame = editor.render(area.width, area.height);
-                draw(tf, &frame, &theme);
+                draw(tf, &frame, &theme, &cfg);
             })
             .unwrap();
 

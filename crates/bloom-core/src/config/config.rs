@@ -12,6 +12,12 @@ fn default_which_key_timeout() -> u64 {
 fn default_scrolloff() -> usize {
     3
 }
+fn default_word_wrap() -> bool {
+    true
+}
+fn default_wrap_indicator() -> String {
+    "↪".into()
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -31,6 +37,10 @@ pub struct Config {
     pub auto_align: AutoAlignMode,
     #[serde(default = "default_scrolloff")]
     pub scrolloff: usize,
+    #[serde(default = "default_word_wrap")]
+    pub word_wrap: bool,
+    #[serde(default = "default_wrap_indicator")]
+    pub wrap_indicator: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
@@ -127,6 +137,8 @@ impl Config {
             which_key_timeout_ms: default_which_key_timeout(),
             auto_align: AutoAlignMode::default(),
             scrolloff: default_scrolloff(),
+            word_wrap: default_word_wrap(),
+            wrap_indicator: default_wrap_indicator(),
         }
     }
 }

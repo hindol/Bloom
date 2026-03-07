@@ -1,6 +1,8 @@
 mod input;
 mod render;
+mod scroll;
 mod theme;
+mod wrap;
 
 use std::io;
 use std::time::{Duration, Instant};
@@ -100,7 +102,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
             }
 
             terminal.draw(|f| {
-                render::draw(f, &frame, &theme);
+                render::draw(f, &frame, &theme, &editor.config);
             })?;
 
             needs_render = false;
