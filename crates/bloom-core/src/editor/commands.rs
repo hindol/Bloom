@@ -120,9 +120,8 @@ impl BloomEditor {
                 keymap::dispatch::PickerKind::InlineLink,
             )],
             "add_tag" => {
-                // Insert a tag into the current page's frontmatter
-                if let Some(page_id) = &self.active_page {
-                    if let Some(buf) = self.buffer_mgr.get(page_id) {
+                if let Some(page_id) = self.active_page().cloned() {
+                    if let Some(buf) = self.buffer_mgr.get(&page_id) {
                         let text = buf.text().to_string();
                         if let Some(_fm) = self.parser.parse_frontmatter(&text) {
                             // Prompt would be ideal, but for now insert a placeholder tag
@@ -134,9 +133,8 @@ impl BloomEditor {
                 vec![keymap::dispatch::Action::Noop]
             }
             "remove_tag" => {
-                // Show current page's tags for removal
-                if let Some(page_id) = &self.active_page {
-                    if let Some(buf) = self.buffer_mgr.get(page_id) {
+                if let Some(page_id) = self.active_page().cloned() {
+                    if let Some(buf) = self.buffer_mgr.get(&page_id) {
                         let text = buf.text().to_string();
                         if let Some(fm) = self.parser.parse_frontmatter(&text) {
                             if !fm.tags.is_empty() {
@@ -170,22 +168,21 @@ impl BloomEditor {
             }
             "insert_due" => {
                 self.insert_text_at_cursor("@due()");
-                // Move cursor inside the parens
-                self.cursor = self.cursor.saturating_sub(1);
+                self.set_cursor(self.cursor().saturating_sub(1));
                 vec![keymap::dispatch::Action::Noop]
             }
             "insert_start" => {
                 self.insert_text_at_cursor("@start()");
-                self.cursor = self.cursor.saturating_sub(1);
+                self.set_cursor(self.cursor().saturating_sub(1));
                 vec![keymap::dispatch::Action::Noop]
             }
             "insert_at" => {
                 self.insert_text_at_cursor("@at()");
-                self.cursor = self.cursor.saturating_sub(1);
+                self.set_cursor(self.cursor().saturating_sub(1));
                 vec![keymap::dispatch::Action::Noop]
             }
             "search_backlinks" => {
-                if let Some(id) = self.active_page.clone() {
+                if let Some(id) = self.active_page().cloned() {
                     vec![keymap::dispatch::Action::OpenPicker(
                         keymap::dispatch::PickerKind::Backlinks(id),
                     )]
@@ -194,7 +191,7 @@ impl BloomEditor {
                 }
             }
             "search_unlinked" => {
-                if let Some(id) = self.active_page.clone() {
+                if let Some(id) = self.active_page().cloned() {
                     vec![keymap::dispatch::Action::OpenPicker(
                         keymap::dispatch::PickerKind::UnlinkedMentions(id),
                     )]
@@ -206,14 +203,14 @@ impl BloomEditor {
                 keymap::dispatch::PickerKind::Journal,
             )],
             "timeline" => {
-                if let Some(id) = self.active_page.clone() {
+                if let Some(id) = self.active_page().cloned() {
                     vec![keymap::dispatch::Action::OpenTimeline(id)]
                 } else {
                     vec![keymap::dispatch::Action::Noop]
                 }
             }
             "backlinks" => {
-                if let Some(id) = self.active_page.clone() {
+                if let Some(id) = self.active_page().cloned() {
                     vec![keymap::dispatch::Action::OpenPicker(
                         keymap::dispatch::PickerKind::Backlinks(id),
                     )]

@@ -172,14 +172,11 @@ pub struct BloomEditor {
     pub(crate) note_store: Option<store::local::LocalFileStore>,
 
     // State
-    pub(crate) cursor: usize,
-    pub(crate) active_page: Option<types::PageId>,
     pub(crate) picker_state: Option<ActivePicker>,
     pub(crate) agenda_state: Option<AgendaState>,
     pub(crate) quick_capture: Option<QuickCaptureState>,
     pub(crate) notifications: Vec<render::Notification>,
     pub(crate) notification_history: Vec<render::Notification>,
-    pub(crate) viewport: render::Viewport,
     pub(crate) wizard: Option<SetupWizardState>,
     pub(crate) vault_root: Option<std::path::PathBuf>,
     pub(crate) leader_keys: Vec<types::KeyEvent>,
@@ -416,14 +413,11 @@ impl BloomEditor {
             _refactorer: refactor::Refactor::new(),
             note_store: None,
             buffer_mgr: BufferManager::new(),
-            cursor: 0,
-            active_page: None,
             picker_state: None,
             agenda_state: None,
             quick_capture: None,
             notifications: Vec::new(),
             notification_history: Vec::new(),
-            viewport: render::Viewport::new(24, 80),
             wizard: None,
             vault_root: None,
             leader_keys: Vec::new(),
@@ -446,6 +440,56 @@ impl BloomEditor {
             active_dialog: None,
             config,
         })
+    }
+
+    // -----------------------------------------------------------------------
+    // Per-pane state accessors
+    // -----------------------------------------------------------------------
+
+    pub(crate) fn cursor(&self) -> usize {
+        self.window_mgr
+            .pane_state(self.window_mgr.active_pane())
+            .map(|s| s.cursor)
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn set_cursor(&mut self, pos: usize) {
+        if let Some(s) = self
+            .window_mgr
+            .pane_state_mut(self.window_mgr.active_pane())
+        {
+            s.cursor = pos;
+        }
+    }
+
+    pub(crate) fn active_page(&self) -> Option<&types::PageId> {
+        self.window_mgr
+            .pane_state(self.window_mgr.active_pane())
+            .and_then(|s| s.page_id.as_ref())
+    }
+
+    pub(crate) fn set_active_page(&mut self, id: Option<types::PageId>) {
+        if let Some(s) = self
+            .window_mgr
+            .pane_state_mut(self.window_mgr.active_pane())
+        {
+            s.page_id = id;
+        }
+    }
+
+    pub(crate) fn viewport(&self) -> &render::Viewport {
+        // SAFETY: active pane always has a state entry
+        self.window_mgr
+            .pane_state(self.window_mgr.active_pane())
+            .map(|s| &s.viewport)
+            .expect("active pane must have state")
+    }
+
+    pub(crate) fn viewport_mut(&mut self) -> &mut render::Viewport {
+        self.window_mgr
+            .pane_state_mut(self.window_mgr.active_pane())
+            .map(|s| &mut s.viewport)
+            .expect("active pane must have state")
     }
 
     /// Get the active theme palette.
@@ -548,14 +592,15 @@ impl BloomEditor {
 
     /// Insert text at the current cursor position.
     pub(crate) fn insert_text_at_cursor(&mut self, text: &str) {
-        let Some(page_id) = &self.active_page else {
+        let Some(page_id) = self.active_page().cloned() else {
             return;
         };
-        let Some(buf) = self.buffer_mgr.get_mut(page_id) else {
+        let cursor = self.cursor();
+        let Some(buf) = self.buffer_mgr.get_mut(&page_id) else {
             return;
         };
-        buf.insert(self.cursor, text);
-        self.cursor += text.chars().count();
+        buf.insert(cursor, text);
+        self.set_cursor(cursor + text.chars().count());
     }
 
     /// Tick for timers, notifications, debounce. Returns true if state changed.
@@ -586,7 +631,7 @@ impl BloomEditor {
     // Buffer management
 
     pub fn open_page(&mut self, id: &types::PageId) -> Result<(), error::BloomError> {
-        self.active_page = Some(id.clone());
+        self.set_active_page(Some(id.clone()));
         Ok(())
     }
 
@@ -600,7 +645,8 @@ impl BloomEditor {
     }
 
     pub fn close_buffer(&mut self, _pane: types::PaneId) -> Result<(), error::BloomError> {
-        if let Some(page_id) = self.active_page.take() {
+        if let Some(page_id) = self.active_page().cloned() {
+            self.set_active_page(None);
             self.buffer_mgr.close(&page_id);
         }
         Ok(())
@@ -618,13 +664,14 @@ impl BloomEditor {
             return Ok(());
         };
         let session_path = root.join(".session.json");
+        let active_page = self.active_page().cloned();
+        let scroll_offset = self.viewport().first_visible_line;
         let buffers: Vec<session::SessionBuffer> = self
             .buffer_mgr
             .open_buffers()
             .iter()
             .map(|info| {
-                let (cursor_line, cursor_col) = if Some(&info.page_id) == self.active_page.as_ref()
-                {
+                let (cursor_line, cursor_col) = if Some(&info.page_id) == active_page.as_ref() {
                     self.cursor_position()
                 } else {
                     (0, 0)
@@ -633,7 +680,7 @@ impl BloomEditor {
                     page_path: info.path.clone(),
                     cursor_line,
                     cursor_column: cursor_col,
-                    scroll_offset: self.viewport.first_visible_line,
+                    scroll_offset,
                     pane: 0,
                 }
             })
@@ -672,17 +719,19 @@ impl BloomEditor {
                         });
                     let id = crate::uuid::generate_hex_id();
                     self.open_page_with_content(&id, &title, &buf_state.page_path, &content);
-                    self.cursor = 0; // Restore cursor position via line/col
+                    self.set_cursor(0);
                     if let Some(buf) = self.buffer_mgr.get(&id) {
                         let rope = buf.text();
                         if buf_state.cursor_line < rope.len_lines() {
                             let line_start = rope.line_to_char(buf_state.cursor_line);
-                            self.cursor = line_start
-                                + buf_state.cursor_column.min(
-                                    rope.line(buf_state.cursor_line)
-                                        .len_chars()
-                                        .saturating_sub(1),
-                                );
+                            self.set_cursor(
+                                line_start
+                                    + buf_state.cursor_column.min(
+                                        rope.line(buf_state.cursor_line)
+                                            .len_chars()
+                                            .saturating_sub(1),
+                                    ),
+                            );
                         }
                     }
                 }
@@ -963,7 +1012,7 @@ mod tests {
         // Buffer should be "abc"
         let buf = editor
             .buffer_mgr
-            .get(&editor.active_page.clone().unwrap())
+            .get(&editor.active_page().cloned().unwrap())
             .unwrap();
         assert_eq!(buf.text().to_string(), "abc");
 
@@ -971,7 +1020,7 @@ mod tests {
         editor.handle_key(KeyEvent::char('u'));
         let buf = editor
             .buffer_mgr
-            .get(&editor.active_page.clone().unwrap())
+            .get(&editor.active_page().cloned().unwrap())
             .unwrap();
         assert_eq!(buf.text().to_string(), "");
     }
@@ -1291,7 +1340,7 @@ mod tests {
             "picker should close after selection"
         );
         assert!(
-            editor.active_page.is_some(),
+            editor.active_page().is_some(),
             "a page should be open after selection"
         );
 

@@ -84,7 +84,7 @@ impl BloomEditor {
         match self.config.startup.mode {
             config::StartupMode::Journal => self.open_journal_today(),
             config::StartupMode::Restore => {
-                if self.restore_session().is_err() || self.active_page.is_none() {
+                if self.restore_session().is_err() || self.active_page().is_none() {
                     self.open_scratch_buffer();
                 }
             }

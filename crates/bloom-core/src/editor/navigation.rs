@@ -60,8 +60,8 @@ impl BloomEditor {
         content: &str,
     ) {
         self.buffer_mgr.open(id, title, path, content);
-        self.active_page = Some(id.clone());
-        self.cursor = 0;
+        self.set_active_page(Some(id.clone()));
+        self.set_cursor(0);
         // Record access for frecency scoring
         if let Some(idx) = &self.index {
             idx.record_access(id);
@@ -106,10 +106,10 @@ impl BloomEditor {
 
     /// Follow the wiki-link under the cursor: `[[id|text]]` → open page by id.
     pub(crate) fn follow_link_at_cursor(&mut self) {
-        let Some(page_id) = &self.active_page else {
+        let Some(page_id) = self.active_page().cloned() else {
             return;
         };
-        let Some(buf) = self.buffer_mgr.get(page_id) else {
+        let Some(buf) = self.buffer_mgr.get(&page_id) else {
             return;
         };
         let rope = buf.text();
@@ -117,7 +117,7 @@ impl BloomEditor {
         if len == 0 {
             return;
         }
-        let cursor = self.cursor.min(len.saturating_sub(1));
+        let cursor = self.cursor().min(len.saturating_sub(1));
         let line_idx = rope.char_to_line(cursor);
         let line_text = rope.line(line_idx).to_string();
         let col = cursor - rope.line_to_char(line_idx);
@@ -165,7 +165,7 @@ impl BloomEditor {
 
     /// Yank a `[[id|title]]` link to the current page.
     pub(crate) fn yank_link_to_current_page(&self) -> Option<String> {
-        let page_id = self.active_page.as_ref()?;
+        let page_id = self.active_page()?;
         let _buf = self.buffer_mgr.get(page_id)?;
         let buffers = self.buffer_mgr.open_buffers();
         let info = buffers.iter().find(|b| b.page_id == *page_id)?;
@@ -174,14 +174,14 @@ impl BloomEditor {
 
     /// Yank a `[[id#block-id|title]]` link to the block at the cursor.
     pub(crate) fn yank_link_to_current_block(&self) -> Option<String> {
-        let page_id = self.active_page.as_ref()?;
+        let page_id = self.active_page()?;
         let buf = self.buffer_mgr.get(page_id)?;
         let rope = buf.text();
         let len = rope.len_chars();
         if len == 0 {
             return None;
         }
-        let cursor = self.cursor.min(len.saturating_sub(1));
+        let cursor = self.cursor().min(len.saturating_sub(1));
         let line_idx = rope.char_to_line(cursor);
         let line_text = rope.line(line_idx).to_string();
         // Look for ^block-id on this line
@@ -213,8 +213,7 @@ impl BloomEditor {
 
         // Find current journal date from active page
         let current_date = self
-            .active_page
-            .as_ref()
+            .active_page()
             .and_then(|id| self.buffer_mgr.get(id))
             .and_then(|buf| {
                 let text = buf.text().to_string();

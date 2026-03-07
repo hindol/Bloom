@@ -76,41 +76,54 @@ impl BloomEditor {
         let pane_area_h = height.saturating_sub(wk_h);
         let pane_rects = self.window_mgr.compute_pane_rects(width, pane_area_h);
 
-        // Update viewport from the active pane's content height
-        if let Some(active_rect) = pane_rects
-            .iter()
-            .find(|r| r.pane_id == self.window_mgr.active_pane())
-        {
-            self.viewport.height = active_rect.content_height as usize;
-            self.viewport.width = active_rect.width as usize;
+        // Update each pane's viewport dimensions from its cell rect
+        for rect in &pane_rects {
+            if let Some(ps) = self.window_mgr.pane_state_mut(rect.pane_id) {
+                ps.viewport.height = rect.content_height as usize;
+                ps.viewport.width = rect.width as usize;
+            }
         }
 
-        // Ensure cursor is visible (scrolls the viewport if needed)
+        // Ensure cursor is visible in the active pane (scrolls the viewport if needed)
         let (cursor_line, _cursor_col) = self.cursor_position();
-        self.viewport
-            .ensure_visible_with_scrolloff(cursor_line, self.config.scrolloff);
+        let scrolloff = self.config.scrolloff;
+        self.viewport_mut()
+            .ensure_visible_with_scrolloff(cursor_line, scrolloff);
 
         for rect in &pane_rects {
             let is_active = rect.pane_id == self.window_mgr.active_pane();
+            let pane_state = self.window_mgr.pane_state(rect.pane_id);
 
-            let (title, dirty, visible_lines) = if let Some(page_id) = &self.active_page {
-                if let Some(buf) = self.buffer_mgr.get(page_id) {
-                    let infos = self.buffer_mgr.open_buffers();
-                    let title = infos
-                        .iter()
-                        .find(|i| i.page_id == *page_id)
-                        .map(|i| i.title.clone())
-                        .unwrap_or_default();
-                    let lines = self.render_buffer_lines(buf);
-                    (title, buf.is_dirty(), lines)
+            let (title, dirty, visible_lines, pane_cursor_line, pane_cursor_col, scroll_offset) =
+                if let Some(ps) = pane_state {
+                    if let Some(page_id) = &ps.page_id {
+                        if let Some(buf) = self.buffer_mgr.get(page_id) {
+                            let infos = self.buffer_mgr.open_buffers();
+                            let title = infos
+                                .iter()
+                                .find(|i| i.page_id == *page_id)
+                                .map(|i| i.title.clone())
+                                .unwrap_or_default();
+                            let lines = self.render_buffer_lines_with_viewport(buf, &ps.viewport);
+                            let (cl, cc) =
+                                Self::cursor_position_for(ps.cursor, buf, &self.vim_state);
+                            (
+                                title,
+                                buf.is_dirty(),
+                                lines,
+                                cl,
+                                cc,
+                                ps.viewport.first_visible_line,
+                            )
+                        } else {
+                            (String::new(), false, Vec::new(), 0, 0, 0)
+                        }
+                    } else {
+                        (String::new(), false, Vec::new(), 0, 0, 0)
+                    }
                 } else {
-                    (String::new(), false, Vec::new())
-                }
-            } else {
-                (String::new(), false, Vec::new())
-            };
-
-            let (cursor_line, cursor_col) = self.cursor_position();
+                    (String::new(), false, Vec::new(), 0, 0, 0)
+                };
 
             // Build per-pane status bar
             let status_bar = if is_active {
@@ -137,8 +150,8 @@ impl BloomEditor {
                     render::StatusBarContent::Normal(render::NormalStatus {
                         title: title.clone(),
                         dirty,
-                        line: cursor_line,
-                        column: cursor_col,
+                        line: pane_cursor_line,
+                        column: pane_cursor_col,
                         pending_keys: if !self.leader_keys.is_empty() {
                             self.leader_keys
                                 .iter()
@@ -167,8 +180,8 @@ impl BloomEditor {
                     content: render::StatusBarContent::Normal(render::NormalStatus {
                         title: title.clone(),
                         dirty,
-                        line: cursor_line,
-                        column: cursor_col,
+                        line: pane_cursor_line,
+                        column: pane_cursor_col,
                         pending_keys: String::new(),
                         recording_macro: None,
                         mcp: render::McpIndicator::Off,
@@ -183,8 +196,8 @@ impl BloomEditor {
                 kind: render::PaneKind::Editor,
                 visible_lines,
                 cursor: render::CursorState {
-                    line: cursor_line,
-                    column: cursor_col,
+                    line: pane_cursor_line,
+                    column: pane_cursor_col,
                     shape: match self.vim_state.mode() {
                         vim::Mode::Normal => render::CursorShape::Block,
                         vim::Mode::Insert => render::CursorShape::Bar,
@@ -192,7 +205,7 @@ impl BloomEditor {
                         vim::Mode::Command => render::CursorShape::Bar,
                     },
                 },
-                scroll_offset: self.viewport.first_visible_line,
+                scroll_offset,
                 is_active,
                 title: title.clone(),
                 dirty,
@@ -616,13 +629,15 @@ impl BloomEditor {
         }
     }
 
-    pub(crate) fn render_buffer_lines(&self, buf: &buffer::Buffer) -> Vec<render::RenderedLine> {
-        let range = self.viewport.visible_range();
+    pub(crate) fn render_buffer_lines_with_viewport(
+        &self,
+        buf: &buffer::Buffer,
+        viewport: &render::Viewport,
+    ) -> Vec<render::RenderedLine> {
+        let range = viewport.visible_range();
         let mut lines = Vec::new();
         let line_count = buf.len_lines();
 
-        // Compute line context (frontmatter/code block state) from the start
-        // of the document up to and through the visible range.
         let scan_end = if range.end < line_count {
             range.end
         } else {
@@ -637,13 +652,10 @@ impl BloomEditor {
             let line_text = buf.line(line_idx).to_string();
             let trimmed = line_text.trim();
 
-            // Track frontmatter: first line must be "---", closed by next "---"
             if line_idx == 0 && trimmed == "---" {
                 in_frontmatter = true;
                 seen_first_delimiter = true;
             } else if in_frontmatter && seen_first_delimiter && trimmed == "---" {
-                // This line is still inside frontmatter (closing delimiter),
-                // but after it we're out.
                 if line_idx >= range.start {
                     let spans = self.parser.highlight_line(
                         &line_text,
@@ -663,7 +675,6 @@ impl BloomEditor {
                 continue;
             }
 
-            // Track code fences
             if !in_frontmatter && trimmed.starts_with("```") {
                 if in_code_block {
                     in_code_block = false;
@@ -698,42 +709,45 @@ impl BloomEditor {
         lines
     }
 
+    /// Compute cursor (line, col) for a given char offset in a buffer.
+    fn cursor_position_for(
+        cursor: usize,
+        buf: &buffer::Buffer,
+        vim_state: &vim::VimState,
+    ) -> (usize, usize) {
+        let rope = buf.text();
+        let len = rope.len_chars();
+        if len == 0 {
+            return (0, 0);
+        }
+        let clamped = if matches!(vim_state.mode(), vim::Mode::Insert) {
+            cursor.min(len)
+        } else {
+            cursor.min(len.saturating_sub(1))
+        };
+        if clamped == len {
+            let last_line = rope.len_lines().saturating_sub(1);
+            let line_start = rope.line_to_char(last_line);
+            let col = clamped - line_start;
+            return (last_line, col);
+        }
+        let line = rope.char_to_line(clamped);
+        let line_start = rope.line_to_char(line);
+        let col = clamped - line_start;
+        if rope.char(clamped) == '\n' && line + 1 < rope.len_lines() {
+            let next_line_start = rope.line_to_char(line + 1);
+            let next_line_len = rope.line(line + 1).len_chars();
+            if next_line_len == 0 && next_line_start == len {
+                return (line + 1, 0);
+            }
+        }
+        (line, col)
+    }
+
     pub(crate) fn cursor_position(&self) -> (usize, usize) {
-        if let Some(page_id) = &self.active_page {
+        if let Some(page_id) = self.active_page() {
             if let Some(buf) = self.buffer_mgr.get(page_id) {
-                let rope = buf.text();
-                let len = rope.len_chars();
-                if len == 0 {
-                    return (0, 0);
-                }
-                // In insert mode, cursor can be at len_chars() (append position)
-                let clamped = if matches!(self.vim_state.mode(), vim::Mode::Insert) {
-                    self.cursor.min(len)
-                } else {
-                    self.cursor.min(len.saturating_sub(1))
-                };
-                if clamped == len {
-                    // Cursor at append position — find last line
-                    let last_line = rope.len_lines().saturating_sub(1);
-                    let line_start = rope.line_to_char(last_line);
-                    let col = clamped - line_start;
-                    return (last_line, col);
-                }
-                let line = rope.char_to_line(clamped);
-                let line_start = rope.line_to_char(line);
-                let col = clamped - line_start;
-                // If clamped landed on a trailing newline and there's an empty
-                // last line after it, place the cursor there instead. This
-                // matches Vim's behavior where the block cursor can sit on an
-                // empty final line (e.g. after `G` or `j`).
-                if rope.char(clamped) == '\n' && line + 1 < rope.len_lines() {
-                    let next_line_start = rope.line_to_char(line + 1);
-                    let next_line_len = rope.line(line + 1).len_chars();
-                    if next_line_len == 0 && next_line_start == len {
-                        return (line + 1, 0);
-                    }
-                }
-                return (line, col);
+                return Self::cursor_position_for(self.cursor(), buf, &self.vim_state);
             }
         }
         (0, 0)

@@ -91,13 +91,9 @@ impl BloomEditor {
         }
 
         // Vim processing
-        if let Some(buf) = self
-            .active_page
-            .as_ref()
-            .and_then(|id| self.buffer_mgr.get(id))
-        {
+        if let Some(buf) = self.active_page().and_then(|id| self.buffer_mgr.get(id)) {
             let mode_before_key = self.vim_state.mode();
-            let action = self.vim_state.process_key(key.clone(), buf, self.cursor);
+            let action = self.vim_state.process_key(key.clone(), buf, self.cursor());
 
             // Esc in Normal mode with no overlays: dismiss persistent notifications
             if key.code == types::KeyCode::Esc && matches!(mode_before_key, vim::Mode::Normal) {
@@ -118,7 +114,7 @@ impl BloomEditor {
     /// task toggle, and any other mutation without each handler needing to
     /// remember to call schedule_autosave().
     fn autosave_if_dirty(&self) {
-        if let Some(page_id) = &self.active_page {
+        if let Some(page_id) = self.active_page() {
             if self.buffer_mgr.get(page_id).is_some_and(|b| b.is_dirty()) {
                 self.schedule_autosave(page_id);
             }
@@ -212,23 +208,23 @@ impl BloomEditor {
                     self.toggle_task_at_cursor();
                 }
                 keymap::dispatch::Action::Undo => {
-                    if let Some(page_id) = &self.active_page {
-                        if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                    if let Some(page_id) = self.active_page().cloned() {
+                        if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                             buf.undo();
                             let len = buf.len_chars();
-                            if self.cursor > len {
-                                self.cursor = len.saturating_sub(1);
+                            if self.cursor() > len {
+                                self.set_cursor(len.saturating_sub(1));
                             }
                         }
                     }
                 }
                 keymap::dispatch::Action::Redo => {
-                    if let Some(page_id) = &self.active_page {
-                        if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                    if let Some(page_id) = self.active_page().cloned() {
+                        if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                             buf.redo();
                             let len = buf.len_chars();
-                            if self.cursor > len {
-                                self.cursor = len.saturating_sub(1);
+                            if self.cursor() > len {
+                                self.set_cursor(len.saturating_sub(1));
                             }
                         }
                     }
@@ -460,7 +456,7 @@ impl BloomEditor {
                                 // Reload from disk
                                 if let Ok(content) = std::fs::read_to_string(&path) {
                                     self.buffer_mgr.reload(&page_id, &content);
-                                    self.cursor = 0;
+                                    self.set_cursor(0);
                                 }
                             }
                             // selected == 1: keep buffer (do nothing)
@@ -689,10 +685,11 @@ impl BloomEditor {
 
     /// Toggle task checkbox on the line at the cursor: `[ ]` ↔ `[x]`.
     pub(crate) fn toggle_task_at_cursor(&mut self) {
-        let Some(page_id) = &self.active_page else {
+        let Some(page_id) = self.active_page().cloned() else {
             return;
         };
-        let Some(buf) = self.buffer_mgr.get_mut(page_id) else {
+        let cursor = self.cursor();
+        let Some(buf) = self.buffer_mgr.get_mut(&page_id) else {
             return;
         };
         let rope = buf.text();
@@ -700,7 +697,7 @@ impl BloomEditor {
         if len == 0 {
             return;
         }
-        let cursor = self.cursor.min(len.saturating_sub(1));
+        let cursor = cursor.min(len.saturating_sub(1));
         let line_idx = rope.char_to_line(cursor);
         let line_text = rope.line(line_idx).to_string();
         let trimmed = line_text.trim_start();
@@ -889,12 +886,12 @@ impl BloomEditor {
 
     /// Close the active buffer. Opens journal or scratch if it was the last buffer.
     pub(crate) fn close_active_buffer(&mut self) {
-        if let Some(page_id) = self.active_page.take() {
+        if let Some(page_id) = self.active_page().cloned() {
+            self.set_active_page(None);
             self.buffer_mgr.close(&page_id);
-            // Switch to another open buffer, or open journal
             if let Some(next) = self.buffer_mgr.open_buffers().first() {
-                self.active_page = Some(next.page_id.clone());
-                self.cursor = 0;
+                self.set_active_page(Some(next.page_id.clone()));
+                self.set_cursor(0);
             } else {
                 self.open_journal_today();
             }
@@ -910,8 +907,8 @@ impl BloomEditor {
             vim::VimAction::Edit(edit) => {
                 self.pending_since = None;
                 self.which_key_visible = false;
-                if let Some(page_id) = &self.active_page {
-                    if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                if let Some(page_id) = self.active_page().cloned() {
+                    if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                         if edit.replacement.is_empty() {
                             buf.delete(edit.range.clone());
                         } else if edit.range.is_empty() {
@@ -919,7 +916,7 @@ impl BloomEditor {
                         } else {
                             buf.replace(edit.range.clone(), &edit.replacement);
                         }
-                        self.cursor = edit.cursor_after;
+                        self.set_cursor(edit.cursor_after);
                     }
                 }
                 vec![keymap::dispatch::Action::Edit(buffer::EditOp {
@@ -931,7 +928,7 @@ impl BloomEditor {
             vim::VimAction::Motion(motion) => {
                 self.pending_since = None;
                 self.which_key_visible = false;
-                self.cursor = motion.new_position;
+                self.set_cursor(motion.new_position);
                 vec![keymap::dispatch::Action::Motion(
                     keymap::dispatch::MotionResult {
                         new_position: motion.new_position,
@@ -949,15 +946,15 @@ impl BloomEditor {
                 }
                 // Edit group lifecycle: begin on Insert entry, end on Insert exit
                 if matches!(mode, vim::Mode::Insert) {
-                    if let Some(page_id) = &self.active_page {
-                        if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                    if let Some(page_id) = self.active_page().cloned() {
+                        if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                             buf.begin_edit_group();
                         }
                     }
                 } else if matches!(mode, vim::Mode::Normal) {
                     // Leaving Insert (or Visual, Command) → close any open group
-                    if let Some(page_id) = &self.active_page {
-                        if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                    if let Some(page_id) = self.active_page().cloned() {
+                        if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                             buf.end_edit_group();
                         }
                     }
@@ -965,16 +962,16 @@ impl BloomEditor {
                     if was_insert {
                         match self.config.auto_align {
                             config::AutoAlignMode::Page => {
-                                if let Some(page_id) = &self.active_page {
-                                    if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                                if let Some(page_id) = self.active_page().cloned() {
+                                    if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                                         align::auto_align_page(buf);
                                     }
                                 }
                             }
                             config::AutoAlignMode::Block => {
                                 let cursor_line = self.cursor_position().0;
-                                if let Some(page_id) = &self.active_page {
-                                    if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                                if let Some(page_id) = self.active_page().cloned() {
+                                    if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                                         align::auto_align_block(buf, cursor_line);
                                     }
                                 }
@@ -994,11 +991,10 @@ impl BloomEditor {
             }
             vim::VimAction::Unhandled => vec![keymap::dispatch::Action::Noop],
             vim::VimAction::RestoreCheckpoint => {
-                // Ctrl+U in Insert mode: revert to checkpoint
-                if let Some(page_id) = &self.active_page {
-                    if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                if let Some(page_id) = self.active_page().cloned() {
+                    if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                         buf.restore_edit_group_checkpoint();
-                        self.cursor = 0; // reset cursor to start (safe default)
+                        self.set_cursor(0);
                     }
                 }
                 vec![keymap::dispatch::Action::Noop]

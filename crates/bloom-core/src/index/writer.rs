@@ -79,7 +79,12 @@ impl Index {
         }
         let fts_ms = t_fts.elapsed().as_millis() as u64;
 
-        tracing::info!(structured_ms, fts_ms, pages = pages.len(), "rebuild write phase breakdown");
+        tracing::info!(
+            structured_ms,
+            fts_ms,
+            pages = pages.len(),
+            "rebuild write phase breakdown"
+        );
 
         tx.commit()
             .map_err(|e| BloomError::IndexError(e.to_string()))?;

@@ -1079,7 +1079,10 @@ mod tests {
             VimAction::Edit(edit) => {
                 assert!(edit.replacement.is_empty());
                 // Should delete the trailing newline, removing the empty line
-                assert!(!edit.range.is_empty(), "range should not be empty for dd on last line");
+                assert!(
+                    !edit.range.is_empty(),
+                    "range should not be empty for dd on last line"
+                );
                 assert_eq!(edit.range, 5..6); // the \n at position 5
             }
             _ => panic!("expected Edit for dd on last empty line, got {:?}", action),

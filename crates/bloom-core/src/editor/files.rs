@@ -54,8 +54,7 @@ impl BloomEditor {
             {
                 std::fs::metadata(&path)
                     .map(|meta| {
-                        meta.len() == recorded_size
-                            && meta.modified().ok() == Some(recorded_mtime)
+                        meta.len() == recorded_size && meta.modified().ok() == Some(recorded_mtime)
                     })
                     .unwrap_or(false)
             } else {
@@ -84,7 +83,7 @@ impl BloomEditor {
                         visual_changed = true;
                     } else {
                         self.buffer_mgr.reload(&page_id, &disk_content);
-                        self.cursor = 0;
+                        self.set_cursor(0);
                         visual_changed = true;
                     }
                 }
@@ -133,9 +132,9 @@ impl BloomEditor {
     }
 
     pub fn save_current(&mut self) -> Result<(), error::BloomError> {
-        if let Some(page_id) = &self.active_page {
+        if let Some(page_id) = self.active_page().cloned() {
             let (content, path) = {
-                if let Some((buf, info)) = self.buffer_mgr.get_with_info(page_id) {
+                if let Some((buf, info)) = self.buffer_mgr.get_with_info(&page_id) {
                     if !buf.is_dirty() {
                         return Ok(());
                     }
@@ -157,7 +156,7 @@ impl BloomEditor {
             } else {
                 // No DiskWriter (tests, pre-init). Inline atomic write.
                 store::disk_writer::atomic_write(&path, &content)?;
-                if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                     buf.mark_clean();
                 }
             }

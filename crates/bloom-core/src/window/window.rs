@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use crate::error::BloomError;
-use crate::types::PaneId;
+use crate::render::Viewport;
+use crate::types::{PageId, PaneId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SplitDirection {
@@ -37,11 +38,28 @@ pub enum PaneKind {
     SetupWizard,
 }
 
+pub struct PaneState {
+    pub page_id: Option<PageId>,
+    pub cursor: usize,
+    pub viewport: Viewport,
+}
+
+impl Clone for PaneState {
+    fn clone(&self) -> Self {
+        Self {
+            page_id: self.page_id.clone(),
+            cursor: self.cursor,
+            viewport: Viewport::new(self.viewport.height, self.viewport.width),
+        }
+    }
+}
+
 pub struct WindowManager {
     tree: LayoutTree,
     active: PaneId,
     next_pane_id: u64,
     pane_kinds: HashMap<PaneId, PaneKind>,
+    pane_states: HashMap<PaneId, PaneState>,
     maximized: bool,
     pre_maximize_tree: Option<LayoutTree>,
     pre_maximize_active: Option<PaneId>,
@@ -290,11 +308,21 @@ impl WindowManager {
         let first = PaneId(0);
         let mut pane_kinds = HashMap::new();
         pane_kinds.insert(first, PaneKind::Editor);
+        let mut pane_states = HashMap::new();
+        pane_states.insert(
+            first,
+            PaneState {
+                page_id: None,
+                cursor: 0,
+                viewport: Viewport::new(24, 80),
+            },
+        );
         Self {
             tree: LayoutTree::Leaf(first),
             active: first,
             next_pane_id: 1,
             pane_kinds,
+            pane_states,
             maximized: false,
             pre_maximize_tree: None,
             pre_maximize_active: None,
@@ -303,6 +331,14 @@ impl WindowManager {
 
     pub fn active_pane(&self) -> PaneId {
         self.active
+    }
+
+    pub fn pane_state(&self, id: PaneId) -> Option<&PaneState> {
+        self.pane_states.get(&id)
+    }
+
+    pub fn pane_state_mut(&mut self, id: PaneId) -> Option<&mut PaneState> {
+        self.pane_states.get_mut(&id)
     }
 
     pub fn pane_count(&self) -> usize {
@@ -342,6 +378,20 @@ impl WindowManager {
         let new_pane = self.alloc_pane();
         self.pane_kinds.insert(new_pane, PaneKind::Editor);
 
+        // Clone active pane's state for the new pane (Vim :vsplit behavior)
+        if let Some(state) = self.pane_states.get(&self.active).cloned() {
+            self.pane_states.insert(new_pane, state);
+        } else {
+            self.pane_states.insert(
+                new_pane,
+                PaneState {
+                    page_id: None,
+                    cursor: 0,
+                    viewport: Viewport::new(24, 80),
+                },
+            );
+        }
+
         let old_leaf = LayoutTree::Leaf(self.active);
         let new_leaf = LayoutTree::Leaf(new_pane);
         let split_node = LayoutTree::Split {
@@ -364,6 +414,7 @@ impl WindowManager {
         let was_active = self.active == pane;
         remove_pane(&mut self.tree, pane);
         self.pane_kinds.remove(&pane);
+        self.pane_states.remove(&pane);
 
         if was_active {
             self.active = first_leaf(&self.tree);
@@ -374,8 +425,8 @@ impl WindowManager {
     /// Close all panes except the active one.
     pub fn close_others(&mut self) {
         let keep = self.active;
-        // Remove all pane_kinds except the active one
         self.pane_kinds.retain(|id, _| *id == keep);
+        self.pane_states.retain(|id, _| *id == keep);
         self.tree = LayoutTree::Leaf(keep);
     }
 
@@ -494,6 +545,16 @@ impl WindowManager {
         }
         if let Some(k) = tk {
             self.pane_kinds.insert(source, k);
+        }
+
+        // Swap pane_states
+        let ss = self.pane_states.remove(&source);
+        let ts = self.pane_states.remove(&target);
+        if let Some(s) = ss {
+            self.pane_states.insert(target, s);
+        }
+        if let Some(s) = ts {
+            self.pane_states.insert(source, s);
         }
 
         // Active stays at the position we navigated to, but now holds the

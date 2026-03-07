@@ -755,22 +755,21 @@ impl BloomEditor {
                         let id = crate::uuid::generate_hex_id();
                         self.open_page_with_content(&id, &title, &path, &content);
                         // Jump cursor to the matching line
-                        if let Some(page_id) = &self.active_page {
-                            if let Some(buf) = self.buffer_mgr.get(page_id) {
+                        if let Some(page_id) = self.active_page().cloned() {
+                            if let Some(buf) = self.buffer_mgr.get(&page_id) {
                                 let target_char = buf
                                     .text()
                                     .line_to_char(line_num.min(buf.len_lines().saturating_sub(1)));
-                                self.cursor = target_char;
+                                self.set_cursor(target_char);
                             }
                         }
                     }
                 }
             }
             PickerKind::SwitchBuffer => {
-                // Switch to the selected buffer
                 if let Some(page_id) = types::PageId::from_hex(&item.id) {
-                    self.active_page = Some(page_id);
-                    self.cursor = 0;
+                    self.set_active_page(Some(page_id));
+                    self.set_cursor(0);
                 }
             }
             PickerKind::Tags => {
@@ -807,9 +806,8 @@ impl BloomEditor {
                 }
             }
             PickerKind::InlineLink => {
-                // Insert [[id|label]] at cursor position
-                if let Some(page_id) = &self.active_page {
-                    if self.buffer_mgr.get(page_id).is_some() {
+                if let Some(page_id) = self.active_page().cloned() {
+                    if self.buffer_mgr.get(&page_id).is_some() {
                         let link_text = format!("[[{}|{}]]", item.id, item.label);
                         self.insert_text_at_cursor(&link_text);
                     }

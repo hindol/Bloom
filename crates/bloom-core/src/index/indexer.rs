@@ -304,7 +304,10 @@ fn run_incremental(
     // path (single DELETE + bulk INSERT) instead of per-file upsert.
     let is_first_run = stored_fps.is_empty();
     if is_first_run && deleted_paths.is_empty() {
-        tracing::info!(entries = entries.len(), "using bulk rebuild path (first run)");
+        tracing::info!(
+            entries = entries.len(),
+            "using bulk rebuild path (first run)"
+        );
         index.rebuild(&entries)?;
     } else {
         index.incremental_update(&entries, &deleted_paths)?;
@@ -322,7 +325,13 @@ fn run_incremental(
     let write_ms = t_write.elapsed().as_millis() as u64;
     let total_ms = t_total.elapsed().as_millis() as u64;
 
-    tracing::info!(scan_ms, read_parse_ms, write_ms, total_ms, "incremental scan phase timing");
+    tracing::info!(
+        scan_ms,
+        read_parse_ms,
+        write_ms,
+        total_ms,
+        "incremental scan phase timing"
+    );
 
     Ok(IndexComplete {
         stats: RebuildStats {
