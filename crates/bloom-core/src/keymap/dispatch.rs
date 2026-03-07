@@ -36,7 +36,11 @@ pub enum Action {
     SplitWindow(SplitDirection),
     NavigateWindow(Direction),
     CloseWindow,
+    CloseOtherWindows,
     ResizeWindow(ResizeOp),
+    SwapWindow,
+    RotateLayout,
+    MoveBuffer(Direction),
 
     Save,
     Quit,

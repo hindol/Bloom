@@ -250,8 +250,19 @@ pub fn default_tree() -> WhichKeyTree {
     tree.register("w k", "Navigate up", "navigate_up".into());
     tree.register("w l", "Navigate right", "navigate_right".into());
     tree.register("w d", "Close window", "close_window".into());
+    tree.register("w o", "Close other windows", "close_other_windows".into());
     tree.register("w =", "Balance windows", "balance".into());
     tree.register("w m", "Maximize window", "maximize".into());
+    tree.register("w >", "Widen window", "widen_window".into());
+    tree.register("w <", "Narrow window", "narrow_window".into());
+    tree.register("w +", "Taller window", "taller_window".into());
+    tree.register("w -", "Shorter window", "shorter_window".into());
+    tree.register("w x", "Swap with next window", "swap_window".into());
+    tree.register("w R", "Rotate layout", "rotate_layout".into());
+    tree.register("w H", "Move buffer left", "move_buffer_left".into());
+    tree.register("w J", "Move buffer down", "move_buffer_down".into());
+    tree.register("w K", "Move buffer up", "move_buffer_up".into());
+    tree.register("w L", "Move buffer right", "move_buffer_right".into());
 
     // Refactor
     tree.register("r s", "Split page", "split_page".into());

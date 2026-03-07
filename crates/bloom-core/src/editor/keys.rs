@@ -145,6 +145,39 @@ impl BloomEditor {
                     let cursor_line = self.cursor_position().0;
                     self.window_mgr.navigate(dir, cursor_line);
                 }
+                keymap::dispatch::Action::CloseOtherWindows => {
+                    self.window_mgr.close_others();
+                }
+                keymap::dispatch::Action::ResizeWindow(ref op) => {
+                    let pane = self.window_mgr.active_pane();
+                    match op {
+                        keymap::dispatch::ResizeOp::IncreaseWidth => {
+                            self.window_mgr
+                                .resize(pane, 1, window::SplitDirection::Vertical);
+                        }
+                        keymap::dispatch::ResizeOp::DecreaseWidth => {
+                            self.window_mgr
+                                .resize(pane, -1, window::SplitDirection::Vertical);
+                        }
+                        keymap::dispatch::ResizeOp::IncreaseHeight => {
+                            self.window_mgr
+                                .resize(pane, 1, window::SplitDirection::Horizontal);
+                        }
+                        keymap::dispatch::ResizeOp::DecreaseHeight => {
+                            self.window_mgr
+                                .resize(pane, -1, window::SplitDirection::Horizontal);
+                        }
+                    }
+                }
+                keymap::dispatch::Action::SwapWindow => {
+                    self.window_mgr.swap_with_next();
+                }
+                keymap::dispatch::Action::RotateLayout => {
+                    self.window_mgr.rotate_layout();
+                }
+                keymap::dispatch::Action::MoveBuffer(dir) => {
+                    self.window_mgr.move_buffer(dir);
+                }
                 keymap::dispatch::Action::OpenAgenda => {
                     if self.agenda_state.is_some() {
                         self.agenda_state = None;

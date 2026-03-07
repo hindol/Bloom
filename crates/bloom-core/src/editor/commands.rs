@@ -237,6 +237,31 @@ impl BloomEditor {
                 // TODO: show confirmation dialog, then delete
                 vec![keymap::dispatch::Action::Noop]
             }
+            "close_other_windows" => vec![keymap::dispatch::Action::CloseOtherWindows],
+            "widen_window" => vec![keymap::dispatch::Action::ResizeWindow(
+                keymap::dispatch::ResizeOp::IncreaseWidth,
+            )],
+            "narrow_window" => vec![keymap::dispatch::Action::ResizeWindow(
+                keymap::dispatch::ResizeOp::DecreaseWidth,
+            )],
+            "taller_window" => vec![keymap::dispatch::Action::ResizeWindow(
+                keymap::dispatch::ResizeOp::IncreaseHeight,
+            )],
+            "shorter_window" => vec![keymap::dispatch::Action::ResizeWindow(
+                keymap::dispatch::ResizeOp::DecreaseHeight,
+            )],
+            "swap_window" => vec![keymap::dispatch::Action::SwapWindow],
+            "rotate_layout" => vec![keymap::dispatch::Action::RotateLayout],
+            "move_buffer_left" => vec![keymap::dispatch::Action::MoveBuffer(
+                window::Direction::Left,
+            )],
+            "move_buffer_down" => vec![keymap::dispatch::Action::MoveBuffer(
+                window::Direction::Down,
+            )],
+            "move_buffer_up" => vec![keymap::dispatch::Action::MoveBuffer(window::Direction::Up)],
+            "move_buffer_right" => vec![keymap::dispatch::Action::MoveBuffer(
+                window::Direction::Right,
+            )],
             "balance" => {
                 self.window_mgr.balance();
                 vec![keymap::dispatch::Action::Noop]
