@@ -3,22 +3,32 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 pub struct WriteRequest {
     pub path: PathBuf,
     pub content: String,
 }
 
+/// Sent back to the editor after a successful atomic write.
+#[derive(Debug, Clone)]
+pub struct WriteComplete {
+    pub path: PathBuf,
+    pub mtime: SystemTime,
+    pub size: u64,
+}
+
 pub struct DiskWriter {
     rx: channel::Receiver<WriteRequest>,
+    ack_tx: channel::Sender<WriteComplete>,
     debounce_ms: u64,
 }
 
 impl DiskWriter {
-    pub fn new(debounce_ms: u64) -> (Self, channel::Sender<WriteRequest>) {
+    pub fn new(debounce_ms: u64) -> (Self, channel::Sender<WriteRequest>, channel::Receiver<WriteComplete>) {
         let (tx, rx) = channel::unbounded();
-        (Self { rx, debounce_ms }, tx)
+        let (ack_tx, ack_rx) = channel::unbounded();
+        (Self { rx, ack_tx, debounce_ms }, tx, ack_rx)
     }
 
     /// Run on a dedicated OS thread. Debounces writes per path, then does
@@ -46,7 +56,9 @@ impl DiskWriter {
                 Err(channel::RecvTimeoutError::Disconnected) => {
                     // Flush remaining writes before exiting.
                     for (path, (content, _)) in pending.drain() {
-                        let _ = atomic_write(&path, &content);
+                        if atomic_write(&path, &content).is_ok() {
+                            self.send_ack(&path);
+                        }
                     }
                     return;
                 }
@@ -64,15 +76,29 @@ impl DiskWriter {
                 if let Some((content, _)) = pending.remove(&path) {
                     if let Err(e) = atomic_write(&path, &content) {
                         tracing::error!("disk write failed for {}: {}", path.display(), e);
+                    } else {
+                        self.send_ack(&path);
                     }
                 }
             }
         }
     }
+
+    fn send_ack(&self, path: &PathBuf) {
+        if let Ok(meta) = fs::metadata(path) {
+            let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+            let size = meta.len();
+            let _ = self.ack_tx.send(WriteComplete {
+                path: path.clone(),
+                mtime,
+                size,
+            });
+        }
+    }
 }
 
 /// Write content to a temp file, fsync, then rename over the target.
-fn atomic_write(path: &PathBuf, content: &str) -> std::io::Result<()> {
+pub fn atomic_write(path: &PathBuf, content: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }

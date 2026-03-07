@@ -102,6 +102,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
             needs_render = true;
         }
 
+        // Poll DiskWriter ack channel (marks buffers clean after write)
+        editor.poll_write_completions();
+
         // Poll file watcher events (debounced → forwarded to indexer)
         if editor.poll_file_events() {
             needs_render = true;

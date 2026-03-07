@@ -333,7 +333,8 @@ While the indexer runs, the editor is fully usable. Features that depend on the 
 
 All inter-thread communication uses `crossbeam` channels (bounded, lock-free):
 
-- **UI → Disk Writer**: `Sender<WriteRequest>` — fire-and-forget, debounced
+- **UI → Disk Writer**: `Sender<WriteRequest>` — debounced auto-save and explicit `:w` both route here
+- **Disk Writer → UI**: `Sender<WriteComplete>` — ack with mtime/size fingerprint after each successful write
 - **UI → Indexer**: `Sender<IndexRequest>` — `FullRebuild`, `IncrementalBatch(paths)`, `Shutdown`
 - **Indexer → UI**: `Sender<IndexComplete>` — completion notification with timing
 - **File Watcher → UI**: `Receiver<FileEvent>` — polled in event loop, debounced, forwarded to indexer
@@ -349,7 +350,7 @@ The core library has **zero dependency on any async runtime**. All concurrency i
 
 - **Atomic writes**: The disk writer uses a write→fsync→rename pattern. Content is written to a temporary file, fsynced to disk, then atomically renamed over the target. A crash at any point leaves either the old or new file intact — never a half-written file.
 - **Auto-save**: Debounced at 300ms after last keystroke. Dirty-buffer indicator shown in the status bar (dot or [+] next to filename).
-- **Self-write detection**: When the file watcher reports a change to an open buffer, Bloom reads the file and compares the disk content to the in-memory rope. If they match, the change was our own save — the buffer is marked clean silently (no prompt, no reload). This avoids false "file changed on disk" prompts after auto-save or manual save.
+- **Self-write detection**: When the file watcher reports a change to an open buffer, the editor first checks a recorded write fingerprint (mtime + size from `DiskWriter`'s ack channel) — a single `stat()` syscall with no file I/O. If the fingerprint matches, the event is from our own save and is skipped. If no fingerprint matches, the editor falls back to reading the file and comparing content. This two-tier approach (stat-first, read-only-if-needed) matches the pattern used by VS Code and Neovim.
 - **External file changes vs dirty buffer**: If the disk content *differs* from the buffer and the buffer has unsaved edits, Bloom shows a prompt: "File changed on disk. Reload (losing edits) or keep buffer version?" If the buffer is clean (no unsaved edits), Bloom silently reloads the new content. This handles `git checkout`, Syncthing sync, and manual external edits.
 
 ---

@@ -178,6 +178,8 @@ pub struct BloomEditor {
     active_theme: &'static theme::ThemePalette,
     // Auto-save
     autosave_tx: Option<crossbeam::channel::Sender<store::disk_writer::WriteRequest>>,
+    write_complete_rx: Option<crossbeam::channel::Receiver<store::disk_writer::WriteComplete>>,
+    last_write_fingerprints: std::collections::HashMap<std::path::PathBuf, (std::time::SystemTime, u64)>,
     terminal_height: u16,
     terminal_width: u16,
     // Background indexer
@@ -480,6 +482,8 @@ impl BloomEditor {
             which_key_visible: false,
             active_theme,
             autosave_tx: None,
+            write_complete_rx: None,
+            last_write_fingerprints: std::collections::HashMap::new(),
             terminal_height: 24,
             terminal_width: 80,
             indexer_rx: None,
@@ -1132,8 +1136,9 @@ impl BloomEditor {
         self.vault_root = Some(vault_root.to_path_buf());
 
         // Start auto-save disk writer thread
-        let (writer, tx) = store::disk_writer::DiskWriter::new(self.config.autosave_debounce_ms);
+        let (writer, tx, ack_rx) = store::disk_writer::DiskWriter::new(self.config.autosave_debounce_ms);
         self.autosave_tx = Some(tx);
+        self.write_complete_rx = Some(ack_rx);
         std::thread::Builder::new()
             .name("bloom-disk-writer".into())
             .spawn(move || writer.start())
@@ -1218,6 +1223,22 @@ impl BloomEditor {
         self.indexing
     }
 
+    /// Drain DiskWriter ack channel. Marks buffers clean when their write completes.
+    pub fn poll_write_completions(&mut self) {
+        if let Some(rx) = &self.write_complete_rx {
+            while let Ok(wc) = rx.try_recv() {
+                // Record fingerprint for the watcher to consume
+                self.last_write_fingerprints.insert(wc.path.clone(), (wc.mtime, wc.size));
+                // Mark clean immediately if the buffer still matches what was written
+                if let Some(page_id) = self.buffer_mgr.find_by_path(&wc.path).cloned() {
+                    if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                        buf.mark_clean();
+                    }
+                }
+            }
+        }
+    }
+
     /// Drain file watcher events, debounce, and forward to the indexer thread.
     /// Returns true if a batch was sent (triggers needs_render for ⟳ indicator).
     pub fn poll_file_events(&mut self) -> bool {
@@ -1241,29 +1262,47 @@ impl BloomEditor {
                         if matches!(first, Some("pages") | Some("journal")) {
                             // Check if this file has an open buffer
                             if let Some(page_id) = self.buffer_mgr.find_by_path(&path).cloned() {
-                                if let Ok(disk_content) = std::fs::read_to_string(&path) {
-                                    let buf_content = self.buffer_mgr.get(&page_id)
-                                        .map(|b| b.text().to_string());
-                                    if buf_content.as_deref() == Some(disk_content.as_str()) {
-                                        // Disk matches buffer — this was our own save.
-                                        // Mark clean silently; no prompt, no reload needed.
-                                        if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
-                                            buf.mark_clean();
-                                        }
-                                    } else {
-                                        let is_dirty = self.buffer_mgr.get(&page_id)
-                                            .map_or(false, |b| b.is_dirty());
-                                        if is_dirty {
-                                            // Dirty buffer with different disk content: real conflict
-                                            self.active_dialog = Some(ActiveDialog::FileChanged {
-                                                page_id,
-                                                path: path.clone(),
-                                                selected: 0,
-                                            });
+                                // Tier 1: stat() vs recorded write fingerprint (no file I/O)
+                                let is_own_write = if let Some((recorded_mtime, recorded_size)) = self.last_write_fingerprints.remove(&path) {
+                                    std::fs::metadata(&path)
+                                        .map(|meta| {
+                                            meta.len() == recorded_size
+                                                && meta.modified().ok() == Some(recorded_mtime)
+                                        })
+                                        .unwrap_or(false)
+                                } else {
+                                    false
+                                };
+
+                                if is_own_write {
+                                    // Our own write confirmed by fingerprint — already marked
+                                    // clean in poll_write_completions, nothing else to do.
+                                } else {
+                                    // Tier 2: read file, compare content
+                                    if let Ok(disk_content) = std::fs::read_to_string(&path) {
+                                        let buf_content = self.buffer_mgr.get(&page_id)
+                                            .map(|b| b.text().to_string());
+                                        if buf_content.as_deref() == Some(disk_content.as_str()) {
+                                            // Content matches — likely our save but fingerprint
+                                            // was consumed or clock skewed. Mark clean.
+                                            if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                                                buf.mark_clean();
+                                            }
                                         } else {
-                                            // Clean buffer, different content: external change
-                                            self.buffer_mgr.reload(&page_id, &disk_content);
-                                            self.cursor = 0;
+                                            let is_dirty = self.buffer_mgr.get(&page_id)
+                                                .map_or(false, |b| b.is_dirty());
+                                            if is_dirty {
+                                                // Dirty buffer, different content: real conflict
+                                                self.active_dialog = Some(ActiveDialog::FileChanged {
+                                                    page_id,
+                                                    path: path.clone(),
+                                                    selected: 0,
+                                                });
+                                            } else {
+                                                // Clean buffer, different content: external change
+                                                self.buffer_mgr.reload(&page_id, &disk_content);
+                                                self.cursor = 0;
+                                            }
                                         }
                                     }
                                 }
@@ -3451,21 +3490,19 @@ impl BloomEditor {
                 return Ok(());
             }
 
-            // Atomic write: write to tmp, fsync, rename
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            let tmp = path.with_extension("tmp");
-            {
-                use std::io::Write;
-                let mut file = std::fs::File::create(&tmp)?;
-                file.write_all(content.as_bytes())?;
-                file.sync_all()?;
-            }
-            std::fs::rename(&tmp, &path)?;
-
-            if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
-                buf.mark_clean();
+            if let Some(tx) = &self.autosave_tx {
+                // Route through DiskWriter (same path as autosave).
+                // DiskWriter will send WriteComplete → poll_write_completions marks clean.
+                let _ = tx.send(store::disk_writer::WriteRequest {
+                    path,
+                    content,
+                });
+            } else {
+                // No DiskWriter (tests, pre-init). Inline atomic write.
+                store::disk_writer::atomic_write(&path, &content)?;
+                if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                    buf.mark_clean();
+                }
             }
         }
         Ok(())
