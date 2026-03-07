@@ -213,7 +213,7 @@ fn insert_page_data(
 
     for tag in &entry.tags {
         conn.execute(
-            "INSERT INTO tags (page_id, tag) VALUES (?1, ?2)",
+            "INSERT OR IGNORE INTO tags (page_id, tag) VALUES (?1, ?2)",
             rusqlite::params![page_id, tag.0],
         )
         .map_err(|e| BloomError::IndexError(e.to_string()))?;
