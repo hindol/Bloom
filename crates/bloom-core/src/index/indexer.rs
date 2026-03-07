@@ -97,24 +97,22 @@ fn indexer_main(
     // Long-lived loop: process requests until Shutdown
     while let Ok(request) = request_rx.recv() {
         match request {
-            IndexRequest::FullRebuild => {
-                match run_full_rebuild(vault_root, &mut index, &parser) {
-                    Ok(complete) => {
-                        tracing::info!(
-                            pages = complete.stats.pages,
-                            links = complete.stats.links,
-                            duration_ms = complete.timing.total_ms,
-                            "full rebuild complete"
-                        );
-                        let _ = index.prune_orphaned_access();
-                        let _ = completion_tx.send(complete);
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, "indexer rebuild error");
-                        send_error_completion(completion_tx, format!("Rebuild failed: {e}"));
-                    }
+            IndexRequest::FullRebuild => match run_full_rebuild(vault_root, &mut index, &parser) {
+                Ok(complete) => {
+                    tracing::info!(
+                        pages = complete.stats.pages,
+                        links = complete.stats.links,
+                        duration_ms = complete.timing.total_ms,
+                        "full rebuild complete"
+                    );
+                    let _ = index.prune_orphaned_access();
+                    let _ = completion_tx.send(complete);
                 }
-            }
+                Err(e) => {
+                    tracing::error!(error = %e, "indexer rebuild error");
+                    send_error_completion(completion_tx, format!("Rebuild failed: {e}"));
+                }
+            },
             IndexRequest::IncrementalBatch(paths) => {
                 match run_batch(vault_root, &mut index, &parser, &paths) {
                     Ok(complete) => {
@@ -138,10 +136,18 @@ fn indexer_main(
 
 fn send_error_completion(tx: &Sender<IndexComplete>, error: String) {
     let _ = tx.send(IndexComplete {
-        stats: RebuildStats { pages: 0, links: 0, tags: 0 },
+        stats: RebuildStats {
+            pages: 0,
+            links: 0,
+            tags: 0,
+        },
         timing: IndexTiming {
-            scan_ms: 0, read_parse_ms: 0, write_ms: 0, total_ms: 0,
-            files_scanned: 0, files_changed: 0,
+            scan_ms: 0,
+            read_parse_ms: 0,
+            write_ms: 0,
+            total_ms: 0,
+            files_scanned: 0,
+            files_changed: 0,
         },
         error: Some(error),
     });
@@ -163,7 +169,8 @@ fn run_full_rebuild(
     let mut all_paths = store.list_pages().unwrap_or_default();
     all_paths.extend(store.list_journals().unwrap_or_default());
     let files_scanned = all_paths.len();
-    let rel_paths: Vec<PathBuf> = all_paths.iter()
+    let rel_paths: Vec<PathBuf> = all_paths
+        .iter()
         .map(|p| p.strip_prefix(vault_root).unwrap_or(p).to_path_buf())
         .collect();
     let scan_ms = t_scan.elapsed().as_millis() as u64;
@@ -181,11 +188,16 @@ fn run_full_rebuild(
     for rel in &rel_paths {
         let full = vault_root.join(rel);
         if let Ok(meta) = std::fs::metadata(&full) {
-            let mtime = meta.modified().ok()
+            let mtime = meta
+                .modified()
+                .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
-            let fp = FileFingerprint { mtime_secs: mtime, size_bytes: meta.len() };
+            let fp = FileFingerprint {
+                mtime_secs: mtime,
+                size_bytes: meta.len(),
+            };
             index.set_fingerprint(&rel.display().to_string(), &fp);
         }
     }
@@ -195,7 +207,10 @@ fn run_full_rebuild(
     Ok(IndexComplete {
         stats,
         timing: IndexTiming {
-            scan_ms, read_parse_ms, write_ms, total_ms,
+            scan_ms,
+            read_parse_ms,
+            write_ms,
+            total_ms,
             files_scanned,
             files_changed: files_scanned, // all files re-indexed
         },
@@ -250,7 +265,9 @@ fn run_incremental(
         current_fps.insert(rel_str.clone(), fp.clone());
 
         let changed = match stored_fps.get(&rel_str) {
-            Some(stored) => stored.mtime_secs != fp.mtime_secs || stored.size_bytes != fp.size_bytes,
+            Some(stored) => {
+                stored.mtime_secs != fp.mtime_secs || stored.size_bytes != fp.size_bytes
+            }
             None => true,
         };
         if changed {
@@ -297,8 +314,12 @@ fn run_incremental(
             tags: entries.iter().map(|e| e.tags.len()).sum(),
         },
         timing: IndexTiming {
-            scan_ms, read_parse_ms, write_ms, total_ms,
-            files_scanned, files_changed,
+            scan_ms,
+            read_parse_ms,
+            write_ms,
+            total_ms,
+            files_scanned,
+            files_changed,
         },
         error: None,
     })
@@ -336,11 +357,16 @@ fn run_batch(
     for rel in &existing {
         let full = vault_root.join(rel);
         if let Ok(meta) = std::fs::metadata(&full) {
-            let mtime = meta.modified().ok()
+            let mtime = meta
+                .modified()
+                .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
-            let fp = FileFingerprint { mtime_secs: mtime, size_bytes: meta.len() };
+            let fp = FileFingerprint {
+                mtime_secs: mtime,
+                size_bytes: meta.len(),
+            };
             index.set_fingerprint(&rel.display().to_string(), &fp);
         }
     }
@@ -355,7 +381,10 @@ fn run_batch(
             tags: entries.iter().map(|e| e.tags.len()).sum(),
         },
         timing: IndexTiming {
-            scan_ms: 0, read_parse_ms, write_ms, total_ms,
+            scan_ms: 0,
+            read_parse_ms,
+            write_ms,
+            total_ms,
             files_scanned: rel_paths.len(),
             files_changed: entries.len() + deleted.len(),
         },
@@ -382,19 +411,29 @@ fn parse_paths(
                 .and_then(|f| f.created)
                 .unwrap_or_else(|| chrono::Local::now().date_naive());
             let tags: Vec<TagName> = doc.tags.iter().map(|t| t.name.clone()).collect();
-            let links: Vec<LinkTarget> = doc.links.iter().map(|l| LinkTarget {
-                page: l.target.clone(),
-                section: l.section.clone(),
-                display_hint: l.display_hint.clone(),
-            }).collect();
-            let tasks: Vec<Task> = doc.tasks.iter().map(|t| Task {
-                text: t.text.clone(),
-                done: t.done,
-                timestamps: t.timestamps.clone(),
-                source_page: page_id.clone(),
-                line: t.line,
-            }).collect();
-            let block_ids: Vec<(BlockId, usize)> = doc.block_ids.iter()
+            let links: Vec<LinkTarget> = doc
+                .links
+                .iter()
+                .map(|l| LinkTarget {
+                    page: l.target.clone(),
+                    section: l.section.clone(),
+                    display_hint: l.display_hint.clone(),
+                })
+                .collect();
+            let tasks: Vec<Task> = doc
+                .tasks
+                .iter()
+                .map(|t| Task {
+                    text: t.text.clone(),
+                    done: t.done,
+                    timestamps: t.timestamps.clone(),
+                    source_page: page_id.clone(),
+                    line: t.line,
+                })
+                .collect();
+            let block_ids: Vec<(BlockId, usize)> = doc
+                .block_ids
+                .iter()
                 .map(|b| (b.id.clone(), b.line))
                 .collect();
 

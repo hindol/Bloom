@@ -291,8 +291,7 @@ pub fn parse_pending(pending: &str, is_recording: bool) -> ParseResult {
         // Check for doubled operator
         let doubled = match op {
             Operator::Reflow => {
-                chars[pos] == 'q'
-                    || (pos + 1 < n && chars[pos] == 'g' && chars[pos + 1] == 'q')
+                chars[pos] == 'q' || (pos + 1 < n && chars[pos] == 'g' && chars[pos + 1] == 'q')
             }
             _ => chars[pos] == first,
         };

@@ -121,11 +121,6 @@ impl<'a> TuiTheme<'a> {
         rgb(self.palette.highlight)
     }
 
-    /// Popout colour (selection, visual mode).
-    pub fn popout(&self) -> Color {
-        rgb(self.palette.popout)
-    }
-
     pub fn faded_style(&self) -> RStyle {
         to_rstyle(&theme::resolve_chrome(Chrome::Faded, self.palette))
     }

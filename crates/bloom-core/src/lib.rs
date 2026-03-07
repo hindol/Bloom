@@ -46,6 +46,12 @@ pub struct BufferInfo {
     pub last_focused: Instant,
 }
 
+impl Default for BufferManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BufferManager {
     pub fn new() -> Self {
         Self {
@@ -101,7 +107,8 @@ impl BufferManager {
 
     /// Find a buffer by its file path (for file watcher conflict detection).
     pub fn find_by_path(&self, path: &std::path::Path) -> Option<&types::PageId> {
-        self.buffers.values()
+        self.buffers
+            .values()
             .find(|(_, info)| info.path == path)
             .map(|(_, info)| &info.page_id)
     }
@@ -163,16 +170,16 @@ pub struct BloomEditor {
     vim_state: vim::VimState,
     window_mgr: window::WindowManager,
     which_key_tree: which_key::WhichKeyTree,
-    command_registry: which_key::CommandRegistry,
+    _command_registry: which_key::CommandRegistry,
     index: Option<index::Index>,
     journal: Option<journal::Journal>,
     parser: parser::BloomMarkdownParser,
     template_engine: Option<template::TemplateEngine>,
     template_mode: Option<template::TemplateModeState>,
-    linker: linker::Linker,
+    _linker: linker::Linker,
     agenda: agenda::Agenda,
-    timeline: timeline::Timeline,
-    refactorer: refactor::Refactor,
+    _timeline: timeline::Timeline,
+    _refactorer: refactor::Refactor,
     note_store: Option<store::local::LocalFileStore>,
 
     // State
@@ -193,7 +200,8 @@ pub struct BloomEditor {
     // Auto-save
     autosave_tx: Option<crossbeam::channel::Sender<store::disk_writer::WriteRequest>>,
     write_complete_rx: Option<crossbeam::channel::Receiver<store::disk_writer::WriteComplete>>,
-    last_write_fingerprints: std::collections::HashMap<std::path::PathBuf, (std::time::SystemTime, u64)>,
+    last_write_fingerprints:
+        std::collections::HashMap<std::path::PathBuf, (std::time::SystemTime, u64)>,
     terminal_height: u16,
     terminal_width: u16,
     // Background indexer
@@ -251,7 +259,7 @@ struct SetupWizardState {
     import_choice: render::ImportChoice,
     logseq_path: String,
     logseq_path_cursor: usize,
-    import_progress: Option<render::ImportProgress>,
+    _import_progress: Option<render::ImportProgress>,
     stats: render::WizardStats,
     error: Option<String>,
 }
@@ -262,6 +270,7 @@ enum WizardStep {
     ChooseVault,
     ImportChoice,
     ImportPath,
+    #[allow(dead_code)]
     ImportRunning,
     Complete,
 }
@@ -275,7 +284,7 @@ impl SetupWizardState {
             import_choice: render::ImportChoice::No,
             logseq_path: String::new(),
             logseq_path_cursor: 0,
-            import_progress: None,
+            _import_progress: None,
             stats: render::WizardStats {
                 pages: 0,
                 journals: 0,
@@ -327,9 +336,7 @@ fn home_dir() -> Option<std::path::PathBuf> {
     }
     #[cfg(not(windows))]
     {
-        std::env::var("HOME")
-            .ok()
-            .map(std::path::PathBuf::from)
+        std::env::var("HOME").ok().map(std::path::PathBuf::from)
     }
 }
 
@@ -344,10 +351,16 @@ fn expand_tilde(path: &str) -> String {
 
 /// Extract the link ID from a `[[id|text]]` pattern at the given column in a line.
 fn extract_link_at_col(line: &str, col: usize) -> Option<String> {
-    let byte_col = line.char_indices().nth(col).map(|(i, _)| i).unwrap_or(line.len());
+    let byte_col = line
+        .char_indices()
+        .nth(col)
+        .map(|(i, _)| i)
+        .unwrap_or(line.len());
     let bytes = line.as_bytes();
     let len = bytes.len();
-    if byte_col >= len { return None; }
+    if byte_col >= len {
+        return None;
+    }
 
     // Search backwards for [[
     let mut start = None;
@@ -464,22 +477,21 @@ struct QuickCaptureState {
 
 impl BloomEditor {
     pub fn new(config: config::Config) -> Result<Self, error::BloomError> {
-        let active_theme = theme::palette_by_name(&config.theme.name)
-            .unwrap_or(&theme::BLOOM_DARK);
+        let active_theme = theme::palette_by_name(&config.theme.name).unwrap_or(&theme::BLOOM_DARK);
         Ok(Self {
             vim_state: vim::VimState::new(),
             window_mgr: window::WindowManager::new(),
             which_key_tree: which_key::default_tree(),
-            command_registry: which_key::default_registry(),
+            _command_registry: which_key::default_registry(),
             index: None,
             journal: None,
             parser: parser::BloomMarkdownParser::new(),
             template_engine: None,
             template_mode: None,
-            linker: linker::Linker::new(),
+            _linker: linker::Linker::new(),
             agenda: agenda::Agenda::new(),
-            timeline: timeline::Timeline::new(),
-            refactorer: refactor::Refactor::new(),
+            _timeline: timeline::Timeline::new(),
+            _refactorer: refactor::Refactor::new(),
             note_store: None,
             buffer_mgr: BufferManager::new(),
             cursor: 0,
@@ -541,40 +553,50 @@ impl BloomEditor {
     fn open_picker(&mut self, kind: keymap::dispatch::PickerKind) {
         use keymap::dispatch::PickerKind;
         let (title, status_noun, items) = match &kind {
-            PickerKind::FindPage => {
-                ("Find Page".to_string(), "pages".to_string(), self.collect_page_items())
-            }
+            PickerKind::FindPage => (
+                "Find Page".to_string(),
+                "pages".to_string(),
+                self.collect_page_items(),
+            ),
             PickerKind::SwitchBuffer => {
-                let items: Vec<GenericPickerItem> = self.buffer_mgr.open_buffers().iter().map(|info| {
-                    GenericPickerItem {
+                let items: Vec<GenericPickerItem> = self
+                    .buffer_mgr
+                    .open_buffers()
+                    .iter()
+                    .map(|info| GenericPickerItem {
                         id: info.page_id.to_hex(),
                         label: info.title.clone(),
                         middle: Some("[+]".to_string()),
                         right: Some(info.path.display().to_string()),
                         preview_text: None,
                         score_boost: 0,
-                    }
-                }).collect();
-                ("Switch Buffer".to_string(), "open buffers".to_string(), items)
+                    })
+                    .collect();
+                (
+                    "Switch Buffer".to_string(),
+                    "open buffers".to_string(),
+                    items,
+                )
             }
-            PickerKind::Search => {
-                ("Search".to_string(), "matches".to_string(), Vec::new())
-            }
-            PickerKind::Journal => {
-                ("Journal".to_string(), "journal entries".to_string(), self.collect_journal_items())
-            }
+            PickerKind::Search => ("Search".to_string(), "matches".to_string(), Vec::new()),
+            PickerKind::Journal => (
+                "Journal".to_string(),
+                "journal entries".to_string(),
+                self.collect_journal_items(),
+            ),
             PickerKind::Tags => {
                 let items = if let Some(idx) = &self.index {
-                    idx.all_tags().into_iter().map(|(tag, count)| {
-                        GenericPickerItem {
+                    idx.all_tags()
+                        .into_iter()
+                        .map(|(tag, count)| GenericPickerItem {
                             id: tag.0.clone(),
                             label: format!("#{}", tag.0),
                             middle: None,
                             right: Some(format!("{count} pages")),
                             preview_text: None,
                             score_boost: 0,
-                        }
-                    }).collect()
+                        })
+                        .collect()
                 } else {
                     Vec::new()
                 };
@@ -594,50 +616,60 @@ impl BloomEditor {
                     ("theme_selector", "Theme selector", "SPC T t"),
                     ("new_from_template", "New from template", "SPC n"),
                     ("rebuild_index", "Rebuild index", "SPC h r"),
-                ].into_iter().map(|(id, label, keys)| {
-                    GenericPickerItem {
-                        id: id.to_string(),
-                        label: label.to_string(),
-                        middle: Some(keys.to_string()),
-                        right: None,
-                        preview_text: None,
-                        score_boost: 0,
-                    }
-                }).collect();
+                ]
+                .into_iter()
+                .map(|(id, label, keys)| GenericPickerItem {
+                    id: id.to_string(),
+                    label: label.to_string(),
+                    middle: Some(keys.to_string()),
+                    right: None,
+                    preview_text: None,
+                    score_boost: 0,
+                })
+                .collect();
                 ("All Commands".to_string(), "commands".to_string(), items)
             }
             PickerKind::Templates => {
-                let items = self.template_engine.as_ref()
-                    .map(|engine| engine.list().into_iter().map(|t| {
-                        let placeholder_count = t.placeholders.len();
-                        GenericPickerItem {
-                            id: t.name.clone(),
-                            label: t.name.clone(),
-                            middle: Some(t.description.clone()),
-                            right: if placeholder_count > 0 {
-                                Some(format!("{placeholder_count} fields"))
-                            } else {
-                                None
-                            },
-                            preview_text: Some(t.content.clone()),
-                            score_boost: 0,
-                        }
-                    }).collect())
+                let items = self
+                    .template_engine
+                    .as_ref()
+                    .map(|engine| {
+                        engine
+                            .list()
+                            .into_iter()
+                            .map(|t| {
+                                let placeholder_count = t.placeholders.len();
+                                GenericPickerItem {
+                                    id: t.name.clone(),
+                                    label: t.name.clone(),
+                                    middle: Some(t.description.clone()),
+                                    right: if placeholder_count > 0 {
+                                        Some(format!("{placeholder_count} fields"))
+                                    } else {
+                                        None
+                                    },
+                                    preview_text: Some(t.content.clone()),
+                                    score_boost: 0,
+                                }
+                            })
+                            .collect()
+                    })
                     .unwrap_or_default();
                 ("Templates".to_string(), "templates".to_string(), items)
             }
             PickerKind::Backlinks(page_id) => {
                 let items = if let Some(idx) = &self.index {
-                    idx.backlinks_to(page_id).into_iter().map(|bl| {
-                        GenericPickerItem {
+                    idx.backlinks_to(page_id)
+                        .into_iter()
+                        .map(|bl| GenericPickerItem {
                             id: bl.source_page.id.to_hex(),
                             label: bl.source_page.title.clone(),
                             middle: Some(bl.context.clone()),
                             right: Some(format!("line {}", bl.line)),
                             preview_text: Some(bl.context),
                             score_boost: 0,
-                        }
-                    }).collect()
+                        })
+                        .collect()
                 } else {
                     Vec::new()
                 };
@@ -645,31 +677,39 @@ impl BloomEditor {
             }
             PickerKind::UnlinkedMentions(page_id) => {
                 let items = if let Some(idx) = &self.index {
-                    let title = idx.find_page_by_id(page_id)
+                    let title = idx
+                        .find_page_by_id(page_id)
                         .map(|m| m.title.clone())
                         .unwrap_or_default();
                     if title.is_empty() {
                         Vec::new()
                     } else {
-                        idx.unlinked_mentions(&title).into_iter().map(|um| {
-                            GenericPickerItem {
+                        idx.unlinked_mentions(&title)
+                            .into_iter()
+                            .map(|um| GenericPickerItem {
                                 id: format!("{}:{}", um.source_page.path.display(), um.line),
                                 label: um.source_page.title.clone(),
                                 middle: Some(um.context.clone()),
                                 right: Some(format!("line {}", um.line)),
                                 preview_text: Some(um.context),
                                 score_boost: 0,
-                            }
-                        }).collect()
+                            })
+                            .collect()
                     }
                 } else {
                     Vec::new()
                 };
-                ("Unlinked Mentions".to_string(), "mentions".to_string(), items)
+                (
+                    "Unlinked Mentions".to_string(),
+                    "mentions".to_string(),
+                    items,
+                )
             }
-            PickerKind::InlineLink => {
-                ("Insert Link".to_string(), "pages".to_string(), self.collect_page_items())
-            }
+            PickerKind::InlineLink => (
+                "Insert Link".to_string(),
+                "pages".to_string(),
+                self.collect_page_items(),
+            ),
             PickerKind::Theme => {
                 // Theme picker is handled by open_theme_picker()
                 self.open_theme_picker();
@@ -718,21 +758,29 @@ impl BloomEditor {
             // Zero-query: show frecency-ordered pages (recently used first).
             // The picker's fuzzy filter re-ranks when the user types.
             let frecent = idx.frecency_top(20);
-            let frecent_ids: std::collections::HashSet<_> = frecent.iter()
-                .map(|m| m.id.clone()).collect();
+            let frecent_ids: std::collections::HashSet<_> =
+                frecent.iter().map(|m| m.id.clone()).collect();
 
-            let mut items: Vec<GenericPickerItem> = frecent.into_iter().map(|meta| {
-                let tags = meta.tags.iter().map(|t| format!("#{}", t.0)).collect::<Vec<_>>().join(" ");
-                let date = Some(meta.created.format("%b %d").to_string());
-                GenericPickerItem {
-                    id: meta.id.to_hex(),
-                    label: meta.title,
-                    middle: if tags.is_empty() { None } else { Some(tags) },
-                    right: date,
-                    preview_text: None,
-                    score_boost: 0,
-                }
-            }).collect();
+            let mut items: Vec<GenericPickerItem> = frecent
+                .into_iter()
+                .map(|meta| {
+                    let tags = meta
+                        .tags
+                        .iter()
+                        .map(|t| format!("#{}", t.0))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let date = Some(meta.created.format("%b %d").to_string());
+                    GenericPickerItem {
+                        id: meta.id.to_hex(),
+                        label: meta.title,
+                        middle: if tags.is_empty() { None } else { Some(tags) },
+                        right: date,
+                        preview_text: None,
+                        score_boost: 0,
+                    }
+                })
+                .collect();
 
             // Append remaining pages after the frecent ones
             let all_pages = idx.list_pages(None);
@@ -740,7 +788,12 @@ impl BloomEditor {
                 if frecent_ids.contains(&meta.id) {
                     continue;
                 }
-                let tags = meta.tags.iter().map(|t| format!("#{}", t.0)).collect::<Vec<_>>().join(" ");
+                let tags = meta
+                    .tags
+                    .iter()
+                    .map(|t| format!("#{}", t.0))
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 let date = Some(meta.created.format("%b %d").to_string());
                 items.push(GenericPickerItem {
                     id: meta.id.to_hex(),
@@ -762,27 +815,39 @@ impl BloomEditor {
             let pages_dir = root.join("pages");
             if pages_dir.exists() {
                 if let Ok(entries) = std::fs::read_dir(&pages_dir) {
-                    return entries.filter_map(|e| {
-                        let e = e.ok()?;
-                        let path = e.path();
-                        if path.extension()?.to_str()? != "md" { return None; }
-                        let content = std::fs::read_to_string(&path).ok()?;
-                        let fm = self.parser.parse_frontmatter(&content)?;
-                        let title = fm.title.unwrap_or_else(|| {
-                            path.file_stem().unwrap_or_default().to_string_lossy().to_string()
-                        });
-                        let tags = fm.tags.iter().map(|t| format!("#{}", t.0)).collect::<Vec<_>>().join(" ");
-                        let preview = content.lines().take(10).collect::<Vec<_>>().join("\n");
-                        let date = fm.created.map(|d| d.format("%b %d").to_string());
-                        Some(GenericPickerItem {
-                            id: path.to_string_lossy().to_string(),
-                            label: title,
-                            middle: if tags.is_empty() { None } else { Some(tags) },
-                            right: date,
-                            preview_text: Some(preview),
-                            score_boost: 0,
+                    return entries
+                        .filter_map(|e| {
+                            let e = e.ok()?;
+                            let path = e.path();
+                            if path.extension()?.to_str()? != "md" {
+                                return None;
+                            }
+                            let content = std::fs::read_to_string(&path).ok()?;
+                            let fm = self.parser.parse_frontmatter(&content)?;
+                            let title = fm.title.unwrap_or_else(|| {
+                                path.file_stem()
+                                    .unwrap_or_default()
+                                    .to_string_lossy()
+                                    .to_string()
+                            });
+                            let tags = fm
+                                .tags
+                                .iter()
+                                .map(|t| format!("#{}", t.0))
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            let preview = content.lines().take(10).collect::<Vec<_>>().join("\n");
+                            let date = fm.created.map(|d| d.format("%b %d").to_string());
+                            Some(GenericPickerItem {
+                                id: path.to_string_lossy().to_string(),
+                                label: title,
+                                middle: if tags.is_empty() { None } else { Some(tags) },
+                                right: date,
+                                preview_text: Some(preview),
+                                score_boost: 0,
+                            })
                         })
-                    }).collect();
+                        .collect();
                 }
             }
         }
@@ -795,16 +860,17 @@ impl BloomEditor {
             let tag = types::TagName("journal".to_string());
             let pages = idx.pages_with_tag(&tag);
             if !pages.is_empty() {
-                let mut items: Vec<GenericPickerItem> = pages.into_iter().map(|meta| {
-                    GenericPickerItem {
+                let mut items: Vec<GenericPickerItem> = pages
+                    .into_iter()
+                    .map(|meta| GenericPickerItem {
                         id: meta.id.to_hex(),
                         label: meta.title,
                         middle: None,
                         right: Some("journal".to_string()),
                         preview_text: None,
                         score_boost: 0,
-                    }
-                }).collect();
+                    })
+                    .collect();
                 items.sort_by(|a, b| b.label.cmp(&a.label)); // most recent first
                 return items;
             }
@@ -815,22 +881,27 @@ impl BloomEditor {
             let journal_dir = root.join("journal");
             if journal_dir.exists() {
                 if let Ok(entries) = std::fs::read_dir(&journal_dir) {
-                    let mut items: Vec<GenericPickerItem> = entries.filter_map(|e| {
-                        let e = e.ok()?;
-                        let path = e.path();
-                        if path.extension()?.to_str()? != "md" { return None; }
-                        let stem = path.file_stem()?.to_string_lossy().to_string();
-                        let preview = std::fs::read_to_string(&path).ok()
-                            .map(|c| c.lines().take(8).collect::<Vec<_>>().join("\n"));
-                        Some(GenericPickerItem {
-                            id: path.to_string_lossy().to_string(),
-                            label: stem,
-                            middle: None,
-                            right: Some("journal".to_string()),
-                            preview_text: preview,
-                            score_boost: 0,
+                    let mut items: Vec<GenericPickerItem> = entries
+                        .filter_map(|e| {
+                            let e = e.ok()?;
+                            let path = e.path();
+                            if path.extension()?.to_str()? != "md" {
+                                return None;
+                            }
+                            let stem = path.file_stem()?.to_string_lossy().to_string();
+                            let preview = std::fs::read_to_string(&path)
+                                .ok()
+                                .map(|c| c.lines().take(8).collect::<Vec<_>>().join("\n"));
+                            Some(GenericPickerItem {
+                                id: path.to_string_lossy().to_string(),
+                                label: stem,
+                                middle: None,
+                                right: Some("journal".to_string()),
+                                preview_text: preview,
+                                score_boost: 0,
+                            })
                         })
-                    }).collect();
+                        .collect();
                     items.sort_by(|a, b| b.label.cmp(&a.label)); // most recent first
                     return items;
                 }
@@ -865,14 +936,12 @@ impl BloomEditor {
                         Err(_) => continue,
                     };
                     let fm = self.parser.parse_frontmatter(&content);
-                    let title = fm
-                        .and_then(|f| f.title)
-                        .unwrap_or_else(|| {
-                            path.file_stem()
-                                .unwrap_or_default()
-                                .to_string_lossy()
-                                .to_string()
-                        });
+                    let title = fm.and_then(|f| f.title).unwrap_or_else(|| {
+                        path.file_stem()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string()
+                    });
                     let display_title = if is_journal {
                         format!("{} (journal)", title)
                     } else {
@@ -882,11 +951,12 @@ impl BloomEditor {
                     let lines: Vec<&str> = content.lines().collect();
 
                     // Skip frontmatter region
-                    let body_start = if lines.first().map_or(false, |l| l.trim() == "---") {
-                        lines.iter()
+                    let body_start = if lines.first().is_some_and(|l| l.trim() == "---") {
+                        lines
+                            .iter()
                             .skip(1)
                             .position(|l| l.trim() == "---")
-                            .map(|i| i + 2)   // +1 for skip(1), +1 to get past closing ---
+                            .map(|i| i + 2) // +1 for skip(1), +1 to get past closing ---
                             .unwrap_or(0)
                     } else {
                         0
@@ -935,7 +1005,11 @@ impl BloomEditor {
             }
         }
         let page_count = page_titles.len();
-        let noun = format!("matches across {} {}", page_count, if page_count == 1 { "page" } else { "pages" });
+        let noun = format!(
+            "matches across {} {}",
+            page_count,
+            if page_count == 1 { "page" } else { "pages" }
+        );
         (noun, items)
     }
 
@@ -971,8 +1045,10 @@ impl BloomEditor {
                 let lines: Vec<&str> = content.lines().collect();
 
                 // Skip frontmatter
-                let body_start = if lines.first().map_or(false, |l| l.trim() == "---") {
-                    lines.iter().skip(1)
+                let body_start = if lines.first().is_some_and(|l| l.trim() == "---") {
+                    lines
+                        .iter()
+                        .skip(1)
                         .position(|l| l.trim() == "---")
                         .map(|i| i + 2)
                         .unwrap_or(0)
@@ -1035,10 +1111,18 @@ impl BloomEditor {
         let items: Vec<GenericPickerItem> = theme::THEME_NAMES
             .iter()
             .map(|name| {
-                let current_marker = if *name == current_name { "(current)" } else { "" };
+                let current_marker = if *name == current_name {
+                    "(current)"
+                } else {
+                    ""
+                };
                 let desc = theme::theme_description(name);
                 let right = if current_marker.is_empty() {
-                    if desc.is_empty() { None } else { Some(desc.to_string()) }
+                    if desc.is_empty() {
+                        None
+                    } else {
+                        Some(desc.to_string())
+                    }
                 } else {
                     Some(format!(
                         "{}{}{}",
@@ -1093,7 +1177,9 @@ impl BloomEditor {
 
     fn theme_picker_confirm(&mut self) {
         if let Some(ap) = self.picker_state.take() {
-            if !matches!(ap.kind, keymap::dispatch::PickerKind::Theme) { return; }
+            if !matches!(ap.kind, keymap::dispatch::PickerKind::Theme) {
+                return;
+            }
             if let Some(selected) = ap.picker.selected() {
                 let name = selected.id.clone();
                 self.set_theme(&name);
@@ -1152,7 +1238,8 @@ impl BloomEditor {
         self.vault_root = Some(vault_root.to_path_buf());
 
         // Start auto-save disk writer thread
-        let (writer, tx, ack_rx) = store::disk_writer::DiskWriter::new(self.config.autosave_debounce_ms);
+        let (writer, tx, ack_rx) =
+            store::disk_writer::DiskWriter::new(self.config.autosave_debounce_ms);
         self.autosave_tx = Some(tx);
         self.write_complete_rx = Some(ack_rx);
         std::thread::Builder::new()
@@ -1170,11 +1257,8 @@ impl BloomEditor {
         let (idx_completion_tx, idx_completion_rx) = crossbeam::channel::bounded(4);
         self.indexer_rx = Some(idx_completion_rx);
         self.indexing = true;
-        let indexer_tx = index::indexer::spawn_indexer(
-            vault_root.to_path_buf(),
-            index_path,
-            idx_completion_tx,
-        );
+        let indexer_tx =
+            index::indexer::spawn_indexer(vault_root.to_path_buf(), index_path, idx_completion_tx);
         self.indexer_tx = Some(indexer_tx);
 
         Ok(())
@@ -1225,10 +1309,7 @@ impl BloomEditor {
         }
 
         let t = &complete.timing;
-        let message = format!(
-            "Index ready — {} files, {}ms",
-            t.files_scanned, t.total_ms,
-        );
+        let message = format!("Index ready — {} files, {}ms", t.files_scanned, t.total_ms,);
         self.last_index_timing = Some(index::indexer::IndexTiming {
             scan_ms: t.scan_ms,
             read_parse_ms: t.read_parse_ms,
@@ -1249,7 +1330,8 @@ impl BloomEditor {
 
     /// Handle a single DiskWriter completion ack.
     pub fn handle_write_complete(&mut self, wc: store::disk_writer::WriteComplete) {
-        self.last_write_fingerprints.insert(wc.path.clone(), (wc.mtime, wc.size));
+        self.last_write_fingerprints
+            .insert(wc.path.clone(), (wc.mtime, wc.size));
         if let Some(page_id) = self.buffer_mgr.find_by_path(&wc.path).cloned() {
             if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                 buf.mark_clean();
@@ -1270,11 +1352,12 @@ impl BloomEditor {
         }
         if let Some(vault_root) = &self.vault_root {
             if let Ok(rel) = path.strip_prefix(vault_root) {
-                let first = rel.components().next()
-                    .and_then(|c| c.as_os_str().to_str());
+                let first = rel.components().next().and_then(|c| c.as_os_str().to_str());
                 if matches!(first, Some("pages") | Some("journal")) {
                     if let Some(page_id) = self.buffer_mgr.find_by_path(&path).cloned() {
-                        let is_own_write = if let Some((recorded_mtime, recorded_size)) = self.last_write_fingerprints.remove(&path) {
+                        let is_own_write = if let Some((recorded_mtime, recorded_size)) =
+                            self.last_write_fingerprints.remove(&path)
+                        {
                             std::fs::metadata(&path)
                                 .map(|meta| {
                                     meta.len() == recorded_size
@@ -1287,15 +1370,15 @@ impl BloomEditor {
 
                         if !is_own_write {
                             if let Ok(disk_content) = std::fs::read_to_string(&path) {
-                                let buf_content = self.buffer_mgr.get(&page_id)
-                                    .map(|b| b.text().to_string());
+                                let buf_content =
+                                    self.buffer_mgr.get(&page_id).map(|b| b.text().to_string());
                                 if buf_content.as_deref() == Some(disk_content.as_str()) {
                                     if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                                         buf.mark_clean();
                                     }
                                 } else {
-                                    let is_dirty = self.buffer_mgr.get(&page_id)
-                                        .map_or(false, |b| b.is_dirty());
+                                    let is_dirty =
+                                        self.buffer_mgr.get(&page_id).is_some_and(|b| b.is_dirty());
                                     if is_dirty {
                                         self.active_dialog = Some(ActiveDialog::FileChanged {
                                             page_id,
@@ -1323,8 +1406,7 @@ impl BloomEditor {
     pub fn flush_file_event_debounce(&mut self) -> bool {
         if let Some(deadline) = self.file_event_deadline {
             if Instant::now() >= deadline && !self.pending_file_events.is_empty() {
-                let paths: Vec<std::path::PathBuf> =
-                    self.pending_file_events.drain().collect();
+                let paths: Vec<std::path::PathBuf> = self.pending_file_events.drain().collect();
                 self.file_event_deadline = None;
                 if let Some(tx) = &self.indexer_tx {
                     let _ = tx.send(index::indexer::IndexRequest::IncrementalBatch(paths));
@@ -1355,7 +1437,9 @@ impl BloomEditor {
         // Which-key timeout
         if !self.which_key_visible && !self.leader_keys.is_empty() {
             if let Some(since) = self.pending_since {
-                consider(since + std::time::Duration::from_millis(self.config.which_key_timeout_ms));
+                consider(
+                    since + std::time::Duration::from_millis(self.config.which_key_timeout_ms),
+                );
             }
         }
         earliest
@@ -1364,8 +1448,12 @@ impl BloomEditor {
     /// Push a notification, keeping max 3 visible and recording in history.
     fn push_notification(&mut self, message: String, level: render::NotificationLevel) {
         let expires_at = match level {
-            render::NotificationLevel::Info => Some(Instant::now() + std::time::Duration::from_secs(4)),
-            render::NotificationLevel::Warning => Some(Instant::now() + std::time::Duration::from_secs(8)),
+            render::NotificationLevel::Info => {
+                Some(Instant::now() + std::time::Duration::from_secs(4))
+            }
+            render::NotificationLevel::Warning => {
+                Some(Instant::now() + std::time::Duration::from_secs(8))
+            }
             render::NotificationLevel::Error => None,
         };
         let notif = render::Notification {
@@ -1380,7 +1468,11 @@ impl BloomEditor {
         }
         // Evict oldest auto-expiring notification if at capacity
         if self.notifications.len() >= 3 {
-            if let Some(pos) = self.notifications.iter().position(|n| n.expires_at.is_some()) {
+            if let Some(pos) = self
+                .notifications
+                .iter()
+                .position(|n| n.expires_at.is_some())
+            {
                 self.notifications.remove(pos);
             } else {
                 self.notifications.remove(0);
@@ -1403,7 +1495,9 @@ impl BloomEditor {
             let pages = idx.list_pages(None).len();
             let tags = idx.all_tags().len();
             let tasks = idx.all_open_tasks().len();
-            parts.push(format!("{pages} pages  │  {tags} tags  │  {tasks} open tasks"));
+            parts.push(format!(
+                "{pages} pages  │  {tags} tags  │  {tasks} open tasks"
+            ));
         }
 
         // Last index timing
@@ -1446,18 +1540,28 @@ impl BloomEditor {
         }
         let content = lines.join("\n");
         let id = crate::uuid::generate_hex_id();
-        self.open_page_with_content(&id, "[messages]", std::path::Path::new("[messages]"), &content);
+        self.open_page_with_content(
+            &id,
+            "[messages]",
+            std::path::Path::new("[messages]"),
+            &content,
+        );
     }
 
     fn open_log_buffer(&mut self) {
-        let log_path = self.vault_root.as_ref()
+        let log_path = self
+            .vault_root
+            .as_ref()
             .map(|r| r.join(".bloom").join("logs").join("bloom.log"));
         if let Some(path) = log_path {
             if let Ok(content) = std::fs::read_to_string(&path) {
                 let id = crate::uuid::generate_hex_id();
                 self.open_page_with_content(&id, "[log]", std::path::Path::new("[log]"), &content);
             } else {
-                self.push_notification("No log file found".to_string(), render::NotificationLevel::Warning);
+                self.push_notification(
+                    "No log file found".to_string(),
+                    render::NotificationLevel::Warning,
+                );
             }
         }
     }
@@ -1508,12 +1612,7 @@ impl BloomEditor {
 
     fn open_scratch_buffer(&mut self) {
         let id = crate::uuid::generate_hex_id();
-        self.open_page_with_content(
-            &id,
-            "[scratch]",
-            std::path::Path::new("[scratch]"),
-            "",
-        );
+        self.open_page_with_content(&id, "[scratch]", std::path::Path::new("[scratch]"), "");
     }
 
     /// Process a key event
@@ -1532,7 +1631,7 @@ impl BloomEditor {
         if let Some(action) = keymap::platform_shortcut(&key) {
             self.leader_keys.clear();
             self.pending_since = None;
-                self.which_key_visible = false;
+            self.which_key_visible = false;
             return self.execute_actions(vec![action]);
         }
 
@@ -1568,33 +1667,35 @@ impl BloomEditor {
         }
 
         // Command mode: intercept Tab for inline menu completion
-        if matches!(self.vim_state.mode(), vim::Mode::Command) {
-            if key.code == types::KeyCode::Tab {
-                // Accept the selected completion into the command line
-                let input = self.vim_state.pending_keys().to_string();
-                let completion = if let Some(arg_prefix) = input.strip_prefix("theme ") {
-                    // Argument completion
-                    theme::THEME_NAMES.iter()
-                        .filter(|name| arg_prefix.is_empty() || name.starts_with(arg_prefix))
-                        .next()
-                        .map(|name| format!("theme {name}"))
-                } else {
-                    // Command completion
-                    EX_COMMANDS.iter()
-                        .filter(|(cmd, _)| input.is_empty() || cmd.starts_with(&input))
-                        .next()
-                        .map(|(cmd, _)| cmd.to_string())
-                };
+        if matches!(self.vim_state.mode(), vim::Mode::Command) && key.code == types::KeyCode::Tab {
+            // Accept the selected completion into the command line
+            let input = self.vim_state.pending_keys().to_string();
+            let completion = if let Some(arg_prefix) = input.strip_prefix("theme ") {
+                // Argument completion
+                theme::THEME_NAMES
+                    .iter()
+                    .find(|name| arg_prefix.is_empty() || name.starts_with(arg_prefix))
+                    .map(|name| format!("theme {name}"))
+            } else {
+                // Command completion
+                EX_COMMANDS
+                    .iter()
+                    .find(|(cmd, _)| input.is_empty() || cmd.starts_with(&input))
+                    .map(|(cmd, _)| cmd.to_string())
+            };
 
-                if let Some(text) = completion {
-                    self.vim_state.set_command_line(&text);
-                }
-                return vec![keymap::dispatch::Action::Noop];
+            if let Some(text) = completion {
+                self.vim_state.set_command_line(&text);
             }
+            return vec![keymap::dispatch::Action::Noop];
         }
 
         // Vim processing
-        if let Some(buf) = self.active_page.as_ref().and_then(|id| self.buffer_mgr.get(id)) {
+        if let Some(buf) = self
+            .active_page
+            .as_ref()
+            .and_then(|id| self.buffer_mgr.get(id))
+        {
             let mode_before_key = self.vim_state.mode();
             let action = self.vim_state.process_key(key.clone(), buf, self.cursor);
             let actions = self.translate_vim_action(action, mode_before_key);
@@ -1684,7 +1785,7 @@ impl BloomEditor {
         if key.code == types::KeyCode::Esc {
             self.leader_keys.clear();
             self.pending_since = None;
-                self.which_key_visible = false;
+            self.which_key_visible = false;
             return vec![keymap::dispatch::Action::Noop];
         }
 
@@ -1803,7 +1904,7 @@ impl BloomEditor {
                 if let Some(page_id) = &self.active_page {
                     if let Some(buf) = self.buffer_mgr.get(page_id) {
                         let text = buf.text().to_string();
-                        if let Some(mut fm) = self.parser.parse_frontmatter(&text) {
+                        if let Some(_fm) = self.parser.parse_frontmatter(&text) {
                             // Prompt would be ideal, but for now insert a placeholder tag
                             // The user types the tag name after #
                             self.insert_text_at_cursor("#");
@@ -1819,16 +1920,18 @@ impl BloomEditor {
                         let text = buf.text().to_string();
                         if let Some(fm) = self.parser.parse_frontmatter(&text) {
                             if !fm.tags.is_empty() {
-                                let items: Vec<GenericPickerItem> = fm.tags.iter().map(|t| {
-                                    GenericPickerItem {
+                                let items: Vec<GenericPickerItem> = fm
+                                    .tags
+                                    .iter()
+                                    .map(|t| GenericPickerItem {
                                         id: t.0.clone(),
                                         label: format!("#{}", t.0),
                                         middle: None,
                                         right: Some("remove".to_string()),
                                         preview_text: None,
                                         score_boost: 0,
-                                    }
-                                }).collect();
+                                    })
+                                    .collect();
                                 self.picker_state = Some(ActivePicker {
                                     kind: keymap::dispatch::PickerKind::Tags,
                                     picker: picker::Picker::new(items),
@@ -1928,8 +2031,10 @@ impl BloomEditor {
 
     fn handle_picker_key(&mut self, key: &types::KeyEvent) -> Vec<keymap::dispatch::Action> {
         use types::KeyCode;
-        let is_theme = self.picker_state.as_ref()
-            .map_or(false, |ap| matches!(ap.kind, keymap::dispatch::PickerKind::Theme));
+        let is_theme = self
+            .picker_state
+            .as_ref()
+            .is_some_and(|ap| matches!(ap.kind, keymap::dispatch::PickerKind::Theme));
 
         // Ctrl+key shortcuts
         if key.modifiers.ctrl {
@@ -1939,7 +2044,9 @@ impl BloomEditor {
                     if let Some(ap) = &mut self.picker_state {
                         ap.picker.move_selection(1);
                     }
-                    if is_theme { self.theme_picker_preview_current(); }
+                    if is_theme {
+                        self.theme_picker_preview_current();
+                    }
                     return vec![keymap::dispatch::Action::Noop];
                 }
                 // Ctrl+P / Ctrl+K → previous result
@@ -1947,7 +2054,9 @@ impl BloomEditor {
                     if let Some(ap) = &mut self.picker_state {
                         ap.picker.move_selection(-1);
                     }
-                    if is_theme { self.theme_picker_preview_current(); }
+                    if is_theme {
+                        self.theme_picker_preview_current();
+                    }
                     return vec![keymap::dispatch::Action::Noop];
                 }
                 // Ctrl+G → close picker
@@ -1986,10 +2095,8 @@ impl BloomEditor {
                     self.theme_picker_confirm();
                 } else if let Some(ap) = self.picker_state.take() {
                     if !ap.query.is_empty() {
-                        self.last_picker_queries.insert(
-                            picker_kind_key(&ap.kind),
-                            ap.query.clone(),
-                        );
+                        self.last_picker_queries
+                            .insert(picker_kind_key(&ap.kind), ap.query.clone());
                     }
                     if let Some(selected) = ap.picker.selected() {
                         self.handle_picker_selection(&ap.kind, selected.clone());
@@ -2001,14 +2108,18 @@ impl BloomEditor {
                 if let Some(ap) = &mut self.picker_state {
                     ap.picker.move_selection(-1);
                 }
-                if is_theme { self.theme_picker_preview_current(); }
+                if is_theme {
+                    self.theme_picker_preview_current();
+                }
                 vec![keymap::dispatch::Action::Noop]
             }
             KeyCode::Down => {
                 if let Some(ap) = &mut self.picker_state {
                     ap.picker.move_selection(1);
                 }
-                if is_theme { self.theme_picker_preview_current(); }
+                if is_theme {
+                    self.theme_picker_preview_current();
+                }
                 vec![keymap::dispatch::Action::Noop]
             }
             KeyCode::Tab => {
@@ -2055,10 +2166,8 @@ impl BloomEditor {
     fn save_picker_query(&mut self) {
         if let Some(ap) = &self.picker_state {
             if !ap.query.is_empty() {
-                self.last_picker_queries.insert(
-                    picker_kind_key(&ap.kind),
-                    ap.query.clone(),
-                );
+                self.last_picker_queries
+                    .insert(picker_kind_key(&ap.kind), ap.query.clone());
             }
         }
     }
@@ -2073,7 +2182,11 @@ impl BloomEditor {
             KeyCode::Enter => {
                 if let Some(dialog) = self.active_dialog.take() {
                     match dialog {
-                        ActiveDialog::FileChanged { page_id, path, selected } => {
+                        ActiveDialog::FileChanged {
+                            page_id,
+                            path,
+                            selected,
+                        } => {
                             if selected == 0 {
                                 // Reload from disk
                                 if let Ok(content) = std::fs::read_to_string(&path) {
@@ -2087,12 +2200,18 @@ impl BloomEditor {
                 }
             }
             KeyCode::Left | KeyCode::Char('h') => {
-                if let Some(ActiveDialog::FileChanged { ref mut selected, .. }) = self.active_dialog {
+                if let Some(ActiveDialog::FileChanged {
+                    ref mut selected, ..
+                }) = self.active_dialog
+                {
                     *selected = 0;
                 }
             }
             KeyCode::Right | KeyCode::Char('l') => {
-                if let Some(ActiveDialog::FileChanged { ref mut selected, .. }) = self.active_dialog {
+                if let Some(ActiveDialog::FileChanged {
+                    ref mut selected, ..
+                }) = self.active_dialog
+                {
                     *selected = 1;
                 }
             }
@@ -2111,34 +2230,39 @@ impl BloomEditor {
             PickerKind::FindPage | PickerKind::Journal => {
                 // item.id is either a PageId hex (from index) or a full path (disk fallback).
                 // Try index lookup first, then fall back to treating id as a path.
-                let (path, content, title) = if let Some(page_id) = types::PageId::from_hex(&item.id) {
-                    if let Some(idx) = &self.index {
-                        if let Some(meta) = idx.find_page_by_id(&page_id) {
-                            let full = self.vault_root.as_ref()
-                                .map(|r| r.join(&meta.path))
-                                .unwrap_or_else(|| meta.path.clone());
-                            match std::fs::read_to_string(&full) {
-                                Ok(c) => (full, c, meta.title),
-                                Err(_) => return,
+                let (path, content, title) =
+                    if let Some(page_id) = types::PageId::from_hex(&item.id) {
+                        if let Some(idx) = &self.index {
+                            if let Some(meta) = idx.find_page_by_id(&page_id) {
+                                let full = self
+                                    .vault_root
+                                    .as_ref()
+                                    .map(|r| r.join(&meta.path))
+                                    .unwrap_or_else(|| meta.path.clone());
+                                match std::fs::read_to_string(&full) {
+                                    Ok(c) => (full, c, meta.title),
+                                    Err(_) => return,
+                                }
+                            } else {
+                                return;
                             }
                         } else {
                             return;
                         }
                     } else {
-                        return;
-                    }
-                } else {
-                    // Disk fallback: id is a full file path
-                    let path = std::path::PathBuf::from(&item.id);
-                    match std::fs::read_to_string(&path) {
-                        Ok(c) => {
-                            let fm = self.parser.parse_frontmatter(&c);
-                            let title = fm.and_then(|f| f.title).unwrap_or_else(|| item.label.clone());
-                            (path, c, title)
+                        // Disk fallback: id is a full file path
+                        let path = std::path::PathBuf::from(&item.id);
+                        match std::fs::read_to_string(&path) {
+                            Ok(c) => {
+                                let fm = self.parser.parse_frontmatter(&c);
+                                let title = fm
+                                    .and_then(|f| f.title)
+                                    .unwrap_or_else(|| item.label.clone());
+                                (path, c, title)
+                            }
+                            Err(_) => return,
                         }
-                        Err(_) => return,
-                    }
-                };
+                    };
                 let id = crate::uuid::generate_hex_id();
                 self.open_page_with_content(&id, &title, &path, &content);
             }
@@ -2150,15 +2274,17 @@ impl BloomEditor {
                     let path = std::path::PathBuf::from(path_str);
                     if let Ok(content) = std::fs::read_to_string(&path) {
                         let fm = self.parser.parse_frontmatter(&content);
-                        let title = fm.and_then(|f| f.title).unwrap_or_else(|| item.label.clone());
+                        let title = fm
+                            .and_then(|f| f.title)
+                            .unwrap_or_else(|| item.label.clone());
                         let id = crate::uuid::generate_hex_id();
                         self.open_page_with_content(&id, &title, &path, &content);
                         // Jump cursor to the matching line
                         if let Some(page_id) = &self.active_page {
                             if let Some(buf) = self.buffer_mgr.get(page_id) {
-                                let target_char = buf.text().line_to_char(
-                                    line_num.min(buf.len_lines().saturating_sub(1)),
-                                );
+                                let target_char = buf
+                                    .text()
+                                    .line_to_char(line_num.min(buf.len_lines().saturating_sub(1)));
                                 self.cursor = target_char;
                             }
                         }
@@ -2191,13 +2317,16 @@ impl BloomEditor {
                         let title = template.name.clone();
                         let expanded = engine.expand(template, &title, &values);
                         let id = crate::uuid::generate_hex_id();
-                        let path = self.vault_root.as_ref()
+                        let path = self
+                            .vault_root
+                            .as_ref()
                             .map(|r| r.join("pages").join(format!("{}.md", title)))
                             .unwrap_or_else(|| std::path::PathBuf::from(format!("{}.md", title)));
                         self.open_page_with_content(&id, &title, &path, &expanded.content);
                         // Activate template mode if there are tab stops
                         if !expanded.tab_stops.is_empty() {
-                            self.template_mode = Some(template::TemplateModeState::new(expanded.tab_stops));
+                            self.template_mode =
+                                Some(template::TemplateModeState::new(expanded.tab_stops));
                         }
                     }
                 }
@@ -2215,10 +2344,7 @@ impl BloomEditor {
         }
     }
 
-    fn handle_quick_capture_key(
-        &mut self,
-        key: &types::KeyEvent,
-    ) -> Vec<keymap::dispatch::Action> {
+    fn handle_quick_capture_key(&mut self, key: &types::KeyEvent) -> Vec<keymap::dispatch::Action> {
         use types::KeyCode;
         match &key.code {
             KeyCode::Esc => {
@@ -2263,12 +2389,11 @@ impl BloomEditor {
         wiz.error = None; // Clear error on any key
 
         match wiz.step {
-            WizardStep::Welcome => match &key.code {
-                KeyCode::Enter => {
+            WizardStep::Welcome => {
+                if key.code == KeyCode::Enter {
                     wiz.step = WizardStep::ChooseVault;
                 }
-                _ => {}
-            },
+            }
             WizardStep::ChooseVault => match &key.code {
                 KeyCode::Enter => {
                     let path_str = expand_tilde(&wiz.vault_path);
@@ -2288,8 +2413,7 @@ impl BloomEditor {
                                 wiz.step = WizardStep::ImportChoice;
                             }
                             Err(e) => {
-                                wiz.error =
-                                    Some(format!("Cannot create directory: {}", e));
+                                wiz.error = Some(format!("Cannot create directory: {}", e));
                             }
                         }
                     }
@@ -2298,14 +2422,24 @@ impl BloomEditor {
                     wiz.step = WizardStep::Welcome;
                 }
                 KeyCode::Char(c) => {
-                    let byte_pos = wiz.vault_path.char_indices().nth(wiz.vault_path_cursor).map(|(i, _)| i).unwrap_or(wiz.vault_path.len());
+                    let byte_pos = wiz
+                        .vault_path
+                        .char_indices()
+                        .nth(wiz.vault_path_cursor)
+                        .map(|(i, _)| i)
+                        .unwrap_or(wiz.vault_path.len());
                     wiz.vault_path.insert(byte_pos, *c);
                     wiz.vault_path_cursor += 1;
                 }
                 KeyCode::Backspace => {
                     if wiz.vault_path_cursor > 0 {
                         wiz.vault_path_cursor -= 1;
-                        let byte_pos = wiz.vault_path.char_indices().nth(wiz.vault_path_cursor).map(|(i, _)| i).unwrap_or(wiz.vault_path.len());
+                        let byte_pos = wiz
+                            .vault_path
+                            .char_indices()
+                            .nth(wiz.vault_path_cursor)
+                            .map(|(i, _)| i)
+                            .unwrap_or(wiz.vault_path.len());
                         wiz.vault_path.remove(byte_pos);
                     }
                 }
@@ -2313,8 +2447,7 @@ impl BloomEditor {
                     wiz.vault_path_cursor = wiz.vault_path_cursor.saturating_sub(1);
                 }
                 KeyCode::Right => {
-                    wiz.vault_path_cursor =
-                        (wiz.vault_path_cursor + 1).min(wiz.vault_path.len());
+                    wiz.vault_path_cursor = (wiz.vault_path_cursor + 1).min(wiz.vault_path.len());
                 }
                 KeyCode::Home => {
                     wiz.vault_path_cursor = 0;
@@ -2348,9 +2481,8 @@ impl BloomEditor {
                     let logseq_path = expand_tilde(&wiz.logseq_path);
                     let lp = std::path::Path::new(&logseq_path);
                     if !lp.join("pages").exists() && !lp.join("journals").exists() {
-                        wiz.error = Some(
-                            "Not a Logseq vault: missing pages/ directory".to_string(),
-                        );
+                        wiz.error =
+                            Some("Not a Logseq vault: missing pages/ directory".to_string());
                     } else {
                         // TODO: actual Logseq import (G13) — for now skip to Complete
                         wiz.step = WizardStep::Complete;
@@ -2360,14 +2492,24 @@ impl BloomEditor {
                     wiz.step = WizardStep::ImportChoice;
                 }
                 KeyCode::Char(c) => {
-                    let byte_pos = wiz.logseq_path.char_indices().nth(wiz.logseq_path_cursor).map(|(i, _)| i).unwrap_or(wiz.logseq_path.len());
+                    let byte_pos = wiz
+                        .logseq_path
+                        .char_indices()
+                        .nth(wiz.logseq_path_cursor)
+                        .map(|(i, _)| i)
+                        .unwrap_or(wiz.logseq_path.len());
                     wiz.logseq_path.insert(byte_pos, *c);
                     wiz.logseq_path_cursor += 1;
                 }
                 KeyCode::Backspace => {
                     if wiz.logseq_path_cursor > 0 {
                         wiz.logseq_path_cursor -= 1;
-                        let byte_pos = wiz.logseq_path.char_indices().nth(wiz.logseq_path_cursor).map(|(i, _)| i).unwrap_or(wiz.logseq_path.len());
+                        let byte_pos = wiz
+                            .logseq_path
+                            .char_indices()
+                            .nth(wiz.logseq_path_cursor)
+                            .map(|(i, _)| i)
+                            .unwrap_or(wiz.logseq_path.len());
                         wiz.logseq_path.remove(byte_pos);
                     }
                 }
@@ -2383,13 +2525,12 @@ impl BloomEditor {
             WizardStep::ImportRunning => {
                 // Non-interactive — import runs to completion
             }
-            WizardStep::Complete => match &key.code {
-                KeyCode::Enter => {
+            WizardStep::Complete => {
+                if key.code == KeyCode::Enter {
                     self.complete_wizard();
                     return vec![keymap::dispatch::Action::Noop];
                 }
-                _ => {}
-            },
+            }
         }
 
         vec![keymap::dispatch::Action::Noop]
@@ -2410,11 +2551,17 @@ impl BloomEditor {
 
     /// Toggle task checkbox on the line at the cursor: `[ ]` ↔ `[x]`.
     fn toggle_task_at_cursor(&mut self) {
-        let Some(page_id) = &self.active_page else { return };
-        let Some(buf) = self.buffer_mgr.get_mut(page_id) else { return };
+        let Some(page_id) = &self.active_page else {
+            return;
+        };
+        let Some(buf) = self.buffer_mgr.get_mut(page_id) else {
+            return;
+        };
         let rope = buf.text();
         let len = rope.len_chars();
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
         let cursor = self.cursor.min(len.saturating_sub(1));
         let line_idx = rope.char_to_line(cursor);
         let line_text = rope.line(line_idx).to_string();
@@ -2440,32 +2587,57 @@ impl BloomEditor {
 
     fn open_agenda(&mut self) {
         let today = chrono::Local::now().date_naive();
-        let filters = index::AgendaFilters { tags: vec![], page: None, date_range: None };
+        let filters = index::AgendaFilters {
+            tags: vec![],
+            page: None,
+            date_range: None,
+        };
         let Some(idx) = &self.index else {
-            self.agenda_state = Some(AgendaState { selected_index: 0, items: Vec::new() });
+            self.agenda_state = Some(AgendaState {
+                selected_index: 0,
+                items: Vec::new(),
+            });
             return;
         };
         let view = self.agenda.build(today, idx, &filters);
         let mut items = Vec::new();
         for task in &view.overdue {
-            let source_title = idx.find_page_by_id(&task.source_page)
+            let source_title = idx
+                .find_page_by_id(&task.source_page)
                 .map(|m| m.title)
                 .unwrap_or_default();
-            items.push(AgendaFlatItem { task: task.clone(), source_title, bucket: AgendaBucket::Overdue });
+            items.push(AgendaFlatItem {
+                task: task.clone(),
+                source_title,
+                bucket: AgendaBucket::Overdue,
+            });
         }
         for task in &view.today {
-            let source_title = idx.find_page_by_id(&task.source_page)
+            let source_title = idx
+                .find_page_by_id(&task.source_page)
                 .map(|m| m.title)
                 .unwrap_or_default();
-            items.push(AgendaFlatItem { task: task.clone(), source_title, bucket: AgendaBucket::Today });
+            items.push(AgendaFlatItem {
+                task: task.clone(),
+                source_title,
+                bucket: AgendaBucket::Today,
+            });
         }
         for task in &view.upcoming {
-            let source_title = idx.find_page_by_id(&task.source_page)
+            let source_title = idx
+                .find_page_by_id(&task.source_page)
                 .map(|m| m.title)
                 .unwrap_or_default();
-            items.push(AgendaFlatItem { task: task.clone(), source_title, bucket: AgendaBucket::Upcoming });
+            items.push(AgendaFlatItem {
+                task: task.clone(),
+                source_title,
+                bucket: AgendaBucket::Upcoming,
+            });
         }
-        self.agenda_state = Some(AgendaState { selected_index: 0, items });
+        self.agenda_state = Some(AgendaState {
+            selected_index: 0,
+            items,
+        });
     }
 
     fn handle_agenda_key(&mut self, key: &types::KeyEvent) -> Vec<keymap::dispatch::Action> {
@@ -2512,7 +2684,9 @@ impl BloomEditor {
                 noop
             }
             KeyCode::Enter => {
-                let page_id = self.agenda_state.as_ref()
+                let page_id = self
+                    .agenda_state
+                    .as_ref()
                     .and_then(|st| st.items.get(st.selected_index))
                     .map(|item| item.task.source_page.clone());
                 self.agenda_state = None;
@@ -2554,14 +2728,19 @@ impl BloomEditor {
             if let Some(idx) = &self.index {
                 if let Some(meta) = idx.find_page_by_id(page_id) {
                     if let Ok(content) = std::fs::read_to_string(&meta.path) {
-                        self.buffer_mgr.open(page_id, &meta.title, &meta.path, &content);
+                        self.buffer_mgr
+                            .open(page_id, &meta.title, &meta.path, &content);
                     }
                 }
             }
         }
-        let Some(buf) = self.buffer_mgr.get_mut(page_id) else { return };
+        let Some(buf) = self.buffer_mgr.get_mut(page_id) else {
+            return;
+        };
         let rope = buf.text();
-        if rope.len_lines() == 0 { return; }
+        if rope.len_lines() == 0 {
+            return;
+        }
         let line_idx = line.min(rope.len_lines().saturating_sub(1));
         let line_text = rope.line(line_idx).to_string();
         let trimmed = line_text.trim_start();
@@ -2593,11 +2772,17 @@ impl BloomEditor {
 
     /// Follow the wiki-link under the cursor: `[[id|text]]` → open page by id.
     fn follow_link_at_cursor(&mut self) {
-        let Some(page_id) = &self.active_page else { return };
-        let Some(buf) = self.buffer_mgr.get(page_id) else { return };
+        let Some(page_id) = &self.active_page else {
+            return;
+        };
+        let Some(buf) = self.buffer_mgr.get(page_id) else {
+            return;
+        };
         let rope = buf.text();
         let len = rope.len_chars();
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
         let cursor = self.cursor.min(len.saturating_sub(1));
         let line_idx = rope.char_to_line(cursor);
         let line_text = rope.line(line_idx).to_string();
@@ -2616,10 +2801,14 @@ impl BloomEditor {
                             let name = path.file_name().unwrap_or_default().to_string_lossy();
                             if name.contains(&link_id) && name.ends_with(".md") {
                                 if let Ok(content) = std::fs::read_to_string(&path) {
-                                    let title = self.parser.parse_frontmatter(&content)
+                                    let title = self
+                                        .parser
+                                        .parse_frontmatter(&content)
                                         .and_then(|f| f.title)
                                         .unwrap_or_else(|| link_id.clone());
-                                    self.open_page_with_content(&target_id, &title, &path, &content);
+                                    self.open_page_with_content(
+                                        &target_id, &title, &path, &content,
+                                    );
                                     return;
                                 }
                             }
@@ -2645,17 +2834,28 @@ impl BloomEditor {
         let buf = self.buffer_mgr.get(page_id)?;
         let rope = buf.text();
         let len = rope.len_chars();
-        if len == 0 { return None; }
+        if len == 0 {
+            return None;
+        }
         let cursor = self.cursor.min(len.saturating_sub(1));
         let line_idx = rope.char_to_line(cursor);
         let line_text = rope.line(line_idx).to_string();
         // Look for ^block-id on this line
         if let Some(caret_pos) = line_text.rfind('^') {
             let block_id = line_text[caret_pos + 1..].trim();
-            if !block_id.is_empty() && block_id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+            if !block_id.is_empty()
+                && block_id
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+            {
                 let buffers = self.buffer_mgr.open_buffers();
                 let info = buffers.iter().find(|b| b.page_id == *page_id)?;
-                return Some(format!("[[{}#{}|{}]]", page_id.to_hex(), block_id, info.title));
+                return Some(format!(
+                    "[[{}#{}|{}]]",
+                    page_id.to_hex(),
+                    block_id,
+                    info.title
+                ));
             }
         }
         // Fallback: page link without block
@@ -2664,8 +2864,12 @@ impl BloomEditor {
 
     /// Insert text at the current cursor position.
     fn insert_text_at_cursor(&mut self, text: &str) {
-        let Some(page_id) = &self.active_page else { return };
-        let Some(buf) = self.buffer_mgr.get_mut(page_id) else { return };
+        let Some(page_id) = &self.active_page else {
+            return;
+        };
+        let Some(buf) = self.buffer_mgr.get_mut(page_id) else {
+            return;
+        };
         buf.insert(self.cursor, text);
         self.cursor += text.chars().count();
     }
@@ -2673,9 +2877,13 @@ impl BloomEditor {
     /// Schedule an auto-save for the given page via the disk writer thread.
     fn schedule_autosave(&self, page_id: &types::PageId) {
         let Some(tx) = &self.autosave_tx else { return };
-        let Some(buf) = self.buffer_mgr.get(page_id) else { return };
+        let Some(buf) = self.buffer_mgr.get(page_id) else {
+            return;
+        };
         let buffers = self.buffer_mgr.open_buffers();
-        let Some(info) = buffers.iter().find(|b| b.page_id == *page_id) else { return };
+        let Some(info) = buffers.iter().find(|b| b.page_id == *page_id) else {
+            return;
+        };
         let content = buf.text().to_string();
         let _ = tx.send(store::disk_writer::WriteRequest {
             path: info.path.clone(),
@@ -2689,11 +2897,14 @@ impl BloomEditor {
         let today = journal::Journal::today();
 
         // Find current journal date from active page
-        let current_date = self.active_page.as_ref()
+        let current_date = self
+            .active_page
+            .as_ref()
             .and_then(|id| self.buffer_mgr.get(id))
             .and_then(|buf| {
                 let text = buf.text().to_string();
-                self.parser.parse_frontmatter(&text)
+                self.parser
+                    .parse_frontmatter(&text)
                     .and_then(|fm| fm.created)
             })
             .unwrap_or(today);
@@ -2770,7 +2981,7 @@ impl BloomEditor {
                     self.pending_since = Some(Instant::now());
                 } else {
                     self.pending_since = None;
-                self.which_key_visible = false;
+                    self.which_key_visible = false;
                 }
                 // Edit group lifecycle: begin on Insert entry, end on Insert exit
                 if matches!(mode, vim::Mode::Insert) {
@@ -2967,11 +3178,11 @@ impl BloomEditor {
         // Compute pane rects from the core layout engine.
         // Reserve space for the which-key drawer only after timeout fires
         // (or if it's already visible from a previous render).
-        let has_pending = !self.leader_keys.is_empty()
-            || self.vim_state.pending_keys().len() > 0;
+        let has_pending = !self.leader_keys.is_empty() || !self.vim_state.pending_keys().is_empty();
         let timeout = std::time::Duration::from_millis(self.config.which_key_timeout_ms);
-        let timed_out = self.pending_since
-            .map_or(false, |since| since.elapsed() >= timeout);
+        let timed_out = self
+            .pending_since
+            .is_some_and(|since| since.elapsed() >= timeout);
         let show_wk = has_pending && (self.which_key_visible || timed_out);
 
         if show_wk && !self.which_key_visible {
@@ -2982,7 +3193,7 @@ impl BloomEditor {
             let col_width = 24u16;
             let cols = (width.saturating_sub(4) / col_width).max(1);
             let entry_count = 12u16;
-            let rows_needed = (entry_count + cols - 1) / cols;
+            let rows_needed = entry_count.div_ceil(cols);
             (rows_needed + 2).min(height / 3).max(3)
         } else {
             0
@@ -2991,14 +3202,18 @@ impl BloomEditor {
         let pane_rects = self.window_mgr.compute_pane_rects(width, pane_area_h);
 
         // Update viewport from the active pane's content height
-        if let Some(active_rect) = pane_rects.iter().find(|r| r.pane_id == self.window_mgr.active_pane()) {
+        if let Some(active_rect) = pane_rects
+            .iter()
+            .find(|r| r.pane_id == self.window_mgr.active_pane())
+        {
             self.viewport.height = active_rect.content_height as usize;
             self.viewport.width = active_rect.width as usize;
         }
 
         // Ensure cursor is visible (scrolls the viewport if needed)
-        let (cursor_line, cursor_col) = self.cursor_position();
-        self.viewport.ensure_visible_with_scrolloff(cursor_line, self.config.scrolloff);
+        let (cursor_line, _cursor_col) = self.cursor_position();
+        self.viewport
+            .ensure_visible_with_scrolloff(cursor_line, self.config.scrolloff);
 
         for rect in &pane_rects {
             let is_active = rect.pane_id == self.window_mgr.active_pane();
@@ -3036,9 +3251,7 @@ impl BloomEditor {
                         keymap::dispatch::QuickCaptureKind::Note => {
                             "📓 Append to journal > ".to_string()
                         }
-                        keymap::dispatch::QuickCaptureKind::Task => {
-                            "☐ Append task > ".to_string()
-                        }
+                        keymap::dispatch::QuickCaptureKind::Task => "☐ Append task > ".to_string(),
                     };
                     render::StatusBarContent::QuickCapture(render::QuickCaptureSlot {
                         prompt,
@@ -3052,7 +3265,8 @@ impl BloomEditor {
                         line: cursor_line,
                         column: cursor_col,
                         pending_keys: if !self.leader_keys.is_empty() {
-                            self.leader_keys.iter()
+                            self.leader_keys
+                                .iter()
                                 .map(|k| k.to_string())
                                 .collect::<Vec<_>>()
                                 .join(" ")
@@ -3127,13 +3341,15 @@ impl BloomEditor {
                 let results: Vec<render::PickerRow> = if below_min {
                     Vec::new()
                 } else {
-                    ap.picker.results().into_iter().map(|item| {
-                        render::PickerRow {
+                    ap.picker
+                        .results()
+                        .into_iter()
+                        .map(|item| render::PickerRow {
                             label: item.label.clone(),
                             middle: item.middle.clone(),
                             right: item.right.clone(),
-                        }
-                    }).collect()
+                        })
+                        .collect()
                 };
                 let preview = if below_min {
                     None
@@ -3147,10 +3363,8 @@ impl BloomEditor {
                         if let Some(page_id) = types::PageId::from_hex(&item.id) {
                             if let Some(buf) = self.buffer_mgr.get(&page_id) {
                                 let text = buf.text();
-                                let lines: Vec<_> = text.lines()
-                                    .take(20)
-                                    .map(|l| l.to_string())
-                                    .collect();
+                                let lines: Vec<_> =
+                                    text.lines().take(20).map(|l| l.to_string()).collect();
                                 if !lines.is_empty() {
                                     return Some(lines.join("\n"));
                                 }
@@ -3158,11 +3372,11 @@ impl BloomEditor {
                             // 3. Read from disk via vault path + index metadata
                             if let Some(idx) = &self.index {
                                 if let Some(meta) = idx.find_page_by_id(&page_id) {
-                                    let full = self.vault_root.as_ref()
-                                        .map(|r| r.join(&meta.path));
+                                    let full = self.vault_root.as_ref().map(|r| r.join(&meta.path));
                                     if let Some(path) = full {
                                         if let Ok(content) = std::fs::read_to_string(&path) {
-                                            let preview: String = content.lines()
+                                            let preview: String = content
+                                                .lines()
                                                 .take(20)
                                                 .collect::<Vec<_>>()
                                                 .join("\n");
@@ -3179,11 +3393,19 @@ impl BloomEditor {
                     title: ap.title.clone(),
                     query: ap.query.clone(),
                     results,
-                    selected_index: if below_min { 0 } else { ap.picker.selected_index() },
+                    selected_index: if below_min {
+                        0
+                    } else {
+                        ap.picker.selected_index()
+                    },
                     filters: Vec::new(),
                     preview,
                     total_count: ap.picker.total_count(),
-                    filtered_count: if below_min { 0 } else { ap.picker.filtered_count() },
+                    filtered_count: if below_min {
+                        0
+                    } else {
+                        ap.picker.filtered_count()
+                    },
                     status_noun: ap.status_noun.clone(),
                     min_query_len: ap.min_query_len,
                     query_selected: ap.query_selected,
@@ -3226,10 +3448,17 @@ impl BloomEditor {
                 });
 
                 Some(render::AgendaFrame {
-                    overdue, today, upcoming,
+                    overdue,
+                    today,
+                    upcoming,
                     selected_index: state.selected_index,
                     total_open: state.items.len(),
-                    total_pages: state.items.iter().map(|i| &i.source_title).collect::<std::collections::HashSet<_>>().len(),
+                    total_pages: state
+                        .items
+                        .iter()
+                        .map(|i| &i.source_title)
+                        .collect::<std::collections::HashSet<_>>()
+                        .len(),
                     preview,
                 })
             } else {
@@ -3241,7 +3470,8 @@ impl BloomEditor {
                 // Detect argument completion: "theme <partial>"
                 let (items, selected) = if let Some(arg_prefix) = input.strip_prefix("theme ") {
                     let theme_names = theme::THEME_NAMES;
-                    let items: Vec<render::InlineMenuItem> = theme_names.iter()
+                    let items: Vec<render::InlineMenuItem> = theme_names
+                        .iter()
                         .filter(|name| arg_prefix.is_empty() || name.starts_with(arg_prefix))
                         .map(|name| render::InlineMenuItem {
                             label: name.to_string(),
@@ -3250,7 +3480,8 @@ impl BloomEditor {
                         .collect();
                     (items, 0)
                 } else {
-                    let items: Vec<render::InlineMenuItem> = EX_COMMANDS.iter()
+                    let items: Vec<render::InlineMenuItem> = EX_COMMANDS
+                        .iter()
                         .filter(|(cmd, _)| input.is_empty() || cmd.starts_with(input))
                         .map(|(cmd, desc)| render::InlineMenuItem {
                             label: cmd.to_string(),
@@ -3277,109 +3508,211 @@ impl BloomEditor {
                 if !show_wk {
                     None
                 } else if matches!(self.vim_state.mode(), vim::Mode::Command) {
-                // Command mode: use inline_menu instead (see inline_menu field below)
-                None
-            } else if self.leader_keys.len() > 1 {
-                let lookup_keys: Vec<types::KeyEvent> = self.leader_keys[1..].to_vec();
-                match self.which_key_tree.lookup(&lookup_keys) {
-                    which_key::WhichKeyLookup::Prefix(entries) => {
-                        let prefix = self.leader_keys.iter()
-                            .map(|k| k.to_string())
-                            .collect::<Vec<_>>()
-                            .join(" ");
-                        Some(render::WhichKeyFrame {
-                            entries: entries.into_iter().map(|e| render::WhichKeyEntry {
-                                key: e.key,
-                                label: e.label,
-                                is_group: e.is_group,
-                            }).collect(),
-                            prefix,
-                            context: render::WhichKeyContext::Leader,
-                        })
+                    // Command mode: use inline_menu instead (see inline_menu field below)
+                    None
+                } else if self.leader_keys.len() > 1 {
+                    let lookup_keys: Vec<types::KeyEvent> = self.leader_keys[1..].to_vec();
+                    match self.which_key_tree.lookup(&lookup_keys) {
+                        which_key::WhichKeyLookup::Prefix(entries) => {
+                            let prefix = self
+                                .leader_keys
+                                .iter()
+                                .map(|k| k.to_string())
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            Some(render::WhichKeyFrame {
+                                entries: entries
+                                    .into_iter()
+                                    .map(|e| render::WhichKeyEntry {
+                                        key: e.key,
+                                        label: e.label,
+                                        is_group: e.is_group,
+                                    })
+                                    .collect(),
+                                prefix,
+                                context: render::WhichKeyContext::Leader,
+                            })
+                        }
+                        _ => None,
                     }
-                    _ => None,
-                }
-            } else if self.leader_keys.len() == 1 {
-                let entries = self.which_key_tree.lookup(&[]);
-                match entries {
-                    which_key::WhichKeyLookup::Prefix(entries) => {
-                        Some(render::WhichKeyFrame {
-                            entries: entries.into_iter().map(|e| render::WhichKeyEntry {
-                                key: e.key,
-                                label: e.label,
-                                is_group: e.is_group,
-                            }).collect(),
+                } else if self.leader_keys.len() == 1 {
+                    let entries = self.which_key_tree.lookup(&[]);
+                    match entries {
+                        which_key::WhichKeyLookup::Prefix(entries) => Some(render::WhichKeyFrame {
+                            entries: entries
+                                .into_iter()
+                                .map(|e| render::WhichKeyEntry {
+                                    key: e.key,
+                                    label: e.label,
+                                    is_group: e.is_group,
+                                })
+                                .collect(),
                             prefix: "SPC".to_string(),
                             context: render::WhichKeyContext::Leader,
-                        })
+                        }),
+                        _ => None,
                     }
-                    _ => None,
-                }
-            } else {
-                // Vim grammar which-key: show motions/text objects when an operator is pending
-                let pending = self.vim_state.pending_keys();
-                let op_char = match pending {
-                    "d" => Some("d"),
-                    "c" => Some("c"),
-                    "y" => Some("y"),
-                    ">" => Some(">"),
-                    "<" => Some("<"),
-                    _ => None,
-                };
-                if let Some(op) = op_char {
-                    let op_name = match op {
-                        "d" => "delete",
-                        "c" => "change",
-                        "y" => "yank",
-                        ">" => "indent",
-                        "<" => "dedent",
-                        _ => op,
-                    };
-                    let mut entries = vec![
-                        // Motions
-                        render::WhichKeyEntry { key: "w".into(), label: "word".into(), is_group: false },
-                        render::WhichKeyEntry { key: "b".into(), label: "back word".into(), is_group: false },
-                        render::WhichKeyEntry { key: "e".into(), label: "end of word".into(), is_group: false },
-                        render::WhichKeyEntry { key: "$".into(), label: "end of line".into(), is_group: false },
-                        render::WhichKeyEntry { key: "0".into(), label: "start of line".into(), is_group: false },
-                        render::WhichKeyEntry { key: "j".into(), label: "line down".into(), is_group: false },
-                        render::WhichKeyEntry { key: "k".into(), label: "line up".into(), is_group: false },
-                        render::WhichKeyEntry { key: "gg".into(), label: "top of file".into(), is_group: false },
-                        render::WhichKeyEntry { key: "G".into(), label: "end of file".into(), is_group: false },
-                        render::WhichKeyEntry { key: "%".into(), label: "matching bracket".into(), is_group: false },
-                        render::WhichKeyEntry { key: "f…".into(), label: "find char".into(), is_group: false },
-                        render::WhichKeyEntry { key: "t…".into(), label: "till char".into(), is_group: false },
-                        // Text objects
-                        render::WhichKeyEntry { key: "iw".into(), label: "inner word".into(), is_group: false },
-                        render::WhichKeyEntry { key: "aw".into(), label: "a word".into(), is_group: false },
-                        render::WhichKeyEntry { key: "ip".into(), label: "inner paragraph".into(), is_group: false },
-                        render::WhichKeyEntry { key: "ap".into(), label: "a paragraph".into(), is_group: false },
-                        render::WhichKeyEntry { key: "il".into(), label: "inner link".into(), is_group: false },
-                        render::WhichKeyEntry { key: "al".into(), label: "a link".into(), is_group: false },
-                        render::WhichKeyEntry { key: "i#".into(), label: "inner tag".into(), is_group: false },
-                        render::WhichKeyEntry { key: "a#".into(), label: "a tag".into(), is_group: false },
-                        render::WhichKeyEntry { key: "i@".into(), label: "inner timestamp".into(), is_group: false },
-                        render::WhichKeyEntry { key: "ih".into(), label: "inner heading".into(), is_group: false },
-                        render::WhichKeyEntry { key: "ah".into(), label: "a heading".into(), is_group: false },
-                    ];
-                    entries.push(render::WhichKeyEntry {
-                        key: format!("{op}"),
-                        label: format!("{op_name} line ({op}{op})"),
-                        is_group: false,
-                    });
-                    Some(render::WhichKeyFrame {
-                        entries,
-                        prefix: op.to_string(),
-                        context: render::WhichKeyContext::VimOperator { operator: op.to_string() },
-                    })
                 } else {
-                    None
+                    // Vim grammar which-key: show motions/text objects when an operator is pending
+                    let pending = self.vim_state.pending_keys();
+                    let op_char = match pending {
+                        "d" => Some("d"),
+                        "c" => Some("c"),
+                        "y" => Some("y"),
+                        ">" => Some(">"),
+                        "<" => Some("<"),
+                        _ => None,
+                    };
+                    if let Some(op) = op_char {
+                        let op_name = match op {
+                            "d" => "delete",
+                            "c" => "change",
+                            "y" => "yank",
+                            ">" => "indent",
+                            "<" => "dedent",
+                            _ => op,
+                        };
+                        let mut entries = vec![
+                            // Motions
+                            render::WhichKeyEntry {
+                                key: "w".into(),
+                                label: "word".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "b".into(),
+                                label: "back word".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "e".into(),
+                                label: "end of word".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "$".into(),
+                                label: "end of line".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "0".into(),
+                                label: "start of line".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "j".into(),
+                                label: "line down".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "k".into(),
+                                label: "line up".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "gg".into(),
+                                label: "top of file".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "G".into(),
+                                label: "end of file".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "%".into(),
+                                label: "matching bracket".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "f…".into(),
+                                label: "find char".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "t…".into(),
+                                label: "till char".into(),
+                                is_group: false,
+                            },
+                            // Text objects
+                            render::WhichKeyEntry {
+                                key: "iw".into(),
+                                label: "inner word".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "aw".into(),
+                                label: "a word".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "ip".into(),
+                                label: "inner paragraph".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "ap".into(),
+                                label: "a paragraph".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "il".into(),
+                                label: "inner link".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "al".into(),
+                                label: "a link".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "i#".into(),
+                                label: "inner tag".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "a#".into(),
+                                label: "a tag".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "i@".into(),
+                                label: "inner timestamp".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "ih".into(),
+                                label: "inner heading".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "ah".into(),
+                                label: "a heading".into(),
+                                is_group: false,
+                            },
+                        ];
+                        entries.push(render::WhichKeyEntry {
+                            key: op.to_string(),
+                            label: format!("{op_name} line ({op}{op})"),
+                            is_group: false,
+                        });
+                        Some(render::WhichKeyFrame {
+                            entries,
+                            prefix: op.to_string(),
+                            context: render::WhichKeyContext::VimOperator {
+                                operator: op.to_string(),
+                            },
+                        })
+                    } else {
+                        None
+                    }
                 }
-            }}, // which_key
+            }, // which_key
             date_picker: None,
             dialog: match &self.active_dialog {
                 Some(ActiveDialog::FileChanged { path, selected, .. }) => {
-                    let filename = path.file_name()
+                    let filename = path
+                        .file_name()
                         .map(|f| f.to_string_lossy().to_string())
                         .unwrap_or_else(|| "file".to_string());
                     Some(render::DialogFrame {
@@ -3390,7 +3723,14 @@ impl BloomEditor {
                 }
                 None => None,
             },
-            notifications: self.notifications.iter().rev().take(3).rev().cloned().collect(),
+            notifications: self
+                .notifications
+                .iter()
+                .rev()
+                .take(3)
+                .rev()
+                .cloned()
+                .collect(),
             scrolloff: self.config.scrolloff,
         }
     }
@@ -3402,7 +3742,11 @@ impl BloomEditor {
 
         // Compute line context (frontmatter/code block state) from the start
         // of the document up to and through the visible range.
-        let scan_end = if range.end < line_count { range.end } else { line_count };
+        let scan_end = if range.end < line_count {
+            range.end
+        } else {
+            line_count
+        };
         let mut in_frontmatter = false;
         let mut in_code_block = false;
         let mut code_fence_lang: Option<String> = None;
@@ -3446,7 +3790,11 @@ impl BloomEditor {
                 } else {
                     in_code_block = true;
                     let lang = trimmed[3..].trim();
-                    code_fence_lang = if lang.is_empty() { None } else { Some(lang.to_string()) };
+                    code_fence_lang = if lang.is_empty() {
+                        None
+                    } else {
+                        Some(lang.to_string())
+                    };
                 }
             }
 
@@ -3514,15 +3862,15 @@ impl BloomEditor {
     /// Tick for timers, notifications, debounce. Returns true if state changed.
     pub fn tick(&mut self, now: std::time::Instant) -> bool {
         let before = self.notifications.len();
-        self.notifications.retain(|n| {
-            n.expires_at.map_or(true, |t| t > now)
-        });
+        self.notifications
+            .retain(|n| n.expires_at.is_none_or(|t| t > now));
         let notif_changed = self.notifications.len() != before;
 
         // Check if which-key drawer should appear (timeout elapsed)
         let wk_changed = if !self.which_key_visible && !self.leader_keys.is_empty() {
             let timeout = std::time::Duration::from_millis(self.config.which_key_timeout_ms);
-            self.pending_since.map_or(false, |since| now.duration_since(since) >= timeout)
+            self.pending_since
+                .is_some_and(|since| now.duration_since(since) >= timeout)
         } else {
             false
         };
@@ -3596,10 +3944,7 @@ impl BloomEditor {
             if let Some(tx) = &self.autosave_tx {
                 // Route through DiskWriter (same path as autosave).
                 // DiskWriter will send WriteComplete → handle_write_complete marks clean.
-                let _ = tx.send(store::disk_writer::WriteRequest {
-                    path,
-                    content,
-                });
+                let _ = tx.send(store::disk_writer::WriteRequest { path, content });
             } else {
                 // No DiskWriter (tests, pre-init). Inline atomic write.
                 store::disk_writer::atomic_write(&path, &content)?;
@@ -3619,22 +3964,30 @@ impl BloomEditor {
     }
 
     pub fn save_session(&self) -> Result<(), error::BloomError> {
-        let Some(root) = &self.vault_root else { return Ok(()) };
+        let Some(root) = &self.vault_root else {
+            return Ok(());
+        };
         let session_path = root.join(".session.json");
-        let buffers: Vec<session::SessionBuffer> = self.buffer_mgr.open_buffers().iter().map(|info| {
-            let (cursor_line, cursor_col) = if Some(&info.page_id) == self.active_page.as_ref() {
-                self.cursor_position()
-            } else {
-                (0, 0)
-            };
-            session::SessionBuffer {
-                page_path: info.path.clone(),
-                cursor_line,
-                cursor_column: cursor_col,
-                scroll_offset: self.viewport.first_visible_line,
-                pane: 0,
-            }
-        }).collect();
+        let buffers: Vec<session::SessionBuffer> = self
+            .buffer_mgr
+            .open_buffers()
+            .iter()
+            .map(|info| {
+                let (cursor_line, cursor_col) = if Some(&info.page_id) == self.active_page.as_ref()
+                {
+                    self.cursor_position()
+                } else {
+                    (0, 0)
+                };
+                session::SessionBuffer {
+                    page_path: info.path.clone(),
+                    cursor_line,
+                    cursor_column: cursor_col,
+                    scroll_offset: self.viewport.first_visible_line,
+                    pane: 0,
+                }
+            })
+            .collect();
         let state = session::SessionState {
             buffers,
             layout: session::SessionLayout::Leaf(0),
@@ -3644,17 +3997,29 @@ impl BloomEditor {
     }
 
     pub fn restore_session(&mut self) -> Result<(), error::BloomError> {
-        let Some(root) = &self.vault_root else { return Ok(()) };
+        let Some(root) = &self.vault_root else {
+            return Ok(());
+        };
         let session_path = root.join(".session.json");
-        if !session_path.exists() { return Ok(()) }
+        if !session_path.exists() {
+            return Ok(());
+        }
         let state = session::SessionState::load(&session_path)?;
         for buf_state in &state.buffers {
             if buf_state.page_path.exists() {
                 if let Ok(content) = std::fs::read_to_string(&buf_state.page_path) {
-                    let title = self.parser.parse_frontmatter(&content)
+                    let title = self
+                        .parser
+                        .parse_frontmatter(&content)
                         .and_then(|fm| fm.title)
-                        .unwrap_or_else(|| buf_state.page_path.file_stem()
-                            .unwrap_or_default().to_string_lossy().to_string());
+                        .unwrap_or_else(|| {
+                            buf_state
+                                .page_path
+                                .file_stem()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string()
+                        });
                     let id = crate::uuid::generate_hex_id();
                     self.open_page_with_content(&id, &title, &buf_state.page_path, &content);
                     self.cursor = 0; // Restore cursor position via line/col
@@ -3662,9 +4027,12 @@ impl BloomEditor {
                         let rope = buf.text();
                         if buf_state.cursor_line < rope.len_lines() {
                             let line_start = rope.line_to_char(buf_state.cursor_line);
-                            self.cursor = line_start + buf_state.cursor_column.min(
-                                rope.line(buf_state.cursor_line).len_chars().saturating_sub(1)
-                            );
+                            self.cursor = line_start
+                                + buf_state.cursor_column.min(
+                                    rope.line(buf_state.cursor_line)
+                                        .len_chars()
+                                        .saturating_sub(1),
+                                );
                         }
                     }
                 }
@@ -3685,7 +4053,12 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "# Hello\n\nWorld\n");
+        editor.open_page_with_content(
+            &id,
+            "Test",
+            std::path::Path::new("test.md"),
+            "# Hello\n\nWorld\n",
+        );
         let frame = editor.render(80, 24);
         assert!(!frame.panes.is_empty());
         assert_eq!(frame.panes[0].status_bar.mode, "NORMAL");
@@ -3699,7 +4072,12 @@ mod tests {
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
         // File with trailing newline → ropey sees 3 lines (0: "hello\n", 1: "world\n", 2: "")
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello\nworld\n");
+        editor.open_page_with_content(
+            &id,
+            "Test",
+            std::path::Path::new("test.md"),
+            "hello\nworld\n",
+        );
         // Move down twice: line 0 → line 1 → line 2 (empty last line)
         editor.handle_key(KeyEvent::char('j'));
         editor.handle_key(KeyEvent::char('j'));
@@ -3719,7 +4097,10 @@ mod tests {
         editor.handle_key(KeyEvent::char('i'));
         let frame = editor.render(80, 24);
         assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
-        assert!(matches!(frame.panes[0].cursor.shape, render::CursorShape::Bar));
+        assert!(matches!(
+            frame.panes[0].cursor.shape,
+            render::CursorShape::Bar
+        ));
     }
 
     // UC-14: Insert mode actually inserts characters
@@ -3774,9 +4155,15 @@ mod tests {
         let id = crate::uuid::generate_hex_id();
         editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "ab");
         editor.handle_key(KeyEvent::char('i')); // insert at pos 0
-        // Move right twice to end
-        editor.handle_key(KeyEvent { code: types::KeyCode::Right, modifiers: types::Modifiers::none() });
-        editor.handle_key(KeyEvent { code: types::KeyCode::Right, modifiers: types::Modifiers::none() });
+                                                // Move right twice to end
+        editor.handle_key(KeyEvent {
+            code: types::KeyCode::Right,
+            modifiers: types::Modifiers::none(),
+        });
+        editor.handle_key(KeyEvent {
+            code: types::KeyCode::Right,
+            modifiers: types::Modifiers::none(),
+        });
         // Type 'c' — should appear after "ab"
         editor.handle_key(KeyEvent::char('c'));
         let buf = editor.buffer_mgr.get(&id).unwrap();
@@ -3792,7 +4179,12 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello\nworld\n");
+        editor.open_page_with_content(
+            &id,
+            "Test",
+            std::path::Path::new("test.md"),
+            "hello\nworld\n",
+        );
         editor.handle_key(KeyEvent::char('o'));
         // Should be in insert mode on a new line below "hello"
         let frame = editor.render(80, 24);
@@ -3812,7 +4204,12 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello\nworld\n");
+        editor.open_page_with_content(
+            &id,
+            "Test",
+            std::path::Path::new("test.md"),
+            "hello\nworld\n",
+        );
         editor.handle_key(KeyEvent::char('O'));
         let frame = editor.render(80, 24);
         assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
@@ -3853,7 +4250,10 @@ mod tests {
         editor.handle_key(KeyEvent::esc());
         let frame = editor.render(80, 24);
         assert_eq!(frame.panes[0].status_bar.mode, "NORMAL");
-        assert!(matches!(frame.panes[0].cursor.shape, render::CursorShape::Block));
+        assert!(matches!(
+            frame.panes[0].cursor.shape,
+            render::CursorShape::Block
+        ));
     }
 
     // UC-90: Ctrl+S saves
@@ -3864,7 +4264,9 @@ mod tests {
         let id = crate::uuid::generate_hex_id();
         editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
         let actions = editor.handle_key(KeyEvent::ctrl('s'));
-        assert!(actions.iter().any(|a| matches!(a, keymap::dispatch::Action::Save)));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, keymap::dispatch::Action::Save)));
     }
 
     // UC-52: Window splits
@@ -3909,12 +4311,18 @@ mod tests {
         editor.handle_key(KeyEvent::esc());
 
         // Buffer should be "abc"
-        let buf = editor.buffer_mgr.get(&editor.active_page.clone().unwrap()).unwrap();
+        let buf = editor
+            .buffer_mgr
+            .get(&editor.active_page.clone().unwrap())
+            .unwrap();
         assert_eq!(buf.text().to_string(), "abc");
 
         // One undo should revert the entire insert session
         editor.handle_key(KeyEvent::char('u'));
-        let buf = editor.buffer_mgr.get(&editor.active_page.clone().unwrap()).unwrap();
+        let buf = editor
+            .buffer_mgr
+            .get(&editor.active_page.clone().unwrap())
+            .unwrap();
         assert_eq!(buf.text().to_string(), "");
     }
 
@@ -4068,8 +4476,8 @@ mod tests {
         let mut editor = BloomEditor::new(config).unwrap();
         editor.start_wizard();
         editor.handle_key(KeyEvent::enter()); // → ChooseVault
-        // Clear and type a new path
-        // Use Ctrl+U-like approach: Home then type
+                                              // Clear and type a new path
+                                              // Use Ctrl+U-like approach: Home then type
         editor.handle_key(KeyEvent {
             code: KeyCode::Home,
             modifiers: Modifiers::none(),
@@ -4091,7 +4499,7 @@ mod tests {
         let mut editor = BloomEditor::new(config).unwrap();
         editor.start_wizard();
         editor.handle_key(KeyEvent::enter()); // → ChooseVault
-        editor.handle_key(KeyEvent::esc());   // → Welcome
+        editor.handle_key(KeyEvent::esc()); // → Welcome
         let frame = editor.render(80, 24);
         if let render::PaneKind::SetupWizard(sw) = &frame.panes[0].kind {
             assert!(matches!(sw.step, render::SetupStep::Welcome));
@@ -4169,7 +4577,9 @@ mod tests {
         let mut editor = BloomEditor::new(config).unwrap();
         editor.start_wizard();
         let actions = editor.handle_key(KeyEvent::ctrl('q'));
-        assert!(actions.iter().any(|a| matches!(a, keymap::dispatch::Action::Quit)));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, keymap::dispatch::Action::Quit)));
     }
 
     // SPC f f opens find page picker
@@ -4182,7 +4592,7 @@ mod tests {
         editor.handle_key(KeyEvent::char(' ')); // SPC
         editor.handle_key(KeyEvent::char('f')); // f (group)
         editor.handle_key(KeyEvent::char('f')); // f (action)
-        // Picker should now be open
+                                                // Picker should now be open
         assert!(editor.picker_state.is_some());
         assert_eq!(editor.picker_state.as_ref().unwrap().title, "Find Page");
         let frame = editor.render(80, 24);
@@ -4226,11 +4636,20 @@ mod tests {
 
         // Select the first (only) result
         editor.handle_key(KeyEvent::enter());
-        assert!(editor.picker_state.is_none(), "picker should close after selection");
-        assert!(editor.active_page.is_some(), "a page should be open after selection");
+        assert!(
+            editor.picker_state.is_none(),
+            "picker should close after selection"
+        );
+        assert!(
+            editor.active_page.is_some(),
+            "a page should be open after selection"
+        );
 
         let frame = editor.render(80, 24);
-        assert!(!frame.panes[0].visible_lines.is_empty(), "page content should be visible");
+        assert!(
+            !frame.panes[0].visible_lines.is_empty(),
+            "page content should be visible"
+        );
     }
 
     // SPC shows which-key popup in render
@@ -4257,7 +4676,7 @@ mod tests {
         let id = crate::uuid::generate_hex_id();
         editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
         editor.handle_key(KeyEvent::char(' ')); // SPC
-        editor.handle_key(KeyEvent::esc());     // Cancel
+        editor.handle_key(KeyEvent::esc()); // Cancel
         let frame = editor.render(80, 24);
         assert!(frame.which_key.is_none());
     }
@@ -4272,7 +4691,9 @@ mod tests {
         editor.handle_key(KeyEvent::char(':')); // enter command mode
         editor.handle_key(KeyEvent::char('q'));
         let actions = editor.handle_key(KeyEvent::enter());
-        assert!(actions.iter().any(|a| matches!(a, keymap::dispatch::Action::Quit)));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, keymap::dispatch::Action::Quit)));
     }
 
     // :w saves
@@ -4285,7 +4706,9 @@ mod tests {
         editor.handle_key(KeyEvent::char(':'));
         editor.handle_key(KeyEvent::char('w'));
         let actions = editor.handle_key(KeyEvent::enter());
-        assert!(actions.iter().any(|a| matches!(a, keymap::dispatch::Action::Save)));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, keymap::dispatch::Action::Save)));
     }
 
     // :wq saves and quits
@@ -4299,8 +4722,12 @@ mod tests {
         editor.handle_key(KeyEvent::char('w'));
         editor.handle_key(KeyEvent::char('q'));
         let actions = editor.handle_key(KeyEvent::enter());
-        assert!(actions.iter().any(|a| matches!(a, keymap::dispatch::Action::Save)));
-        assert!(actions.iter().any(|a| matches!(a, keymap::dispatch::Action::Quit)));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, keymap::dispatch::Action::Save)));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, keymap::dispatch::Action::Quit)));
     }
 
     // u undoes the last edit
@@ -4318,7 +4745,9 @@ mod tests {
         assert_eq!(buf.text().to_string(), "Xhello");
         // Undo
         let actions = editor.handle_key(KeyEvent::char('u'));
-        assert!(actions.iter().any(|a| matches!(a, keymap::dispatch::Action::Undo)));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, keymap::dispatch::Action::Undo)));
         let buf = editor.buffer_mgr.get(&id).unwrap();
         assert_eq!(buf.text().to_string(), "hello");
     }
@@ -4338,7 +4767,9 @@ mod tests {
         assert_eq!(buf.text().to_string(), "hello");
         // Redo
         let actions = editor.handle_key(KeyEvent::ctrl('r'));
-        assert!(actions.iter().any(|a| matches!(a, keymap::dispatch::Action::Redo)));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, keymap::dispatch::Action::Redo)));
         let buf = editor.buffer_mgr.get(&id).unwrap();
         assert_eq!(buf.text().to_string(), "Xhello");
     }

@@ -44,7 +44,7 @@ pub enum AutoAlignMode {
     None,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct StartupConfig {
     #[serde(default)]
     pub mode: StartupMode,
@@ -90,7 +90,7 @@ pub struct ThemeConfig {
     pub overrides: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct McpConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -137,14 +137,6 @@ impl Default for Config {
     }
 }
 
-impl Default for StartupConfig {
-    fn default() -> Self {
-        Self {
-            mode: StartupMode::default(),
-        }
-    }
-}
-
 impl Default for FontConfig {
     fn default() -> Self {
         Self {
@@ -160,16 +152,6 @@ impl Default for ThemeConfig {
         Self {
             name: default_theme(),
             overrides: HashMap::new(),
-        }
-    }
-}
-
-impl Default for McpConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            mode: McpMode::default(),
-            exclude_paths: Vec::new(),
         }
     }
 }

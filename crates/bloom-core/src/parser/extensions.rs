@@ -60,7 +60,10 @@ fn parse_link_content(content: &str, line: usize, byte_range: Range<usize>) -> O
 
     let (id_str, section) = if let Some(hash_pos) = target_part.find('#') {
         let section_str = &target_part[hash_pos + 1..];
-        (&target_part[..hash_pos], Some(BlockId(section_str.to_string())))
+        (
+            &target_part[..hash_pos],
+            Some(BlockId(section_str.to_string())),
+        )
     } else {
         (target_part, None)
     };
@@ -82,7 +85,11 @@ pub fn parse_block_id(line: &str, line_number: usize) -> Option<ParsedBlockId> {
     // Must be preceded by a space (or be the entire line)
     if let Some(pos) = trimmed.rfind(" ^") {
         let id_str = &trimmed[pos + 2..];
-        if !id_str.is_empty() && id_str.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+        if !id_str.is_empty()
+            && id_str
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        {
             return Some(ParsedBlockId {
                 id: BlockId(id_str.to_string()),
                 line: line_number,
@@ -91,7 +98,11 @@ pub fn parse_block_id(line: &str, line_number: usize) -> Option<ParsedBlockId> {
     }
     // Line that is solely ^block-id
     if let Some(rest) = trimmed.strip_prefix('^') {
-        if !rest.is_empty() && rest.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+        if !rest.is_empty()
+            && rest
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        {
             return Some(ParsedBlockId {
                 id: BlockId(rest.to_string()),
                 line: line_number,
@@ -136,14 +147,18 @@ pub fn parse_tags(line: &str, line_number: usize) -> Vec<ParsedTag> {
 
         if bytes[i] == b'#' {
             // Must be preceded by whitespace or start of line
-            let preceded_by_ws = i == 0 || line[..i].chars().last().map_or(true, |c| c.is_whitespace());
+            let preceded_by_ws =
+                i == 0 || line[..i].chars().last().is_none_or(|c| c.is_whitespace());
             if preceded_by_ws {
                 // Check if this is a heading (# at start of line followed by space)
                 if i == 0 {
                     // Check if this is a heading pattern
                     let rest = &line[i..];
                     let hash_count = rest.bytes().take_while(|&b| b == b'#').count();
-                    if hash_count <= 6 && line.len() > i + hash_count && bytes[i + hash_count] == b' ' {
+                    if hash_count <= 6
+                        && line.len() > i + hash_count
+                        && bytes[i + hash_count] == b' '
+                    {
                         // It's a heading — skip
                         i += hash_count + 1;
                         continue;
@@ -232,22 +247,20 @@ fn try_parse_timestamp(line: &str, pos: &mut usize) -> Option<Timestamp> {
             if let Some(close) = line[inner_start..].find(')') {
                 let inner = &line[inner_start..inner_start + close];
                 let ts = match constructor {
-                    TimestampKind::Due => {
-                        NaiveDate::parse_from_str(inner, "%Y-%m-%d").ok().map(Timestamp::Due)
-                    }
-                    TimestampKind::Start => {
-                        NaiveDate::parse_from_str(inner, "%Y-%m-%d").ok().map(Timestamp::Start)
-                    }
-                    TimestampKind::At => {
-                        NaiveDateTime::parse_from_str(inner, "%Y-%m-%d %H:%M")
-                            .ok()
-                            .map(Timestamp::At)
-                            .or_else(|| {
-                                NaiveDate::parse_from_str(inner, "%Y-%m-%d")
-                                    .ok()
-                                    .map(|d| Timestamp::At(d.and_hms_opt(0, 0, 0).unwrap()))
-                            })
-                    }
+                    TimestampKind::Due => NaiveDate::parse_from_str(inner, "%Y-%m-%d")
+                        .ok()
+                        .map(Timestamp::Due),
+                    TimestampKind::Start => NaiveDate::parse_from_str(inner, "%Y-%m-%d")
+                        .ok()
+                        .map(Timestamp::Start),
+                    TimestampKind::At => NaiveDateTime::parse_from_str(inner, "%Y-%m-%d %H:%M")
+                        .ok()
+                        .map(Timestamp::At)
+                        .or_else(|| {
+                            NaiveDate::parse_from_str(inner, "%Y-%m-%d")
+                                .ok()
+                                .map(|d| Timestamp::At(d.and_hms_opt(0, 0, 0).unwrap()))
+                        }),
                 };
                 if let Some(ts) = ts {
                     *pos = inner_start + close + 1; // past the closing )
@@ -293,8 +306,8 @@ pub fn parse_task(line: &str, line_number: usize) -> Option<ParsedTask> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Timelike;
     use crate::types::{BlockId, PageId, TagName, Timestamp};
+    use chrono::Timelike;
 
     // --- Link tests (UC-24) ---
 
@@ -470,7 +483,10 @@ mod tests {
         assert_eq!(ts.len(), 1);
         match &ts[0].timestamp {
             Timestamp::At(dt) => {
-                assert_eq!(dt.date(), chrono::NaiveDate::from_ymd_opt(2026, 3, 5).unwrap());
+                assert_eq!(
+                    dt.date(),
+                    chrono::NaiveDate::from_ymd_opt(2026, 3, 5).unwrap()
+                );
                 assert_eq!(dt.time().hour(), 14);
                 assert_eq!(dt.time().minute(), 30);
             }
@@ -484,7 +500,10 @@ mod tests {
         assert_eq!(ts.len(), 1);
         match &ts[0].timestamp {
             Timestamp::At(dt) => {
-                assert_eq!(dt.date(), chrono::NaiveDate::from_ymd_opt(2026, 3, 5).unwrap());
+                assert_eq!(
+                    dt.date(),
+                    chrono::NaiveDate::from_ymd_opt(2026, 3, 5).unwrap()
+                );
             }
             _ => panic!("Expected At"),
         }

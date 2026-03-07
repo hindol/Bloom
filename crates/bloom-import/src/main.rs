@@ -1,7 +1,7 @@
-use bloom_core::parser::{BloomMarkdownParser, traits::DocumentParser};
+use bloom_core::parser::BloomMarkdownParser;
 use bloom_core::uuid::generate_hex_id;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -14,7 +14,10 @@ fn main() {
 
     match import_logseq(logseq_dir, bloom_vault) {
         Ok(stats) => {
-            println!("✓ Import complete: {} pages, {} journals", stats.pages, stats.journals);
+            println!(
+                "✓ Import complete: {} pages, {} journals",
+                stats.pages, stats.journals
+            );
         }
         Err(e) => {
             eprintln!("Error: {e}");
@@ -38,17 +41,24 @@ fn import_logseq(logseq_dir: &Path, bloom_vault: &Path) -> Result<ImportStats, S
     std::fs::create_dir_all(&pages_dst).map_err(|e| format!("Create pages dir: {e}"))?;
     std::fs::create_dir_all(&journals_dst).map_err(|e| format!("Create journal dir: {e}"))?;
 
-    let parser = BloomMarkdownParser::new();
+    let _parser = BloomMarkdownParser::new();
     let mut title_to_id: HashMap<String, String> = HashMap::new();
-    let mut stats = ImportStats { pages: 0, journals: 0 };
+    let mut stats = ImportStats {
+        pages: 0,
+        journals: 0,
+    };
 
     // Pass 1: Assign IDs to all pages
     if pages_src.exists() {
         if let Ok(entries) = std::fs::read_dir(&pages_src) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
-                let title = path.file_stem().unwrap_or_default()
+                if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                    continue;
+                }
+                let title = path
+                    .file_stem()
+                    .unwrap_or_default()
                     .to_string_lossy()
                     .replace("%2F", "/")
                     .replace("___", "/");
@@ -63,8 +73,12 @@ fn import_logseq(logseq_dir: &Path, bloom_vault: &Path) -> Result<ImportStats, S
         if let Ok(entries) = std::fs::read_dir(&pages_src) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
-                let title = path.file_stem().unwrap_or_default()
+                if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                    continue;
+                }
+                let title = path
+                    .file_stem()
+                    .unwrap_or_default()
                     .to_string_lossy()
                     .replace("%2F", "/")
                     .replace("___", "/");
@@ -79,8 +93,10 @@ fn import_logseq(logseq_dir: &Path, bloom_vault: &Path) -> Result<ImportStats, S
                     chrono::Local::now().format("%Y-%m-%d")
                 );
 
-                let filename = format!("{}-{id_hex}.md",
-                    title.to_lowercase().replace(' ', "-").replace('/', "-"));
+                let filename = format!(
+                    "{}-{id_hex}.md",
+                    title.to_lowercase().replace([' ', '/'], "-")
+                );
                 let dst_path = pages_dst.join(&filename);
 
                 // Idempotent: skip if file exists with same ID
@@ -98,7 +114,9 @@ fn import_logseq(logseq_dir: &Path, bloom_vault: &Path) -> Result<ImportStats, S
         if let Ok(entries) = std::fs::read_dir(&journals_src) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
+                if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                    continue;
+                }
                 let stem = path.file_stem().unwrap_or_default().to_string_lossy();
 
                 // Logseq journals: YYYY_MM_DD.md → YYYY-MM-DD.md
@@ -164,7 +182,12 @@ fn convert_logseq_content(content: &str, title_to_id: &HashMap<String, String>) 
                 } else {
                     format!("![[{page_name}]]")
                 };
-                converted = format!("{}{}{}", &converted[..start], replacement, &converted[start + end + 4..]);
+                converted = format!(
+                    "{}{}{}",
+                    &converted[..start],
+                    replacement,
+                    &converted[start + end + 4..]
+                );
             } else {
                 break;
             }

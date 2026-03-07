@@ -23,10 +23,7 @@ impl RegisterFile {
     pub fn set(&mut self, name: char, content: String) {
         if name.is_ascii_uppercase() {
             let lower = name.to_ascii_lowercase();
-            self.registers
-                .entry(lower)
-                .or_default()
-                .push_str(&content);
+            self.registers.entry(lower).or_default().push_str(&content);
         } else {
             self.registers.insert(name, content.clone());
         }

@@ -154,11 +154,7 @@ mod tests {
     #[test]
     fn test_list_journals() {
         let (dir, store) = setup();
-        std::fs::write(
-            dir.path().join("journal").join("2026-03-01.md"),
-            "content",
-        )
-        .unwrap();
+        std::fs::write(dir.path().join("journal").join("2026-03-01.md"), "content").unwrap();
         let journals = store.list_journals().unwrap();
         assert_eq!(journals.len(), 1);
     }

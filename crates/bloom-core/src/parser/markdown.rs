@@ -3,9 +3,7 @@ use crate::types::BlockId;
 use super::extensions::{parse_block_id, parse_links, parse_tags, parse_task, parse_timestamps};
 use super::frontmatter;
 use super::highlight;
-use super::traits::{
-    Document, DocumentParser, Frontmatter, LineContext, Section, StyledSpan,
-};
+use super::traits::{Document, DocumentParser, Frontmatter, LineContext, Section, StyledSpan};
 
 /// The concrete Bloom Markdown parser.
 pub struct BloomMarkdownParser;
@@ -235,15 +233,13 @@ mod tests {
         let parser = BloomMarkdownParser::new();
         let doc = parser.parse(text);
         assert_eq!(doc.links.len(), 1);
-        assert_eq!(
-            doc.links[0].section,
-            Some(BlockId("intro".to_string()))
-        );
+        assert_eq!(doc.links[0].section, Some(BlockId("intro".to_string())));
     }
 
     #[test]
     fn test_parse_frontmatter_via_parser() {
-        let text = "---\nid: 8f3a1b2c\ntitle: \"Via Parser\"\ncreated: 2026-06-15\ntags: [test]\n---\n";
+        let text =
+            "---\nid: 8f3a1b2c\ntitle: \"Via Parser\"\ncreated: 2026-06-15\ntags: [test]\n---\n";
         let parser = BloomMarkdownParser::new();
         let fm = parser.parse_frontmatter(text).unwrap();
         assert_eq!(fm.title.as_deref(), Some("Via Parser"));
@@ -254,9 +250,7 @@ mod tests {
         let parser = BloomMarkdownParser::new();
         let ctx = LineContext::default();
         let spans = parser.highlight_line("## Heading", &ctx);
-        assert!(spans
-            .iter()
-            .any(|s| s.style == Style::Heading { level: 2 }));
+        assert!(spans.iter().any(|s| s.style == Style::Heading { level: 2 }));
     }
 
     #[test]

@@ -11,9 +11,7 @@ pub fn auto_align_page(buf: &mut Buffer) {
     buf.begin_edit_group();
 
     // Collect all lines upfront (avoids borrow issues during mutation)
-    let lines: Vec<String> = (0..line_count)
-        .map(|i| buf.line(i).to_string())
-        .collect();
+    let lines: Vec<String> = (0..line_count).map(|i| buf.line(i).to_string()).collect();
 
     // Pass 1: Frontmatter
     align_frontmatter_block(buf, &lines);
@@ -48,9 +46,7 @@ pub fn auto_align_block(buf: &mut Buffer, cursor_line: usize) {
         return;
     }
 
-    let lines: Vec<String> = (0..line_count)
-        .map(|i| buf.line(i).to_string())
-        .collect();
+    let lines: Vec<String> = (0..line_count).map(|i| buf.line(i).to_string()).collect();
 
     let cursor_text = &lines[cursor_line];
 
@@ -75,7 +71,7 @@ pub fn auto_align_block(buf: &mut Buffer, cursor_line: usize) {
 
 fn is_task_line(line: &str) -> bool {
     let t = line.trim_start();
-    (t.starts_with("- [ ] ") || t.starts_with("- [x] ") || t.starts_with("- [X] "))
+    t.starts_with("- [ ] ") || t.starts_with("- [x] ") || t.starts_with("- [X] ")
 }
 
 fn is_table_line(line: &str) -> bool {
@@ -87,8 +83,8 @@ fn is_in_frontmatter(lines: &[String], line_idx: usize) -> bool {
     if lines.is_empty() || lines[0].trim() != "---" {
         return false;
     }
-    for i in 1..lines.len() {
-        if lines[i].trim() == "---" {
+    for (i, line) in lines.iter().enumerate().skip(1) {
+        if line.trim() == "---" {
             return line_idx <= i;
         }
     }
@@ -113,9 +109,7 @@ fn find_block_bounds(lines: &[String], cursor: usize, pred: fn(&str) -> bool) ->
 
 fn align_timestamp_block(buf: &mut Buffer, start: usize, end: usize) {
     // Re-read lines (buffer may have shifted from earlier edits)
-    let lines: Vec<String> = (start..end)
-        .map(|i| buf.line(i).to_string())
-        .collect();
+    let lines: Vec<String> = (start..end).map(|i| buf.line(i).to_string()).collect();
 
     // Phase 1: relocate post-@ tags to before the first @
     // Phase 2: compute alignment column
@@ -154,7 +148,8 @@ fn align_timestamp_block(buf: &mut Buffer, start: usize, end: usize) {
     // Compute alignment column: max text width across ALL lines + 1
     // Lines without @ still contribute to the column so timestamps
     // don't land in the middle of longer non-@ lines.
-    let max_width = parsed.iter()
+    let max_width = parsed
+        .iter()
         .map(|p| p.text_before_at.width())
         .max()
         .unwrap_or(0);
@@ -175,7 +170,12 @@ fn align_timestamp_block(buf: &mut Buffer, start: usize, end: usize) {
 
         let new_line = if p.has_at {
             let padding = align_col.saturating_sub(p.text_before_at.width());
-            format!("{}{}{}", p.text_before_at, " ".repeat(padding), p.at_and_after)
+            format!(
+                "{}{}{}",
+                p.text_before_at,
+                " ".repeat(padding),
+                p.at_and_after
+            )
         } else {
             p.text_before_at.clone()
         };
@@ -244,9 +244,7 @@ fn relocate_post_at_tags(before: &str, after: &str) -> (String, String) {
 // ---------------------------------------------------------------------------
 
 fn align_table_block(buf: &mut Buffer, start: usize, end: usize) {
-    let lines: Vec<String> = (start..end)
-        .map(|i| buf.line(i).to_string())
-        .collect();
+    let lines: Vec<String> = (start..end).map(|i| buf.line(i).to_string()).collect();
 
     // Parse cells
     let mut table: Vec<Vec<String>> = Vec::new();
@@ -297,16 +295,23 @@ fn align_table_block(buf: &mut Buffer, start: usize, end: usize) {
         let old_line = buf.line(line_idx).to_string();
         let old_trimmed = old_line.trim_end_matches('\n');
 
-        let new_cells: Vec<String> = (0..col_count).map(|col_idx| {
-            let cell = row.get(col_idx).map(|s| s.as_str()).unwrap_or("");
-            let width = col_widths[col_idx];
-            if is_alignment_row[i] {
-                format!("{:-<width$}", cell.trim_matches(|c: char| c == '-' || c == ':')
-                    .chars().next().map_or("---".to_string(), |_| "-".repeat(width)))
-            } else {
-                format!("{:<width$}", cell, width = width)
-            }
-        }).collect();
+        let new_cells: Vec<String> = (0..col_count)
+            .map(|col_idx| {
+                let cell = row.get(col_idx).map(|s| s.as_str()).unwrap_or("");
+                let width = col_widths[col_idx];
+                if is_alignment_row[i] {
+                    format!(
+                        "{:-<width$}",
+                        cell.trim_matches(|c: char| c == '-' || c == ':')
+                            .chars()
+                            .next()
+                            .map_or("---".to_string(), |_| "-".repeat(width))
+                    )
+                } else {
+                    format!("{:<width$}", cell, width = width)
+                }
+            })
+            .collect();
 
         let new_line = format!("| {} |", new_cells.join(" | "));
 
@@ -329,8 +334,8 @@ fn align_frontmatter_block(buf: &mut Buffer, lines: &[String]) {
 
     // Find closing ---
     let mut end = 0;
-    for i in 1..lines.len() {
-        if lines[i].trim() == "---" {
+    for (i, line) in lines.iter().enumerate().skip(1) {
+        if line.trim() == "---" {
             end = i;
             break;
         }
@@ -341,9 +346,9 @@ fn align_frontmatter_block(buf: &mut Buffer, lines: &[String]) {
 
     // Parse key: value lines (between delimiters)
     let mut max_key_len = 0usize;
-    for i in 1..end {
-        if let Some(colon) = lines[i].find(": ") {
-            let key = lines[i][..colon].trim();
+    for line in lines.iter().take(end).skip(1) {
+        if let Some(colon) = line.find(": ") {
+            let key = line[..colon].trim();
             max_key_len = max_key_len.max(key.width());
         }
     }
@@ -386,14 +391,12 @@ mod tests {
         let mut buf = Buffer::from_text(
             "- [ ] Short task @due(2026-03-05)\n\
              - [ ] A much longer task description @due(2026-03-10)\n\
-             - [x] Done @due(2026-03-04)\n"
+             - [x] Done @due(2026-03-04)\n",
         );
         auto_align_page(&mut buf);
         let text = buf.text().to_string();
         // All @due should be at the same column
-        let positions: Vec<usize> = text.lines()
-            .filter_map(|l| l.find("@due"))
-            .collect();
+        let positions: Vec<usize> = text.lines().filter_map(|l| l.find("@due")).collect();
         assert!(positions.len() == 3);
         assert!(positions[0] == positions[1] && positions[1] == positions[2]);
     }
@@ -403,7 +406,7 @@ mod tests {
         let mut buf = Buffer::from_text(
             "- [ ] Has timestamp @due(2026-03-05)\n\
              - [ ] No timestamp here\n\
-             - [ ] Another @due(2026-03-10)\n"
+             - [ ] Another @due(2026-03-10)\n",
         );
         auto_align_page(&mut buf);
         let text = buf.text().to_string();
@@ -413,9 +416,7 @@ mod tests {
 
     #[test]
     fn test_tag_relocation() {
-        let mut buf = Buffer::from_text(
-            "- [ ] Fix parser @due(2026-03-10) #rust\n"
-        );
+        let mut buf = Buffer::from_text("- [ ] Fix parser @due(2026-03-10) #rust\n");
         auto_align_page(&mut buf);
         let text = buf.text().to_string();
         let line = text.lines().next().unwrap();
@@ -431,7 +432,7 @@ mod tests {
             "| Key | Action |\n\
              |---|---|\n\
              | `w` | Next word start |\n\
-             | `b` | Previous word start |\n"
+             | `b` | Previous word start |\n",
         );
         auto_align_page(&mut buf);
         let text = buf.text().to_string();
@@ -439,7 +440,8 @@ mod tests {
         let lines: Vec<&str> = text.lines().collect();
         assert!(lines.len() == 4);
         // Second column pipe should align
-        let pipe2_positions: Vec<usize> = lines.iter()
+        let pipe2_positions: Vec<usize> = lines
+            .iter()
             .filter_map(|l| {
                 let first = l.find('|')?;
                 l[first + 1..].find('|').map(|p| p + first + 1)
@@ -451,12 +453,13 @@ mod tests {
     #[test]
     fn test_frontmatter_alignment() {
         let mut buf = Buffer::from_text(
-            "---\nid: abc123\ntitle: \"My Page\"\ncreated: 2026-03-01\ntags: [rust]\n---\n"
+            "---\nid: abc123\ntitle: \"My Page\"\ncreated: 2026-03-01\ntags: [rust]\n---\n",
         );
         auto_align_page(&mut buf);
         let text = buf.text().to_string();
         // All values should start at the same column
-        let value_starts: Vec<usize> = text.lines()
+        let value_starts: Vec<usize> = text
+            .lines()
             .filter(|l| l.contains(": ") && *l != "---")
             .filter_map(|l| l.find(": ").map(|p| p + 2))
             .collect();
@@ -483,7 +486,7 @@ mod tests {
              - [ ] Much longer task B @due(2026-03-10)\n\
              \n\
              - [ ] Task C @due(2026-04-01)\n\
-             - [ ] Task D @due(2026-04-05)\n"
+             - [ ] Task D @due(2026-04-05)\n",
         );
         auto_align_block(&mut buf, 0); // align first block only
         let text = buf.text().to_string();
@@ -509,7 +512,7 @@ mod tests {
         let mut buf = Buffer::from_text(
             "- [ ] Short @due(2026-03-05)\n\
              - [ ] A really long task description without any timestamp\n\
-             - [ ] Medium @due(2026-03-10)\n"
+             - [ ] Medium @due(2026-03-10)\n",
         );
         auto_align_page(&mut buf);
         let text = buf.text().to_string();
@@ -528,7 +531,7 @@ mod tests {
         let mut buf = Buffer::from_text(
             "- [ ] Finish FTS5 integration for Bloom @start(2026-03-02) @due(2026-03-07)\n\
              - [ ] Read chapters 7-9 of DDIA @due(2026-03-07)\n\
-             - [ ] Schedule dentist appointment @due(2026-03-05)\n"
+             - [ ] Schedule dentist appointment @due(2026-03-05)\n",
         );
         auto_align_page(&mut buf);
         let text = buf.text().to_string();
@@ -544,7 +547,7 @@ mod tests {
     #[test]
     fn test_frontmatter_no_extra_space() {
         let mut buf = Buffer::from_text(
-            "---\nid: abc\ntitle: \"My Page\"\ncreated: 2026-03-01\ntags: [rust]\n---\n"
+            "---\nid: abc\ntitle: \"My Page\"\ncreated: 2026-03-01\ntags: [rust]\n---\n",
         );
         auto_align_page(&mut buf);
         let text = buf.text().to_string();
@@ -553,7 +556,10 @@ mod tests {
                 let colon_pos = line.find(':').unwrap();
                 let after_colon = &line[colon_pos + 1..];
                 let value_start = after_colon.find(|c: char| c != ' ').unwrap_or(0);
-                assert!(value_start >= 1, "value should have at least 1 space after colon");
+                assert!(
+                    value_start >= 1,
+                    "value should have at least 1 space after colon"
+                );
             }
         }
         // Idempotent

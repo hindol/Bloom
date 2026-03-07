@@ -62,9 +62,7 @@ impl Index {
             Ok(s) => s,
             Err(_) => return Vec::new(),
         };
-        let rows = match stmt.query_map(rusqlite::params![page_id], |row| {
-            row.get::<_, String>(0)
-        }) {
+        let rows = match stmt.query_map(rusqlite::params![page_id], |row| row.get::<_, String>(0)) {
             Ok(r) => r,
             Err(_) => return Vec::new(),
         };
@@ -103,7 +101,10 @@ impl Index {
     }
 
     pub fn find_page_fuzzy(&self, query: &str) -> Vec<PageMeta> {
-        let mut stmt = match self.conn.prepare("SELECT id, title, created, path FROM pages") {
+        let mut stmt = match self
+            .conn
+            .prepare("SELECT id, title, created, path FROM pages")
+        {
             Ok(s) => s,
             Err(_) => return Vec::new(),
         };
@@ -120,10 +121,7 @@ impl Index {
         };
         let pages: Vec<_> = rows.filter_map(|r| r.ok()).collect();
 
-        let pattern = nucleo::pattern::Pattern::parse(
-            query,
-            nucleo::pattern::CaseMatching::Ignore,
-        );
+        let pattern = nucleo::pattern::Pattern::parse(query, nucleo::pattern::CaseMatching::Ignore);
         let mut matcher = nucleo::Matcher::new(nucleo::Config::DEFAULT);
 
         let mut scored: Vec<(u32, PageMeta)> = pages
@@ -162,9 +160,10 @@ impl Index {
             };
             rows.filter_map(|r| r.ok()).collect()
         } else {
-            let mut stmt = match self.conn.prepare(
-                "SELECT id, title, created, path FROM pages ORDER BY title",
-            ) {
+            let mut stmt = match self
+                .conn
+                .prepare("SELECT id, title, created, path FROM pages ORDER BY title")
+            {
                 Ok(s) => s,
                 Err(_) => return Vec::new(),
             };
@@ -231,9 +230,10 @@ impl Index {
 
     pub fn forward_links_from(&self, page: &PageId) -> Vec<LinkTarget> {
         let hex = page.to_hex();
-        let mut stmt = match self.conn.prepare(
-            "SELECT to_page, display_hint, section FROM links WHERE from_page = ?1",
-        ) {
+        let mut stmt = match self
+            .conn
+            .prepare("SELECT to_page, display_hint, section FROM links WHERE from_page = ?1")
+        {
             Ok(s) => s,
             Err(_) => return Vec::new(),
         };

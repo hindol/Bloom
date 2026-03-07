@@ -279,6 +279,12 @@ fn swap_leaves_at_parent(tree: &mut LayoutTree, pane: PaneId) -> bool {
 // WindowManager
 // ---------------------------------------------------------------------------
 
+impl Default for WindowManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WindowManager {
     pub fn new() -> Self {
         let first = PaneId(0);
@@ -406,20 +412,12 @@ impl WindowManager {
 
         if let Some(best) = candidates.iter().min_by(|a, b| {
             let dist_a = match direction {
-                Direction::Left | Direction::Right => {
-                    ((a.y + a.h * 0.5) - cursor_y_norm).abs()
-                }
-                Direction::Up | Direction::Down => {
-                    ((a.x + a.w * 0.5) - cursor_x_norm).abs()
-                }
+                Direction::Left | Direction::Right => ((a.y + a.h * 0.5) - cursor_y_norm).abs(),
+                Direction::Up | Direction::Down => ((a.x + a.w * 0.5) - cursor_x_norm).abs(),
             };
             let dist_b = match direction {
-                Direction::Left | Direction::Right => {
-                    ((b.y + b.h * 0.5) - cursor_y_norm).abs()
-                }
-                Direction::Up | Direction::Down => {
-                    ((b.x + b.w * 0.5) - cursor_x_norm).abs()
-                }
+                Direction::Left | Direction::Right => ((b.y + b.h * 0.5) - cursor_y_norm).abs(),
+                Direction::Up | Direction::Down => ((b.x + b.w * 0.5) - cursor_x_norm).abs(),
             };
             dist_a
                 .partial_cmp(&dist_b)
@@ -574,8 +572,8 @@ pub struct CellRect {
     pub x: u16,
     pub y: u16,
     pub width: u16,
-    pub height: u16,          // total pane height (content + status bar)
-    pub content_height: u16,  // rows for content (height - 1 for status bar)
+    pub height: u16,         // total pane height (content + status bar)
+    pub content_height: u16, // rows for content (height - 1 for status bar)
 }
 
 fn compute_cell_rects(
@@ -598,22 +596,25 @@ fn compute_cell_rects(
                 content_height: content_h,
             });
         }
-        LayoutTree::Split { direction, ratio, left, right } => {
-            match direction {
-                SplitDirection::Vertical => {
-                    let left_w = ((width as f32) * ratio) as u16;
-                    let right_w = width.saturating_sub(left_w);
-                    compute_cell_rects(left, x, y, left_w, height, out);
-                    compute_cell_rects(right, x + left_w, y, right_w, height, out);
-                }
-                SplitDirection::Horizontal => {
-                    let top_h = ((height as f32) * ratio) as u16;
-                    let bottom_h = height.saturating_sub(top_h);
-                    compute_cell_rects(left, x, y, width, top_h, out);
-                    compute_cell_rects(right, x, y + top_h, width, bottom_h, out);
-                }
+        LayoutTree::Split {
+            direction,
+            ratio,
+            left,
+            right,
+        } => match direction {
+            SplitDirection::Vertical => {
+                let left_w = ((width as f32) * ratio) as u16;
+                let right_w = width.saturating_sub(left_w);
+                compute_cell_rects(left, x, y, left_w, height, out);
+                compute_cell_rects(right, x + left_w, y, right_w, height, out);
             }
-        }
+            SplitDirection::Horizontal => {
+                let top_h = ((height as f32) * ratio) as u16;
+                let bottom_h = height.saturating_sub(top_h);
+                compute_cell_rects(left, x, y, width, top_h, out);
+                compute_cell_rects(right, x, y + top_h, width, bottom_h, out);
+            }
+        },
     }
 }
 

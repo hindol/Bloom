@@ -76,8 +76,7 @@ impl Buffer {
         self.rope.remove(range);
         self.bump_version();
         if self.edit_group_checkpoint.is_none() {
-            self.undo_tree
-                .push(self.rope.clone(), "delete".to_string());
+            self.undo_tree.push(self.rope.clone(), "delete".to_string());
         }
     }
 
@@ -250,12 +249,12 @@ mod tests {
     #[test]
     fn test_undo_tree_branches() {
         let mut buf = Buffer::from_text("");
-        buf.insert(0, "alpha");     // node 1
-        buf.insert(5, " beta");     // node 2
-        buf.insert(10, " gamma");   // node 3
-        buf.undo();                 // back to node 2: "alpha beta"
-        buf.undo();                 // back to node 1: "alpha"
-        buf.insert(5, " delta");    // NEW branch: node 4
+        buf.insert(0, "alpha"); // node 1
+        buf.insert(5, " beta"); // node 2
+        buf.insert(10, " gamma"); // node 3
+        buf.undo(); // back to node 2: "alpha beta"
+        buf.undo(); // back to node 1: "alpha"
+        buf.insert(5, " delta"); // NEW branch: node 4
         assert_eq!(buf.text().to_string(), "alpha delta");
 
         // The undo tree should have branches
@@ -319,7 +318,7 @@ mod tests {
     #[test]
     fn test_restore_state() {
         let mut buf = Buffer::from_text("");
-        buf.insert(0, "first");   // node 1
+        buf.insert(0, "first"); // node 1
         let node_after_first = buf.undo_tree().current();
         buf.insert(5, " second"); // node 2
         assert_eq!(buf.text().to_string(), "first second");

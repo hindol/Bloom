@@ -25,10 +25,24 @@ pub struct DiskWriter {
 }
 
 impl DiskWriter {
-    pub fn new(debounce_ms: u64) -> (Self, channel::Sender<WriteRequest>, channel::Receiver<WriteComplete>) {
+    pub fn new(
+        debounce_ms: u64,
+    ) -> (
+        Self,
+        channel::Sender<WriteRequest>,
+        channel::Receiver<WriteComplete>,
+    ) {
         let (tx, rx) = channel::unbounded();
         let (ack_tx, ack_rx) = channel::unbounded();
-        (Self { rx, ack_tx, debounce_ms }, tx, ack_rx)
+        (
+            Self {
+                rx,
+                ack_tx,
+                debounce_ms,
+            },
+            tx,
+            ack_rx,
+        )
     }
 
     /// Run on a dedicated OS thread. Debounces writes per path, then does

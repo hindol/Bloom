@@ -171,7 +171,12 @@ fn motion_w_boundary(buffer: &Buffer, cursor: usize, count: usize) -> usize {
             pos += 1;
         }
         // Skip whitespace/newlines
-        while pos < len && matches!(classify(buffer.text().char(pos)), CharClass::Whitespace | CharClass::Newline) {
+        while pos < len
+            && matches!(
+                classify(buffer.text().char(pos)),
+                CharClass::Whitespace | CharClass::Newline
+            )
+        {
             pos += 1;
         }
     }
@@ -191,7 +196,12 @@ fn motion_b(buffer: &Buffer, cursor: usize, count: usize) -> usize {
         }
         pos -= 1;
         // Skip whitespace/newlines backward
-        while pos > 0 && matches!(classify(buffer.text().char(pos)), CharClass::Whitespace | CharClass::Newline) {
+        while pos > 0
+            && matches!(
+                classify(buffer.text().char(pos)),
+                CharClass::Whitespace | CharClass::Newline
+            )
+        {
             pos -= 1;
         }
         // Skip current class backward
@@ -212,7 +222,12 @@ fn motion_e(buffer: &Buffer, cursor: usize, count: usize) -> usize {
         }
         pos += 1;
         // Skip whitespace/newlines
-        while pos < len && matches!(classify(buffer.text().char(pos)), CharClass::Whitespace | CharClass::Newline) {
+        while pos < len
+            && matches!(
+                classify(buffer.text().char(pos)),
+                CharClass::Whitespace | CharClass::Newline
+            )
+        {
             pos += 1;
         }
         if pos >= len {
@@ -229,7 +244,12 @@ fn motion_e(buffer: &Buffer, cursor: usize, count: usize) -> usize {
 
 fn skip_blank_chars(buffer: &Buffer, mut pos: usize) -> usize {
     let len = buffer.len_chars();
-    while pos < len && matches!(classify(buffer.text().char(pos)), CharClass::Whitespace | CharClass::Newline) {
+    while pos < len
+        && matches!(
+            classify(buffer.text().char(pos)),
+            CharClass::Whitespace | CharClass::Newline
+        )
+    {
         pos += 1;
     }
     pos
@@ -402,7 +422,13 @@ fn motion_big_g(buffer: &Buffer, count: Option<usize>) -> usize {
     }
 }
 
-fn motion_find(buffer: &Buffer, cursor: usize, target: char, forward: bool, count: usize) -> Option<usize> {
+fn motion_find(
+    buffer: &Buffer,
+    cursor: usize,
+    target: char,
+    forward: bool,
+    count: usize,
+) -> Option<usize> {
     let rope = buffer.text();
     let line_idx = rope.char_to_line(cursor);
     let line_start = rope.line_to_char(line_idx);
@@ -433,7 +459,13 @@ fn motion_find(buffer: &Buffer, cursor: usize, target: char, forward: bool, coun
     None
 }
 
-fn motion_to(buffer: &Buffer, cursor: usize, target: char, forward: bool, count: usize) -> Option<usize> {
+fn motion_to(
+    buffer: &Buffer,
+    cursor: usize,
+    target: char,
+    forward: bool,
+    count: usize,
+) -> Option<usize> {
     motion_find(buffer, cursor, target, forward, count).map(|pos| {
         if forward {
             pos.saturating_sub(1).max(cursor)
@@ -444,10 +476,7 @@ fn motion_to(buffer: &Buffer, cursor: usize, target: char, forward: bool, count:
 }
 
 fn motion_matching_bracket(buffer: &Buffer, cursor: usize) -> Option<usize> {
-    let c = match char_at(buffer, cursor) {
-        Some(c) => c,
-        None => return None,
-    };
+    let c = char_at(buffer, cursor)?;
     let (target, forward) = match c {
         '(' => (')', true),
         ')' => ('(', false),
@@ -500,8 +529,7 @@ fn motion_paragraph_forward_boundary(buffer: &Buffer, cursor: usize, count: usiz
         while pos < len {
             let line_idx = rope.char_to_line(pos);
             let line = rope.line(line_idx);
-            let blank = line.len_chars() == 0
-                || (line.len_chars() == 1 && line.char(0) == '\n');
+            let blank = line.len_chars() == 0 || (line.len_chars() == 1 && line.char(0) == '\n');
             if blank {
                 break;
             }
@@ -515,8 +543,7 @@ fn motion_paragraph_forward_boundary(buffer: &Buffer, cursor: usize, count: usiz
         while pos < len {
             let line_idx = rope.char_to_line(pos);
             let line = rope.line(line_idx);
-            let blank = line.len_chars() == 0
-                || (line.len_chars() == 1 && line.char(0) == '\n');
+            let blank = line.len_chars() == 0 || (line.len_chars() == 1 && line.char(0) == '\n');
             if !blank {
                 break;
             }
@@ -547,8 +574,7 @@ fn motion_paragraph_backward(buffer: &Buffer, cursor: usize, count: usize) -> us
         // Skip non-blank lines backward
         loop {
             let line = rope.line(line_idx);
-            let blank = line.len_chars() == 0
-                || (line.len_chars() == 1 && line.char(0) == '\n');
+            let blank = line.len_chars() == 0 || (line.len_chars() == 1 && line.char(0) == '\n');
             if blank || line_idx == 0 {
                 break;
             }
@@ -557,8 +583,7 @@ fn motion_paragraph_backward(buffer: &Buffer, cursor: usize, count: usize) -> us
         // Skip blank lines backward
         loop {
             let line = rope.line(line_idx);
-            let blank = line.len_chars() == 0
-                || (line.len_chars() == 1 && line.char(0) == '\n');
+            let blank = line.len_chars() == 0 || (line.len_chars() == 1 && line.char(0) == '\n');
             if !blank || line_idx == 0 {
                 break;
             }
@@ -597,7 +622,9 @@ pub fn execute_motion(
         MotionType::DocumentStart => motion_gg(buffer, count),
         MotionType::DocumentEnd => motion_big_g(buffer, count),
         MotionType::FindForward(ch) => motion_find(buffer, cursor, *ch, true, c).unwrap_or(cursor),
-        MotionType::FindBackward(ch) => motion_find(buffer, cursor, *ch, false, c).unwrap_or(cursor),
+        MotionType::FindBackward(ch) => {
+            motion_find(buffer, cursor, *ch, false, c).unwrap_or(cursor)
+        }
         MotionType::ToForward(ch) => motion_to(buffer, cursor, *ch, true, c).unwrap_or(cursor),
         MotionType::ToBackward(ch) => motion_to(buffer, cursor, *ch, false, c).unwrap_or(cursor),
         MotionType::MatchingBracket => motion_matching_bracket(buffer, cursor).unwrap_or(cursor),

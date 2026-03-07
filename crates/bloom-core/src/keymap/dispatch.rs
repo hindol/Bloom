@@ -133,14 +133,9 @@ pub struct EditorContext<'a> {
     pub active_pane: PaneId,
 }
 
+#[derive(Default)]
 pub struct KeymapConfig {
     // placeholder for user keymap overrides
-}
-
-impl Default for KeymapConfig {
-    fn default() -> Self {
-        KeymapConfig {}
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -181,7 +176,10 @@ impl KeymapDispatcher {
         }
 
         // 4. Template mode: Tab advances
-        if context.template_mode_active && key.code == KeyCode::Tab && key.modifiers == Modifiers::none() {
+        if context.template_mode_active
+            && key.code == KeyCode::Tab
+            && key.modifiers == Modifiers::none()
+        {
             return vec![Action::TemplateAdvance];
         }
 
@@ -205,7 +203,9 @@ impl KeymapDispatcher {
                 KeyCode::Char('g') => vec![Action::ClosePicker],
                 // Ctrl+U           → clear search input
                 KeyCode::Char('u') => {
-                    vec![Action::PickerInput(PickerInputAction::UpdateQuery(String::new()))]
+                    vec![Action::PickerInput(PickerInputAction::UpdateQuery(
+                        String::new(),
+                    ))]
                 }
                 _ => vec![],
             };
@@ -217,12 +217,18 @@ impl KeymapDispatcher {
             KeyCode::Up => vec![Action::PickerInput(PickerInputAction::MoveSelection(-1))],
             KeyCode::Down => vec![Action::PickerInput(PickerInputAction::MoveSelection(1))],
             KeyCode::Tab => vec![Action::PickerInput(PickerInputAction::ToggleMark)],
-            KeyCode::Char(c) if key.modifiers == Modifiers::none() || key.modifiers == Modifiers::shift() => {
-                vec![Action::PickerInput(PickerInputAction::UpdateQuery(c.to_string()))]
+            KeyCode::Char(c)
+                if key.modifiers == Modifiers::none() || key.modifiers == Modifiers::shift() =>
+            {
+                vec![Action::PickerInput(PickerInputAction::UpdateQuery(
+                    c.to_string(),
+                ))]
             }
             KeyCode::Backspace => {
                 // Backspace in picker: send empty update to signal deletion
-                vec![Action::PickerInput(PickerInputAction::UpdateQuery(String::new()))]
+                vec![Action::PickerInput(PickerInputAction::UpdateQuery(
+                    String::new(),
+                ))]
             }
             _ => vec![],
         }

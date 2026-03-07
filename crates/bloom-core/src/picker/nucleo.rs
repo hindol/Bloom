@@ -63,7 +63,9 @@ pub fn all_words_score(query: &str, candidate: &str) -> Option<u32> {
                 let pos_bonus = 100u32.saturating_sub(pos as u32);
                 // Word boundary bonus
                 let boundary = pos == 0
-                    || candidate_lower.as_bytes().get(pos - 1)
+                    || candidate_lower
+                        .as_bytes()
+                        .get(pos - 1)
                         .map(|&b| b == b' ' || b == b'_' || b == b'-' || b == b'/')
                         .unwrap_or(false);
                 score += pos_bonus + if boundary { 50 } else { 0 };
@@ -147,7 +149,9 @@ mod tests {
     #[test]
     fn fuzzy_words_matches_partial_words() {
         // "mem pat re" should match — each word fuzzy-matches independently
-        assert!(fuzzy_words_score("mem pat re", "Deep research on memory usage patterns").is_some());
+        assert!(
+            fuzzy_words_score("mem pat re", "Deep research on memory usage patterns").is_some()
+        );
     }
 
     #[test]

@@ -244,13 +244,21 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
                 // Display text
                 spans.push(StyledSpan {
                     range: uuid_end + 1..content_end,
-                    style: if is_valid { Style::LinkText } else { Style::BrokenLink },
+                    style: if is_valid {
+                        Style::LinkText
+                    } else {
+                        Style::BrokenLink
+                    },
                 });
             } else {
                 // No pipe — whole content is the link
                 spans.push(StyledSpan {
                     range: content_start..content_end,
-                    style: if is_valid { Style::LinkText } else { Style::BrokenLink },
+                    style: if is_valid {
+                        Style::LinkText
+                    } else {
+                        Style::BrokenLink
+                    },
                 });
             }
 
@@ -321,7 +329,8 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
 
         // Tags #tagname
         if bytes[i] == b'#' {
-            let preceded_by_ws = i == 0 || line[..i].chars().last().map_or(true, |c| c.is_whitespace());
+            let preceded_by_ws =
+                i == 0 || line[..i].chars().last().is_none_or(|c| c.is_whitespace());
             if preceded_by_ws {
                 let tag_start = i;
                 i += 1;
@@ -355,7 +364,9 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
         // Timestamps @due(...), @start(...), @at(...)
         if bytes[i] == b'@' {
             let ts_start = i;
-            if let Some((keyword_end, date_start, date_end, close)) = try_match_timestamp_parts(line, i) {
+            if let Some((keyword_end, date_start, date_end, close)) =
+                try_match_timestamp_parts(line, i)
+            {
                 flush_normal(normal_start, ts_start, spans);
                 let keyword = &line[ts_start..keyword_end];
                 // Keyword: @due, @start, @at
@@ -373,7 +384,11 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
                 let is_overdue = keyword == "@due" && is_overdue_date(date_str);
                 spans.push(StyledSpan {
                     range: date_start..date_end,
-                    style: if is_overdue { Style::TimestampOverdue } else { Style::TimestampDate },
+                    style: if is_overdue {
+                        Style::TimestampOverdue
+                    } else {
+                        Style::TimestampDate
+                    },
                 });
                 // Closing paren
                 spans.push(StyledSpan {
@@ -390,7 +405,10 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
         if bytes[i] == b'^' && (i == 0 || bytes[i - 1] == b' ') {
             let rest = &line[i + 1..];
             if !rest.is_empty()
-                && rest.trim_end().chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+                && rest
+                    .trim_end()
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
             {
                 let block_end = line.trim_end().len();
                 flush_normal(normal_start, i, spans);
@@ -551,18 +569,14 @@ mod tests {
     fn test_highlight_heading() {
         let ctx = LineContext::default();
         let spans = highlight_line("## My Heading", &ctx);
-        assert!(spans
-            .iter()
-            .any(|s| s.style == Style::Heading { level: 2 }));
+        assert!(spans.iter().any(|s| s.style == Style::Heading { level: 2 }));
     }
 
     #[test]
     fn test_highlight_heading_level_1() {
         let ctx = LineContext::default();
         let spans = highlight_line("# Title", &ctx);
-        assert!(spans
-            .iter()
-            .any(|s| s.style == Style::Heading { level: 1 }));
+        assert!(spans.iter().any(|s| s.style == Style::Heading { level: 1 }));
     }
 
     #[test]

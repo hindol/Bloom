@@ -75,6 +75,12 @@ impl WhichKeyNode {
     }
 }
 
+impl Default for WhichKeyTree {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WhichKeyTree {
     pub fn new() -> Self {
         Self {
@@ -109,12 +115,14 @@ impl WhichKeyTree {
                 .children
                 .entry(key.clone())
                 .or_insert_with(|| WhichKeyChild::Group {
-                    label: format!("+{key}"),  // default; override via set_group_label()
+                    label: format!("+{key}"), // default; override via set_group_label()
                     node: WhichKeyNode::new(),
                 });
 
             match child {
-                WhichKeyChild::Group { node: ref mut n, .. } => {
+                WhichKeyChild::Group {
+                    node: ref mut n, ..
+                } => {
                     node = n;
                 }
                 WhichKeyChild::Action { .. } => {
@@ -126,7 +134,10 @@ impl WhichKeyTree {
 
     /// Set a descriptive label for a group key (e.g., "f" → "files").
     pub fn set_group_label(&mut self, key: &str, label: &str) {
-        if let Some(WhichKeyChild::Group { label: ref mut l, .. }) = self.root.children.get_mut(key) {
+        if let Some(WhichKeyChild::Group {
+            label: ref mut l, ..
+        }) = self.root.children.get_mut(key)
+        {
             *l = label.to_string();
         }
     }
@@ -169,9 +180,15 @@ fn key_event_to_string(event: &KeyEvent) -> String {
             } else {
                 // Build prefix without Shift (it's in the char)
                 let mut prefix = String::new();
-                if has_ctrl { prefix.push_str("C-"); }
-                if has_alt { prefix.push_str("A-"); }
-                if has_meta { prefix.push_str("M-"); }
+                if has_ctrl {
+                    prefix.push_str("C-");
+                }
+                if has_alt {
+                    prefix.push_str("A-");
+                }
+                if has_meta {
+                    prefix.push_str("M-");
+                }
                 format!("{prefix}{c}")
             }
         }
@@ -292,6 +309,12 @@ pub struct Completion {
     pub description: String,
 }
 
+impl Default for CommandRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CommandRegistry {
     pub fn new() -> Self {
         Self {
@@ -331,7 +354,8 @@ impl CommandRegistry {
         match &def.args {
             CommandArgs::None => Vec::new(),
             CommandArgs::Required(label) | CommandArgs::Optional(label) => {
-                if label.to_lowercase().contains(&arg_prefix.to_lowercase()) || arg_prefix.is_empty()
+                if label.to_lowercase().contains(&arg_prefix.to_lowercase())
+                    || arg_prefix.is_empty()
                 {
                     vec![Completion {
                         text: label.clone(),
@@ -525,7 +549,10 @@ mod tests {
         let result = tree.lookup(&[shift_t]);
         match result {
             WhichKeyLookup::Prefix(entries) => {
-                assert!(!entries.is_empty(), "T should be a group with t, m children");
+                assert!(
+                    !entries.is_empty(),
+                    "T should be a group with t, m children"
+                );
             }
             _ => panic!("expected Prefix for Shift+T, got {result:?}"),
         }

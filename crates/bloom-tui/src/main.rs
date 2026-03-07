@@ -11,9 +11,7 @@ use bloom_core::keymap::dispatch::Action;
 use bloom_core::BloomEditor;
 use crossbeam::channel;
 use crossterm::event::{self, Event, KeyEventKind};
-use crossterm::terminal::{
-    self, EnterAlternateScreen, LeaveAlternateScreen,
-};
+use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::{cursor, execute};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
@@ -50,8 +48,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
     } else {
         Config::defaults()
     };
-    let mut editor = BloomEditor::new(config)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{e:?}")))?;
+    let mut editor = BloomEditor::new(config).map_err(|e| io::Error::other(format!("{e:?}")))?;
 
     // First-run detection: show setup wizard if no vault exists
     if editor.needs_setup() {
@@ -72,14 +69,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
     std::thread::Builder::new()
         .name("bloom-input".into())
         .spawn(move || {
-            loop {
-                match event::read() {
-                    Ok(ev) => {
-                        if input_tx.send(ev).is_err() {
-                            break; // receiver dropped, editor shutting down
-                        }
-                    }
-                    Err(_) => break,
+            while let Ok(ev) = event::read() {
+                if input_tx.send(ev).is_err() {
+                    break; // receiver dropped, editor shutting down
                 }
             }
         })
@@ -98,12 +90,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
 
             if let Some(pane) = frame.panes.iter().find(|p| p.is_active) {
                 let cursor_style = match pane.cursor.shape {
-                    bloom_core::render::CursorShape::Block => {
-                        cursor::SetCursorStyle::SteadyBlock
-                    }
-                    bloom_core::render::CursorShape::Bar => {
-                        cursor::SetCursorStyle::SteadyBar
-                    }
+                    bloom_core::render::CursorShape::Block => cursor::SetCursorStyle::SteadyBlock,
+                    bloom_core::render::CursorShape::Bar => cursor::SetCursorStyle::SteadyBar,
                     bloom_core::render::CursorShape::Underline => {
                         cursor::SetCursorStyle::SteadyUnderScore
                     }
@@ -119,7 +107,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
         }
 
         // Compute timeout from editor timers (debounce, notifications, which-key)
-        let timeout = editor.next_deadline()
+        let timeout = editor
+            .next_deadline()
             .map(|d| d.saturating_duration_since(Instant::now()))
             .unwrap_or(Duration::from_millis(500));
 
@@ -191,7 +180,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
 }
 
 fn init_logging(vault_path: &str) {
-    use tracing_subscriber::{fmt, EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+    use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
     let log_dir = std::path::Path::new(vault_path).join(".bloom").join("logs");
     let _ = std::fs::create_dir_all(&log_dir);
@@ -215,8 +204,7 @@ fn init_logging(vault_path: &str) {
         .with_target(true)
         .with_span_events(fmt::format::FmtSpan::CLOSE);
 
-    let filter = EnvFilter::try_from_env("BLOOM_LOG")
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter = EnvFilter::try_from_env("BLOOM_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
 
     tracing_subscriber::registry()
         .with(filter)
@@ -231,7 +219,8 @@ fn rotate_logs(log_dir: &std::path::Path) {
     let max_size = 5 * 1024 * 1024; // 5 MB
     let max_files = 3;
 
-    let needs_rotate = current.metadata()
+    let needs_rotate = current
+        .metadata()
         .map(|m| m.len() > max_size)
         .unwrap_or(false);
 

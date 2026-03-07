@@ -1,8 +1,11 @@
 mod palette;
 mod resolve;
 
-pub use palette::{Rgb, ThemePalette, BLOOM_DARK, BLOOM_DARK_FADED, BLOOM_LIGHT, BLOOM_LIGHT_FADED, PARCHMENT, NEWSPRINT, AGED_PAPER, MOSS, SLATE, SOLARIUM, INK, DRIFTWOOD, TWILIGHT, LICHEN, EMBER};
-pub use resolve::{StyleProps, Chrome, resolve, resolve_status_bar, resolve_chrome};
+pub use palette::{
+    Rgb, ThemePalette, AGED_PAPER, BLOOM_DARK, BLOOM_DARK_FADED, BLOOM_LIGHT, BLOOM_LIGHT_FADED,
+    DRIFTWOOD, EMBER, INK, LICHEN, MOSS, NEWSPRINT, PARCHMENT, SLATE, SOLARIUM, TWILIGHT,
+};
+pub use resolve::{resolve, resolve_chrome, resolve_status_bar, Chrome, StyleProps};
 
 /// All built-in theme names, in display order.
 pub const THEME_NAMES: &[&str] = &[

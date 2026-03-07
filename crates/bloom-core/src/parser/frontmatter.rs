@@ -45,7 +45,7 @@ pub fn parse_frontmatter(text: &str) -> Option<Frontmatter> {
 fn parse_yaml_frontmatter(yaml: &str) -> Option<Frontmatter> {
     let raw: RawFrontmatter = serde_yaml::from_str(yaml).ok()?;
     let id = raw.id.and_then(|s| PageId::from_hex(&s));
-    let tags = raw.tags.into_iter().map(|t| TagName(t)).collect();
+    let tags = raw.tags.into_iter().map(TagName).collect();
     Some(Frontmatter {
         id,
         title: raw.title,
@@ -130,7 +130,8 @@ mod tests {
 
     #[test]
     fn test_serialize_frontmatter_roundtrip() {
-        let text = "---\nid: 8f3a1b2c\ntitle: \"Test\"\ncreated: 2026-01-01\ntags: [rust, editors]\n---\n";
+        let text =
+            "---\nid: 8f3a1b2c\ntitle: \"Test\"\ncreated: 2026-01-01\ntags: [rust, editors]\n---\n";
         let fm = parse_frontmatter(text).unwrap();
         let serialized = serialize_frontmatter(&fm);
         let reparsed = parse_frontmatter(&format!("{}\n", serialized)).unwrap();

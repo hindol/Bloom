@@ -28,6 +28,12 @@ pub struct TextEdit {
     pub new_text: String,
 }
 
+impl Default for Linker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Linker {
     pub fn new() -> Self {
         Linker {}
@@ -76,11 +82,7 @@ impl Linker {
     }
 
     /// Promote an unlinked mention to a wiki-link.
-    pub fn promote_unlinked_mention(
-        &self,
-        mention: &UnlinkedMention,
-        target: &PageId,
-    ) -> TextEdit {
+    pub fn promote_unlinked_mention(&self, mention: &UnlinkedMention, target: &PageId) -> TextEdit {
         let matched_text = &mention.context[mention.match_range.clone()];
         let new_text = format!("[[{}|{}]]", target.to_hex(), matched_text);
         TextEdit {
@@ -91,11 +93,7 @@ impl Linker {
     }
 
     /// Batch-promote multiple unlinked mentions.
-    pub fn batch_promote(
-        &self,
-        mentions: &[UnlinkedMention],
-        target: &PageId,
-    ) -> Vec<TextEdit> {
+    pub fn batch_promote(&self, mentions: &[UnlinkedMention], target: &PageId) -> Vec<TextEdit> {
         mentions
             .iter()
             .map(|m| self.promote_unlinked_mention(m, target))

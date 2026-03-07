@@ -88,8 +88,7 @@ pub struct FileFingerprint {
 
 impl Index {
     pub fn open(path: &Path) -> Result<Self, BloomError> {
-        let conn =
-            Connection::open(path).map_err(|e| BloomError::IndexError(e.to_string()))?;
+        let conn = Connection::open(path).map_err(|e| BloomError::IndexError(e.to_string()))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
             .map_err(|e| BloomError::IndexError(e.to_string()))?;
         schema::create_tables(&conn)?;
@@ -195,10 +194,7 @@ mod tests {
         idx.index_page(&make_entry("aabbccdd", "P1", "c", &["editors"]))
             .unwrap();
         let count = idx
-            .rename_tag(
-                &TagName("editors".into()),
-                &TagName("text-editors".into()),
-            )
+            .rename_tag(&TagName("editors".into()), &TagName("text-editors".into()))
             .unwrap();
         assert_eq!(count, 1);
         let pages = idx.pages_with_tag(&TagName("text-editors".into()));
@@ -276,9 +272,7 @@ mod tests {
         entry.tasks.push(Task {
             text: "Do thing".into(),
             done: false,
-            timestamps: vec![Timestamp::Due(
-                NaiveDate::from_ymd_opt(2026, 3, 5).unwrap(),
-            )],
+            timestamps: vec![Timestamp::Due(NaiveDate::from_ymd_opt(2026, 3, 5).unwrap())],
             source_page: page_id,
             line: 5,
         });

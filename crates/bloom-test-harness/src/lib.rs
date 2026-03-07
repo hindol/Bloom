@@ -19,7 +19,7 @@ pub struct TestVault {
 }
 
 struct TestPage {
-    id: PageId,
+    _id: PageId,
     #[allow(dead_code)]
     title: String,
     content: String,
@@ -42,7 +42,7 @@ impl TestVault {
             title
         );
         self.pages.push(TestPage {
-            id,
+            _id: id,
             title: title.to_string(),
             content,
             tags: Vec::new(),
@@ -84,10 +84,7 @@ impl TestVault {
         std::fs::create_dir_all(&bloom_dir).unwrap();
 
         for page in &self.pages {
-            let filename = format!(
-                "{}.md",
-                page.title.to_lowercase().replace(' ', "-")
-            );
+            let filename = format!("{}.md", page.title.to_lowercase().replace(' ', "-"));
             let path = pages_dir.join(&filename);
             std::fs::write(&path, &page.content).unwrap();
         }

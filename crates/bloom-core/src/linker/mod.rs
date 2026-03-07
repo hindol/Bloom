@@ -1,6 +1,6 @@
-pub mod resolver;
 pub mod backlinks;
 pub mod hints;
 pub mod orphan;
+pub mod resolver;
 
-pub use resolver::{Linker, LinkResolution, HintUpdate, TextEdit};
+pub use resolver::{HintUpdate, LinkResolution, Linker, TextEdit};

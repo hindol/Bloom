@@ -1,5 +1,6 @@
 pub mod filter;
 pub mod nucleo;
+#[allow(clippy::module_inception)]
 pub mod picker;
 pub mod source;
 

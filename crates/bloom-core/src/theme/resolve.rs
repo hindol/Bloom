@@ -1,5 +1,5 @@
-use crate::parser::traits::Style;
 use super::palette::{Rgb, ThemePalette};
+use crate::parser::traits::Style;
 
 /// Resolved style properties — UI-agnostic, ready for frontend conversion.
 #[derive(Debug, Clone, Default)]

@@ -1,5 +1,5 @@
 use crate::picker::filter::PickerFilter;
-use crate::picker::nucleo::{fuzzy_score, all_words_score};
+use crate::picker::nucleo::{all_words_score, fuzzy_score};
 use crate::picker::source::PickerItem;
 use std::collections::HashSet;
 

@@ -286,7 +286,9 @@ pub enum McpIndicator {
     #[default]
     Off,
     Idle,
-    Editing { tick: u8 },
+    Editing {
+        tick: u8,
+    },
 }
 
 impl Default for StatusBarFrame {

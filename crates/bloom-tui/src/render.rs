@@ -1,9 +1,8 @@
 use bloom_core::render::{
-    AgendaFrame, DialogFrame, InlineMenuAnchor, InlineMenuFrame, McpIndicator,
-    NotificationLevel, PaneFrame, PaneKind, PickerFrame, RenderFrame,
-    StatusBarContent, StatusBarFrame, WhichKeyFrame,
+    AgendaFrame, DialogFrame, InlineMenuAnchor, InlineMenuFrame, McpIndicator, NotificationLevel,
+    PaneFrame, PaneKind, PickerFrame, RenderFrame, StatusBarContent, StatusBarFrame, WhichKeyFrame,
 };
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style as RStyle};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
@@ -28,7 +27,7 @@ pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &TuiTheme) {
     let wk_h = if let Some(wk) = &frame.which_key {
         let col_width = 24u16;
         let cols = (area.width.saturating_sub(4) / col_width).max(1);
-        let rows_needed = ((wk.entries.len() as u16) + cols - 1) / cols;
+        let rows_needed = (wk.entries.len() as u16).div_ceil(cols);
         // +1 for top padding, +1 for bottom padding
         (rows_needed + 2).min(area.height / 3).max(3)
     } else {
@@ -44,7 +43,14 @@ pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &TuiTheme) {
     };
 
     // Draw panes (each pane includes its own status bar)
-    draw_panes(f, pane_area, &frame.panes, frame.maximized, frame.hidden_pane_count, theme);
+    draw_panes(
+        f,
+        pane_area,
+        &frame.panes,
+        frame.maximized,
+        frame.hidden_pane_count,
+        theme,
+    );
 
     // Which-key drawer
     if let (Some(wk), Some(wk_rect)) = (&frame.which_key, wk_area) {
@@ -158,27 +164,11 @@ fn draw_pane(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
     }
 }
 
-fn draw_pane_title(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
-    let title_text = if pane.dirty {
-        format!(" {} [+]", pane.title)
-    } else {
-        format!(" {}", pane.title)
-    };
-    let max_len = area.width as usize;
-    let truncated = if title_text.len() > max_len {
-        format!("{}…", &title_text[..max_len.saturating_sub(1)])
-    } else {
-        title_text
-    };
-    let line = Line::from(Span::styled(truncated, theme.border_style()));
-    f.render_widget(Paragraph::new(line), area);
-}
-
 fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
     let height = area.height as usize;
     let line_number_width = 5u16;
     let total_width = area.width as usize;
-    let content_width = total_width.saturating_sub(line_number_width as usize);
+    let _content_width = total_width.saturating_sub(line_number_width as usize);
 
     let bg = theme.background();
     let base_normal = RStyle::default().fg(theme.foreground()).bg(bg);
@@ -201,8 +191,7 @@ fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiT
         let rendered_line = &pane.visible_lines[row];
 
         // Determine base style (cursor line highlight or normal)
-        let is_cursor_line = pane.is_active
-            && rendered_line.line_number == pane.cursor.line;
+        let is_cursor_line = pane.is_active && rendered_line.line_number == pane.cursor.line;
         let base_style = if is_cursor_line {
             theme.current_line_style()
         } else {
@@ -219,10 +208,9 @@ fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiT
 
         // Content text with syntax highlighting
         let text = rendered_line.text.trim_end_matches(['\n', '\r']);
-        let mut text_width = 0usize;
+        let text_width = text.width();
 
         if rendered_line.spans.is_empty() {
-            text_width = text.width();
             spans.push(Span::styled(text, base_style));
         } else {
             let mut last_end = 0usize;
@@ -241,7 +229,6 @@ fn draw_editor_content(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiT
             if last_end < text.len() {
                 spans.push(Span::styled(&text[last_end..], base_style));
             }
-            text_width = text.width();
         }
 
         // Pad remaining width with spaces in base_style
@@ -275,17 +262,18 @@ fn draw_status_bar_slot(
             None
         }
         StatusBarContent::CommandLine(cmd) => {
-            let style = RStyle::default().fg(theme.foreground()).bg(theme.background());
+            let style = RStyle::default()
+                .fg(theme.foreground())
+                .bg(theme.background());
             let text = format!(":{}", cmd.input);
-            f.render_widget(
-                Paragraph::new(Line::from(Span::styled(&text, style))),
-                area,
-            );
+            f.render_widget(Paragraph::new(Line::from(Span::styled(&text, style))), area);
 
             // Error display: overwrite the last pane line above status bar
             if let Some(err) = &cmd.error {
                 let err_y = area.y.saturating_sub(1);
-                let err_style = RStyle::default().fg(theme.critical()).bg(theme.background());
+                let err_style = RStyle::default()
+                    .fg(theme.critical())
+                    .bg(theme.background());
                 f.render_widget(
                     Paragraph::new(Line::from(Span::styled(err, err_style))),
                     Rect::new(area.x, err_y, area.width, 1),
@@ -300,12 +288,10 @@ fn draw_status_bar_slot(
                 .fg(theme.foreground())
                 .bg(theme.modeline());
             let text = format!("{}{}", qc.prompt, qc.input);
-            f.render_widget(
-                Paragraph::new(Line::from(Span::styled(&text, style))),
-                area,
-            );
+            f.render_widget(Paragraph::new(Line::from(Span::styled(&text, style))), area);
 
-            let cx = (area.x + qc.prompt.width() as u16 + qc.cursor_pos as u16).min(area.right().saturating_sub(1));
+            let cx = (area.x + qc.prompt.width() as u16 + qc.cursor_pos as u16)
+                .min(area.right().saturating_sub(1));
             Some((cx, area.y))
         }
     }
@@ -367,7 +353,11 @@ fn draw_normal_status(
     };
     if !mcp_str.is_empty() {
         // MCP: faded when idle, salient when animating
-        let mcp_fg = if mcp_animating { theme.salient() } else { theme.faded() };
+        let mcp_fg = if mcp_animating {
+            theme.salient()
+        } else {
+            theme.faded()
+        };
         let mcp_style = RStyle::default().fg(mcp_fg).bg(bar_bg);
         right_spans.push(Span::styled(mcp_str, mcp_style));
         right_spans.push(Span::raw("  "));
@@ -400,7 +390,7 @@ fn draw_normal_status(
     let dirty_mark = if status.dirty { " [+]" } else { "" };
     let title_max = width
         .saturating_sub(mode_text.width())
-        .saturating_sub(3)  // " │ "
+        .saturating_sub(3) // " │ "
         .saturating_sub(dirty_mark.width())
         .saturating_sub(right_width);
     let title = truncate_with_ellipsis(&status.title, title_max);
@@ -416,10 +406,7 @@ fn draw_normal_status(
     let left_width: usize = left_spans.iter().map(|s| s.content.width()).sum();
 
     // Render left
-    f.render_widget(
-        Paragraph::new(Line::from(left_spans)),
-        area,
-    );
+    f.render_widget(Paragraph::new(Line::from(left_spans)), area);
 
     // Render right
     let rx = area.right().saturating_sub(right_width as u16);
@@ -516,8 +503,16 @@ fn render_highlighted_preview(
                 if mr.end <= line_start || mr.start >= line_end {
                     continue;
                 }
-                let rel_start = mr.start.saturating_sub(line_start).max(range.start).min(range.end);
-                let rel_end = mr.end.saturating_sub(line_start).max(range.start).min(range.end);
+                let rel_start = mr
+                    .start
+                    .saturating_sub(line_start)
+                    .max(range.start)
+                    .min(range.end);
+                let rel_end = mr
+                    .end
+                    .saturating_sub(line_start)
+                    .max(range.start)
+                    .min(range.end);
                 if rel_start > pos && pos < range.end {
                     spans.push(Span::styled(&line[pos..rel_start.min(range.end)], *style));
                 }
@@ -552,8 +547,22 @@ fn truncate_with_ellipsis(s: &str, max: usize) -> String {
 
 fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme) {
     // Adaptive sizing per ADAPTIVE_LAYOUT.md
-    let w_pct = if area.width >= 180 { 75 } else if area.width >= 140 { 65 } else if area.width < 80 { 90 } else { 60 };
-    let h_pct = if area.height >= 50 { 75 } else if area.height >= 30 { 70 } else { 60 };
+    let w_pct = if area.width >= 180 {
+        75
+    } else if area.width >= 140 {
+        65
+    } else if area.width < 80 {
+        90
+    } else {
+        60
+    };
+    let h_pct = if area.height >= 50 {
+        75
+    } else if area.height >= 30 {
+        70
+    } else {
+        60
+    };
     let w = (area.width * w_pct / 100).max(30).min(area.width);
     let h = (area.height * h_pct / 100).max(10).min(area.height);
     let x = area.x + (area.width.saturating_sub(w)) / 2;
@@ -596,14 +605,15 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
     };
     // 1 line for the separator between results and preview
     let separator_h = if has_bottom_preview { 1 } else { 0 };
-    let top_h = content_area.height.saturating_sub(preview_h).saturating_sub(separator_h);
+    let top_h = content_area
+        .height
+        .saturating_sub(preview_h)
+        .saturating_sub(separator_h);
 
     // Query line (indented)
     let query_style = if picker.query_selected && !picker.query.is_empty() {
         // Mild background indicates select-all — typing replaces the query
-        RStyle::default()
-            .fg(theme.foreground())
-            .bg(theme.mild())
+        RStyle::default().fg(theme.foreground()).bg(theme.mild())
     } else {
         theme.picker_style().add_modifier(Modifier::BOLD)
     };
@@ -611,17 +621,28 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
         Span::styled(" > ", theme.picker_style()),
         Span::styled(&picker.query, query_style),
     ]);
-    f.render_widget(Paragraph::new(query_line), Rect::new(content_area.x, content_area.y, content_area.width, 1));
+    f.render_widget(
+        Paragraph::new(query_line),
+        Rect::new(content_area.x, content_area.y, content_area.width, 1),
+    );
     // Place cursor at end of query input (overrides editor cursor)
     let query_cx = content_area.x + 3 + picker.query.width() as u16;
     f.set_cursor_position((query_cx, content_area.y));
 
     // Results (between query and footer)
     let results_h = top_h.saturating_sub(2); // -1 query, -1 footer
-    let results_area = Rect::new(content_area.x, content_area.y + 1, content_area.width, results_h);
+    let results_area = Rect::new(
+        content_area.x,
+        content_area.y + 1,
+        content_area.width,
+        results_h,
+    );
 
     // Show hint when query is below minimum length
-    if picker.results.is_empty() && picker.min_query_len > 0 && picker.query.len() < picker.min_query_len {
+    if picker.results.is_empty()
+        && picker.min_query_len > 0
+        && picker.query.len() < picker.min_query_len
+    {
         let hint = "Type to search…";
         let hx = results_area.x + (results_area.width.saturating_sub(hint.width() as u16)) / 2;
         let hy = results_area.y + results_area.height / 2;
@@ -633,10 +654,12 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
         }
     }
 
-    let available = results_area.width as usize;
+    let _available = results_area.width as usize;
 
     // Multi-column grid (ADAPTIVE_LAYOUT.md §4): for short items on wide screens
-    let max_item_w: usize = picker.results.iter()
+    let max_item_w: usize = picker
+        .results
+        .iter()
         .map(|r| r.label.width() + r.right.as_deref().map_or(0, |s| s.width() + 2))
         .max()
         .unwrap_or(0);
@@ -652,7 +675,9 @@ fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme
     let footer = if picker.filtered_count > 0 {
         format!(
             "  {} / {} {}",
-            picker.selected_index + 1, picker.filtered_count, picker.status_noun
+            picker.selected_index + 1,
+            picker.filtered_count,
+            picker.status_noun
         )
     } else {
         format!("  0 / {} {}", picker.total_count, picker.status_noun)
@@ -736,7 +761,11 @@ fn draw_picker_single_column(
 
     let right_zone = if max_right_w > 0 { max_right_w + 2 } else { 0 };
     // Compact: hide middle (tags) column when terminal < 100 cols (inner < 60)
-    let middle_zone = if terminal_area.width < 100 || max_middle_w == 0 { 0 } else { max_middle_w + 2 };
+    let middle_zone = if terminal_area.width < 100 || max_middle_w == 0 {
+        0
+    } else {
+        max_middle_w + 2
+    };
     let marker_w = 3;
     let label_max = available.saturating_sub(marker_w + middle_zone + right_zone);
 
@@ -745,7 +774,11 @@ fn draw_picker_single_column(
     for (vi, row) in visible_slice.iter().enumerate() {
         let abs_i = scroll_offset + vi;
         let is_selected = abs_i == picker.selected_index;
-        let style = if is_selected { theme.picker_selected() } else { theme.picker_style() };
+        let style = if is_selected {
+            theme.picker_selected()
+        } else {
+            theme.picker_style()
+        };
         let marker = if is_selected { " ▸ " } else { "   " };
 
         let label = truncate_to_width(&row.label, label_max);
@@ -758,7 +791,8 @@ fn draw_picker_single_column(
         spans.push(Span::styled(marker, style));
 
         if !picker.query.is_empty() && !is_selected {
-            let match_spans = bloom_core::render::search_highlight::highlight_matches(&label, &picker.query);
+            let match_spans =
+                bloom_core::render::search_highlight::highlight_matches(&label, &picker.query);
             let match_style = theme.style_for(&bloom_core::parser::traits::Style::SearchMatch);
             if match_spans.is_empty() {
                 spans.push(Span::styled(label.clone(), style));
@@ -767,11 +801,17 @@ fn draw_picker_single_column(
                 for ms in &match_spans {
                     let s = ms.range.start.min(label.len());
                     let e = ms.range.end.min(label.len());
-                    if s > pos { spans.push(Span::styled(&label[pos..s], style)); }
-                    if s < e { spans.push(Span::styled(&label[s..e], match_style)); }
+                    if s > pos {
+                        spans.push(Span::styled(&label[pos..s], style));
+                    }
+                    if s < e {
+                        spans.push(Span::styled(&label[s..e], match_style));
+                    }
                     pos = e;
                 }
-                if pos < label.len() { spans.push(Span::styled(&label[pos..], style)); }
+                if pos < label.len() {
+                    spans.push(Span::styled(&label[pos..], style));
+                }
             }
         } else {
             spans.push(Span::styled(label.clone(), style));
@@ -779,17 +819,36 @@ fn draw_picker_single_column(
         spans.push(Span::styled(" ".repeat(label_gap), style));
 
         if middle_zone > 0 {
-            let mid_padded = format!("{}{}", middle_text, " ".repeat(middle_zone.saturating_sub(middle_text.width())));
-            spans.push(Span::styled(mid_padded, if is_selected { style } else { faded_style }));
+            let mid_padded = format!(
+                "{}{}",
+                middle_text,
+                " ".repeat(middle_zone.saturating_sub(middle_text.width()))
+            );
+            spans.push(Span::styled(
+                mid_padded,
+                if is_selected { style } else { faded_style },
+            ));
         }
         if right_zone > 0 {
-            let right_padded = format!("{}{}", " ".repeat(right_zone.saturating_sub(right_text.width())), right_text);
-            spans.push(Span::styled(right_padded, if is_selected { style } else { faded_style }));
+            let right_padded = format!(
+                "{}{}",
+                " ".repeat(right_zone.saturating_sub(right_text.width())),
+                right_text
+            );
+            spans.push(Span::styled(
+                right_padded,
+                if is_selected { style } else { faded_style },
+            ));
         }
 
         f.render_widget(
             Paragraph::new(Line::from(spans)),
-            Rect::new(results_area.x, results_area.y + vi as u16, results_area.width, 1),
+            Rect::new(
+                results_area.x,
+                results_area.y + vi as u16,
+                results_area.width,
+                1,
+            ),
         );
     }
 }
@@ -807,12 +866,14 @@ fn draw_picker_multi_column(
     }
 
     // Column sizing per spec: col_width = max(item_width) + 4, col_count = min(4, width/col_width)
-    let max_item_w: usize = picker.results.iter()
+    let max_item_w: usize = picker
+        .results
+        .iter()
         .map(|r| r.label.width() + r.right.as_deref().map_or(0, |s| s.width() + 2))
         .max()
         .unwrap_or(10);
     let col_width = (max_item_w + 6).max(12); // +4 padding + 2 for marker
-    let col_count = (results_area.width as usize / col_width).max(1).min(4);
+    let col_count = (results_area.width as usize / col_width).clamp(1, 4);
     let rows_per_col = results_area.height as usize;
     let items_per_page = col_count * rows_per_col;
 
@@ -822,13 +883,23 @@ fn draw_picker_multi_column(
     let faded_style = theme.faded_style();
     let actual_col_w = results_area.width as usize / col_count;
 
-    for (i, row) in picker.results.iter().enumerate().skip(page_start).take(items_per_page) {
+    for (i, row) in picker
+        .results
+        .iter()
+        .enumerate()
+        .skip(page_start)
+        .take(items_per_page)
+    {
         let local_i = i - page_start;
         let col = local_i / rows_per_col;
         let row_in_col = local_i % rows_per_col;
 
         let is_selected = i == picker.selected_index;
-        let style = if is_selected { theme.picker_selected() } else { theme.picker_style() };
+        let style = if is_selected {
+            theme.picker_selected()
+        } else {
+            theme.picker_style()
+        };
         let marker = if is_selected { " ▸ " } else { "   " };
 
         let right_text = row.right.as_deref().unwrap_or("");
@@ -843,7 +914,10 @@ fn draw_picker_multi_column(
         spans.push(Span::styled(label, style));
         spans.push(Span::styled(" ".repeat(gap), style));
         if right_w > 0 {
-            spans.push(Span::styled(right_text, if is_selected { style } else { faded_style }));
+            spans.push(Span::styled(
+                right_text,
+                if is_selected { style } else { faded_style },
+            ));
         }
 
         let cx = results_area.x + (col * actual_col_w) as u16;
@@ -876,7 +950,7 @@ fn draw_which_key(f: &mut Frame, area: Rect, wk: &WhichKeyFrame, theme: &TuiThem
         inner.x.saturating_add(2),
         inner.y.saturating_add(1),
         inner.width.saturating_sub(4),
-        inner.height.saturating_sub(2),  // 1 top + 1 bottom padding
+        inner.height.saturating_sub(2), // 1 top + 1 bottom padding
     );
 
     let col_width = 24u16;
@@ -983,8 +1057,8 @@ fn draw_notifications(
         }
         let icon = match notif.level {
             NotificationLevel::Info => "\u{2713}",    // ✓
-            NotificationLevel::Warning => "\u{26a0}",  // ⚠
-            NotificationLevel::Error => "\u{2717}",    // ✗
+            NotificationLevel::Warning => "\u{26a0}", // ⚠
+            NotificationLevel::Error => "\u{2717}",   // ✗
         };
         let text = format!(" {} {} ", icon, notif.message);
         let w = (text.width() as u16).min(area.width);
@@ -1004,22 +1078,21 @@ fn draw_notifications(
 // Inline menu (command completion, link picker, tag completion)
 // ---------------------------------------------------------------------------
 
-fn draw_inline_menu(
-    f: &mut Frame,
-    area: Rect,
-    menu: &InlineMenuFrame,
-    theme: &TuiTheme,
-) {
+fn draw_inline_menu(f: &mut Frame, area: Rect, menu: &InlineMenuFrame, theme: &TuiTheme) {
     if menu.items.is_empty() {
         return;
     }
 
     // Compute column widths from data
-    let max_label_w: usize = menu.items.iter()
+    let max_label_w: usize = menu
+        .items
+        .iter()
         .map(|i| i.label.width())
         .max()
         .unwrap_or(0);
-    let max_right_w: usize = menu.items.iter()
+    let max_right_w: usize = menu
+        .items
+        .iter()
         .filter_map(|i| i.right.as_ref())
         .map(|r| r.width())
         .max()
@@ -1067,20 +1140,31 @@ fn draw_inline_menu(
     };
 
     let faded = theme.faded_style();
-    for (vi, item) in menu.items.iter().skip(scroll_offset).take(viewport_h).enumerate() {
+    for (vi, item) in menu
+        .items
+        .iter()
+        .skip(scroll_offset)
+        .take(viewport_h)
+        .enumerate()
+    {
         let abs_i = scroll_offset + vi;
         let is_selected = abs_i == menu.selected;
         let style = if is_selected {
             theme.picker_selected()
         } else {
-            RStyle::default().fg(theme.foreground()).bg(theme.background())
+            RStyle::default()
+                .fg(theme.foreground())
+                .bg(theme.background())
         };
         let marker = if is_selected { " ▸ " } else { "   " };
 
         let label_w = inner.width as usize - marker_w;
         let mut spans = vec![Span::styled(marker, style)];
         let label_text = truncate_to_width(&item.label, label_w.saturating_sub(right_col));
-        spans.push(Span::styled(label_text.clone(), style.add_modifier(Modifier::BOLD)));
+        spans.push(Span::styled(
+            label_text.clone(),
+            style.add_modifier(Modifier::BOLD),
+        ));
 
         if let Some(right) = &item.right {
             let pad = label_w.saturating_sub(label_text.width() + right_col);
@@ -1140,9 +1224,16 @@ fn draw_agenda(
 
     // Split: top ~60% for task list + footer, 1 separator, bottom ~40% for preview
     let has_preview = agenda.preview.is_some() && padded.height >= 10;
-    let preview_h = if has_preview { (padded.height * 2 / 5).max(3) } else { 0 };
+    let preview_h = if has_preview {
+        (padded.height * 2 / 5).max(3)
+    } else {
+        0
+    };
     let separator_h: u16 = if has_preview { 1 } else { 0 };
-    let top_h = padded.height.saturating_sub(preview_h).saturating_sub(separator_h);
+    let top_h = padded
+        .height
+        .saturating_sub(preview_h)
+        .saturating_sub(separator_h);
 
     // Footer takes 1 line at bottom of the top section
     let list_h = top_h.saturating_sub(1);
@@ -1157,22 +1248,41 @@ fn draw_agenda(
 
     let today_str = chrono::Local::now().format("%Y-%m-%d").to_string();
     let sections = [
-        Section { label: "Overdue", items: &agenda.overdue, fg: theme.critical() },
-        Section { label: &format!("Today · {today_str}"), items: &agenda.today, fg: theme.foreground() },
-        Section { label: "Upcoming", items: &agenda.upcoming, fg: theme.faded() },
+        Section {
+            label: "Overdue",
+            items: &agenda.overdue,
+            fg: theme.critical(),
+        },
+        Section {
+            label: &format!("Today · {today_str}"),
+            items: &agenda.today,
+            fg: theme.foreground(),
+        },
+        Section {
+            label: "Upcoming",
+            items: &agenda.upcoming,
+            fg: theme.faded(),
+        },
     ];
 
     // Pre-compute max column widths across all items for alignment
-    let all_items = agenda.overdue.iter()
+    let all_items = agenda
+        .overdue
+        .iter()
         .chain(agenda.today.iter())
         .chain(agenda.upcoming.iter());
-    let max_source_w: usize = all_items.clone()
+    let max_source_w: usize = all_items
+        .clone()
         .map(|i| i.source_page.width())
         .max()
         .unwrap_or(0)
         .min(padded.width as usize / 3);
     let max_date_w: usize = all_items
-        .map(|i| i.date.map(|d| d.format("%Y-%m-%d").to_string().width()).unwrap_or(0))
+        .map(|i| {
+            i.date
+                .map(|d| d.format("%Y-%m-%d").to_string().width())
+                .unwrap_or(0)
+        })
         .max()
         .unwrap_or(0);
     let source_col_w = max_source_w + 2;
@@ -1186,24 +1296,34 @@ fn draw_agenda(
     enum RowKind<'a> {
         Blank,
         Header(&'a str),
-        Item { item: &'a bloom_core::render::AgendaItem, flat_idx: usize, is_overdue: bool },
+        Item {
+            item: &'a bloom_core::render::AgendaItem,
+            flat_idx: usize,
+            is_overdue: bool,
+        },
     }
 
     let mut rows: Vec<VisualRow> = Vec::new();
     let mut flat_idx: usize = 0;
-    let mut is_first_section = true;
+    let mut _is_first_section = true;
     for section in &sections {
         if section.items.is_empty() {
             continue;
         }
         // Blank line before section header (including first — gives top margin)
-        rows.push(VisualRow { kind: RowKind::Blank, section_fg: section.fg });
+        rows.push(VisualRow {
+            kind: RowKind::Blank,
+            section_fg: section.fg,
+        });
         rows.push(VisualRow {
             kind: RowKind::Header(section.label),
             section_fg: section.fg,
         });
         // Blank line after header
-        rows.push(VisualRow { kind: RowKind::Blank, section_fg: section.fg });
+        rows.push(VisualRow {
+            kind: RowKind::Blank,
+            section_fg: section.fg,
+        });
         for item in section.items {
             rows.push(VisualRow {
                 kind: RowKind::Item {
@@ -1215,7 +1335,7 @@ fn draw_agenda(
             });
             flat_idx += 1;
         }
-        is_first_section = false;
+        _is_first_section = false;
     }
 
     // Find the visual row of the selected item
@@ -1229,7 +1349,10 @@ fn draw_agenda(
         let min_offset_bottom = (selected_visual_row + scrolloff + 1).saturating_sub(viewport_h);
         let max_offset_top = selected_visual_row.saturating_sub(scrolloff);
         let max_possible = rows.len().saturating_sub(viewport_h);
-        min_offset_bottom.min(max_possible).max(min_offset_bottom).min(max_offset_top.max(min_offset_bottom))
+        min_offset_bottom
+            .min(max_possible)
+            .max(min_offset_bottom)
+            .min(max_offset_top.max(min_offset_bottom))
     };
 
     // Render visible rows
@@ -1247,15 +1370,16 @@ fn draw_agenda(
                     .fg(theme.salient())
                     .add_modifier(Modifier::BOLD);
                 f.render_widget(
-                    Paragraph::new(Line::from(Span::styled(
-                        label.to_string(),
-                        header_style,
-                    ))),
+                    Paragraph::new(Line::from(Span::styled(label.to_string(), header_style))),
                     Rect::new(padded.x, y, padded.width, 1),
                 );
                 y += 1;
             }
-            RowKind::Item { item, flat_idx: fi, is_overdue } => {
+            RowKind::Item {
+                item,
+                flat_idx: fi,
+                is_overdue,
+            } => {
                 let is_selected = *fi == agenda.selected_index;
                 let base_style = if is_selected {
                     RStyle::default().fg(row.section_fg).bg(theme.mild())
@@ -1264,7 +1388,10 @@ fn draw_agenda(
                 };
 
                 let marker = if is_selected { "▸ " } else { "  " };
-                let date_str = item.date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default();
+                let date_str = item
+                    .date
+                    .map(|d| d.format("%Y-%m-%d").to_string())
+                    .unwrap_or_default();
                 let available = padded.width as usize;
                 let marker_w = 5; // "▸ ☐ " or "  ☐ "
 
@@ -1290,7 +1417,11 @@ fn draw_agenda(
                     String::new()
                 };
 
-                let date_fg = if *is_overdue { theme.critical() } else { theme.faded() };
+                let date_fg = if *is_overdue {
+                    theme.critical()
+                } else {
+                    theme.faded()
+                };
                 let source_style = if is_selected {
                     RStyle::default().fg(theme.faded()).bg(theme.mild())
                 } else {
@@ -1310,7 +1441,11 @@ fn draw_agenda(
                 use bloom_core::parser::traits::DocumentParser as _;
                 let styled_spans = parser.highlight_line(&task_text, &ctx);
 
-                let sel_bg = if is_selected { Some(theme.mild()) } else { None };
+                let sel_bg = if is_selected {
+                    Some(theme.mild())
+                } else {
+                    None
+                };
                 let mut task_spans: Vec<Span> = Vec::new();
                 task_spans.push(Span::styled(left_prefix, base_style));
 
@@ -1343,7 +1478,10 @@ fn draw_agenda(
                 task_spans.push(Span::styled(date_padded, date_style));
 
                 let line = Line::from(task_spans);
-                f.render_widget(Paragraph::new(line), Rect::new(padded.x, y, padded.width, 1));
+                f.render_widget(
+                    Paragraph::new(line),
+                    Rect::new(padded.x, y, padded.width, 1),
+                );
                 y += 1;
             }
         }
@@ -1358,8 +1496,7 @@ fn draw_agenda(
         };
         let footer = format!(
             "▸ {selection}/{} tasks   {} pages   [x]toggle [Enter]jump [q]close",
-            agenda.total_open,
-            agenda.total_pages,
+            agenda.total_open, agenda.total_pages,
         );
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(footer, theme.faded_style()))),
@@ -1490,10 +1627,7 @@ fn draw_undo_tree(
                     break;
                 }
                 f.render_widget(
-                    Paragraph::new(Line::from(Span::styled(
-                        format!("  {line}"),
-                        style,
-                    ))),
+                    Paragraph::new(Line::from(Span::styled(format!("  {line}"), style))),
                     Rect::new(area.x, y, area.width, 1),
                 );
                 y += 1;
@@ -1539,14 +1673,38 @@ fn draw_setup_wizard(
         SetupStep::Welcome => {
             let title_y = y_start + 2;
             render_line(f, cx, title_y, inner.width, "Bloom 🌱", heading_style);
-            render_line(f, cx, title_y + 2, inner.width,
-                "A local-first, keyboard-driven note-taking app.", text_style);
-            render_line(f, cx, title_y + 4, inner.width,
-                "Your notes are stored as Markdown files in a", text_style);
-            render_line(f, cx, title_y + 5, inner.width,
-                "single folder called a vault. No cloud, no sync \u{2014}", text_style);
-            render_line(f, cx, title_y + 6, inner.width,
-                "everything stays on your machine.", text_style);
+            render_line(
+                f,
+                cx,
+                title_y + 2,
+                inner.width,
+                "A local-first, keyboard-driven note-taking app.",
+                text_style,
+            );
+            render_line(
+                f,
+                cx,
+                title_y + 4,
+                inner.width,
+                "Your notes are stored as Markdown files in a",
+                text_style,
+            );
+            render_line(
+                f,
+                cx,
+                title_y + 5,
+                inner.width,
+                "single folder called a vault. No cloud, no sync \u{2014}",
+                text_style,
+            );
+            render_line(
+                f,
+                cx,
+                title_y + 6,
+                inner.width,
+                "everything stays on your machine.",
+                text_style,
+            );
 
             // Bottom prompt
             let prompt_y = inner.bottom().saturating_sub(2);
@@ -1557,18 +1715,41 @@ fn draw_setup_wizard(
 
         SetupStep::ChooseVaultLocation => {
             let y = y_start;
-            render_line(f, cx, y, inner.width, "Choose vault location", heading_style);
-            render_line(f, cx, y + 2, inner.width,
-                "This is where your notes, journal, and config", text_style);
-            render_line(f, cx, y + 3, inner.width,
-                "will live. You can move it later.", text_style);
+            render_line(
+                f,
+                cx,
+                y,
+                inner.width,
+                "Choose vault location",
+                heading_style,
+            );
+            render_line(
+                f,
+                cx,
+                y + 2,
+                inner.width,
+                "This is where your notes, journal, and config",
+                text_style,
+            );
+            render_line(
+                f,
+                cx,
+                y + 3,
+                inner.width,
+                "will live. You can move it later.",
+                text_style,
+            );
 
             // Path input
             let input_y = y + 5;
             let label = "Path: ";
             render_line(f, cx, input_y, inner.width, label, text_style);
-            let input_style = RStyle::default().fg(theme.foreground()).bg(theme.modeline());
-            let input_w = inner.width.saturating_sub(cx - inner.x + label.len() as u16 + 2);
+            let input_style = RStyle::default()
+                .fg(theme.foreground())
+                .bg(theme.modeline());
+            let input_w = inner
+                .width
+                .saturating_sub(cx - inner.x + label.len() as u16 + 2);
             let input_x = cx + label.len() as u16;
             let padded: String = format!("{:<width$}", sw.vault_path, width = input_w as usize);
             f.render_widget(
@@ -1584,14 +1765,49 @@ fn draw_setup_wizard(
             // Directory preview
             let prev_y = y + 7;
             render_line(f, cx, prev_y, inner.width, "Bloom will create:", faded);
-            render_line(f, cx + 2, prev_y + 1, inner.width, "pages/       \u{2014} topic pages", faded);
-            render_line(f, cx + 2, prev_y + 2, inner.width, "journal/     \u{2014} daily journal", faded);
-            render_line(f, cx + 2, prev_y + 3, inner.width, "templates/   \u{2014} page templates", faded);
-            render_line(f, cx + 2, prev_y + 4, inner.width, "images/      \u{2014} attachments", faded);
+            render_line(
+                f,
+                cx + 2,
+                prev_y + 1,
+                inner.width,
+                "pages/       \u{2014} topic pages",
+                faded,
+            );
+            render_line(
+                f,
+                cx + 2,
+                prev_y + 2,
+                inner.width,
+                "journal/     \u{2014} daily journal",
+                faded,
+            );
+            render_line(
+                f,
+                cx + 2,
+                prev_y + 3,
+                inner.width,
+                "templates/   \u{2014} page templates",
+                faded,
+            );
+            render_line(
+                f,
+                cx + 2,
+                prev_y + 4,
+                inner.width,
+                "images/      \u{2014} attachments",
+                faded,
+            );
 
             // Error
             if let Some(err) = &sw.error {
-                render_line(f, cx, input_y + 2, inner.width, &format!("\u{2717} {err}"), error_style);
+                render_line(
+                    f,
+                    cx,
+                    input_y + 2,
+                    inner.width,
+                    &format!("\u{2717} {err}"),
+                    error_style,
+                );
             }
 
             // Nav hints
@@ -1605,25 +1821,69 @@ fn draw_setup_wizard(
         SetupStep::ImportChoice => {
             let y = y_start;
             render_line(f, cx, y, inner.width, "Import from Logseq?", heading_style);
-            render_line(f, cx, y + 2, inner.width,
-                "If you have an existing Logseq vault, Bloom", text_style);
-            render_line(f, cx, y + 3, inner.width,
-                "can import your pages, journals, and links.", text_style);
-            render_line(f, cx, y + 4, inner.width,
-                "Your Logseq files will not be modified.", text_style);
+            render_line(
+                f,
+                cx,
+                y + 2,
+                inner.width,
+                "If you have an existing Logseq vault, Bloom",
+                text_style,
+            );
+            render_line(
+                f,
+                cx,
+                y + 3,
+                inner.width,
+                "can import your pages, journals, and links.",
+                text_style,
+            );
+            render_line(
+                f,
+                cx,
+                y + 4,
+                inner.width,
+                "Your Logseq files will not be modified.",
+                text_style,
+            );
 
             let opt_y = y + 6;
             let (no_style, yes_style) = if sw.import_choice == ImportChoice::No {
-                (RStyle::default().fg(theme.foreground()).bg(theme.mild()), text_style)
+                (
+                    RStyle::default().fg(theme.foreground()).bg(theme.mild()),
+                    text_style,
+                )
             } else {
-                (text_style, RStyle::default().fg(theme.foreground()).bg(theme.mild()))
+                (
+                    text_style,
+                    RStyle::default().fg(theme.foreground()).bg(theme.mild()),
+                )
             };
-            let no_marker = if sw.import_choice == ImportChoice::No { "\u{25b8} " } else { "  " };
-            let yes_marker = if sw.import_choice == ImportChoice::Yes { "\u{25b8} " } else { "  " };
-            render_line(f, cx, opt_y, inner.width,
-                &format!("{no_marker}No, start fresh"), no_style);
-            render_line(f, cx, opt_y + 1, inner.width,
-                &format!("{yes_marker}Yes, import from Logseq"), yes_style);
+            let no_marker = if sw.import_choice == ImportChoice::No {
+                "\u{25b8} "
+            } else {
+                "  "
+            };
+            let yes_marker = if sw.import_choice == ImportChoice::Yes {
+                "\u{25b8} "
+            } else {
+                "  "
+            };
+            render_line(
+                f,
+                cx,
+                opt_y,
+                inner.width,
+                &format!("{no_marker}No, start fresh"),
+                no_style,
+            );
+            render_line(
+                f,
+                cx,
+                opt_y + 1,
+                inner.width,
+                &format!("{yes_marker}Yes, import from Logseq"),
+                yes_style,
+            );
 
             // Nav hints
             let prompt_y = inner.bottom().saturating_sub(2);
@@ -1636,15 +1896,25 @@ fn draw_setup_wizard(
         SetupStep::ImportPath => {
             let y = y_start;
             render_line(f, cx, y, inner.width, "Import from Logseq", heading_style);
-            render_line(f, cx, y + 2, inner.width,
-                "Enter the path to your Logseq vault:", text_style);
+            render_line(
+                f,
+                cx,
+                y + 2,
+                inner.width,
+                "Enter the path to your Logseq vault:",
+                text_style,
+            );
 
             // Path input
             let input_y = y + 4;
             let label = "Path: ";
             render_line(f, cx, input_y, inner.width, label, text_style);
-            let input_style = RStyle::default().fg(theme.foreground()).bg(theme.modeline());
-            let input_w = inner.width.saturating_sub(cx - inner.x + label.len() as u16 + 2);
+            let input_style = RStyle::default()
+                .fg(theme.foreground())
+                .bg(theme.modeline());
+            let input_w = inner
+                .width
+                .saturating_sub(cx - inner.x + label.len() as u16 + 2);
             let input_x = cx + label.len() as u16;
             let padded: String = format!("{:<width$}", sw.logseq_path, width = input_w as usize);
             f.render_widget(
@@ -1658,7 +1928,14 @@ fn draw_setup_wizard(
 
             // Error
             if let Some(err) = &sw.error {
-                render_line(f, cx, input_y + 2, inner.width, &format!("\u{2717} {err}"), error_style);
+                render_line(
+                    f,
+                    cx,
+                    input_y + 2,
+                    inner.width,
+                    &format!("\u{2717} {err}"),
+                    error_style,
+                );
             }
 
             // Nav hints
@@ -1671,7 +1948,14 @@ fn draw_setup_wizard(
 
         SetupStep::ImportRunning => {
             let y = y_start;
-            render_line(f, cx, y, inner.width, "Importing from Logseq...", heading_style);
+            render_line(
+                f,
+                cx,
+                y,
+                inner.width,
+                "Importing from Logseq...",
+                heading_style,
+            );
             if let Some(prog) = &sw.import_progress {
                 // Progress bar
                 let bar_y = y + 2;
@@ -1695,23 +1979,53 @@ fn draw_setup_wizard(
                 let green = RStyle::default().fg(theme.accent_green());
                 let yellow = RStyle::default().fg(theme.accent_yellow());
                 let red = RStyle::default().fg(theme.critical());
-                render_line(f, cx, sy, inner.width,
-                    &format!("\u{2713} {} pages imported", prog.pages_imported), green);
+                render_line(
+                    f,
+                    cx,
+                    sy,
+                    inner.width,
+                    &format!("\u{2713} {} pages imported", prog.pages_imported),
+                    green,
+                );
                 sy += 1;
-                render_line(f, cx, sy, inner.width,
-                    &format!("\u{2713} {} journals imported", prog.journals_imported), green);
+                render_line(
+                    f,
+                    cx,
+                    sy,
+                    inner.width,
+                    &format!("\u{2713} {} journals imported", prog.journals_imported),
+                    green,
+                );
                 sy += 1;
-                render_line(f, cx, sy, inner.width,
-                    &format!("\u{2713} {} links resolved", prog.links_resolved), green);
+                render_line(
+                    f,
+                    cx,
+                    sy,
+                    inner.width,
+                    &format!("\u{2713} {} links resolved", prog.links_resolved),
+                    green,
+                );
                 sy += 1;
                 if !prog.warnings.is_empty() {
-                    render_line(f, cx, sy, inner.width,
-                        &format!("\u{26a0} {} warnings", prog.warnings.len()), yellow);
+                    render_line(
+                        f,
+                        cx,
+                        sy,
+                        inner.width,
+                        &format!("\u{26a0} {} warnings", prog.warnings.len()),
+                        yellow,
+                    );
                     sy += 1;
                 }
                 if !prog.errors.is_empty() {
-                    render_line(f, cx, sy, inner.width,
-                        &format!("\u{2717} {} errors", prog.errors.len()), red);
+                    render_line(
+                        f,
+                        cx,
+                        sy,
+                        inner.width,
+                        &format!("\u{2717} {} errors", prog.errors.len()),
+                        red,
+                    );
                 }
 
                 if prog.finished {
@@ -1725,15 +2039,40 @@ fn draw_setup_wizard(
 
         SetupStep::Complete => {
             let y = y_start + 2;
-            render_line(f, cx, y, inner.width, "Your vault is ready \u{1f331}", heading_style);
+            render_line(
+                f,
+                cx,
+                y,
+                inner.width,
+                "Your vault is ready \u{1f331}",
+                heading_style,
+            );
 
             let sy = y + 2;
-            render_line(f, cx, sy, inner.width,
-                &format!("Location:  {}", sw.vault_path), text_style);
-            render_line(f, cx, sy + 1, inner.width,
-                &format!("Pages:     {}", sw.stats.pages), text_style);
-            render_line(f, cx, sy + 2, inner.width,
-                &format!("Journal:   {} entries", sw.stats.journals), text_style);
+            render_line(
+                f,
+                cx,
+                sy,
+                inner.width,
+                &format!("Location:  {}", sw.vault_path),
+                text_style,
+            );
+            render_line(
+                f,
+                cx,
+                sy + 1,
+                inner.width,
+                &format!("Pages:     {}", sw.stats.pages),
+                text_style,
+            );
+            render_line(
+                f,
+                cx,
+                sy + 2,
+                inner.width,
+                &format!("Journal:   {} entries", sw.stats.journals),
+                text_style,
+            );
 
             let ty = sy + 4;
             render_line(f, cx, ty, inner.width, "Tips:", text_style);
@@ -1806,11 +2145,7 @@ fn strip_timestamps(s: &str) -> String {
             if let Some(end) = result[start..].find(')') {
                 // Remove the timestamp and any surrounding whitespace
                 let remove_end = start + end + 1;
-                result = format!(
-                    "{}{}",
-                    result[..start].trim_end(),
-                    &result[remove_end..],
-                );
+                result = format!("{}{}", result[..start].trim_end(), &result[remove_end..],);
             } else {
                 break;
             }
@@ -1891,12 +2226,7 @@ mod tests {
             .map(|i| format!("Line number {i} with some content here"))
             .collect::<Vec<_>>()
             .join("\n");
-        editor.open_page_with_content(
-            &id1,
-            "Long",
-            std::path::Path::new("long.md"),
-            &long_content,
-        );
+        editor.open_page_with_content(&id1, "Long", std::path::Path::new("long.md"), &long_content);
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1913,12 +2243,7 @@ mod tests {
 
         // Open a short file
         let id2 = bloom_core::uuid::generate_hex_id();
-        editor.open_page_with_content(
-            &id2,
-            "Short",
-            std::path::Path::new("short.md"),
-            "# Short\n",
-        );
+        editor.open_page_with_content(&id2, "Short", std::path::Path::new("short.md"), "# Short\n");
 
         // Render again
         terminal
@@ -1982,7 +2307,10 @@ mod tests {
                 if cell.bg == Color::Reset {
                     issues.push(format!(
                         "({},{}) sym={:?} fg={:?}",
-                        x, y, cell.symbol(), cell.fg
+                        x,
+                        y,
+                        cell.symbol(),
+                        cell.fg
                     ));
                 }
             }
@@ -1993,7 +2321,11 @@ mod tests {
             panic!(
                 "Found {} cells with bg=Reset. First 20:\n{}",
                 issues.len(),
-                sample.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n")
+                sample
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n")
             );
         }
     }
@@ -2031,7 +2363,10 @@ mod tests {
                 if cell.bg == Color::Reset {
                     issues.push(format!(
                         "({},{}) sym={:?} fg={:?}",
-                        x, y, cell.symbol(), cell.fg
+                        x,
+                        y,
+                        cell.symbol(),
+                        cell.fg
                     ));
                 }
             }
@@ -2042,7 +2377,11 @@ mod tests {
             panic!(
                 "Found {} cells with bg=Reset (CRLF content). First 20:\n{}",
                 issues.len(),
-                sample.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n")
+                sample
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n")
             );
         }
     }

@@ -68,6 +68,12 @@ pub struct VimState {
     current_cmd_keys: Vec<KeyEvent>,
 }
 
+impl Default for VimState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VimState {
     pub fn new() -> Self {
         Self {
@@ -87,12 +93,7 @@ impl VimState {
     }
 
     /// Process a key event. Returns the action(s) to take.
-    pub fn process_key(
-        &mut self,
-        key: KeyEvent,
-        buffer: &Buffer,
-        cursor: usize,
-    ) -> VimAction {
+    pub fn process_key(&mut self, key: KeyEvent, buffer: &Buffer, cursor: usize) -> VimAction {
         // Record for macros
         if self.macro_state.is_recording() {
             self.macro_state.record_key(key.clone());
@@ -150,12 +151,7 @@ impl VimState {
 
     // ── Normal mode ──────────────────────────────────────────────────
 
-    fn process_normal(
-        &mut self,
-        key: KeyEvent,
-        buffer: &Buffer,
-        cursor: usize,
-    ) -> VimAction {
+    fn process_normal(&mut self, key: KeyEvent, buffer: &Buffer, cursor: usize) -> VimAction {
         // Handle Escape — clear pending
         if key.code == KeyCode::Esc {
             self.pending.clear();
@@ -293,8 +289,10 @@ impl VimState {
             // Insert mode allows cursor after last char, so use simple +1/-1
             MotionType::Left => cursor.saturating_sub(1),
             MotionType::Right => (cursor + 1).min(len),
-            MotionType::LineStart | MotionType::LineEnd
-            | MotionType::DocumentStart | MotionType::DocumentEnd => {
+            MotionType::LineStart
+            | MotionType::LineEnd
+            | MotionType::DocumentStart
+            | MotionType::DocumentEnd => {
                 motion::execute_motion(&motion, buffer, cursor, None, &self.last_find)
             }
             _ => {
@@ -442,12 +440,7 @@ impl VimState {
 
     // ── command execution ────────────────────────────────────────────
 
-    fn execute_command(
-        &mut self,
-        cmd: ParsedCommand,
-        buffer: &Buffer,
-        cursor: usize,
-    ) -> VimAction {
+    fn execute_command(&mut self, cmd: ParsedCommand, buffer: &Buffer, cursor: usize) -> VimAction {
         match cmd {
             // ── motion ───────────────────────────────────────────────
             ParsedCommand::Motion { motion, count } => {
@@ -466,8 +459,14 @@ impl VimState {
                 count,
             } => {
                 self.update_find_state(&motion);
-                let spec =
-                    motion::execute_operator_motion(operator, &motion, buffer, cursor, count, &self.last_find);
+                let spec = motion::execute_operator_motion(
+                    operator,
+                    &motion,
+                    buffer,
+                    cursor,
+                    count,
+                    &self.last_find,
+                );
                 let range = motion::range_from_operator_spec(cursor, spec);
                 self.apply_operator(operator, buffer, &range, cursor)
             }
@@ -484,8 +483,7 @@ impl VimState {
                 count,
             } => {
                 let c = count.unwrap_or(1);
-                if let Some(mut range) = text_object::resolve_text_object(&object, buffer, cursor)
-                {
+                if let Some(mut range) = text_object::resolve_text_object(&object, buffer, cursor) {
                     for _ in 1..c {
                         if let Some(next) =
                             text_object::resolve_text_object(&object, buffer, range.end)
@@ -547,21 +545,14 @@ impl VimState {
             }
             Operator::Indent => VimAction::Edit(indent_range(buffer, range)),
             Operator::Dedent => VimAction::Edit(dedent_range(buffer, range)),
-            Operator::AutoIndent | Operator::Reflow => {
-                VimAction::Motion(MotionResult {
-                    new_position: range.start,
-                    extend_selection: false,
-                })
-            }
+            Operator::AutoIndent | Operator::Reflow => VimAction::Motion(MotionResult {
+                new_position: range.start,
+                extend_selection: false,
+            }),
         }
     }
 
-    fn execute_mode_switch(
-        &mut self,
-        ms: ModeSwitch,
-        buffer: &Buffer,
-        cursor: usize,
-    ) -> VimAction {
+    fn execute_mode_switch(&mut self, ms: ModeSwitch, buffer: &Buffer, cursor: usize) -> VimAction {
         match ms {
             ModeSwitch::InsertBefore => {
                 self.mode = Mode::Insert;
@@ -629,16 +620,14 @@ impl VimState {
                 // Insert \n at the start of the next line (or end of buffer).
                 // For lines ending with \n, this puts the new \n right after it.
                 // For a final line without \n, we first need to add a \n.
-                let (insert_pos, replacement, cursor_after) =
-                    if next_line_start == rope.len_chars()
-                        && (rope.len_chars() == 0
-                            || rope.char(rope.len_chars() - 1) != '\n')
-                    {
-                        // Last line has no trailing newline — insert \n + \n
-                        (next_line_start, "\n".to_string(), next_line_start + 1)
-                    } else {
-                        (next_line_start, "\n".to_string(), next_line_start)
-                    };
+                let (insert_pos, replacement, cursor_after) = if next_line_start == rope.len_chars()
+                    && (rope.len_chars() == 0 || rope.char(rope.len_chars() - 1) != '\n')
+                {
+                    // Last line has no trailing newline — insert \n + \n
+                    (next_line_start, "\n".to_string(), next_line_start + 1)
+                } else {
+                    (next_line_start, "\n".to_string(), next_line_start)
+                };
                 VimAction::Composite(vec![
                     VimAction::Edit(EditOp {
                         range: insert_pos..insert_pos,
@@ -740,9 +729,7 @@ impl VimState {
                 self.macro_state.stop_recording();
                 VimAction::Pending
             }
-            StandaloneCmd::PlayMacro(reg) => {
-                VimAction::Command(format!("play-macro:{reg}"))
-            }
+            StandaloneCmd::PlayMacro(reg) => VimAction::Command(format!("play-macro:{reg}")),
         }
     }
 
@@ -905,8 +892,12 @@ mod tests {
     use crate::buffer::Buffer;
     use crate::types::{KeyCode, KeyEvent, Modifiers};
 
-    fn key(c: char) -> KeyEvent { KeyEvent::char(c) }
-    fn esc() -> KeyEvent { KeyEvent::esc() }
+    fn key(c: char) -> KeyEvent {
+        KeyEvent::char(c)
+    }
+    fn esc() -> KeyEvent {
+        KeyEvent::esc()
+    }
 
     // UC-14: Mode transitions
     #[test]
@@ -1110,7 +1101,10 @@ mod tests {
     fn test_dw_deletes_word() {
         let mut vim = VimState::new();
         let buf = Buffer::from_text("hello world");
-        assert!(matches!(vim.process_key(key('d'), &buf, 0), VimAction::Pending));
+        assert!(matches!(
+            vim.process_key(key('d'), &buf, 0),
+            VimAction::Pending
+        ));
         let action = vim.process_key(key('w'), &buf, 0);
         match action {
             VimAction::Edit(edit) => {
@@ -1126,7 +1120,10 @@ mod tests {
     fn test_cw_changes_word_and_enters_insert() {
         let mut vim = VimState::new();
         let buf = Buffer::from_text("hello world");
-        assert!(matches!(vim.process_key(key('c'), &buf, 0), VimAction::Pending));
+        assert!(matches!(
+            vim.process_key(key('c'), &buf, 0),
+            VimAction::Pending
+        ));
         let action = vim.process_key(key('w'), &buf, 0);
         assert!(matches!(vim.mode(), Mode::Insert));
         match action {
@@ -1153,7 +1150,10 @@ mod tests {
     fn test_cw_single_letter_word_stays_on_current_word() {
         let mut vim = VimState::new();
         let buf = Buffer::from_text("a b");
-        assert!(matches!(vim.process_key(key('c'), &buf, 0), VimAction::Pending));
+        assert!(matches!(
+            vim.process_key(key('c'), &buf, 0),
+            VimAction::Pending
+        ));
         let action = vim.process_key(key('w'), &buf, 0);
         assert!(matches!(vim.mode(), Mode::Insert));
         match action {
@@ -1168,7 +1168,10 @@ mod tests {
                 assert_eq!(edit.range, 0..1);
                 assert_eq!(edit.cursor_after, 0);
             }
-            _ => panic!("expected Composite for cw on a single-letter word, got {:?}", action),
+            _ => panic!(
+                "expected Composite for cw on a single-letter word, got {:?}",
+                action
+            ),
         }
     }
 
@@ -1284,7 +1287,10 @@ mod tests {
         match action {
             VimAction::Edit(_) => {}
             VimAction::Unhandled => {}
-            _ => panic!("expected Edit or Unhandled in insert mode, got {:?}", action),
+            _ => panic!(
+                "expected Edit or Unhandled in insert mode, got {:?}",
+                action
+            ),
         }
     }
 }

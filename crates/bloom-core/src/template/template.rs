@@ -209,13 +209,12 @@ impl TemplateEngine {
                             if let Ok(idx) = inner[..colon_pos].parse::<usize>() {
                                 let desc = inner[colon_pos + 1..].to_string();
                                 let range = i..i + close + 1;
-                                let entry = placeholders.entry(idx).or_insert_with(|| {
-                                    Placeholder {
+                                let entry =
+                                    placeholders.entry(idx).or_insert_with(|| Placeholder {
                                         index: idx,
                                         description: desc.clone(),
                                         occurrences: Vec::new(),
-                                    }
-                                });
+                                    });
                                 entry.occurrences.push(range);
                                 i += close + 1;
                                 continue;
@@ -300,11 +299,7 @@ impl TemplateModeState {
                     mirror_edits,
                 };
             }
-            let cursor_target = next
-                .ranges
-                .first()
-                .cloned()
-                .unwrap_or(0..0);
+            let cursor_target = next.ranges.first().cloned().unwrap_or(0..0);
             TemplateAdvanceResult::NextStop {
                 cursor_target,
                 mirror_edits,
@@ -413,10 +408,7 @@ mod tests {
         ];
         let mut state = TemplateModeState::new(stops);
         let result = state.advance("hello");
-        assert!(matches!(
-            result,
-            TemplateAdvanceResult::FinalCursor { .. }
-        ));
+        assert!(matches!(result, TemplateAdvanceResult::FinalCursor { .. }));
         assert!(!state.is_active());
     }
 

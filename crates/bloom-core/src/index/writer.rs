@@ -157,7 +157,10 @@ impl Index {
     /// Get all stored fingerprints as a map.
     pub fn all_fingerprints(&self) -> std::collections::HashMap<String, FileFingerprint> {
         let mut map = std::collections::HashMap::new();
-        if let Ok(mut stmt) = self.conn.prepare("SELECT path, mtime_secs, size_bytes FROM file_fingerprints") {
+        if let Ok(mut stmt) = self
+            .conn
+            .prepare("SELECT path, mtime_secs, size_bytes FROM file_fingerprints")
+        {
             if let Ok(rows) = stmt.query_map([], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -177,18 +180,20 @@ impl Index {
 
     /// Clear all fingerprints (forces full re-scan on next incremental run).
     pub fn clear_fingerprints(&self) -> Result<(), BloomError> {
-        self.conn.execute("DELETE FROM file_fingerprints", [])
+        self.conn
+            .execute("DELETE FROM file_fingerprints", [])
             .map_err(|e| BloomError::IndexError(e.to_string()))?;
         Ok(())
     }
 
     /// Remove page_access rows for pages that no longer exist in the index.
     pub fn prune_orphaned_access(&self) -> Result<usize, BloomError> {
-        self.conn.execute(
-            "DELETE FROM page_access WHERE page_id NOT IN (SELECT id FROM pages)",
-            [],
-        )
-        .map_err(|e| BloomError::IndexError(e.to_string()))
+        self.conn
+            .execute(
+                "DELETE FROM page_access WHERE page_id NOT IN (SELECT id FROM pages)",
+                [],
+            )
+            .map_err(|e| BloomError::IndexError(e.to_string()))
     }
 }
 

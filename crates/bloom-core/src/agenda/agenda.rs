@@ -12,6 +12,12 @@ pub struct AgendaView {
     pub total_pages: usize,
 }
 
+impl Default for Agenda {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Agenda {
     pub fn new() -> Self {
         Agenda {}
@@ -87,16 +93,38 @@ mod tests {
             links: vec![],
             tags: vec![],
             tasks: vec![
-                Task { text: "Overdue".into(), done: false, timestamps: vec![Timestamp::Due(yesterday)], source_page: page_id.clone(), line: 1 },
-                Task { text: "Today".into(), done: false, timestamps: vec![Timestamp::Due(today)], source_page: page_id.clone(), line: 2 },
-                Task { text: "Tomorrow".into(), done: false, timestamps: vec![Timestamp::Due(tomorrow)], source_page: page_id.clone(), line: 3 },
+                Task {
+                    text: "Overdue".into(),
+                    done: false,
+                    timestamps: vec![Timestamp::Due(yesterday)],
+                    source_page: page_id.clone(),
+                    line: 1,
+                },
+                Task {
+                    text: "Today".into(),
+                    done: false,
+                    timestamps: vec![Timestamp::Due(today)],
+                    source_page: page_id.clone(),
+                    line: 2,
+                },
+                Task {
+                    text: "Tomorrow".into(),
+                    done: false,
+                    timestamps: vec![Timestamp::Due(tomorrow)],
+                    source_page: page_id.clone(),
+                    line: 3,
+                },
             ],
             block_ids: vec![],
         };
         idx.index_page(&entry).unwrap();
 
         let agenda = Agenda::new();
-        let filters = AgendaFilters { tags: vec![], page: None, date_range: None };
+        let filters = AgendaFilters {
+            tags: vec![],
+            page: None,
+            date_range: None,
+        };
         let view = agenda.build(today, &idx, &filters);
         assert_eq!(view.overdue.len(), 1);
         assert_eq!(view.today.len(), 1);

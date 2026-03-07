@@ -16,6 +16,12 @@ pub struct TimelineView {
     pub entries: Vec<TimelineEntry>,
 }
 
+impl Default for Timeline {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Timeline {
     pub fn new() -> Self {
         Timeline {}

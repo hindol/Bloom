@@ -28,7 +28,9 @@ pub(crate) fn adopt_file(
             let hash = simple_hash(&path.to_string_lossy());
             PageId(hash)
         });
-        let created = fm.created.unwrap_or_else(|| chrono::Local::now().date_naive());
+        let created = fm
+            .created
+            .unwrap_or_else(|| chrono::Local::now().date_naive());
         let meta = PageMeta {
             id,
             title,

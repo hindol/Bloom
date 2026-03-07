@@ -110,10 +110,9 @@ impl Journal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::local::LocalFileStore;
     use chrono::NaiveDate;
     use tempfile::TempDir;
-    use crate::store::local::LocalFileStore;
-
 
     fn setup() -> (TempDir, Journal) {
         let dir = TempDir::new().unwrap();

@@ -17,9 +17,9 @@ pub fn start_watcher(
                     let _ = tx.send(FileEvent::Created(p));
                 }
             }
-            EventKind::Modify(notify::event::ModifyKind::Name(
-                notify::event::RenameMode::Both,
-            )) if paths.len() >= 2 => {
+            EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::Both))
+                if paths.len() >= 2 =>
+            {
                 let _ = tx.send(FileEvent::Renamed {
                     from: paths[0].clone(),
                     to: paths[1].clone(),
