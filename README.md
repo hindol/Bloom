@@ -1,5 +1,7 @@
 # Bloom 🌱
 
+[![Docs](https://img.shields.io/badge/docs-latest-blue)](https://hindol.github.io/Bloom/bloom_core/)
+
 A local-first, Vim-modal note-taking editor built in Rust. Bloom keeps your notes as plain Markdown files on disk, links them with stable UUIDs, and indexes everything with SQLite — so your knowledge graph is fast, portable, and entirely yours.
 
 ## Features
