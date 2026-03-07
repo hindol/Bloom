@@ -175,6 +175,50 @@ tracing::info!(session_restored = restored, buffers = count, "startup complete")
 
 ---
 
+## Notification UX
+
+### Rendering
+
+Notifications appear in the **bottom-right corner**, above the status bar. Up to 3 are visible simultaneously, stacked upward (newest at bottom):
+
+```
+                                              ┌─────────────────────────────┐
+                                              │ ⚠ Fingerprint mismatch      │  ← older, fading
+                                              ├─────────────────────────────┤
+                                              │ ✓ Index ready — 10365 files │  ← newest
+                                              └─────────────────────────────┘
+═══════════════════════════════════════════════════════════════════════════════
+ NORMAL  notes.md                                                  3:12  utf-8
+```
+
+### Severity Behavior
+
+| Level | Icon | Background | Lifetime |
+|-------|------|-----------|----------|
+| Info | `✓` | `subtle` | Auto-expires after 4 seconds |
+| Warning | `⚠` | `accent_yellow` (dimmed) | Auto-expires after 8 seconds |
+| Error | `✗` | `critical` (dimmed) | **Persists** until dismissed with `Esc` |
+
+Errors demand attention. Info is ambient. The icon prefix ensures severity is visible even without color (e.g., in a monochrome SSH session).
+
+### Stack & Overflow
+
+- Maximum **3 visible** notifications. If a 4th arrives, the oldest auto-expiring notification is evicted.
+- Errors are never auto-evicted — they can only be dismissed manually or replaced by a newer error.
+- If all 3 slots are errors, the oldest error is evicted when a new one arrives.
+
+### History
+
+All notifications from the current session are retained in memory (capped at 100). Accessible via `:messages` — opens a read-only buffer listing all notifications with timestamps, newest first:
+
+```
+[07:10:16] ✗ Index error: SQLITE_BUSY
+[07:10:16] ✓ Vault initialized — ~/bloom
+[07:09:58] ✓ Session restored — 3 buffers
+```
+
+---
+
 ## Error Surfacing
 
 Every `tracing::error!` should also produce a user-visible notification:
@@ -185,7 +229,7 @@ tracing::error!(?err, "indexer startup error");
 self.notifications.push(Notification {
     message: format!("Index error: {err}"),
     level: NotificationLevel::Error,
-    expires_at: Instant::now() + Duration::from_secs(10),
+    expires_at: None,  // errors persist until dismissed
 });
 ```
 
@@ -199,6 +243,7 @@ Errors that occur on background threads (indexer, disk writer) send the error me
 |---------|-------------|
 | `:log` | Open the current log file in a read-only buffer |
 | `:log-level <level>` | Change runtime log level (persists until restart) |
+| `:messages` | Show notification history (all notifications from session) |
 | `:stats` | Show index/vault statistics (already implemented) |
 
 ---
