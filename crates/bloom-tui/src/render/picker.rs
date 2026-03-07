@@ -48,7 +48,8 @@ pub(super) fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme
     }
 
     // Determine layout: side-by-side preview (wide) or bottom preview (compact)
-    let side_preview = picker_area.width >= 80 && area.width >= 160;
+    // Only allocate side preview space when there's content to show
+    let side_preview = picker_area.width >= 80 && area.width >= 160 && picker.preview.is_some();
     let (content_area, side_preview_area) = if side_preview {
         let left_w = inner.width * 60 / 100;
         let right_w = inner.width.saturating_sub(left_w + 1); // 1 for separator
