@@ -284,6 +284,12 @@ impl BloomEditor {
                     status_noun: ap.status_noun.clone(),
                     min_query_len: ap.min_query_len,
                     query_selected: ap.query_selected,
+                    wide: matches!(
+                        ap.kind,
+                        keymap::dispatch::PickerKind::Search
+                            | keymap::dispatch::PickerKind::Backlinks(_)
+                            | keymap::dispatch::PickerKind::UnlinkedMentions(_)
+                    ),
                 })
             } else {
                 None

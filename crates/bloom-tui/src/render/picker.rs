@@ -2,7 +2,16 @@ use super::*;
 
 pub(super) fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme: &TuiTheme) {
     // Adaptive sizing per ADAPTIVE_LAYOUT.md
-    let w_pct = if area.width >= 180 {
+    // Wide pickers (search, backlinks) get more horizontal space
+    let w_pct = if picker.wide {
+        if area.width >= 180 {
+            90
+        } else if area.width >= 140 {
+            85
+        } else {
+            80
+        }
+    } else if area.width >= 180 {
         75
     } else if area.width >= 140 {
         65
@@ -201,26 +210,35 @@ pub(super) fn draw_picker_single_column(
 
     let visible_end = (scroll_offset + viewport_h).min(picker.results.len());
     let visible_slice = &picker.results[scroll_offset..visible_end];
+
+    // Column layout: label (flex) | middle/tags (capped) | right/date (fixed)
+    // Right column is fixed-width (dates are always ~10 chars)
     let max_right_w: usize = visible_slice
         .iter()
         .map(|row| row.right.as_deref().unwrap_or("").width())
         .max()
         .unwrap_or(0)
-        .min(available * 2 / 5);
-    let max_middle_w: usize = visible_slice
-        .iter()
-        .map(|row| row.middle.as_deref().unwrap_or("").width())
-        .max()
-        .unwrap_or(0)
-        .min(available / 4);
-
+        .min(16); // dates/counts never need more than 16 chars
     let right_zone = if max_right_w > 0 { max_right_w + 2 } else { 0 };
-    // Compact: hide middle (tags) column when terminal < 100 cols (inner < 60)
-    let middle_zone = if terminal_area.width < 100 || max_middle_w == 0 {
+
+    // Middle column (tags) is capped and hidden on narrow terminals
+    let middle_zone = if terminal_area.width < 100 {
         0
     } else {
-        max_middle_w + 2
+        let max_middle_w: usize = visible_slice
+            .iter()
+            .map(|row| row.middle.as_deref().unwrap_or("").width())
+            .max()
+            .unwrap_or(0);
+        if max_middle_w == 0 {
+            0
+        } else {
+            // Cap at 20% of available or 30 chars, whichever is smaller
+            let cap = (available / 5).min(30);
+            max_middle_w.min(cap) + 2
+        }
     };
+
     let marker_w = 3;
     let label_max = available.saturating_sub(marker_w + middle_zone + right_zone);
 
@@ -274,10 +292,12 @@ pub(super) fn draw_picker_single_column(
         spans.push(Span::styled(" ".repeat(label_gap), style));
 
         if middle_zone > 0 {
+            let mid_truncated = truncate_to_width(middle_text, middle_zone.saturating_sub(2));
+            let mid_w = mid_truncated.width();
             let mid_padded = format!(
                 "{}{}",
-                middle_text,
-                " ".repeat(middle_zone.saturating_sub(middle_text.width()))
+                mid_truncated,
+                " ".repeat(middle_zone.saturating_sub(mid_w))
             );
             spans.push(Span::styled(
                 mid_padded,

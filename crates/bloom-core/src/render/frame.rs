@@ -360,6 +360,8 @@ pub struct PickerFrame {
     pub min_query_len: usize,
     /// Whether the query text is selected (visual highlight, typing replaces).
     pub query_selected: bool,
+    /// Hint for the TUI to use a wider layout (e.g. search results with context).
+    pub wide: bool,
 }
 
 pub struct PickerRow {
