@@ -8,18 +8,24 @@ use crate::*;
 
 impl BloomEditor {
     /// Handle a single DiskWriter completion ack.
-    pub fn handle_write_complete(&mut self, wc: store::disk_writer::WriteComplete) {
+    /// Returns true if the visual state changed (dirty indicator flipped).
+    pub fn handle_write_complete(&mut self, wc: store::disk_writer::WriteComplete) -> bool {
         self.last_write_fingerprints
             .insert(wc.path.clone(), (wc.mtime, wc.size));
         if let Some(page_id) = self.buffer_mgr.find_by_path(&wc.path).cloned() {
             if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
-                buf.mark_clean();
+                if buf.is_dirty() {
+                    buf.mark_clean();
+                    return true;
+                }
             }
         }
+        false
     }
 
     /// Handle a single file watcher event.
-    pub fn handle_file_event(&mut self, event: store::traits::FileEvent) {
+    /// Returns true if the visual state changed (dialog shown, buffer reloaded, or dirty flag flipped).
+    pub fn handle_file_event(&mut self, event: store::traits::FileEvent) -> bool {
         let path = match &event {
             store::traits::FileEvent::Created(p)
             | store::traits::FileEvent::Modified(p)
@@ -27,57 +33,69 @@ impl BloomEditor {
             store::traits::FileEvent::Renamed { to, .. } => to.clone(),
         };
         if path.extension().and_then(|e| e.to_str()) != Some("md") {
-            return;
+            return false;
         }
-        if let Some(vault_root) = &self.vault_root {
-            if let Ok(rel) = path.strip_prefix(vault_root) {
-                let first = rel.components().next().and_then(|c| c.as_os_str().to_str());
-                if matches!(first, Some("pages") | Some("journal")) {
-                    if let Some(page_id) = self.buffer_mgr.find_by_path(&path).cloned() {
-                        let is_own_write = if let Some((recorded_mtime, recorded_size)) =
-                            self.last_write_fingerprints.remove(&path)
-                        {
-                            std::fs::metadata(&path)
-                                .map(|meta| {
-                                    meta.len() == recorded_size
-                                        && meta.modified().ok() == Some(recorded_mtime)
-                                })
-                                .unwrap_or(false)
-                        } else {
-                            false
-                        };
+        let Some(vault_root) = &self.vault_root else {
+            return false;
+        };
+        let Ok(rel) = path.strip_prefix(vault_root) else {
+            return false;
+        };
+        let first = rel.components().next().and_then(|c| c.as_os_str().to_str());
+        if !matches!(first, Some("pages") | Some("journal")) {
+            return false;
+        }
 
-                        if !is_own_write {
-                            if let Ok(disk_content) = std::fs::read_to_string(&path) {
-                                let buf_content =
-                                    self.buffer_mgr.get(&page_id).map(|b| b.text().to_string());
-                                if buf_content.as_deref() == Some(disk_content.as_str()) {
-                                    if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
-                                        buf.mark_clean();
-                                    }
-                                } else {
-                                    let is_dirty =
-                                        self.buffer_mgr.get(&page_id).is_some_and(|b| b.is_dirty());
-                                    if is_dirty {
-                                        self.active_dialog = Some(ActiveDialog::FileChanged {
-                                            page_id,
-                                            path: path.clone(),
-                                            selected: 0,
-                                        });
-                                    } else {
-                                        self.buffer_mgr.reload(&page_id, &disk_content);
-                                        self.cursor = 0;
-                                    }
-                                }
-                            }
+        let mut visual_changed = false;
+
+        if let Some(page_id) = self.buffer_mgr.find_by_path(&path).cloned() {
+            let is_own_write = if let Some((recorded_mtime, recorded_size)) =
+                self.last_write_fingerprints.remove(&path)
+            {
+                std::fs::metadata(&path)
+                    .map(|meta| {
+                        meta.len() == recorded_size
+                            && meta.modified().ok() == Some(recorded_mtime)
+                    })
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+
+            if is_own_write {
+                // Fingerprint matched — already marked clean in handle_write_complete
+            } else if let Ok(disk_content) = std::fs::read_to_string(&path) {
+                let buf_content = self.buffer_mgr.get(&page_id).map(|b| b.text().to_string());
+                if buf_content.as_deref() == Some(disk_content.as_str()) {
+                    if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                        if buf.is_dirty() {
+                            buf.mark_clean();
+                            visual_changed = true;
                         }
                     }
-                    self.pending_file_events.insert(rel.to_path_buf());
-                    self.file_event_deadline =
-                        Some(std::time::Instant::now() + std::time::Duration::from_millis(300));
+                } else {
+                    let is_dirty = self.buffer_mgr.get(&page_id).is_some_and(|b| b.is_dirty());
+                    if is_dirty {
+                        self.active_dialog = Some(ActiveDialog::FileChanged {
+                            page_id,
+                            path: path.clone(),
+                            selected: 0,
+                        });
+                        visual_changed = true;
+                    } else {
+                        self.buffer_mgr.reload(&page_id, &disk_content);
+                        self.cursor = 0;
+                        visual_changed = true;
+                    }
                 }
             }
         }
+
+        self.pending_file_events.insert(rel.to_path_buf());
+        self.file_event_deadline =
+            Some(std::time::Instant::now() + std::time::Duration::from_millis(300));
+
+        visual_changed
     }
 
     /// Flush debounced file events to the indexer if the deadline has passed.

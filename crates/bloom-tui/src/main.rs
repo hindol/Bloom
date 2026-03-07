@@ -150,14 +150,16 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
             }
             recv(channels.write_complete_rx.as_ref().unwrap_or(&channel::never())) -> msg => {
                 if let Ok(wc) = msg {
-                    editor.handle_write_complete(wc);
-                    needs_render = true;
+                    if editor.handle_write_complete(wc) {
+                        needs_render = true;
+                    }
                 }
             }
             recv(channels.watcher_rx.as_ref().unwrap_or(&channel::never())) -> msg => {
                 if let Ok(ev) = msg {
-                    editor.handle_file_event(ev);
-                    needs_render = true;
+                    if editor.handle_file_event(ev) {
+                        needs_render = true;
+                    }
                 }
             }
             recv(channels.indexer_rx.as_ref().unwrap_or(&channel::never())) -> msg => {
