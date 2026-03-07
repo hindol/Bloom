@@ -28,7 +28,9 @@ impl BloomEditor {
             self.leader_keys.clear();
             self.pending_since = None;
             self.which_key_visible = false;
-            return self.execute_actions(vec![action]);
+            let result = self.execute_actions(vec![action]);
+            self.autosave_if_dirty();
+            return result;
         }
 
         // If agenda overlay is open
@@ -49,7 +51,9 @@ impl BloomEditor {
         // If we're in a leader key sequence (SPC was pressed), route to which-key
         if !self.leader_keys.is_empty() {
             let actions = self.handle_leader_key(key);
-            return self.execute_actions(actions);
+            let result = self.execute_actions(actions);
+            self.autosave_if_dirty();
+            return result;
         }
 
         // Check if this is the leader key (Space in Normal mode)
@@ -101,10 +105,24 @@ impl BloomEditor {
             }
 
             let actions = self.translate_vim_action(action, mode_before_key);
-            return self.execute_actions(actions);
+            let result = self.execute_actions(actions);
+            self.autosave_if_dirty();
+            return result;
         }
 
         vec![keymap::dispatch::Action::Noop]
+    }
+
+    /// Schedule autosave if the active buffer is dirty.
+    /// Called once at the end of handle_key() — covers edits, undo, redo,
+    /// task toggle, and any other mutation without each handler needing to
+    /// remember to call schedule_autosave().
+    fn autosave_if_dirty(&self) {
+        if let Some(page_id) = &self.active_page {
+            if self.buffer_mgr.get(page_id).is_some_and(|b| b.is_dirty()) {
+                self.schedule_autosave(page_id);
+            }
+        }
     }
 
     /// Execute actions on editor state. Returns the actions for the TUI to handle
@@ -159,6 +177,28 @@ impl BloomEditor {
                 }
                 keymap::dispatch::Action::ToggleTask => {
                     self.toggle_task_at_cursor();
+                }
+                keymap::dispatch::Action::Undo => {
+                    if let Some(page_id) = &self.active_page {
+                        if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                            buf.undo();
+                            let len = buf.len_chars();
+                            if self.cursor > len {
+                                self.cursor = len.saturating_sub(1);
+                            }
+                        }
+                    }
+                }
+                keymap::dispatch::Action::Redo => {
+                    if let Some(page_id) = &self.active_page {
+                        if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                            buf.redo();
+                            let len = buf.len_chars();
+                            if self.cursor > len {
+                                self.cursor = len.saturating_sub(1);
+                            }
+                        }
+                    }
                 }
                 keymap::dispatch::Action::FollowLink => {
                     self.follow_link_at_cursor();
@@ -848,7 +888,6 @@ impl BloomEditor {
                         }
                         self.cursor = edit.cursor_after;
                     }
-                    self.schedule_autosave(page_id);
                 }
                 vec![keymap::dispatch::Action::Edit(buffer::EditOp {
                     range: edit.range,
@@ -940,31 +979,8 @@ impl BloomEditor {
 
     pub(crate) fn handle_vim_command(&mut self, cmd: &str) -> Vec<keymap::dispatch::Action> {
         match cmd {
-            "undo" => {
-                if let Some(page_id) = &self.active_page {
-                    if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
-                        buf.undo();
-                        // Clamp cursor to buffer length after undo
-                        let len = buf.len_chars();
-                        if self.cursor > len {
-                            self.cursor = len.saturating_sub(1);
-                        }
-                    }
-                }
-                vec![keymap::dispatch::Action::Undo]
-            }
-            "redo" => {
-                if let Some(page_id) = &self.active_page {
-                    if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
-                        buf.redo();
-                        let len = buf.len_chars();
-                        if self.cursor > len {
-                            self.cursor = len.saturating_sub(1);
-                        }
-                    }
-                }
-                vec![keymap::dispatch::Action::Redo]
-            }
+            "undo" => vec![keymap::dispatch::Action::Undo],
+            "redo" => vec![keymap::dispatch::Action::Redo],
             _ => self.translate_ex_command(cmd),
         }
     }

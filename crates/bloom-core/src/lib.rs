@@ -1394,10 +1394,7 @@ mod tests {
         let buf = editor.buffer_mgr.get(&id).unwrap();
         assert_eq!(buf.text().to_string(), "Xhello");
         // Undo
-        let actions = editor.handle_key(KeyEvent::char('u'));
-        assert!(actions
-            .iter()
-            .any(|a| matches!(a, keymap::dispatch::Action::Undo)));
+        editor.handle_key(KeyEvent::char('u'));
         let buf = editor.buffer_mgr.get(&id).unwrap();
         assert_eq!(buf.text().to_string(), "hello");
     }
@@ -1416,10 +1413,7 @@ mod tests {
         let buf = editor.buffer_mgr.get(&id).unwrap();
         assert_eq!(buf.text().to_string(), "hello");
         // Redo
-        let actions = editor.handle_key(KeyEvent::ctrl('r'));
-        assert!(actions
-            .iter()
-            .any(|a| matches!(a, keymap::dispatch::Action::Redo)));
+        editor.handle_key(KeyEvent::ctrl('r'));
         let buf = editor.buffer_mgr.get(&id).unwrap();
         assert_eq!(buf.text().to_string(), "Xhello");
     }
