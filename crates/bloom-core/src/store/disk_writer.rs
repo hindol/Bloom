@@ -34,6 +34,7 @@ impl DiskWriter {
     /// Run on a dedicated OS thread. Debounces writes per path, then does
     /// atomic write → fsync → rename.
     pub fn start(self) {
+        tracing::info!("disk writer thread started");
         let debounce = Duration::from_millis(self.debounce_ms);
         // Track latest content and when we first saw a pending write for each path.
         let mut pending: HashMap<PathBuf, (String, Instant)> = HashMap::new();
@@ -74,9 +75,11 @@ impl DiskWriter {
 
             for path in ready {
                 if let Some((content, _)) = pending.remove(&path) {
+                    let size = content.len();
                     if let Err(e) = atomic_write(&path, &content) {
-                        tracing::error!("disk write failed for {}: {}", path.display(), e);
+                        tracing::error!(path = %path.display(), error = %e, "atomic write failed");
                     } else {
+                        tracing::debug!(path = %path.display(), size_bytes = size, "atomic write complete");
                         self.send_ack(&path);
                     }
                 }

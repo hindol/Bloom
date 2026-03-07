@@ -21,6 +21,10 @@ use ratatui::Terminal;
 use theme::TuiTheme;
 
 fn main() -> io::Result<()> {
+    // Initialize tracing subscriber (file logging) before anything else
+    let vault_path = default_vault_path();
+    init_logging(&vault_path);
+
     // Terminal setup
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -184,4 +188,66 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
             needs_render = true;
         }
     }
+}
+
+fn init_logging(vault_path: &str) {
+    use tracing_subscriber::{fmt, EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+
+    let log_dir = std::path::Path::new(vault_path).join(".bloom").join("logs");
+    let _ = std::fs::create_dir_all(&log_dir);
+
+    // Rotate on startup: if bloom.log > 5MB, rotate existing files
+    rotate_logs(&log_dir);
+
+    let log_file = log_dir.join("bloom.log");
+    let file = match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_file)
+    {
+        Ok(f) => f,
+        Err(_) => return, // can't log — continue without crashing
+    };
+
+    let file_layer = fmt::layer()
+        .json()
+        .with_writer(std::sync::Mutex::new(file))
+        .with_target(true)
+        .with_span_events(fmt::format::FmtSpan::CLOSE);
+
+    let filter = EnvFilter::try_from_env("BLOOM_LOG")
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(file_layer)
+        .init();
+
+    tracing::info!("bloom started");
+}
+
+fn rotate_logs(log_dir: &std::path::Path) {
+    let current = log_dir.join("bloom.log");
+    let max_size = 5 * 1024 * 1024; // 5 MB
+    let max_files = 3;
+
+    let needs_rotate = current.metadata()
+        .map(|m| m.len() > max_size)
+        .unwrap_or(false);
+
+    if !needs_rotate {
+        return;
+    }
+
+    // Delete oldest, shift others down
+    let oldest = log_dir.join(format!("bloom.{max_files}.log"));
+    let _ = std::fs::remove_file(&oldest);
+
+    for i in (1..max_files).rev() {
+        let from = log_dir.join(format!("bloom.{i}.log"));
+        let to = log_dir.join(format!("bloom.{}.log", i + 1));
+        let _ = std::fs::rename(&from, &to);
+    }
+
+    let _ = std::fs::rename(&current, log_dir.join("bloom.1.log"));
 }

@@ -138,6 +138,8 @@ const EX_COMMANDS: &[(&str, &str)] = &[
     ("theme", "switch theme"),
     ("rebuild-index", "rebuild search index"),
     ("stats", "show vault and index stats"),
+    ("messages", "show notification history"),
+    ("log", "open log file"),
 ];
 
 // ---------------------------------------------------------------------------
@@ -180,6 +182,7 @@ pub struct BloomEditor {
     agenda_state: Option<AgendaState>,
     quick_capture: Option<QuickCaptureState>,
     notifications: Vec<render::Notification>,
+    notification_history: Vec<render::Notification>,
     viewport: render::Viewport,
     wizard: Option<SetupWizardState>,
     vault_root: Option<std::path::PathBuf>,
@@ -485,6 +488,7 @@ impl BloomEditor {
             agenda_state: None,
             quick_capture: None,
             notifications: Vec::new(),
+            notification_history: Vec::new(),
             viewport: render::Viewport::new(24, 80),
             wizard: None,
             vault_root: None,
@@ -1132,6 +1136,7 @@ impl BloomEditor {
     /// Initialize with a vault path — sets up index, journal, template engine.
     /// Spawns the background indexer thread (non-blocking).
     pub fn init_vault(&mut self, vault_root: &std::path::Path) -> Result<(), error::BloomError> {
+        tracing::info!(vault = %vault_root.display(), "vault initializing");
         let index_path = vault_root.join(".index.db");
         self.index = Some(index::Index::open(&index_path)?);
         self.journal = Some(journal::Journal::new(vault_root));
@@ -1210,6 +1215,15 @@ impl BloomEditor {
     /// Handle a single indexer completion event.
     pub fn handle_index_complete(&mut self, complete: index::indexer::IndexComplete) {
         self.indexing = false;
+
+        if let Some(error) = &complete.error {
+            self.push_notification(
+                format!("Index error: {error}"),
+                render::NotificationLevel::Error,
+            );
+            return;
+        }
+
         let t = &complete.timing;
         let message = format!(
             "Index ready — {} files, {}ms",
@@ -1223,11 +1237,7 @@ impl BloomEditor {
             files_scanned: t.files_scanned,
             files_changed: t.files_changed,
         });
-        self.notifications.push(render::Notification {
-            message,
-            level: render::NotificationLevel::Info,
-            expires_at: Instant::now() + std::time::Duration::from_secs(4),
-        });
+        self.push_notification(message, render::NotificationLevel::Info);
         // Reload the index connection to pick up changes from the indexer thread
         if let Some(vault_root) = &self.vault_root {
             let index_path = vault_root.join(".index.db");
@@ -1338,7 +1348,9 @@ impl BloomEditor {
         }
         // Notification expiry
         for n in &self.notifications {
-            consider(n.expires_at);
+            if let Some(t) = n.expires_at {
+                consider(t);
+            }
         }
         // Which-key timeout
         if !self.which_key_visible && !self.leader_keys.is_empty() {
@@ -1347,6 +1359,39 @@ impl BloomEditor {
             }
         }
         earliest
+    }
+
+    /// Push a notification, keeping max 3 visible and recording in history.
+    fn push_notification(&mut self, message: String, level: render::NotificationLevel) {
+        let expires_at = match level {
+            render::NotificationLevel::Info => Some(Instant::now() + std::time::Duration::from_secs(4)),
+            render::NotificationLevel::Warning => Some(Instant::now() + std::time::Duration::from_secs(8)),
+            render::NotificationLevel::Error => None,
+        };
+        let notif = render::Notification {
+            message,
+            level,
+            expires_at,
+            created_at: Instant::now(),
+        };
+        self.notification_history.push(notif.clone());
+        if self.notification_history.len() > 100 {
+            self.notification_history.remove(0);
+        }
+        // Evict oldest auto-expiring notification if at capacity
+        if self.notifications.len() >= 3 {
+            if let Some(pos) = self.notifications.iter().position(|n| n.expires_at.is_some()) {
+                self.notifications.remove(pos);
+            } else {
+                self.notifications.remove(0);
+            }
+        }
+        self.notifications.push(notif);
+    }
+
+    /// Dismiss all persistent (error) notifications. Called on Esc.
+    pub fn dismiss_notifications(&mut self) {
+        self.notifications.retain(|n| n.expires_at.is_some());
     }
 
     /// Show vault and index stats as a notification.
@@ -1378,11 +1423,43 @@ impl BloomEditor {
         parts.push(format!("{buf_count} open buffers"));
 
         let message = parts.join("  ·  ");
-        self.notifications.push(render::Notification {
-            message,
-            level: render::NotificationLevel::Info,
-            expires_at: Instant::now() + std::time::Duration::from_secs(10),
-        });
+        self.push_notification(message, render::NotificationLevel::Info);
+    }
+
+    fn open_messages_buffer(&mut self) {
+        let mut lines = Vec::new();
+        for n in self.notification_history.iter().rev() {
+            let icon = match n.level {
+                render::NotificationLevel::Info => "\u{2713}",
+                render::NotificationLevel::Warning => "\u{26a0}",
+                render::NotificationLevel::Error => "\u{2717}",
+            };
+            let elapsed = n.created_at.elapsed();
+            let secs = elapsed.as_secs();
+            let h = secs / 3600;
+            let m = (secs % 3600) / 60;
+            let s = secs % 60;
+            lines.push(format!("[{h:02}:{m:02}:{s:02}] {icon} {}", n.message));
+        }
+        if lines.is_empty() {
+            lines.push("No notifications yet.".to_string());
+        }
+        let content = lines.join("\n");
+        let id = crate::uuid::generate_hex_id();
+        self.open_page_with_content(&id, "[messages]", std::path::Path::new("[messages]"), &content);
+    }
+
+    fn open_log_buffer(&mut self) {
+        let log_path = self.vault_root.as_ref()
+            .map(|r| r.join(".bloom").join("logs").join("bloom.log"));
+        if let Some(path) = log_path {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let id = crate::uuid::generate_hex_id();
+                self.open_page_with_content(&id, "[log]", std::path::Path::new("[log]"), &content);
+            } else {
+                self.push_notification("No log file found".to_string(), render::NotificationLevel::Warning);
+            }
+        }
     }
 
     /// Perform startup according to config. Guarantees `active_page` is `Some` on return.
@@ -2830,6 +2907,14 @@ impl BloomEditor {
                 self.show_stats();
                 vec![keymap::dispatch::Action::Noop]
             }
+            "messages" => {
+                self.open_messages_buffer();
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "log" => {
+                self.open_log_buffer();
+                vec![keymap::dispatch::Action::Noop]
+            }
             _ => {
                 // Unknown command — noop
                 vec![keymap::dispatch::Action::Noop]
@@ -2865,7 +2950,7 @@ impl BloomEditor {
                 which_key: None,
                 date_picker: None,
                 dialog: None,
-                notification: None,
+                notifications: Vec::new(),
                 scrolloff: self.config.scrolloff,
             };
         }
@@ -3305,7 +3390,7 @@ impl BloomEditor {
                 }
                 None => None,
             },
-            notification: self.notifications.last().cloned(),
+            notifications: self.notifications.iter().rev().take(3).rev().cloned().collect(),
             scrolloff: self.config.scrolloff,
         }
     }
@@ -3429,7 +3514,9 @@ impl BloomEditor {
     /// Tick for timers, notifications, debounce. Returns true if state changed.
     pub fn tick(&mut self, now: std::time::Instant) -> bool {
         let before = self.notifications.len();
-        self.notifications.retain(|n| n.expires_at > now);
+        self.notifications.retain(|n| {
+            n.expires_at.map_or(true, |t| t > now)
+        });
         let notif_changed = self.notifications.len() != before;
 
         // Check if which-key drawer should appear (timeout elapsed)

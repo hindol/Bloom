@@ -64,8 +64,8 @@ pub fn draw(f: &mut Frame, frame: &RenderFrame, theme: &TuiTheme) {
     if let Some(dialog) = &frame.dialog {
         draw_dialog(f, area, dialog, theme);
     }
-    if let Some(notif) = &frame.notification {
-        draw_notification(f, area, &notif.message, &notif.level, theme);
+    if !frame.notifications.is_empty() {
+        draw_notifications(f, area, &frame.notifications, theme);
     }
 }
 
@@ -966,24 +966,38 @@ fn draw_dialog(f: &mut Frame, area: Rect, dialog: &DialogFrame, theme: &TuiTheme
 // Notification
 // ---------------------------------------------------------------------------
 
-fn draw_notification(
+fn draw_notifications(
     f: &mut Frame,
     area: Rect,
-    message: &str,
-    level: &NotificationLevel,
+    notifications: &[bloom_core::render::Notification],
     theme: &TuiTheme,
 ) {
-    let w = (message.width() as u16 + 4).min(area.width);
-    let x = area.right().saturating_sub(w + 1);
-    let y = area.y;
-    let notif_area = Rect::new(x, y, w, 1);
+    // Stack notifications bottom-right, above the status bar (last row).
+    // Newest at bottom, older ones stack upward.
+    let status_bar_height = 1u16;
+    let mut y = area.bottom().saturating_sub(status_bar_height + 1);
 
-    let style = theme.notification_style(level);
-    let text = format!(" {} ", message);
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(text, style))),
-        notif_area,
-    );
+    for notif in notifications.iter().rev() {
+        if y < area.y + 1 {
+            break;
+        }
+        let icon = match notif.level {
+            NotificationLevel::Info => "\u{2713}",    // ✓
+            NotificationLevel::Warning => "\u{26a0}",  // ⚠
+            NotificationLevel::Error => "\u{2717}",    // ✗
+        };
+        let text = format!(" {} {} ", icon, notif.message);
+        let w = (text.width() as u16).min(area.width);
+        let x = area.right().saturating_sub(w + 1);
+        let notif_area = Rect::new(x, y, w, 1);
+
+        let style = theme.notification_style(&notif.level);
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(&text, style))),
+            notif_area,
+        );
+        y = y.saturating_sub(1);
+    }
 }
 
 // ---------------------------------------------------------------------------

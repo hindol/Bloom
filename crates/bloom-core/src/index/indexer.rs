@@ -26,6 +26,8 @@ pub enum IndexRequest {
 pub struct IndexComplete {
     pub stats: RebuildStats,
     pub timing: IndexTiming,
+    /// If set, the indexer encountered an error. The UI should surface this.
+    pub error: Option<String>,
 }
 
 #[derive(Debug)]
@@ -64,11 +66,12 @@ fn indexer_main(
     request_rx: &Receiver<IndexRequest>,
     completion_tx: &Sender<IndexComplete>,
 ) {
+    tracing::info!(vault = %vault_root.display(), "indexer thread started");
     let mut index = match Index::open(index_path) {
         Ok(i) => i,
         Err(e) => {
-            tracing::error!("indexer: failed to open index: {:?}", e);
-            send_empty_completion(completion_tx);
+            tracing::error!(error = %e, "indexer: failed to open index");
+            send_error_completion(completion_tx, format!("Failed to open index: {e}"));
             return;
         }
     };
@@ -76,10 +79,18 @@ fn indexer_main(
 
     // Initial startup scan
     match run_incremental(vault_root, &mut index, &parser) {
-        Ok(complete) => { let _ = completion_tx.send(complete); }
+        Ok(complete) => {
+            tracing::info!(
+                files_scanned = complete.timing.files_scanned,
+                files_changed = complete.timing.files_changed,
+                duration_ms = complete.timing.total_ms,
+                "incremental scan complete"
+            );
+            let _ = completion_tx.send(complete);
+        }
         Err(e) => {
-            tracing::error!("indexer startup error: {:?}", e);
-            send_empty_completion(completion_tx);
+            tracing::error!(error = %e, "indexer startup error");
+            send_error_completion(completion_tx, format!("Startup scan failed: {e}"));
         }
     }
 
@@ -87,40 +98,52 @@ fn indexer_main(
     while let Ok(request) = request_rx.recv() {
         match request {
             IndexRequest::FullRebuild => {
-                // True wipe-and-reinsert: read all files, nuke DB, rebuild.
-                // This corrects any DB drift — the point of :rebuild-index.
                 match run_full_rebuild(vault_root, &mut index, &parser) {
                     Ok(complete) => {
+                        tracing::info!(
+                            pages = complete.stats.pages,
+                            links = complete.stats.links,
+                            duration_ms = complete.timing.total_ms,
+                            "full rebuild complete"
+                        );
                         let _ = index.prune_orphaned_access();
                         let _ = completion_tx.send(complete);
                     }
                     Err(e) => {
-                        tracing::error!("indexer rebuild error: {:?}", e);
-                        send_empty_completion(completion_tx);
+                        tracing::error!(error = %e, "indexer rebuild error");
+                        send_error_completion(completion_tx, format!("Rebuild failed: {e}"));
                     }
                 }
             }
             IndexRequest::IncrementalBatch(paths) => {
                 match run_batch(vault_root, &mut index, &parser, &paths) {
-                    Ok(complete) => { let _ = completion_tx.send(complete); }
+                    Ok(complete) => {
+                        tracing::debug!(
+                            files_changed = complete.timing.files_changed,
+                            "incremental batch complete"
+                        );
+                        let _ = completion_tx.send(complete);
+                    }
                     Err(e) => {
-                        tracing::error!("indexer batch error: {:?}", e);
-                        send_empty_completion(completion_tx);
+                        tracing::error!(error = %e, "indexer batch error");
+                        send_error_completion(completion_tx, format!("Batch index failed: {e}"));
                     }
                 }
             }
             IndexRequest::Shutdown => break,
         }
     }
+    tracing::info!("indexer thread stopped");
 }
 
-fn send_empty_completion(tx: &Sender<IndexComplete>) {
+fn send_error_completion(tx: &Sender<IndexComplete>, error: String) {
     let _ = tx.send(IndexComplete {
         stats: RebuildStats { pages: 0, links: 0, tags: 0 },
         timing: IndexTiming {
             scan_ms: 0, read_parse_ms: 0, write_ms: 0, total_ms: 0,
             files_scanned: 0, files_changed: 0,
         },
+        error: Some(error),
     });
 }
 
@@ -176,6 +199,7 @@ fn run_full_rebuild(
             files_scanned,
             files_changed: files_scanned, // all files re-indexed
         },
+        error: None,
     })
 }
 
@@ -276,6 +300,7 @@ fn run_incremental(
             scan_ms, read_parse_ms, write_ms, total_ms,
             files_scanned, files_changed,
         },
+        error: None,
     })
 }
 
@@ -334,6 +359,7 @@ fn run_batch(
             files_scanned: rel_paths.len(),
             files_changed: entries.len() + deleted.len(),
         },
+        error: None,
     })
 }
 

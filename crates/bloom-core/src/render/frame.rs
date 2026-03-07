@@ -19,7 +19,7 @@ pub struct RenderFrame {
     pub which_key: Option<WhichKeyFrame>,
     pub date_picker: Option<DatePickerFrame>,
     pub dialog: Option<DialogFrame>,
-    pub notification: Option<Notification>,
+    pub notifications: Vec<Notification>,
     pub scrolloff: usize,
 }
 
@@ -315,10 +315,12 @@ impl Default for StatusBarFrame {
 pub struct Notification {
     pub message: String,
     pub level: NotificationLevel,
-    pub expires_at: Instant,
+    /// None means the notification persists until dismissed (used for errors).
+    pub expires_at: Option<Instant>,
+    pub created_at: Instant,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum NotificationLevel {
     Info,
     Warning,
