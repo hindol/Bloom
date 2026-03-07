@@ -162,13 +162,18 @@ impl Index {
     }
 
     /// Batch-set fingerprints within an existing transaction scope.
-    pub fn set_fingerprints_batch(&self, fingerprints: &[(String, FileFingerprint)]) {
+    pub fn set_fingerprints_batch(&mut self, fingerprints: &[(String, FileFingerprint)]) {
+        let tx = match self.conn.transaction() {
+            Ok(tx) => tx,
+            Err(_) => return,
+        };
         for (path, fp) in fingerprints {
-            let _ = self.conn.execute(
+            let _ = tx.execute(
                 "INSERT OR REPLACE INTO file_fingerprints (path, mtime_secs, size_bytes) VALUES (?1, ?2, ?3)",
                 rusqlite::params![path, fp.mtime_secs, fp.size_bytes],
             );
         }
+        let _ = tx.commit();
     }
 
     /// Get all stored fingerprints as a map.
