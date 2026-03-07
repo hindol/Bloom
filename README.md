@@ -82,6 +82,17 @@ Contributions are welcome! To get started:
 
 Please follow the existing code style: Rust 2021 edition, `thiserror` for errors, `tracing` for instrumentation, and trait-based abstractions where the docs call for them. The design documents in `docs/` are the source of truth for architecture decisions — read them before proposing structural changes.
 
+## Performance
+
+Benchmarked on a 10,365-page vault (24 MB of Markdown), Windows 11, NVMe SSD:
+
+| Operation | Time | Notes |
+|-----------|------|-------|
+| First-run full index | **2.4s** | Scan 820ms + read/parse 150ms + SQLite write 1,470ms |
+| Incremental startup (0 changed) | **0.7s** | 10K `stat()` calls against fingerprint cache |
+| File save → watcher ack | **<1ms** | Fingerprint match, no file I/O |
+| Render (idle) | **0 CPU** | Event-driven `crossbeam::select!`, no polling |
+
 ## Known Bugs
 
 | Bug | Root Cause | Impact |
