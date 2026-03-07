@@ -588,10 +588,73 @@ impl BloomEditor {
                 ("All Commands".to_string(), "commands".to_string(), items)
             }
             PickerKind::Templates => {
-                ("Templates".to_string(), "templates".to_string(), Vec::new())
+                let items = self.template_engine.as_ref()
+                    .map(|engine| engine.list().into_iter().map(|t| {
+                        let placeholder_count = t.placeholders.len();
+                        GenericPickerItem {
+                            id: t.name.clone(),
+                            label: t.name.clone(),
+                            middle: Some(t.description.clone()),
+                            right: if placeholder_count > 0 {
+                                Some(format!("{placeholder_count} fields"))
+                            } else {
+                                None
+                            },
+                            preview_text: Some(t.content.clone()),
+                            score_boost: 0,
+                        }
+                    }).collect())
+                    .unwrap_or_default();
+                ("Templates".to_string(), "templates".to_string(), items)
             }
-            _ => {
-                ("Picker".to_string(), "results".to_string(), Vec::new())
+            PickerKind::Backlinks(page_id) => {
+                let items = if let Some(idx) = &self.index {
+                    idx.backlinks_to(page_id).into_iter().map(|bl| {
+                        GenericPickerItem {
+                            id: bl.source_page.id.to_hex(),
+                            label: bl.source_page.title.clone(),
+                            middle: Some(bl.context.clone()),
+                            right: Some(format!("line {}", bl.line)),
+                            preview_text: Some(bl.context),
+                            score_boost: 0,
+                        }
+                    }).collect()
+                } else {
+                    Vec::new()
+                };
+                ("Backlinks".to_string(), "backlinks".to_string(), items)
+            }
+            PickerKind::UnlinkedMentions(page_id) => {
+                let items = if let Some(idx) = &self.index {
+                    let title = idx.find_page_by_id(page_id)
+                        .map(|m| m.title.clone())
+                        .unwrap_or_default();
+                    if title.is_empty() {
+                        Vec::new()
+                    } else {
+                        idx.unlinked_mentions(&title).into_iter().map(|um| {
+                            GenericPickerItem {
+                                id: format!("{}:{}", um.source_page.path.display(), um.line),
+                                label: um.source_page.title.clone(),
+                                middle: Some(um.context.clone()),
+                                right: Some(format!("line {}", um.line)),
+                                preview_text: Some(um.context),
+                                score_boost: 0,
+                            }
+                        }).collect()
+                    }
+                } else {
+                    Vec::new()
+                };
+                ("Unlinked Mentions".to_string(), "mentions".to_string(), items)
+            }
+            PickerKind::InlineLink => {
+                ("Insert Link".to_string(), "pages".to_string(), self.collect_page_items())
+            }
+            PickerKind::Theme => {
+                // Theme picker is handled by open_theme_picker()
+                self.open_theme_picker();
+                return;
             }
         };
         let min_query_len = match &kind {
@@ -1604,11 +1667,50 @@ impl BloomEditor {
                 keymap::dispatch::PickerKind::InlineLink,
             )],
             "add_tag" => {
-                // TODO: open tag input picker
+                // Insert a tag into the current page's frontmatter
+                if let Some(page_id) = &self.active_page {
+                    if let Some(buf) = self.buffer_mgr.get(page_id) {
+                        let text = buf.text().to_string();
+                        if let Some(mut fm) = self.parser.parse_frontmatter(&text) {
+                            // Prompt would be ideal, but for now insert a placeholder tag
+                            // The user types the tag name after #
+                            self.insert_text_at_cursor("#");
+                        }
+                    }
+                }
                 vec![keymap::dispatch::Action::Noop]
             }
             "remove_tag" => {
-                // TODO: open picker with current page's tags for selection
+                // Show current page's tags for removal
+                if let Some(page_id) = &self.active_page {
+                    if let Some(buf) = self.buffer_mgr.get(page_id) {
+                        let text = buf.text().to_string();
+                        if let Some(fm) = self.parser.parse_frontmatter(&text) {
+                            if !fm.tags.is_empty() {
+                                let items: Vec<GenericPickerItem> = fm.tags.iter().map(|t| {
+                                    GenericPickerItem {
+                                        id: t.0.clone(),
+                                        label: format!("#{}", t.0),
+                                        middle: None,
+                                        right: Some("remove".to_string()),
+                                        preview_text: None,
+                                        score_boost: 0,
+                                    }
+                                }).collect();
+                                self.picker_state = Some(ActivePicker {
+                                    kind: keymap::dispatch::PickerKind::Tags,
+                                    picker: picker::Picker::new(items),
+                                    title: "Remove Tag".to_string(),
+                                    query: String::new(),
+                                    status_noun: "tags".to_string(),
+                                    min_query_len: 0,
+                                    previous_theme: None,
+                                    query_selected: false,
+                                });
+                            }
+                        }
+                    }
+                }
                 vec![keymap::dispatch::Action::Noop]
             }
             "insert_due" => {
@@ -1947,6 +2049,35 @@ impl BloomEditor {
                 let actions = self.action_id_to_actions(&item.id);
                 // Need to execute these actions
                 let _ = self.execute_actions(actions);
+            }
+            PickerKind::Templates => {
+                // Find and expand the selected template, then open as new page
+                if let Some(engine) = &self.template_engine {
+                    let templates = engine.list();
+                    if let Some(template) = templates.iter().find(|t| t.name == item.id) {
+                        let values = std::collections::HashMap::new();
+                        let title = template.name.clone();
+                        let expanded = engine.expand(template, &title, &values);
+                        let id = crate::uuid::generate_hex_id();
+                        let path = self.vault_root.as_ref()
+                            .map(|r| r.join("pages").join(format!("{}.md", title)))
+                            .unwrap_or_else(|| std::path::PathBuf::from(format!("{}.md", title)));
+                        self.open_page_with_content(&id, &title, &path, &expanded.content);
+                        // Activate template mode if there are tab stops
+                        if !expanded.tab_stops.is_empty() {
+                            self.template_mode = Some(template::TemplateModeState::new(expanded.tab_stops));
+                        }
+                    }
+                }
+            }
+            PickerKind::InlineLink => {
+                // Insert [[id|label]] at cursor position
+                if let Some(page_id) = &self.active_page {
+                    if self.buffer_mgr.get(page_id).is_some() {
+                        let link_text = format!("[[{}|{}]]", item.id, item.label);
+                        self.insert_text_at_cursor(&link_text);
+                    }
+                }
             }
             _ => {}
         }

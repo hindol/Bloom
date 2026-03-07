@@ -127,6 +127,9 @@ fn import_logseq(logseq_dir: &Path, bloom_vault: &Path) -> Result<ImportStats, S
 /// - Convert `[[Page Name]]` links to `[[id|Page Name]]`
 /// - Convert `TODO`/`DONE` to `- [ ]`/`- [x]`
 /// - Strip Logseq-specific properties
+/// - Convert `{{embed [[Page]]}}` to `![[id|Page]]`
+/// - Convert `((block-id))` block references to `[[block-id]]`
+/// - Strip `{{query ...}}` blocks (not supported)
 fn convert_logseq_content(content: &str, title_to_id: &HashMap<String, String>) -> String {
     let mut result = String::new();
     for line in content.lines() {
@@ -134,6 +137,11 @@ fn convert_logseq_content(content: &str, title_to_id: &HashMap<String, String>) 
 
         // Skip Logseq property lines (key:: value)
         if trimmed.contains(":: ") && !trimmed.starts_with('-') && !trimmed.starts_with('#') {
+            continue;
+        }
+
+        // Strip {{query ...}} blocks entirely
+        if trimmed.starts_with("{{query") || trimmed.starts_with("{{ query") {
             continue;
         }
 
@@ -147,11 +155,49 @@ fn convert_logseq_content(content: &str, title_to_id: &HashMap<String, String>) 
             converted = converted.replacen("DONE ", "[x] ", 1);
         }
 
-        // Convert [[Page Name]] links to [[id|Page Name]]
+        // Convert {{embed [[Page Name]]}} to ![[id|Page Name]]
+        while let Some(start) = converted.find("{{embed [[") {
+            if let Some(end) = converted[start..].find("]]}}") {
+                let page_name = &converted[start + 10..start + end].to_string();
+                let replacement = if let Some(id) = title_to_id.get(page_name.as_str()) {
+                    format!("![[{id}|{page_name}]]")
+                } else {
+                    format!("![[{page_name}]]")
+                };
+                converted = format!("{}{}{}", &converted[..start], replacement, &converted[start + end + 4..]);
+            } else {
+                break;
+            }
+        }
+
+        // Convert ((block-id)) block references to [[block-id]]
         let mut output = String::new();
         let mut chars = converted.chars().peekable();
         while let Some(ch) = chars.next() {
-            if ch == '[' && chars.peek() == Some(&'[') {
+            if ch == '(' && chars.peek() == Some(&'(') {
+                chars.next(); // consume second (
+                let mut ref_text = String::new();
+                let mut closed = false;
+                while let Some(&c) = chars.peek() {
+                    if c == ')' {
+                        chars.next();
+                        if chars.peek() == Some(&')') {
+                            chars.next();
+                            closed = true;
+                            break;
+                        }
+                        ref_text.push(')');
+                    } else {
+                        ref_text.push(c);
+                        chars.next();
+                    }
+                }
+                if closed {
+                    output.push_str(&format!("[[{ref_text}]]"));
+                } else {
+                    output.push_str(&format!("(({ref_text}"));
+                }
+            } else if ch == '[' && chars.peek() == Some(&'[') {
                 chars.next(); // consume second [
                 let mut link_text = String::new();
                 while let Some(&c) = chars.peek() {
