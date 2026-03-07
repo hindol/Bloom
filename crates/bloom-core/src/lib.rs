@@ -1192,18 +1192,6 @@ impl BloomEditor {
         self.wizard.is_some()
     }
 
-    /// Poll the background indexer for completion (convenience for tests).
-    /// Returns true if indexing just completed.
-    pub fn poll_indexer(&mut self) -> bool {
-        if let Some(rx) = &self.indexer_rx {
-            if let Ok(complete) = rx.try_recv() {
-                self.handle_index_complete(complete);
-                return true;
-            }
-        }
-        false
-    }
-
     /// Whether background indexing is in progress.
     pub fn is_indexing(&self) -> bool {
         self.indexing
@@ -1359,28 +1347,6 @@ impl BloomEditor {
             }
         }
         earliest
-    }
-
-    /// Drain DiskWriter ack channel (convenience for tests/legacy callers).
-    pub fn poll_write_completions(&mut self) {
-        let events: Vec<_> = self.write_complete_rx.as_ref()
-            .map(|rx| rx.try_iter().collect())
-            .unwrap_or_default();
-        for wc in events {
-            self.handle_write_complete(wc);
-        }
-    }
-
-    /// Drain file watcher events and flush debounce (convenience for tests/legacy callers).
-    /// Returns true if a batch was sent to the indexer.
-    pub fn poll_file_events(&mut self) -> bool {
-        let events: Vec<_> = self.watcher_rx.as_ref()
-            .map(|rx| rx.try_iter().collect())
-            .unwrap_or_default();
-        for event in events {
-            self.handle_file_event(event);
-        }
-        self.flush_file_event_debounce()
     }
 
     /// Show vault and index stats as a notification.
@@ -4153,9 +4119,15 @@ mod tests {
         let _ = editor.init_vault(dir.path());
 
         // Wait for indexer (in tests, it completes quickly)
-        for _ in 0..100 {
-            if editor.poll_indexer() { break; }
-            std::thread::sleep(std::time::Duration::from_millis(10));
+        let ch = editor.channels();
+        if let Some(rx) = &ch.indexer_rx {
+            for _ in 0..100 {
+                if let Ok(complete) = rx.try_recv() {
+                    editor.handle_index_complete(complete);
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
         }
         assert!(!editor.is_indexing(), "indexer should have completed");
 
