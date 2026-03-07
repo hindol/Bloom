@@ -56,13 +56,30 @@ impl Index {
             tags: 0,
         };
 
+        // Phase A: insert structured data (pages, tags, links, tasks, block_ids)
+        let t_structured = std::time::Instant::now();
         for entry in pages {
             let page_id = entry.meta.id.to_hex();
-            insert_page_data(&tx, &page_id, entry)?;
+            insert_page_data_no_fts(&tx, &page_id, entry)?;
             stats.pages += 1;
             stats.links += entry.links.len();
             stats.tags += entry.tags.len();
         }
+        let structured_ms = t_structured.elapsed().as_millis() as u64;
+
+        // Phase B: insert FTS content
+        let t_fts = std::time::Instant::now();
+        for entry in pages {
+            let page_id = entry.meta.id.to_hex();
+            tx.execute(
+                "INSERT INTO pages_fts (page_id, title, content) VALUES (?1, ?2, ?3)",
+                rusqlite::params![page_id, entry.meta.title, entry.content],
+            )
+            .map_err(|e| BloomError::IndexError(e.to_string()))?;
+        }
+        let fts_ms = t_fts.elapsed().as_millis() as u64;
+
+        tracing::info!(structured_ms, fts_ms, pages = pages.len(), "rebuild write phase breakdown");
 
         tx.commit()
             .map_err(|e| BloomError::IndexError(e.to_string()))?;
@@ -195,6 +212,69 @@ impl Index {
             )
             .map_err(|e| BloomError::IndexError(e.to_string()))
     }
+}
+
+fn insert_page_data_no_fts(
+    conn: &rusqlite::Connection,
+    page_id: &str,
+    entry: &IndexEntry,
+) -> Result<(), BloomError> {
+    let path_str = entry.meta.path.display().to_string();
+    let created_str = entry.meta.created.to_string();
+
+    conn.execute(
+        "INSERT INTO pages (id, title, created, path) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![page_id, entry.meta.title, created_str, path_str],
+    )
+    .map_err(|e| BloomError::IndexError(e.to_string()))?;
+
+    for tag in &entry.tags {
+        conn.execute(
+            "INSERT OR IGNORE INTO tags (page_id, tag) VALUES (?1, ?2)",
+            rusqlite::params![page_id, tag.0],
+        )
+        .map_err(|e| BloomError::IndexError(e.to_string()))?;
+    }
+
+    for link in &entry.links {
+        conn.execute(
+            "INSERT INTO links (from_page, to_page, display_hint, section) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![
+                page_id,
+                link.page.to_hex(),
+                link.display_hint,
+                link.section.as_ref().map(|s| &s.0),
+            ],
+        )
+        .map_err(|e| BloomError::IndexError(e.to_string()))?;
+    }
+
+    for task in &entry.tasks {
+        let (due_date, start_date) = extract_task_dates(task);
+        conn.execute(
+            "INSERT INTO tasks (page_id, line, text, done, due_date, start_date) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                page_id,
+                task.line as i64,
+                task.text,
+                task.done as i32,
+                due_date,
+                start_date,
+            ],
+        )
+        .map_err(|e| BloomError::IndexError(e.to_string()))?;
+    }
+
+    for (block_id, line) in &entry.block_ids {
+        conn.execute(
+            "INSERT INTO block_ids (page_id, block_id, line) VALUES (?1, ?2, ?3)",
+            rusqlite::params![page_id, block_id.0, *line as i64],
+        )
+        .map_err(|e| BloomError::IndexError(e.to_string()))?;
+    }
+
+    Ok(())
 }
 
 fn insert_page_data(
