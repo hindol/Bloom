@@ -1,0 +1,728 @@
+use crate::editor::commands::EX_COMMANDS;
+use crate::*;
+
+impl BloomEditor {
+    /// Produce the render frame. `width` and `height` are the actual terminal
+    /// dimensions — used directly for layout computation so pane rects always
+    /// tile the exact screen area.
+    pub fn render(&mut self, width: u16, height: u16) -> render::RenderFrame {
+        // If wizard is active, render wizard as a full-screen pane
+        if let Some(wiz) = &self.wizard {
+            return render::RenderFrame {
+                panes: vec![render::PaneFrame {
+                    id: types::PaneId(0),
+                    kind: render::PaneKind::SetupWizard(wiz.to_frame()),
+                    visible_lines: Vec::new(),
+                    cursor: render::CursorState::default(),
+                    scroll_offset: 0,
+                    is_active: true,
+                    title: String::new(),
+                    dirty: false,
+                    status_bar: render::StatusBarFrame::default(),
+                    rect: render::PaneRectFrame::default(),
+                }],
+                maximized: false,
+                hidden_pane_count: 0,
+                picker: None,
+                agenda: None,
+                inline_menu: None,
+                which_key: None,
+                date_picker: None,
+                dialog: None,
+                notifications: Vec::new(),
+                scrolloff: self.config.scrolloff,
+            };
+        }
+
+        let mut panes = Vec::new();
+
+        let mode_str = match self.vim_state.mode() {
+            vim::Mode::Normal => "NORMAL",
+            vim::Mode::Insert => "INSERT",
+            vim::Mode::Visual { .. } => "VISUAL",
+            vim::Mode::Command => "COMMAND",
+        };
+
+        // Compute pane rects from the core layout engine.
+        // Reserve space for the which-key drawer only after timeout fires
+        // (or if it's already visible from a previous render).
+        let has_pending = !self.leader_keys.is_empty() || !self.vim_state.pending_keys().is_empty();
+        let timeout = std::time::Duration::from_millis(self.config.which_key_timeout_ms);
+        let timed_out = self
+            .pending_since
+            .is_some_and(|since| since.elapsed() >= timeout);
+        let show_wk = has_pending && (self.which_key_visible || timed_out);
+
+        if show_wk && !self.which_key_visible {
+            self.which_key_visible = true;
+        }
+
+        let wk_h = if show_wk {
+            let col_width = 24u16;
+            let cols = (width.saturating_sub(4) / col_width).max(1);
+            let entry_count = 12u16;
+            let rows_needed = entry_count.div_ceil(cols);
+            (rows_needed + 2).min(height / 3).max(3)
+        } else {
+            0
+        };
+        let pane_area_h = height.saturating_sub(wk_h);
+        let pane_rects = self.window_mgr.compute_pane_rects(width, pane_area_h);
+
+        // Update viewport from the active pane's content height
+        if let Some(active_rect) = pane_rects
+            .iter()
+            .find(|r| r.pane_id == self.window_mgr.active_pane())
+        {
+            self.viewport.height = active_rect.content_height as usize;
+            self.viewport.width = active_rect.width as usize;
+        }
+
+        // Ensure cursor is visible (scrolls the viewport if needed)
+        let (cursor_line, _cursor_col) = self.cursor_position();
+        self.viewport
+            .ensure_visible_with_scrolloff(cursor_line, self.config.scrolloff);
+
+        for rect in &pane_rects {
+            let is_active = rect.pane_id == self.window_mgr.active_pane();
+
+            let (title, dirty, visible_lines) = if let Some(page_id) = &self.active_page {
+                if let Some(buf) = self.buffer_mgr.get(page_id) {
+                    let infos = self.buffer_mgr.open_buffers();
+                    let title = infos
+                        .iter()
+                        .find(|i| i.page_id == *page_id)
+                        .map(|i| i.title.clone())
+                        .unwrap_or_default();
+                    let lines = self.render_buffer_lines(buf);
+                    (title, buf.is_dirty(), lines)
+                } else {
+                    (String::new(), false, Vec::new())
+                }
+            } else {
+                (String::new(), false, Vec::new())
+            };
+
+            let (cursor_line, cursor_col) = self.cursor_position();
+
+            // Build per-pane status bar
+            let status_bar = if is_active {
+                // Active pane: priority CommandLine > QuickCapture > Normal
+                let content = if matches!(self.vim_state.mode(), vim::Mode::Command) {
+                    render::StatusBarContent::CommandLine(render::CommandLineSlot {
+                        input: self.vim_state.pending_keys().to_string(),
+                        cursor_pos: self.vim_state.pending_keys().len(),
+                        error: None,
+                    })
+                } else if let Some(qc) = &self.quick_capture {
+                    let prompt = match qc.kind {
+                        keymap::dispatch::QuickCaptureKind::Note => {
+                            "📓 Append to journal > ".to_string()
+                        }
+                        keymap::dispatch::QuickCaptureKind::Task => "☐ Append task > ".to_string(),
+                    };
+                    render::StatusBarContent::QuickCapture(render::QuickCaptureSlot {
+                        prompt,
+                        input: qc.input.clone(),
+                        cursor_pos: qc.cursor_pos,
+                    })
+                } else {
+                    render::StatusBarContent::Normal(render::NormalStatus {
+                        title: title.clone(),
+                        dirty,
+                        line: cursor_line,
+                        column: cursor_col,
+                        pending_keys: if !self.leader_keys.is_empty() {
+                            self.leader_keys
+                                .iter()
+                                .map(|k| k.to_string())
+                                .collect::<Vec<_>>()
+                                .join(" ")
+                        } else {
+                            self.vim_state.pending_keys().to_string()
+                        },
+                        recording_macro: if self.vim_state.is_recording() {
+                            Some('q')
+                        } else {
+                            None
+                        },
+                        mcp: render::McpIndicator::Off,
+                        indexing: self.indexing,
+                    })
+                };
+                render::StatusBarFrame {
+                    content,
+                    mode: mode_str.to_string(),
+                }
+            } else {
+                // Inactive pane: just title
+                render::StatusBarFrame {
+                    content: render::StatusBarContent::Normal(render::NormalStatus {
+                        title: title.clone(),
+                        dirty,
+                        line: cursor_line,
+                        column: cursor_col,
+                        pending_keys: String::new(),
+                        recording_macro: None,
+                        mcp: render::McpIndicator::Off,
+                        indexing: self.indexing,
+                    }),
+                    mode: mode_str.to_string(),
+                }
+            };
+
+            panes.push(render::PaneFrame {
+                id: rect.pane_id,
+                kind: render::PaneKind::Editor,
+                visible_lines,
+                cursor: render::CursorState {
+                    line: cursor_line,
+                    column: cursor_col,
+                    shape: match self.vim_state.mode() {
+                        vim::Mode::Normal => render::CursorShape::Block,
+                        vim::Mode::Insert => render::CursorShape::Bar,
+                        vim::Mode::Visual { .. } => render::CursorShape::Block,
+                        vim::Mode::Command => render::CursorShape::Bar,
+                    },
+                },
+                scroll_offset: self.viewport.first_visible_line,
+                is_active,
+                title: title.clone(),
+                dirty,
+                status_bar,
+                rect: render::PaneRectFrame {
+                    x: rect.x,
+                    y: rect.y,
+                    width: rect.width,
+                    content_height: rect.content_height,
+                    total_height: rect.height,
+                },
+            });
+        }
+
+        render::RenderFrame {
+            panes,
+            maximized: self.window_mgr.is_maximized(),
+            hidden_pane_count: self.window_mgr.hidden_pane_count(),
+            picker: if let Some(ap) = &self.picker_state {
+                let below_min = ap.query.len() < ap.min_query_len;
+                let results: Vec<render::PickerRow> = if below_min {
+                    Vec::new()
+                } else {
+                    ap.picker
+                        .results()
+                        .into_iter()
+                        .map(|item| render::PickerRow {
+                            label: item.label.clone(),
+                            middle: item.middle.clone(),
+                            right: item.right.clone(),
+                        })
+                        .collect()
+                };
+                let preview = if below_min {
+                    None
+                } else {
+                    ap.picker.selected().and_then(|item| {
+                        // 1. Pre-set preview (e.g., search context, theme sample)
+                        if item.preview_text.is_some() {
+                            return item.preview_text.clone();
+                        }
+                        // 2. Try in-memory buffer (already open pages — free)
+                        if let Some(page_id) = types::PageId::from_hex(&item.id) {
+                            if let Some(buf) = self.buffer_mgr.get(&page_id) {
+                                let text = buf.text();
+                                let lines: Vec<_> =
+                                    text.lines().take(20).map(|l| l.to_string()).collect();
+                                if !lines.is_empty() {
+                                    return Some(lines.join("\n"));
+                                }
+                            }
+                            // 3. Read from disk via vault path + index metadata
+                            if let Some(idx) = &self.index {
+                                if let Some(meta) = idx.find_page_by_id(&page_id) {
+                                    let full = self.vault_root.as_ref().map(|r| r.join(&meta.path));
+                                    if let Some(path) = full {
+                                        if let Ok(content) = std::fs::read_to_string(&path) {
+                                            let preview: String = content
+                                                .lines()
+                                                .take(20)
+                                                .collect::<Vec<_>>()
+                                                .join("\n");
+                                            return Some(preview);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        None
+                    })
+                };
+                Some(render::PickerFrame {
+                    title: ap.title.clone(),
+                    query: ap.query.clone(),
+                    results,
+                    selected_index: if below_min {
+                        0
+                    } else {
+                        ap.picker.selected_index()
+                    },
+                    filters: Vec::new(),
+                    preview,
+                    total_count: ap.picker.total_count(),
+                    filtered_count: if below_min {
+                        0
+                    } else {
+                        ap.picker.filtered_count()
+                    },
+                    status_noun: ap.status_noun.clone(),
+                    min_query_len: ap.min_query_len,
+                    query_selected: ap.query_selected,
+                })
+            } else {
+                None
+            },
+            agenda: if let Some(state) = &self.agenda_state {
+                let mut overdue = Vec::new();
+                let mut today = Vec::new();
+                let mut upcoming = Vec::new();
+                for item in &state.items {
+                    let agenda_item = render::AgendaItem {
+                        task_text: item.task.text.clone(),
+                        source_page: item.source_title.clone(),
+                        date: item.task.timestamps.iter().find_map(|ts| match ts {
+                            types::Timestamp::Due(d) => Some(*d),
+                            _ => None,
+                        }),
+                        tags: vec![],
+                    };
+                    match item.bucket {
+                        AgendaBucket::Overdue => overdue.push(agenda_item),
+                        AgendaBucket::Today => today.push(agenda_item),
+                        AgendaBucket::Upcoming => upcoming.push(agenda_item),
+                    }
+                }
+                // Build preview: read source file, extract ~5 lines around selected task
+                let preview = state.items.get(state.selected_index).and_then(|item| {
+                    use store::traits::NoteStore;
+                    let idx = self.index.as_ref()?;
+                    let meta = idx.find_page_by_id(&item.task.source_page)?;
+                    let store = self.note_store.as_ref()?;
+                    let content = store.read(&meta.path).ok()?;
+                    let lines: Vec<&str> = content.lines().collect();
+                    let task_line = item.task.line;
+                    let ctx_start = task_line.saturating_sub(3);
+                    let ctx_end = (task_line + 4).min(lines.len());
+                    Some(lines[ctx_start..ctx_end].join("\n"))
+                });
+
+                Some(render::AgendaFrame {
+                    overdue,
+                    today,
+                    upcoming,
+                    selected_index: state.selected_index,
+                    total_open: state.items.len(),
+                    total_pages: state
+                        .items
+                        .iter()
+                        .map(|i| &i.source_title)
+                        .collect::<std::collections::HashSet<_>>()
+                        .len(),
+                    preview,
+                })
+            } else {
+                None
+            },
+            inline_menu: if matches!(self.vim_state.mode(), vim::Mode::Command) {
+                let input = self.vim_state.pending_keys();
+
+                // Detect argument completion: "theme <partial>"
+                let (items, selected) = if let Some(arg_prefix) = input.strip_prefix("theme ") {
+                    let theme_names = theme::THEME_NAMES;
+                    let items: Vec<render::InlineMenuItem> = theme_names
+                        .iter()
+                        .filter(|name| arg_prefix.is_empty() || name.starts_with(arg_prefix))
+                        .map(|name| render::InlineMenuItem {
+                            label: name.to_string(),
+                            right: None,
+                        })
+                        .collect();
+                    (items, 0)
+                } else {
+                    let items: Vec<render::InlineMenuItem> = EX_COMMANDS
+                        .iter()
+                        .filter(|(cmd, _)| input.is_empty() || cmd.starts_with(input))
+                        .map(|(cmd, desc)| render::InlineMenuItem {
+                            label: cmd.to_string(),
+                            right: Some(desc.to_string()),
+                        })
+                        .collect();
+                    (items, 0)
+                };
+
+                if !items.is_empty() {
+                    Some(render::InlineMenuFrame {
+                        items,
+                        selected,
+                        anchor: render::InlineMenuAnchor::CommandLine,
+                        hint: None,
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            },
+            which_key: {
+                if !show_wk {
+                    None
+                } else if matches!(self.vim_state.mode(), vim::Mode::Command) {
+                    // Command mode: use inline_menu instead (see inline_menu field below)
+                    None
+                } else if self.leader_keys.len() > 1 {
+                    let lookup_keys: Vec<types::KeyEvent> = self.leader_keys[1..].to_vec();
+                    match self.which_key_tree.lookup(&lookup_keys) {
+                        which_key::WhichKeyLookup::Prefix(entries) => {
+                            let prefix = self
+                                .leader_keys
+                                .iter()
+                                .map(|k| k.to_string())
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            Some(render::WhichKeyFrame {
+                                entries: entries
+                                    .into_iter()
+                                    .map(|e| render::WhichKeyEntry {
+                                        key: e.key,
+                                        label: e.label,
+                                        is_group: e.is_group,
+                                    })
+                                    .collect(),
+                                prefix,
+                                context: render::WhichKeyContext::Leader,
+                            })
+                        }
+                        _ => None,
+                    }
+                } else if self.leader_keys.len() == 1 {
+                    let entries = self.which_key_tree.lookup(&[]);
+                    match entries {
+                        which_key::WhichKeyLookup::Prefix(entries) => Some(render::WhichKeyFrame {
+                            entries: entries
+                                .into_iter()
+                                .map(|e| render::WhichKeyEntry {
+                                    key: e.key,
+                                    label: e.label,
+                                    is_group: e.is_group,
+                                })
+                                .collect(),
+                            prefix: "SPC".to_string(),
+                            context: render::WhichKeyContext::Leader,
+                        }),
+                        _ => None,
+                    }
+                } else {
+                    // Vim grammar which-key: show motions/text objects when an operator is pending
+                    let pending = self.vim_state.pending_keys();
+                    let op_char = match pending {
+                        "d" => Some("d"),
+                        "c" => Some("c"),
+                        "y" => Some("y"),
+                        ">" => Some(">"),
+                        "<" => Some("<"),
+                        _ => None,
+                    };
+                    if let Some(op) = op_char {
+                        let op_name = match op {
+                            "d" => "delete",
+                            "c" => "change",
+                            "y" => "yank",
+                            ">" => "indent",
+                            "<" => "dedent",
+                            _ => op,
+                        };
+                        let mut entries = vec![
+                            // Motions
+                            render::WhichKeyEntry {
+                                key: "w".into(),
+                                label: "word".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "b".into(),
+                                label: "back word".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "e".into(),
+                                label: "end of word".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "$".into(),
+                                label: "end of line".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "0".into(),
+                                label: "start of line".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "j".into(),
+                                label: "line down".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "k".into(),
+                                label: "line up".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "gg".into(),
+                                label: "top of file".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "G".into(),
+                                label: "end of file".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "%".into(),
+                                label: "matching bracket".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "f…".into(),
+                                label: "find char".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "t…".into(),
+                                label: "till char".into(),
+                                is_group: false,
+                            },
+                            // Text objects
+                            render::WhichKeyEntry {
+                                key: "iw".into(),
+                                label: "inner word".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "aw".into(),
+                                label: "a word".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "ip".into(),
+                                label: "inner paragraph".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "ap".into(),
+                                label: "a paragraph".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "il".into(),
+                                label: "inner link".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "al".into(),
+                                label: "a link".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "i#".into(),
+                                label: "inner tag".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "a#".into(),
+                                label: "a tag".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "i@".into(),
+                                label: "inner timestamp".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "ih".into(),
+                                label: "inner heading".into(),
+                                is_group: false,
+                            },
+                            render::WhichKeyEntry {
+                                key: "ah".into(),
+                                label: "a heading".into(),
+                                is_group: false,
+                            },
+                        ];
+                        entries.push(render::WhichKeyEntry {
+                            key: op.to_string(),
+                            label: format!("{op_name} line ({op}{op})"),
+                            is_group: false,
+                        });
+                        Some(render::WhichKeyFrame {
+                            entries,
+                            prefix: op.to_string(),
+                            context: render::WhichKeyContext::VimOperator {
+                                operator: op.to_string(),
+                            },
+                        })
+                    } else {
+                        None
+                    }
+                }
+            }, // which_key
+            date_picker: None,
+            dialog: match &self.active_dialog {
+                Some(ActiveDialog::FileChanged { path, selected, .. }) => {
+                    let filename = path
+                        .file_name()
+                        .map(|f| f.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "file".to_string());
+                    Some(render::DialogFrame {
+                        message: format!("{} changed on disk. Reload?", filename),
+                        choices: vec!["Reload".to_string(), "Keep buffer".to_string()],
+                        selected: *selected,
+                    })
+                }
+                None => None,
+            },
+            notifications: self
+                .notifications
+                .iter()
+                .rev()
+                .take(3)
+                .rev()
+                .cloned()
+                .collect(),
+            scrolloff: self.config.scrolloff,
+        }
+    }
+
+    pub(crate) fn render_buffer_lines(&self, buf: &buffer::Buffer) -> Vec<render::RenderedLine> {
+        let range = self.viewport.visible_range();
+        let mut lines = Vec::new();
+        let line_count = buf.len_lines();
+
+        // Compute line context (frontmatter/code block state) from the start
+        // of the document up to and through the visible range.
+        let scan_end = if range.end < line_count {
+            range.end
+        } else {
+            line_count
+        };
+        let mut in_frontmatter = false;
+        let mut in_code_block = false;
+        let mut code_fence_lang: Option<String> = None;
+        let mut seen_first_delimiter = false;
+
+        for line_idx in 0..scan_end {
+            let line_text = buf.line(line_idx).to_string();
+            let trimmed = line_text.trim();
+
+            // Track frontmatter: first line must be "---", closed by next "---"
+            if line_idx == 0 && trimmed == "---" {
+                in_frontmatter = true;
+                seen_first_delimiter = true;
+            } else if in_frontmatter && seen_first_delimiter && trimmed == "---" {
+                // This line is still inside frontmatter (closing delimiter),
+                // but after it we're out.
+                if line_idx >= range.start {
+                    let spans = self.parser.highlight_line(
+                        &line_text,
+                        &parser::traits::LineContext {
+                            in_code_block: false,
+                            in_frontmatter: true,
+                            code_fence_lang: None,
+                        },
+                    );
+                    lines.push(render::RenderedLine {
+                        line_number: line_idx,
+                        text: line_text,
+                        spans,
+                    });
+                }
+                in_frontmatter = false;
+                continue;
+            }
+
+            // Track code fences
+            if !in_frontmatter && trimmed.starts_with("```") {
+                if in_code_block {
+                    in_code_block = false;
+                    code_fence_lang = None;
+                } else {
+                    in_code_block = true;
+                    let lang = trimmed[3..].trim();
+                    code_fence_lang = if lang.is_empty() {
+                        None
+                    } else {
+                        Some(lang.to_string())
+                    };
+                }
+            }
+
+            if line_idx >= range.start {
+                let spans = self.parser.highlight_line(
+                    &line_text,
+                    &parser::traits::LineContext {
+                        in_code_block,
+                        in_frontmatter,
+                        code_fence_lang: code_fence_lang.clone(),
+                    },
+                );
+                lines.push(render::RenderedLine {
+                    line_number: line_idx,
+                    text: line_text,
+                    spans,
+                });
+            }
+        }
+        lines
+    }
+
+    pub(crate) fn cursor_position(&self) -> (usize, usize) {
+        if let Some(page_id) = &self.active_page {
+            if let Some(buf) = self.buffer_mgr.get(page_id) {
+                let rope = buf.text();
+                let len = rope.len_chars();
+                if len == 0 {
+                    return (0, 0);
+                }
+                // In insert mode, cursor can be at len_chars() (append position)
+                let clamped = if matches!(self.vim_state.mode(), vim::Mode::Insert) {
+                    self.cursor.min(len)
+                } else {
+                    self.cursor.min(len.saturating_sub(1))
+                };
+                if clamped == len {
+                    // Cursor at append position — find last line
+                    let last_line = rope.len_lines().saturating_sub(1);
+                    let line_start = rope.line_to_char(last_line);
+                    let col = clamped - line_start;
+                    return (last_line, col);
+                }
+                let line = rope.char_to_line(clamped);
+                let line_start = rope.line_to_char(line);
+                let col = clamped - line_start;
+                // If clamped landed on a trailing newline and there's an empty
+                // last line after it, place the cursor there instead. This
+                // matches Vim's behavior where the block cursor can sit on an
+                // empty final line (e.g. after `G` or `j`).
+                if rope.char(clamped) == '\n' && line + 1 < rope.len_lines() {
+                    let next_line_start = rope.line_to_char(line + 1);
+                    let next_line_len = rope.line(line + 1).len_chars();
+                    if next_line_len == 0 && next_line_start == len {
+                        return (line + 1, 0);
+                    }
+                }
+                return (line, col);
+            }
+        }
+        (0, 0)
+    }
+}
