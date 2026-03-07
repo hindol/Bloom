@@ -1192,37 +1192,12 @@ impl BloomEditor {
         self.wizard.is_some()
     }
 
-    /// Poll the background indexer for completion. Called from the event loop.
+    /// Poll the background indexer for completion (convenience for tests).
     /// Returns true if indexing just completed.
     pub fn poll_indexer(&mut self) -> bool {
         if let Some(rx) = &self.indexer_rx {
             if let Ok(complete) = rx.try_recv() {
-                self.indexing = false;
-                let t = &complete.timing;
-                let message = format!(
-                    "Index ready — {} files, {}ms",
-                    t.files_scanned, t.total_ms,
-                );
-                self.last_index_timing = Some(index::indexer::IndexTiming {
-                    scan_ms: t.scan_ms,
-                    read_parse_ms: t.read_parse_ms,
-                    write_ms: t.write_ms,
-                    total_ms: t.total_ms,
-                    files_scanned: t.files_scanned,
-                    files_changed: t.files_changed,
-                });
-                self.notifications.push(render::Notification {
-                    message,
-                    level: render::NotificationLevel::Info,
-                    expires_at: Instant::now() + std::time::Duration::from_secs(4),
-                });
-                // Reload the index connection to pick up changes from the indexer thread
-                if let Some(vault_root) = &self.vault_root {
-                    let index_path = vault_root.join(".index.db");
-                    if let Ok(idx) = index::Index::open(&index_path) {
-                        self.index = Some(idx);
-                    }
-                }
+                self.handle_index_complete(complete);
                 return true;
             }
         }
@@ -1386,114 +1361,26 @@ impl BloomEditor {
         earliest
     }
 
-    /// Drain DiskWriter ack channel. Marks buffers clean when their write completes.
+    /// Drain DiskWriter ack channel (convenience for tests/legacy callers).
     pub fn poll_write_completions(&mut self) {
-        if let Some(rx) = &self.write_complete_rx {
-            while let Ok(wc) = rx.try_recv() {
-                // Record fingerprint for the watcher to consume
-                self.last_write_fingerprints.insert(wc.path.clone(), (wc.mtime, wc.size));
-                // Mark clean immediately if the buffer still matches what was written
-                if let Some(page_id) = self.buffer_mgr.find_by_path(&wc.path).cloned() {
-                    if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
-                        buf.mark_clean();
-                    }
-                }
-            }
+        let events: Vec<_> = self.write_complete_rx.as_ref()
+            .map(|rx| rx.try_iter().collect())
+            .unwrap_or_default();
+        for wc in events {
+            self.handle_write_complete(wc);
         }
     }
 
-    /// Drain file watcher events, debounce, and forward to the indexer thread.
-    /// Returns true if a batch was sent (triggers needs_render for ⟳ indicator).
+    /// Drain file watcher events and flush debounce (convenience for tests/legacy callers).
+    /// Returns true if a batch was sent to the indexer.
     pub fn poll_file_events(&mut self) -> bool {
-        // Drain watcher channel (receiver obtained once in init_vault)
-        if let Some(rx) = &self.watcher_rx {
-            while let Ok(event) = rx.try_recv() {
-                let path = match &event {
-                    store::traits::FileEvent::Created(p)
-                    | store::traits::FileEvent::Modified(p)
-                    | store::traits::FileEvent::Deleted(p) => p.clone(),
-                    store::traits::FileEvent::Renamed { to, .. } => to.clone(),
-                };
-                // Only .md files in pages/ or journal/
-                if path.extension().and_then(|e| e.to_str()) != Some("md") {
-                    continue;
-                }
-                if let Some(vault_root) = &self.vault_root {
-                    if let Ok(rel) = path.strip_prefix(vault_root) {
-                        let first = rel.components().next()
-                            .and_then(|c| c.as_os_str().to_str());
-                        if matches!(first, Some("pages") | Some("journal")) {
-                            // Check if this file has an open buffer
-                            if let Some(page_id) = self.buffer_mgr.find_by_path(&path).cloned() {
-                                // Tier 1: stat() vs recorded write fingerprint (no file I/O)
-                                let is_own_write = if let Some((recorded_mtime, recorded_size)) = self.last_write_fingerprints.remove(&path) {
-                                    std::fs::metadata(&path)
-                                        .map(|meta| {
-                                            meta.len() == recorded_size
-                                                && meta.modified().ok() == Some(recorded_mtime)
-                                        })
-                                        .unwrap_or(false)
-                                } else {
-                                    false
-                                };
-
-                                if is_own_write {
-                                    // Our own write confirmed by fingerprint — already marked
-                                    // clean in poll_write_completions, nothing else to do.
-                                } else {
-                                    // Tier 2: read file, compare content
-                                    if let Ok(disk_content) = std::fs::read_to_string(&path) {
-                                        let buf_content = self.buffer_mgr.get(&page_id)
-                                            .map(|b| b.text().to_string());
-                                        if buf_content.as_deref() == Some(disk_content.as_str()) {
-                                            // Content matches — likely our save but fingerprint
-                                            // was consumed or clock skewed. Mark clean.
-                                            if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
-                                                buf.mark_clean();
-                                            }
-                                        } else {
-                                            let is_dirty = self.buffer_mgr.get(&page_id)
-                                                .map_or(false, |b| b.is_dirty());
-                                            if is_dirty {
-                                                // Dirty buffer, different content: real conflict
-                                                self.active_dialog = Some(ActiveDialog::FileChanged {
-                                                    page_id,
-                                                    path: path.clone(),
-                                                    selected: 0,
-                                                });
-                                            } else {
-                                                // Clean buffer, different content: external change
-                                                self.buffer_mgr.reload(&page_id, &disk_content);
-                                                self.cursor = 0;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            self.pending_file_events.insert(rel.to_path_buf());
-                            self.file_event_deadline =
-                                Some(Instant::now() + std::time::Duration::from_millis(300));
-                        }
-                    }
-                }
-            }
+        let events: Vec<_> = self.watcher_rx.as_ref()
+            .map(|rx| rx.try_iter().collect())
+            .unwrap_or_default();
+        for event in events {
+            self.handle_file_event(event);
         }
-
-        // Check if debounce timer has fired
-        if let Some(deadline) = self.file_event_deadline {
-            if Instant::now() >= deadline && !self.pending_file_events.is_empty() {
-                let paths: Vec<std::path::PathBuf> =
-                    self.pending_file_events.drain().collect();
-                self.file_event_deadline = None;
-                if let Some(tx) = &self.indexer_tx {
-                    let _ = tx.send(index::indexer::IndexRequest::IncrementalBatch(paths));
-                    self.indexing = true;
-                    return true;
-                }
-            }
-        }
-
-        false
+        self.flush_file_event_debounce()
     }
 
     /// Show vault and index stats as a notification.
@@ -3655,7 +3542,7 @@ impl BloomEditor {
 
             if let Some(tx) = &self.autosave_tx {
                 // Route through DiskWriter (same path as autosave).
-                // DiskWriter will send WriteComplete → poll_write_completions marks clean.
+                // DiskWriter will send WriteComplete → handle_write_complete marks clean.
                 let _ = tx.send(store::disk_writer::WriteRequest {
                     path,
                     content,
