@@ -1,3 +1,10 @@
+//! Background indexer thread.
+//!
+//! Runs on a dedicated OS thread, listening for [`IndexRequest`] messages
+//! (full rebuild, incremental batch, shutdown). Uses file fingerprints for
+//! change detection and [`rayon`] for parallel markdown parsing. Sends
+//! [`IndexComplete`] back to the UI thread on completion.
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;

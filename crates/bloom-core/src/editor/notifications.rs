@@ -1,3 +1,9 @@
+//! Notification stack and history.
+//!
+//! Info notifications auto-expire after 4 s, warnings after 8 s, and errors
+//! persist until dismissed. At most 3 notifications are visible at once; older
+//! ones are pushed into a rolling 100-entry history for the stats display.
+
 use std::time::Instant;
 
 use crate::*;

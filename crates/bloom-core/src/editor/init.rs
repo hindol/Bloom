@@ -1,3 +1,9 @@
+//! Vault initialization and startup.
+//!
+//! Opens or creates the vault directory, sets up the SQLite index, journal,
+//! template engine, file store, background disk-writer thread, and file watcher.
+//! Routes startup to the setup wizard, journal, or session restore as appropriate.
+
 use crate::*;
 
 /// Set the hidden file attribute on Windows.

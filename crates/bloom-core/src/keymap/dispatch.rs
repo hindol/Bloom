@@ -10,6 +10,11 @@ use super::platform::platform_shortcut;
 // Action — the central action type for the whole editor
 // ---------------------------------------------------------------------------
 
+/// The central action enum for the editor.
+///
+/// Every user interaction ultimately resolves to one or more `Action` values
+/// that [`BloomEditor`](crate::BloomEditor) executes: edits, motions, mode
+/// changes, picker operations, window management, and more.
 #[derive(Debug, Clone)]
 pub enum Action {
     // Buffer edits
@@ -65,6 +70,7 @@ pub struct MotionResult {
     pub extend_selection: bool,
 }
 
+/// Identifies which picker to open (pages, buffers, tags, templates, etc.).
 #[derive(Debug, Clone)]
 pub enum PickerKind {
     FindPage,

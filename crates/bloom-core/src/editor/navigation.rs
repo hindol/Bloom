@@ -1,3 +1,9 @@
+//! Page navigation and link following.
+//!
+//! Opens pages by ID or file path, follows `[[id|text]]` wiki-links under the
+//! cursor, navigates journal entries by date, and tracks frontier access for
+//! search ranking. Also provides block-link yanking to clipboard.
+
 use crate::parser::traits::DocumentParser;
 use crate::*;
 

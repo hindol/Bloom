@@ -1,3 +1,9 @@
+//! Picker item collection and selection.
+//!
+//! Populates [`GenericPickerItem`](crate::GenericPickerItem) lists for each
+//! [`PickerKind`](crate::keymap::dispatch::PickerKind) (pages, buffers, tags,
+//! templates, themes, …) and handles selection, confirmation, and cancellation.
+
 use crate::parser::traits::DocumentParser;
 use crate::*;
 

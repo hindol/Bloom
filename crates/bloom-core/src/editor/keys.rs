@@ -1,3 +1,9 @@
+//! Key event dispatch and input routing.
+//!
+//! Processes each [`KeyEvent`](crate::types::KeyEvent) through the modal dispatch
+//! pipeline: wizard → dialog → picker → quick-capture → leader sequences →
+//! Vim state machine → ex-command line. Handles all mode-specific input logic.
+
 use std::time::Instant;
 
 use crate::editor::commands::EX_COMMANDS;
@@ -5,7 +11,7 @@ use crate::editor::pickers::picker_kind_key;
 use crate::*;
 
 impl BloomEditor {
-    /// Process a key event
+    /// Process a key event.
     pub fn handle_key(&mut self, key: types::KeyEvent) -> Vec<keymap::dispatch::Action> {
         // If wizard is active, route all keys there
         if self.wizard.is_some() {

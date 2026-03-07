@@ -1,3 +1,10 @@
+//! Render frame construction.
+//!
+//! Assembles a complete [`RenderFrame`](crate::render::RenderFrame) from current
+//! editor state — pane layout, visible lines, cursor, status bar, picker overlay,
+//! which-key drawer, and notifications. The frame is UI-agnostic; frontends
+//! (TUI / GUI) consume it without any core logic.
+
 use crate::editor::commands::EX_COMMANDS;
 use crate::*;
 

@@ -18,7 +18,7 @@
 
 ## Layered Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────┐
 │                  Frontend Layer                       │
 │  (Tauri GUI / TUI / MCP Server — all swappable)      │
@@ -61,7 +61,7 @@
 
 The core library produces a `RenderFrame` — a UI-agnostic snapshot of everything to draw. Frontends never query editor state directly; they consume frames. The core owns layout computation (Vim/Emacs model); the TUI reads positions from the frame.
 
-```
+```rust,ignore
 terminal.draw(|f| {
     let (w, h) = f.area();
     let frame = editor.render(w, h);    // core computes layout for this exact size
@@ -98,7 +98,7 @@ This means:
 
 The TUI render loop runs synchronously on the UI thread at ~60fps (or on input):
 
-```
+```rust,ignore
 loop {
     terminal.draw(|f| {
         let area = f.area();                        // actual terminal dimensions
@@ -117,7 +117,7 @@ ratatui uses **differential rendering** — it maintains an in-memory buffer and
 
 Each frame follows a three-layer painting strategy:
 
-```
+```text
 Layer 1: Clear + Background    ← writes ' ' with bg to every cell (clean slate)
 Layer 2: Pane content          ← editor lines, status bars, written into pane rects
 Layer 3: Overlays              ← picker, agenda, dialog, notification (drawn last, wins)
@@ -144,7 +144,7 @@ The viewport height is never guessed or stored separately — it's derived from 
 
 All content — editor, picker preview, agenda tasks — uses the same highlighting path:
 
-```
+```text
                         ┌─────────────────────┐
                         │     text line        │
                         └──────────┬──────────┘
@@ -181,7 +181,7 @@ Search match highlighting overlays on top via `render::search_highlight::highlig
 
 ## Threading Model
 
-```
+```text
 ┌──────────────────────────────────────────────────────┐
 │                    UI Thread                          │
 │                                                      │
@@ -235,7 +235,7 @@ Search match highlighting overlays on top via `render::search_highlight::highlig
 
 The indexer is a **long-lived background thread** that keeps the SQLite index in sync with the vault. It processes two kinds of requests from the UI thread:
 
-```
+```text
 UI Thread                              Indexer Thread
     │                                       │
     │  FullRebuild ────────────────────────▶ │  Invalidate all fingerprints,
@@ -253,7 +253,7 @@ UI Thread                              Indexer Thread
 
 **Long-lived loop:** The indexer thread starts on `init_vault()` and runs until the editor exits. On startup it performs the initial incremental scan (same as before). Then it blocks on the request channel, waking only when the UI forwards file changes or a full rebuild.
 
-```
+```text
 Indexer Thread
     │
     ├── Startup: run_incremental() — scan all files, compare fingerprints
@@ -281,7 +281,7 @@ Indexer Thread
 
 The file watcher detects changes on disk. The UI thread debounces them and forwards batches to the indexer:
 
-```
+```text
 File Watcher (OS thread)
     │
     │  FileEvent::Modified("pages/rust-notes.md")

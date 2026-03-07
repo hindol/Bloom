@@ -9,6 +9,11 @@ pub use crate::parser::traits::{Style, StyledSpan};
 // Top-level render frame
 // ---------------------------------------------------------------------------
 
+/// Complete snapshot of everything a frontend needs to paint one frame.
+///
+/// Produced by [`BloomEditor::render`](crate::BloomEditor::render) each tick.
+/// Contains pane layout, cursor state, modal overlays (picker, agenda,
+/// which-key drawer), and the current notification stack.
 pub struct RenderFrame {
     pub panes: Vec<PaneFrame>,
     pub maximized: bool,
@@ -27,6 +32,10 @@ pub struct RenderFrame {
 // Pane
 // ---------------------------------------------------------------------------
 
+/// A single editor pane within the render frame.
+///
+/// Contains the visible lines, cursor state, scroll offset, status bar, and
+/// layout rect. Frontends iterate over panes to render the editor area.
 pub struct PaneFrame {
     pub id: PaneId,
     pub kind: PaneKind,
@@ -313,6 +322,9 @@ impl Default for StatusBarFrame {
 // Notification
 // ---------------------------------------------------------------------------
 
+/// A transient notification shown to the user.
+///
+/// Info (4 s) and Warning (8 s) auto-expire; Errors persist until dismissed.
 #[derive(Clone)]
 pub struct Notification {
     pub message: String,
@@ -322,6 +334,7 @@ pub struct Notification {
     pub created_at: Instant,
 }
 
+/// Severity level for notifications — determines color coding and expiry.
 #[derive(Clone, PartialEq)]
 pub enum NotificationLevel {
     Info,

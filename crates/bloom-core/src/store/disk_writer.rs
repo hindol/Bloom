@@ -1,3 +1,9 @@
+//! Debounced atomic disk writer.
+//!
+//! Coalesces multiple [`WriteRequest`]s per path within a configurable debounce
+//! window, then performs an atomic write sequence (temp file → fsync → rename)
+//! to prevent data corruption. Sends a [`WriteComplete`] ack per successful write.
+
 use crossbeam::channel;
 use std::collections::HashMap;
 use std::fs;
@@ -5,6 +11,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
 
+/// A write request sent from the editor to the [`DiskWriter`] thread.
 pub struct WriteRequest {
     pub path: PathBuf,
     pub content: String,
@@ -18,6 +25,11 @@ pub struct WriteComplete {
     pub size: u64,
 }
 
+/// Debounced atomic disk writer running on a dedicated thread.
+///
+/// Coalesces multiple writes per path within a configurable debounce window,
+/// then performs temp → fsync → rename to prevent corruption. Create via
+/// [`new`](Self::new), then spawn with [`start`](Self::start) on an OS thread.
 pub struct DiskWriter {
     rx: channel::Receiver<WriteRequest>,
     ack_tx: channel::Sender<WriteComplete>,

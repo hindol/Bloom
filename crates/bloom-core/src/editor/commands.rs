@@ -1,3 +1,9 @@
+//! Ex-command dispatch and action registration.
+//!
+//! Defines all `:` commands (`:w`, `:q`, `:split`, `:theme`, …) and maps
+//! action IDs from the which-key tree to editor [`Action`](crate::keymap::dispatch::Action)
+//! sequences. Also handles inline quick-capture and agenda toggle commands.
+
 use crate::*;
 
 /// All registered `:` commands with their descriptions.

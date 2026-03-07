@@ -4,7 +4,11 @@ use std::ops::Range;
 use crate::buffer::undo::UndoTree;
 use crate::types::{UndoNodeId, Version};
 
-/// A rope-based text buffer with undo support.
+/// A rope-based text buffer with branching undo/redo.
+///
+/// Wraps a [`ropey::Rope`] with version tracking, dirty-state management,
+/// and an [`UndoTree`] that supports branching history. Edit groups collapse
+/// multiple edits (e.g. an insert-mode session) into a single undo node.
 pub struct Buffer {
     rope: Rope,
     undo_tree: UndoTree,
@@ -17,6 +21,7 @@ pub struct Buffer {
 }
 
 impl Buffer {
+    /// Create a buffer from a string, initializing the undo tree root.
     pub fn from_text(text: &str) -> Self {
         let rope = Rope::from_str(text);
         let undo_tree = UndoTree::new(rope.clone());
@@ -59,6 +64,8 @@ impl Buffer {
         self.dirty = self.version != self.clean_version;
     }
 
+    /// Insert `text` at the given character index, pushing an undo node
+    /// (unless inside an edit group).
     pub fn insert(&mut self, char_idx: usize, text: &str) {
         self.rope.insert(char_idx, text);
         self.bump_version();
@@ -72,6 +79,7 @@ impl Buffer {
         }
     }
 
+    /// Delete the character range, pushing an undo node.
     pub fn delete(&mut self, range: Range<usize>) {
         self.rope.remove(range);
         self.bump_version();
@@ -80,6 +88,7 @@ impl Buffer {
         }
     }
 
+    /// Replace the character range with `text`, pushing an undo node.
     pub fn replace(&mut self, range: Range<usize>, text: &str) {
         let start = range.start;
         self.rope.remove(range);
@@ -111,6 +120,7 @@ impl Buffer {
         results
     }
 
+    /// Undo the last edit. Returns `true` if the tree moved, `false` at root.
     pub fn undo(&mut self) -> bool {
         if let Some(snapshot) = self.undo_tree.undo() {
             self.rope = snapshot;
@@ -121,6 +131,7 @@ impl Buffer {
         }
     }
 
+    /// Redo a previously undone edit. Returns `true` if the tree moved.
     pub fn redo(&mut self) -> bool {
         if let Some(snapshot) = self.undo_tree.redo() {
             self.rope = snapshot;
@@ -140,6 +151,7 @@ impl Buffer {
         self.bump_version();
     }
 
+    /// Mark the buffer as clean (matches on-disk state). Resets the dirty flag.
     pub fn mark_clean(&mut self) {
         self.clean_version = self.version;
         self.dirty = false;

@@ -1,4 +1,4 @@
-// Bloom core library
+#![doc = include_str!("../../../docs/ARCHITECTURE.md")]
 
 pub mod agenda;
 pub mod align;
@@ -36,10 +36,15 @@ use std::time::Instant;
 
 use parser::traits::DocumentParser;
 
+/// Manages all open text buffers, keyed by [`PageId`](types::PageId).
+///
+/// Each buffer is paired with [`BufferInfo`] metadata (title, path, dirty flag).
+/// The editor opens, closes, and reloads buffers through this manager.
 pub struct BufferManager {
     buffers: HashMap<String, (buffer::Buffer, BufferInfo)>,
 }
 
+/// Metadata for an open buffer: identity, display title, file path, and dirty state.
 pub struct BufferInfo {
     pub page_id: types::PageId,
     pub title: String,
@@ -127,7 +132,11 @@ impl BufferManager {
 // Channel bundle for event-driven TUI loop
 // ---------------------------------------------------------------------------
 
-/// Cloned channel receivers for use with `crossbeam::select!` in the TUI event loop.
+/// Channel bundle returned by [`BloomEditor::channels`] for the frontend event loop.
+///
+/// Each receiver corresponds to a background subsystem (disk writer, file watcher,
+/// indexer). Fields are `None` until [`BloomEditor::init_vault`] sets them up.
+/// Designed for multiplexing with `crossbeam::select!`.
 pub struct EditorChannels {
     pub write_complete_rx: Option<crossbeam::channel::Receiver<store::disk_writer::WriteComplete>>,
     pub watcher_rx: Option<crossbeam::channel::Receiver<store::traits::FileEvent>>,
@@ -138,6 +147,12 @@ pub struct EditorChannels {
 // BloomEditor — The Orchestrator
 // ---------------------------------------------------------------------------
 
+/// The top-level editor orchestrator.
+///
+/// Owns all core state — buffers, Vim state machine, window layout, index,
+/// journal, file store, and notification stack. Frontends drive the editor by
+/// calling [`handle_key`](Self::handle_key) and [`render`](Self::render) in a loop,
+/// using [`channels`](Self::channels) to multiplex background events.
 pub struct BloomEditor {
     pub config: config::Config,
     pub(crate) buffer_mgr: BufferManager,

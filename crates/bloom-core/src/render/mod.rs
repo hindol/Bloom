@@ -1,3 +1,10 @@
+//! UI-agnostic render frame types.
+//!
+//! Defines [`RenderFrame`] — the complete snapshot of everything a frontend
+//! needs to paint one frame: panes, cursor, status bar, picker overlay,
+//! which-key drawer, notifications, and modal dialogs. Core produces frames;
+//! TUI and GUI consume them without any editor logic.
+
 mod frame;
 mod layout;
 pub mod search_highlight;

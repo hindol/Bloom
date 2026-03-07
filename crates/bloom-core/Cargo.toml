@@ -5,23 +5,41 @@ edition = "2021"
 license = "AGPL-3.0-or-later"
 
 [dependencies]
+# Rope data structure for O(log n) text editing on large documents
 ropey = "1"
+# SQLite database engine (bundled) for the search/backlinks/tags index
 rusqlite = { version = "0.31", features = ["bundled"] }
+# High-performance fuzzy matching engine for the picker
 nucleo = "0.2"
+# Serialization framework (derive macros) for config, frontmatter, index entries
 serde = { version = "1", features = ["derive"] }
+# JSON serialization for session state and MCP protocol
 serde_json = "1"
+# YAML frontmatter parsing in markdown pages
 serde_yaml = "0.9"
+# TOML config file parsing
 toml = "0.8"
+# Lock-free channels for inter-thread communication (no async runtime)
 crossbeam = "0.8"
+# Filesystem watcher for live file-change detection
 notify = "6"
+# Ergonomic error type derivation
 thiserror = "2"
+# Structured logging / tracing instrumentation
 tracing = "0.1"
+# UUID v4 generation for page IDs
 uuid = { version = "1", features = ["v4"] }
+# Date/time handling for journals, timestamps, and task scheduling
 chrono = { version = "0.4", features = ["serde"] }
+# Unicode display-width calculation for correct column alignment
 unicode-width = "0.2"
+# Data-parallel iteration for the background indexer
 rayon = "1"
 
 [dev-dependencies]
+# Snapshot testing for parser and render output
 insta = "1"
+# Temporary directories for isolated file-system tests
 tempfile = "3"
+# Shared test utilities and fixtures
 bloom-test-harness = { path = "../bloom-test-harness" }

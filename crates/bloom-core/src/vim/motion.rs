@@ -1,10 +1,21 @@
+//! Motion implementations and operator range resolution.
+//!
+//! Each [`MotionType`] variant maps to a function that computes a new cursor
+//! position given the current buffer and cursor. When combined with an
+//! [`Operator`], the motion range is resolved to
+//! a character span for editing (delete, yank, change, indent, etc.).
+
 use std::ops::Range;
 
 use crate::buffer::Buffer;
 
 use super::operator::Operator;
 
-/// Types of motions the grammar parser can identify.
+/// All supported cursor motions.
+///
+/// Each variant maps to a movement function that computes a new cursor
+/// position in the buffer. Used both as standalone motions and as the
+/// target half of operator+motion commands (e.g. `dw`, `c$`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MotionType {
     Left,

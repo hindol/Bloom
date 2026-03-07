@@ -1,3 +1,9 @@
+//! Text object resolution (inner and around variants).
+//!
+//! Resolves `iw`, `a"`, `i[`, and Bloom-specific objects (`il` for links,
+//! `it` for tags, `id` for timestamps, `ih` for headings) to character ranges
+//! in the buffer. Used by the Vim grammar for `operator + text-object` commands.
+
 use crate::buffer::Buffer;
 use std::ops::Range;
 

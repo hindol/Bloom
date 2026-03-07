@@ -1,3 +1,9 @@
+//! Core Vim state machine and key processing.
+//!
+//! [`VimState`] holds the current mode, pending key buffer, register file, macro
+//! recorder, and last-command info for `.` repeat. Each key event is fed through
+//! the grammar parser; the result is a [`VimAction`] the editor applies.
+
 use std::ops::Range;
 
 use crate::buffer::{Buffer, EditOp};
@@ -57,6 +63,11 @@ pub struct RecordedCommand {
 
 // ── VimState ─────────────────────────────────────────────────────────
 
+/// The Vim state machine.
+///
+/// Tracks the current editing mode, pending key buffer, named registers,
+/// macro recorder, and last-command info for `.` repeat. Feed key events
+/// via [`process_key`](Self::process_key) to get back [`VimAction`]s.
 pub struct VimState {
     mode: Mode,
     pending: String,

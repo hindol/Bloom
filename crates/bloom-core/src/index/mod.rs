@@ -1,3 +1,9 @@
+//! SQLite-backed index for full-text search, backlinks, tags, and tasks.
+//!
+//! Each markdown page is parsed into an [`IndexEntry`] and stored in SQLite
+//! with FTS5 for search. Provides queries for backlinks, unlinked mentions,
+//! tag management, task agendas, and page metadata lookups.
+
 mod fts;
 pub mod indexer;
 mod query;
@@ -13,7 +19,11 @@ use rusqlite::Connection;
 use crate::error::BloomError;
 use crate::types::*;
 
-/// SQLite-backed index for search, backlinks, tags, and unlinked mentions.
+/// SQLite-backed index for search, backlinks, tags, and task queries.
+///
+/// Wraps a [`rusqlite::Connection`] with FTS5 full-text search. Pages are
+/// indexed via [`IndexEntry`] objects produced by the markdown parser;
+/// queries return [`SearchResult`]s, [`Backlink`]s, tags, and task agendas.
 pub struct Index {
     conn: Connection,
 }

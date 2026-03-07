@@ -1,3 +1,10 @@
+//! Vim grammar parser.
+//!
+//! Parses the pending key buffer into structured commands: optional count prefix,
+//! operator, motion or text-object, mode switches, and standalone commands.
+//! Returns [`ParseResult::Complete`], [`Incomplete`](ParseResult::Incomplete),
+//! or [`Invalid`](ParseResult::Invalid) to drive the state machine.
+
 use super::motion::MotionType;
 use super::operator::Operator;
 use super::text_object::{ObjectKind, TextObjectType};

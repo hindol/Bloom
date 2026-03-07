@@ -1,3 +1,9 @@
+//! File save, auto-save, and watcher integration.
+//!
+//! Handles explicit `:w` saves, debounced auto-save via the background
+//! [`DiskWriter`](crate::store::DiskWriter), and file-watcher events with
+//! conflict detection (external-change dialog when a buffer is dirty).
+
 use crate::*;
 
 impl BloomEditor {
