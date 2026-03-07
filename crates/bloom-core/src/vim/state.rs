@@ -800,15 +800,31 @@ fn ordered_range(a: usize, b: usize) -> Range<usize> {
 
 fn line_range(buffer: &Buffer, cursor: usize, count: usize) -> Range<usize> {
     let rope = buffer.text();
+    let total_lines = rope.len_lines();
     let start_line = rope.char_to_line(cursor);
-    let end_line = (start_line + count).min(rope.len_lines());
+    let end_line = (start_line + count).min(total_lines);
     let start = rope.line_to_char(start_line);
-    let end = if end_line < rope.len_lines() {
+    let end = if end_line < total_lines {
         rope.line_to_char(end_line)
     } else {
         buffer.len_chars()
     };
-    start..end
+
+    // If the range is non-empty, use it as-is (normal case).
+    if start < end {
+        return start..end;
+    }
+
+    // Last line is empty (start == end == len_chars). Include the preceding
+    // newline so the line is actually removed and the cursor moves up.
+    if start_line > 0 {
+        let prev_line_start = rope.line_to_char(start_line - 1);
+        let prev_line_end = rope.line_to_char(start_line);
+        // Delete from end of previous line's content (the newline) to EOF
+        prev_line_end.saturating_sub(1).max(prev_line_start)..end
+    } else {
+        start..end
+    }
 }
 
 fn indent_range(buffer: &Buffer, range: &Range<usize>) -> EditOp {
@@ -1048,6 +1064,25 @@ mod tests {
                 assert!(!actions.is_empty());
             }
             _ => panic!("expected Edit or Composite for dd, got {:?}", action),
+        }
+    }
+
+    #[test]
+    fn test_dd_last_empty_line() {
+        let mut vim = VimState::new();
+        // "hello\n" has two lines: "hello\n" and "" (trailing empty line)
+        let buf = Buffer::from_text("hello\n");
+        let cursor = buf.len_chars(); // cursor on the empty last line
+        vim.process_key(key('d'), &buf, cursor);
+        let action = vim.process_key(key('d'), &buf, cursor);
+        match action {
+            VimAction::Edit(edit) => {
+                assert!(edit.replacement.is_empty());
+                // Should delete the trailing newline, removing the empty line
+                assert!(!edit.range.is_empty(), "range should not be empty for dd on last line");
+                assert_eq!(edit.range, 5..6); // the \n at position 5
+            }
+            _ => panic!("expected Edit for dd on last empty line, got {:?}", action),
         }
     }
 
