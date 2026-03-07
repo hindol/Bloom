@@ -84,7 +84,6 @@ Please follow the existing code style: Rust 2021 edition, `thiserror` for errors
 
 | Bug | Root Cause | Impact |
 |-----|-----------|--------|
-| `x` in Normal mode deletes 2 chars instead of 1 | `ordered_range()` adds `+1` for inclusive Vim semantics, but `motion_l` already returns an exclusive position. Double-counting. Affects all operator+motion combos — needs careful audit of every motion before fixing. | All `d`+motion commands delete one char too many |
 | Picker composable filters not wired | `PickerFilter` types defined (Tag, DateRange, LinksTo, TaskStatus) but Ctrl+T/D/L/S not handled in `handle_picker_key()`. No filter pill UI. | Users can't narrow results by tag/date in pickers |
 
 ## License
