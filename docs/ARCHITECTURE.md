@@ -333,14 +333,19 @@ While the indexer runs, the editor is fully usable. Features that depend on the 
 
 All inter-thread communication uses `crossbeam` channels (bounded, lock-free):
 
+- **Input → UI**: `Sender<crossterm::Event>` — dedicated input thread calls `crossterm::event::read()` in a loop
 - **UI → Disk Writer**: `Sender<WriteRequest>` — debounced auto-save and explicit `:w` both route here
 - **Disk Writer → UI**: `Sender<WriteComplete>` — ack with mtime/size fingerprint after each successful write
 - **UI → Indexer**: `Sender<IndexRequest>` — `FullRebuild`, `IncrementalBatch(paths)`, `Shutdown`
 - **Indexer → UI**: `Sender<IndexComplete>` — completion notification with timing
-- **File Watcher → UI**: `Receiver<FileEvent>` — polled in event loop, debounced, forwarded to indexer
+- **File Watcher → UI**: `Receiver<FileEvent>` — debounced, forwarded to indexer
 - **MCP Server → UI**: `Sender<McpEditRequest>` — edit requests applied to the shared rope buffer; results sent back via a one-shot channel
 - **No shared mutable state** — threads communicate exclusively via channels
 - **SQLite access** — the indexer thread owns the read-write connection; the UI thread holds a separate read-only connection (SQLite WAL mode supports concurrent readers)
+
+### Event-Driven Rendering
+
+The TUI event loop uses `crossbeam::select!` to block until **any** channel fires or a timer expires — no polling, no frame-budget spinning. The loop renders only when state changes, sleeps with zero CPU cost between events, and wakes with sub-millisecond latency on any channel input. Timeouts are computed dynamically from active timers (notification expiry, which-key popup delay, file-event debounce).
 
 The core library has **zero dependency on any async runtime**. All concurrency is OS threads + channels. This keeps the dependency tree small, debugging straightforward, and latency predictable.
 
