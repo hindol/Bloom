@@ -91,7 +91,8 @@ pub(super) fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme
         Rect::new(content_area.x, content_area.y, content_area.width, 1),
     );
     // Place cursor at end of query input (overrides editor cursor)
-    let query_cx = content_area.x + 3 + picker.query.width() as u16;
+    let query_cx = (content_area.x + 3 + picker.query.width() as u16)
+        .min(content_area.right().saturating_sub(1));
     f.set_cursor_position((query_cx, content_area.y));
 
     // Results (between query and footer)

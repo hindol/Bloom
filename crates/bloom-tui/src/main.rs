@@ -83,21 +83,27 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
         // Render immediately when state has changed
         if needs_render {
             let theme = TuiTheme::new(editor.theme());
-            let size = terminal.size()?;
-            let frame = editor.render(size.width, size.height);
-
-            if let Some(pane) = frame.panes.iter().find(|p| p.is_active) {
-                let cursor_style = match pane.cursor.shape {
-                    bloom_core::render::CursorShape::Block => cursor::SetCursorStyle::SteadyBlock,
-                    bloom_core::render::CursorShape::Bar => cursor::SetCursorStyle::SteadyBar,
-                    bloom_core::render::CursorShape::Underline => {
-                        cursor::SetCursorStyle::SteadyUnderScore
-                    }
-                };
-                execute!(terminal.backend_mut(), cursor_style)?;
-            }
 
             terminal.draw(|f| {
+                let size = f.area();
+                let frame = editor.render(size.width, size.height);
+
+                if let Some(pane) = frame.panes.iter().find(|p| p.is_active) {
+                    let cursor_style = match pane.cursor.shape {
+                        bloom_core::render::CursorShape::Block => {
+                            cursor::SetCursorStyle::SteadyBlock
+                        }
+                        bloom_core::render::CursorShape::Bar => {
+                            cursor::SetCursorStyle::SteadyBar
+                        }
+                        bloom_core::render::CursorShape::Underline => {
+                            cursor::SetCursorStyle::SteadyUnderScore
+                        }
+                    };
+                    // Cursor style change is best-effort; ignore errors inside draw
+                    let _ = execute!(std::io::stdout(), cursor_style);
+                }
+
                 bloom_tui::render::draw(f, &frame, &theme, &editor.config);
             })?;
 

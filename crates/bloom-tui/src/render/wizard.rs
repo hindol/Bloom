@@ -471,9 +471,13 @@ pub(super) fn draw_setup_wizard(
     }
 }
 
-pub(super) fn render_line(f: &mut Frame, x: u16, y: u16, _max_w: u16, text: &str, style: RStyle) {
+pub(super) fn render_line(f: &mut Frame, x: u16, y: u16, max_w: u16, text: &str, style: RStyle) {
+    let w = (text.width() as u16).min(max_w.saturating_sub(x));
+    if w == 0 {
+        return;
+    }
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(text, style))),
-        Rect::new(x, y, text.width() as u16 + 1, 1),
+        Rect::new(x, y, w, 1),
     );
 }
