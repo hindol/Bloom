@@ -335,4 +335,77 @@ Another paragraph.
         let doc = parse(text);
         assert!(assign_block_ids(text, &doc).is_none());
     }
+
+    // -- round-trip: assign IDs, re-parse, verify parser sees them --
+
+    #[test]
+    fn round_trip_ids_parse_back() {
+        let text = "\
+---
+id: 8f3a1b2c
+title: \"Round Trip\"
+---
+
+# Heading
+
+A paragraph
+continues here.
+
+- List item one
+- [ ] Open task
+- [x] Done task
+
+> Blockquote line one
+> line two
+
+Another paragraph.
+";
+        // First pass: assign IDs.
+        let doc1 = parse(text);
+        assert!(doc1.blocks.iter().all(|b| !b.has_id), "no IDs initially");
+        let with_ids = assign_block_ids(text, &doc1).expect("should assign IDs");
+
+        // Second pass: re-parse the modified text.
+        let doc2 = parse(&with_ids);
+
+        // Every block should now have an ID.
+        for (i, block) in doc2.blocks.iter().enumerate() {
+            assert!(block.has_id, "block {i} (lines {}–{}) missing ID after round-trip", block.first_line, block.last_line);
+        }
+
+        // The parser's block_ids should match the blocks count.
+        assert_eq!(
+            doc2.block_ids.len(),
+            doc2.blocks.len(),
+            "block_ids count should equal blocks count"
+        );
+
+        // All generated IDs are unique.
+        let ids: Vec<&str> = doc2.block_ids.iter().map(|b| b.id.0.as_str()).collect();
+        let unique: std::collections::HashSet<&str> = ids.iter().copied().collect();
+        assert_eq!(ids.len(), unique.len(), "IDs should be unique: {:?}", ids);
+
+        // Third pass: re-assigning should produce no changes (idempotent).
+        assert!(
+            assign_block_ids(&with_ids, &doc2).is_none(),
+            "second assignment should be a no-op"
+        );
+    }
+
+    #[test]
+    fn round_trip_preserves_manually_set_ids() {
+        let text = "# Heading ^my-heading\n\nParagraph one\n\nParagraph two ^custom\n";
+        let doc1 = parse(text);
+        let with_ids = assign_block_ids(text, &doc1).expect("should assign to paragraph one");
+        let doc2 = parse(&with_ids);
+
+        // Manual IDs preserved.
+        let ids: Vec<&str> = doc2.block_ids.iter().map(|b| b.id.0.as_str()).collect();
+        assert!(ids.contains(&"my-heading"), "manual heading ID preserved");
+        assert!(ids.contains(&"custom"), "manual paragraph ID preserved");
+
+        // Auto-assigned ID didn't collide with manual ones.
+        let auto_id = ids.iter().find(|&&id| id != "my-heading" && id != "custom").unwrap();
+        assert_eq!(*auto_id, "a", "auto-assigned gets 'a'");
+    }
 }
