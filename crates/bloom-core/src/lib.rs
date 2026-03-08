@@ -12,6 +12,7 @@ pub mod keymap;
 pub mod linker;
 pub mod parser;
 pub mod picker;
+pub mod query;
 pub mod refactor;
 pub mod render;
 pub mod session;
