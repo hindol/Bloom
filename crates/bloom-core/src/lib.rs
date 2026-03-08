@@ -206,6 +206,8 @@ pub struct BloomEditor {
     pub(crate) active_dialog: Option<ActiveDialog>,
     // Inline completion (link picker / tag completion)
     pub(crate) inline_completion: Option<InlineCompletion>,
+    // Block ID bulk assignment (run once after first index)
+    pub(crate) block_ids_bulk_done: bool,
 }
 
 pub(crate) struct InlineCompletion {
@@ -454,6 +456,7 @@ impl BloomEditor {
             file_event_deadline: None,
             active_dialog: None,
             inline_completion: None,
+            block_ids_bulk_done: false,
             config,
         })
     }
@@ -576,6 +579,13 @@ impl BloomEditor {
             if let Ok(idx) = index::Index::open(&index_path) {
                 self.index = Some(idx);
             }
+        }
+
+        // On first indexing (files_changed == files_scanned means everything was new),
+        // assign block IDs to all pages that need them.
+        if t.files_changed > 0 && !self.block_ids_bulk_done {
+            self.block_ids_bulk_done = true;
+            self.assign_block_ids_bulk();
         }
     }
 
