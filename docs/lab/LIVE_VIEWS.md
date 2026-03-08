@@ -134,63 +134,85 @@ blocks | where modified = today                -- everything touched today
 
 ---
 
-## Embedding Queries in Notes
+## Queries Live in Pages
 
-A fenced code block with the `bloom` language tag becomes a live view:
+There is no separate "view" mode. A query is a `` ```bloom `` code block in a regular page. The page is the view.
 
-````markdown
-## My Work Dashboard
+### Example: A User-Created Agenda Page
 
-Open tasks for this week:
+The user creates a page called "Agenda" (`pages/Agenda.md`):
 
-```bloom
-tasks | where not done and due this week and tags has #work | sort due
-```
-
-Recently created pages:
-
-```bloom
-pages | sort created desc | limit 5
-```
-
-Total open tasks: `bloom: tasks | where not done | count`
-````
-
-**Rendering:**
-- In Bloom: the code block is replaced with a live, interactive result set. Results update as notes change. You can act on results (toggle tasks, jump to source) just like in the agenda.
-- In other editors / GitHub: it's a readable code block. Portable Markdown. No lock-in.
-- Inline queries (`` `bloom: ...` ``) render as inline values — numbers, short lists.
-
-**Code-block safety:** Bloom query blocks are NOT evaluated inside regular fenced code blocks or nested code blocks. Same rule as existing Bloom extensions.
-
+```markdown
+---
+id: a1b2c3d4
+title: "Agenda"
+created: 2026-03-08
+tags: []
 ---
 
-## Interaction Model
+## Overdue
 
-### As a picker/view (`SPC v v`)
+` ``bloom
+tasks | where not done and due < today | sort due
+` ``
 
-`SPC v v` opens a **live view** prompt. Type a query, see results in real-time (same as the picker, but driven by BQL instead of fuzzy match). Results are interactive — you can jump to source, toggle tasks, preview content.
+## This Week
 
-### As embedded views in notes
+` ``bloom
+tasks | where not done and due this week | sort due
+` ``
 
-Write a `bloom` code block in any note. The results render live in the editor pane.
+## No Due Date
 
-### As saved views
+` ``bloom
+tasks | where not done and due = none | sort page
+` ``
+```
 
-`:save-view <name>` saves the current query. `SPC v s` opens saved views. Saved views are stored in `config.toml` or a `views.toml` file.
+This is a normal page. It shows up in `SPC f f`. It can have prose, headings, links, tags — anything. The `` ```bloom `` blocks render as live, interactive result sets inside the page content.
 
-### Built-in views (replace hard-coded features)
+### Rendering
 
-| Current feature | BQL equivalent | Keybinding (unchanged) |
-|----------------|----------------|----------------------|
-| Agenda | `tasks \| where not done \| sort due \| group due.category` | `SPC a a` |
-| Backlinks | `links \| where to = $page` | `SPC s l` |
-| Tag browse | `tags \| sort count desc` | `SPC s t` |
-| Journal search | `journal \| sort date desc` | `SPC s j` |
+- **In Bloom:** Each `` ```bloom `` block is replaced inline with a result table. The query text is hidden (shown dimmed above the results, like a code fence label). Results update on `IndexComplete`.
+- **In other editors / GitHub:** It's a readable code block. Portable Markdown. No lock-in.
+- **Inline queries:** `` `bloom: tasks | where not done | count` `` renders as an inline number (e.g., "12").
 
-The keybindings still work exactly as today — they just invoke a BQL query under the hood. Users who never learn BQL see zero difference. Users who do can customise or create their own.
+**Code-block safety:** Bloom query blocks inside regular fenced code blocks or nested code blocks are NOT evaluated. Same rule as all Bloom extensions.
 
-`$page` is a context variable — the current page's ID. `$today` resolves to today's date.
+### Interaction Within a Query Block
+
+When the cursor enters a query result block:
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Navigate between result rows |
+| `x` | Toggle task (writes to source file via block ID, undo-able) |
+| `Enter` | Jump to source page at the block |
+| `Ctrl-o` | Jump back to the query page (same row) |
+| `u` | Undo last toggle (task reappears if it still matches the query) |
+| `q` | Move cursor out of the result block |
+
+The query block text itself is editable — you can modify the query, and after 150ms debounce the results re-render.
+
+### Built-in Query Pages
+
+Bloom ships (or auto-creates on first launch) template query pages:
+
+| Keybinding | Opens page | Default query |
+|-----------|-----------|---------------|
+| `SPC a a` | "Agenda" | `tasks \| where not done \| sort due \| group due.category` |
+
+The user can edit, rename, or delete this page. `SPC a a` simply opens the page titled "Agenda" — if deleted, the keybinding does nothing (or offers to re-create it).
+
+Other built-in features don't need dedicated pages — they already work as picker surfaces:
+
+| Feature | Mechanism |
+|---------|-----------|
+| Backlinks (`SPC s l`) | Picker (existing) |
+| Tag browse (`SPC s t`) | Picker (existing) |
+| Journal search (`SPC s j`) | Picker (existing) |
+
+`$page` is a context variable — the current page's ID. `$today` resolves to today's date. These resolve based on the page you were viewing *before* opening the query page.
 
 ---
 
@@ -198,7 +220,7 @@ The keybindings still work exactly as today — they just invoke a BQL query und
 
 ### Parser
 
-A hand-written recursive descent parser. The grammar is small enough that a parser generator is overkill. Parsing takes microseconds. Errors include position info for the live feedback UI.
+A hand-written recursive descent parser. The grammar is small enough that a parser generator is overkill. Parsing takes microseconds. Errors include position info for inline display.
 
 ### Execution
 
@@ -225,20 +247,11 @@ The BQL-to-SQL compiler is straightforward because:
 
 Execution always goes through the existing read-only index connection. No new database access patterns.
 
-### Live Feedback (`SPC v v`)
+### Live Updates
 
-The interactive query prompt debounces at 150ms. On each pause:
+Query blocks re-execute when the index changes (after `IndexComplete`). The editor re-runs queries for the visible page and re-renders if results changed. Same pattern as backlinks/agenda refresh. Cost: <1ms per query.
 
-1. **Tokenise + parse** → AST or error with position
-2. **Compile** → SQL or semantic error (unknown field, type mismatch)
-3. **Execute** → result set
-4. **Render** → results below the input, or error inline with caret
-
-This reuses the picker infrastructure: the query input is the picker input, the results are the picker results. BQL replaces the fuzzy matcher with parse → compile → execute.
-
-### Embedded Views
-
-Embedded queries (`` ```bloom ``) re-execute when the index changes (after `IndexComplete`). The UI thread re-runs visible queries and re-renders if results changed. Same pattern as backlinks/agenda refresh. Cost: <1ms per query.
+When the user edits the query text in a `` ```bloom `` block, a 150ms debounce triggers re-parse + re-execute + re-render.
 
 ### New Modules
 
@@ -247,48 +260,44 @@ Embedded queries (`` ```bloom ``) re-execute when the index changes (after `Inde
 | `query/parse.rs` | BQL tokeniser + parser → AST, with position-aware error diagnostics |
 | `query/compile.rs` | AST → SQL query string, field/type validation |
 | `query/execute.rs` | Run compiled query against index, return typed result sets |
-| `query/builtins.rs` | Built-in queries (agenda, backlinks, etc.) as BQL constants |
 | `query/mod.rs` | Public API: `parse()`, `execute()`, `QueryResult` types |
 
 ### Render Integration
 
-Query results produce a `QueryResultFrame` (new variant in `RenderFrame`) containing:
-- Column headers (derived from source defaults)
-- Typed rows (strings, dates, booleans, numbers)
-- Group headers (from `group`)
-- Source locations (page + line, for jump-to-source via block ID)
-- Actions available per row (toggle task, open page, etc.)
+The editor's content renderer detects `` ```bloom `` blocks during `render()`. For each:
 
-The TUI renders this as a table/list — same visual language as the existing agenda and picker results.
+1. Parse the query text
+2. If valid: compile → execute → produce `QueryResultBlock` (rows, columns, group headers, actions)
+3. If error: produce `QueryErrorBlock` (error message with position)
+4. The TUI renders result blocks inline where the code block would be, with the same visual language as agenda/picker results
+
+No new `RenderFrame` variant needed — query results are part of the page's `RenderedLine` stream, rendered inline with the rest of the page content.
 
 ---
 
-## Migration: Agenda as a Query
+## Migration: Agenda as a Page
 
-The current `Agenda` struct, `AgendaView`, `AgendaFrame`, and the dedicated agenda module become **thin wrappers** around a BQL query:
+The current `Agenda` struct, `AgendaView`, `AgendaFrame`, and the dedicated agenda overlay become unnecessary. The agenda is a page with query blocks.
 
-```rust
-pub const AGENDA_QUERY: &str =
-    "tasks | where not done | sort due | group due category";
-```
+On first launch (or upgrade), Bloom creates `pages/Agenda.md` with default queries. `SPC a a` opens this page. The dedicated agenda rendering code is replaced by the general query block renderer.
 
-The `SPC a a` keybinding executes this query and renders the result. The agenda module shrinks to a constant + any agenda-specific actions (toggle, reschedule).
-
-This is a **backwards-compatible** change — users see the exact same agenda. But now they can also write `tasks | where not done | where tags has "work" | sort due | group page` and get a work-specific agenda with zero core code changes.
+This is **backwards-compatible** — users see the same tasks, same grouping, same actions. But now they can edit the queries, add sections, combine with prose. The agenda is theirs.
 
 ---
 
 ## Open Questions
 
-1. **Error rendering in embedded blocks.** Show error inline with caret position? Or show the raw query text with a diagnostic underline? Leaning towards: red-tinted code block with error message below the query text.
+1. **Error rendering in query blocks.** Show error inline with caret position? Or show the raw query text with a diagnostic message below? Leaning towards: dimmed query text + error message in `critical` colour below.
 
-2. **Performance guardrails.** Should we prevent `blocks` queries on huge vaults (100K+ blocks)? Auto-add `limit 1000`? Show a warning? Leaning towards: no implicit limit, but show result count and warn if > 1000.
+2. **Performance guardrails.** Should we prevent `blocks` queries on huge vaults (100K+ blocks)? Auto-add `limit 1000`? Leaning towards: no implicit limit, but show result count and warn if > 1000.
 
 3. **Week start configuration.** `this week` range depends on week start day. Config: `[calendar] week_starts = "monday"`. Default: Monday (ISO 8601).
 
-4. **`contains` operator.** Useful for `tasks | where text contains "?"` (find questions). Not in the grammar yet. Add as a string operator alongside `=` and `!=`? Leaning towards: yes, add it — it's the only substring predicate users will need.
+4. **`contains` operator.** Useful for `tasks | where text contains "?"` (find questions). Not in the grammar yet. Leaning towards: add it — it's the only substring predicate needed.
 
-5. **`select` clause.** The original design had `select` to choose display columns. Removed for simplicity. Revisit if users request it.
+5. **Context variable resolution.** `$page` should resolve to the page the user was on *before* navigating to the query page. Need to track "previous page" in the jump list.
+
+6. **Cursor behaviour at block boundaries.** When the cursor moves from prose into a query result block, how does the transition feel? Does the cursor "enter" the block (switching to result-row navigation)? Or does `j`/`k` skip over the block entirely unless the user explicitly enters it?
 
 ---
 
