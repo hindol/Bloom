@@ -179,6 +179,7 @@ The design documents in `docs/` are the source of truth for architecture decisio
 | Picker composable filters not wired | `PickerFilter` types defined but Ctrl+T/D/L/S not handled | Users can't narrow results by tag/date in pickers |
 | No horizontal scrolling | When `word_wrap = false`, long lines truncate at pane edge | Cursor can move past visible area |
 | Inline link picker has no hint keys | `InlineMenuFrame.hint` always `None`; no `^` drill-down to blocks | No discoverability for block deep-linking from `[[` picker |
+| Undo doesn't re-assign block IDs | Undo can remove a `^id` but autosave doesn't re-add it (ensure_block_ids sees clean buffer) | Undoing a block split leaves the merged block without an ID until next edit |
 
 ## License
 
