@@ -41,9 +41,9 @@ pub(crate) fn extract_link_at_col(line: &str, col: usize) -> Option<String> {
     while j + 1 < len {
         if bytes[j] == b']' && bytes[j + 1] == b']' {
             let content = &line[content_start..j];
-            // Extract the ID (before | or # if present)
+            // Extract the ID (before | or ^ if present)
             let id = content.split('|').next().unwrap_or(content);
-            let id = id.split('#').next().unwrap_or(id);
+            let id = id.split('^').next().unwrap_or(id);
             return Some(id.to_string());
         }
         j += 1;

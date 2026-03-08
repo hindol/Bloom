@@ -222,10 +222,10 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
             }
             let content_end = i;
 
-            // Parse link content: uuid|display or uuid#section|display
+            // Parse link content: uuid|display or uuid^block|display
             let content = &line[content_start..content_end];
             let target_str = content.split('|').next().unwrap_or(content);
-            let target_str = target_str.split('#').next().unwrap_or(target_str);
+            let target_str = target_str.split('^').next().unwrap_or(target_str);
             let is_valid = crate::types::PageId::from_hex(target_str).is_some();
 
             // Split into uuid (chrome) and display text

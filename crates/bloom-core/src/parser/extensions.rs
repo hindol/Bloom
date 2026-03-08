@@ -58,10 +58,10 @@ fn parse_link_content(content: &str, line: usize, byte_range: Range<usize>) -> O
         (content, content.to_string())
     };
 
-    let (id_str, section) = if let Some(hash_pos) = target_part.find('#') {
-        let section_str = &target_part[hash_pos + 1..];
+    let (id_str, section) = if let Some(caret_pos) = target_part.find('^') {
+        let section_str = &target_part[caret_pos + 1..];
         (
-            &target_part[..hash_pos],
+            &target_part[..caret_pos],
             Some(BlockId(section_str.to_string())),
         )
     } else {
@@ -323,7 +323,7 @@ mod tests {
 
     #[test]
     fn test_parse_link_with_section() {
-        let line = "[[8f3a1b2c#intro|Text Editor]]";
+        let line = "[[8f3a1b2c^intro|Text Editor]]";
         let links = parse_links(line, 0);
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].section, Some(BlockId("intro".to_string())));

@@ -229,7 +229,7 @@ mod tests {
 
     #[test]
     fn test_document_links_with_sections() {
-        let text = "---\nid: 8f3a1b2c\ntitle: \"T\"\n---\n\nSee [[abcd1234#intro|Page]]\n";
+        let text = "---\nid: 8f3a1b2c\ntitle: \"T\"\n---\n\nSee [[abcd1234^intro|Page]]\n";
         let parser = BloomMarkdownParser::new();
         let doc = parser.parse(text);
         assert_eq!(doc.links.len(), 1);

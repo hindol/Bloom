@@ -2,6 +2,7 @@
 
 pub mod agenda;
 pub mod align;
+pub mod block_id_gen;
 pub mod buffer;
 pub mod config;
 pub mod error;
