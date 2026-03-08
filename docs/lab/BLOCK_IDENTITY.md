@@ -295,8 +295,6 @@ No new crate dependencies.
 
 2. **First-run write storm verification.** Assigning IDs to 10K pages means 10K file writes. The self-write detection (fingerprint match) should suppress watcher events, but this needs testing at scale. If the watcher floods the indexer despite fingerprints, we fall back to a background batch with progress indicator.
 
-3. **Multi-line paragraph boundaries.** How do we decide where one paragraph ends and the next begins? Blank-line separated is the obvious rule, but edge cases: a blockquote spanning 5 lines gets one ID on the first `>` line? A list item with continuation lines gets one ID on the `- ` line? Need clear rules.
-
 ---
 
 ## References
