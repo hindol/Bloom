@@ -1,8 +1,4 @@
 mod input;
-mod render;
-mod scroll;
-mod theme;
-mod wrap;
 
 use std::io;
 use std::time::{Duration, Instant};
@@ -18,7 +14,7 @@ use crossterm::{cursor, execute};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use theme::TuiTheme;
+use bloom_tui::theme::TuiTheme;
 
 fn main() -> io::Result<()> {
     // Initialize tracing subscriber (file logging) before anything else
@@ -102,7 +98,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
             }
 
             terminal.draw(|f| {
-                render::draw(f, &frame, &theme, &editor.config);
+                bloom_tui::render::draw(f, &frame, &theme, &editor.config);
             })?;
 
             needs_render = false;

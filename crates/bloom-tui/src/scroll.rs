@@ -2,6 +2,12 @@ pub struct ScreenScroll {
     pub first_screen_row: usize,
 }
 
+impl Default for ScreenScroll {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ScreenScroll {
     pub fn new() -> Self {
         Self {
