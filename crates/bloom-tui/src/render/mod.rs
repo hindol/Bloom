@@ -76,9 +76,6 @@ pub fn draw(
     }
 
     // Overlays — drawn after panes, so their set_cursor_position() wins.
-    if let Some(agenda) = &frame.agenda {
-        agenda::draw_agenda(f, area, agenda, theme, frame.scrolloff);
-    }
     if let Some(menu) = &frame.inline_menu {
         inline_menu::draw_inline_menu(f, area, menu, theme);
     }

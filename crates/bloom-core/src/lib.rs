@@ -175,7 +175,7 @@ pub struct BloomEditor {
 
     // State
     pub(crate) picker_state: Option<ActivePicker>,
-    pub(crate) agenda_state: Option<AgendaState>,
+
     pub(crate) quick_capture: Option<QuickCaptureState>,
     pub(crate) notifications: Vec<render::Notification>,
     pub(crate) notification_history: Vec<render::Notification>,
@@ -229,28 +229,6 @@ pub(crate) enum ActiveDialog {
         path: std::path::PathBuf,
         selected: usize,
     },
-}
-
-// ---------------------------------------------------------------------------
-// Agenda overlay state
-// ---------------------------------------------------------------------------
-
-pub(crate) struct AgendaState {
-    pub(crate) selected_index: usize,
-    pub(crate) items: Vec<AgendaFlatItem>,
-}
-
-pub(crate) struct AgendaFlatItem {
-    pub(crate) task: types::Task,
-    pub(crate) source_title: String,
-    pub(crate) bucket: AgendaBucket,
-}
-
-#[derive(Clone, Copy, PartialEq)]
-pub(crate) enum AgendaBucket {
-    Overdue,
-    Today,
-    Upcoming,
 }
 
 // ---------------------------------------------------------------------------
@@ -432,7 +410,7 @@ impl BloomEditor {
             note_store: None,
             buffer_mgr: BufferManager::new(),
             picker_state: None,
-            agenda_state: None,
+
             quick_capture: None,
             notifications: Vec::new(),
             notification_history: Vec::new(),

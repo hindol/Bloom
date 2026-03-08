@@ -33,11 +33,6 @@ impl BloomEditor {
             return result;
         }
 
-        // If agenda overlay is open
-        if self.agenda_state.is_some() {
-            return self.handle_agenda_key(&key);
-        }
-
         // If picker is open (all picker types, including theme)
         if self.picker_state.is_some() {
             return self.handle_picker_key(&key);
@@ -793,80 +788,6 @@ impl BloomEditor {
                 std::path::Path::new("[agenda]"),
                 &content,
             );
-        }
-    }
-
-    pub(crate) fn handle_agenda_key(
-        &mut self,
-        key: &types::KeyEvent,
-    ) -> Vec<keymap::dispatch::Action> {
-        use types::KeyCode;
-        let noop = vec![keymap::dispatch::Action::Noop];
-
-        if key.modifiers.ctrl {
-            match &key.code {
-                KeyCode::Char('n') => {
-                    if let Some(st) = &mut self.agenda_state {
-                        if !st.items.is_empty() {
-                            st.selected_index = (st.selected_index + 1).min(st.items.len() - 1);
-                        }
-                    }
-                    return noop;
-                }
-                KeyCode::Char('p') => {
-                    if let Some(st) = &mut self.agenda_state {
-                        st.selected_index = st.selected_index.saturating_sub(1);
-                    }
-                    return noop;
-                }
-                _ => return noop,
-            }
-        }
-
-        match &key.code {
-            KeyCode::Char('j') | KeyCode::Down => {
-                if let Some(st) = &mut self.agenda_state {
-                    if !st.items.is_empty() {
-                        st.selected_index = (st.selected_index + 1).min(st.items.len() - 1);
-                    }
-                }
-                noop
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                if let Some(st) = &mut self.agenda_state {
-                    st.selected_index = st.selected_index.saturating_sub(1);
-                }
-                noop
-            }
-            KeyCode::Char('q') | KeyCode::Esc => {
-                self.agenda_state = None;
-                noop
-            }
-            KeyCode::Enter => {
-                let page_id = self
-                    .agenda_state
-                    .as_ref()
-                    .and_then(|st| st.items.get(st.selected_index))
-                    .map(|item| item.task.source_page.clone());
-                self.agenda_state = None;
-                if let Some(id) = page_id {
-                    self.navigate_to_page_by_id(&id);
-                }
-                noop
-            }
-            KeyCode::Char('x') => {
-                if let Some(st) = &self.agenda_state {
-                    if let Some(item) = st.items.get(st.selected_index) {
-                        let page_id = item.task.source_page.clone();
-                        let line = item.task.line;
-                        self.toggle_task_in_page(&page_id, line);
-                    }
-                }
-                // Refresh the agenda after toggling
-                self.open_agenda();
-                noop
-            }
-            _ => noop,
         }
     }
 

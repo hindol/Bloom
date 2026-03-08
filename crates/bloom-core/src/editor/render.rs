@@ -309,57 +309,7 @@ impl BloomEditor {
             } else {
                 None
             },
-            agenda: if let Some(state) = &self.agenda_state {
-                let mut overdue = Vec::new();
-                let mut today = Vec::new();
-                let mut upcoming = Vec::new();
-                for item in &state.items {
-                    let agenda_item = render::AgendaItem {
-                        task_text: item.task.text.clone(),
-                        source_page: item.source_title.clone(),
-                        date: item.task.timestamps.iter().find_map(|ts| match ts {
-                            types::Timestamp::Due(d) => Some(*d),
-                            _ => None,
-                        }),
-                        tags: vec![],
-                    };
-                    match item.bucket {
-                        AgendaBucket::Overdue => overdue.push(agenda_item),
-                        AgendaBucket::Today => today.push(agenda_item),
-                        AgendaBucket::Upcoming => upcoming.push(agenda_item),
-                    }
-                }
-                // Build preview: read source file, extract ~5 lines around selected task
-                let preview = state.items.get(state.selected_index).and_then(|item| {
-                    use store::traits::NoteStore;
-                    let idx = self.index.as_ref()?;
-                    let meta = idx.find_page_by_id(&item.task.source_page)?;
-                    let store = self.note_store.as_ref()?;
-                    let content = store.read(&meta.path).ok()?;
-                    let lines: Vec<&str> = content.lines().collect();
-                    let task_line = item.task.line;
-                    let ctx_start = task_line.saturating_sub(3);
-                    let ctx_end = (task_line + 4).min(lines.len());
-                    Some(lines[ctx_start..ctx_end].join("\n"))
-                });
-
-                Some(render::AgendaFrame {
-                    overdue,
-                    today,
-                    upcoming,
-                    selected_index: state.selected_index,
-                    total_open: state.items.len(),
-                    total_pages: state
-                        .items
-                        .iter()
-                        .map(|i| &i.source_title)
-                        .collect::<std::collections::HashSet<_>>()
-                        .len(),
-                    preview,
-                })
-            } else {
-                None
-            },
+            agenda: None,
             inline_menu: if let Some(ic) = &self.inline_completion {
                 let items = self.collect_inline_items(ic);
                 let (cursor_line, cursor_col) = self.cursor_position();
