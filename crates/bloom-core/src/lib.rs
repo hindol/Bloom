@@ -1680,4 +1680,147 @@ mod tests {
 
         editor.handle_key(KeyEvent::esc());
     }
+
+    // -----------------------------------------------------------------------
+    // Block ID profiling
+    // -----------------------------------------------------------------------
+
+    /// Profile block ID assignment on a single large page.
+    #[test]
+    fn profile_block_id_single_large_page() {
+        use std::time::Instant;
+
+        // Generate a page with ~200 blocks (headings, paragraphs, lists, tasks).
+        let mut content = String::from("---\nid: abcdef01\ntitle: \"Large Page\"\ncreated: 2026-01-01\ntags: [test]\n---\n\n");
+        for i in 0..50 {
+            content.push_str(&format!("## Section {i}\n\n"));
+            content.push_str(&format!("Paragraph about topic {i}. This has some content\nthat spans multiple lines for realism.\n\n"));
+            content.push_str(&format!("- List item {i}a\n- [ ] Task {i} @due(2026-03-10)\n- Item {i}b with\n  continuation line\n\n"));
+        }
+
+        let parser = parser::BloomMarkdownParser::new();
+
+        // Measure parse time.
+        let t0 = Instant::now();
+        let doc = parser.parse(&content);
+        let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+        // Measure assignment time.
+        let t1 = Instant::now();
+        let result = block_id_gen::assign_block_ids(&content, &doc);
+        let assign_ms = t1.elapsed().as_secs_f64() * 1000.0;
+
+        let block_count = doc.blocks.len();
+        let ids_assigned = result.is_some();
+
+        eprintln!(
+            "profile_block_id_single_large_page: {} blocks, parse={:.2}ms, assign={:.2}ms, assigned={}",
+            block_count, parse_ms, assign_ms, ids_assigned
+        );
+
+        assert!(ids_assigned, "should have assigned IDs");
+        assert!(block_count >= 200, "expected ~200+ blocks, got {block_count}");
+        // Performance gate: parse + assign should be under 50ms for a large page.
+        assert!(
+            parse_ms + assign_ms < 50.0,
+            "too slow: parse={parse_ms:.2}ms + assign={assign_ms:.2}ms"
+        );
+    }
+
+    /// Profile block ID assignment across many pages (simulates bulk assignment).
+    #[test]
+    fn profile_block_id_bulk_1000_pages() {
+        use std::time::Instant;
+
+        let parser = parser::BloomMarkdownParser::new();
+
+        // Generate 1000 pages with ~10 blocks each.
+        let mut pages: Vec<String> = Vec::with_capacity(1000);
+        for i in 0..1000 {
+            let content = format!(
+                "---\nid: {:08x}\ntitle: \"Page {i}\"\ncreated: 2026-01-01\ntags: [test]\n---\n\n\
+                 # Page {i}\n\n\
+                 Some content for page {i}.\n\n\
+                 - Item one\n\
+                 - [ ] Task for page {i}\n\
+                 - Item two\n\n\
+                 Another paragraph with details about topic {i}.\n\n\
+                 > A blockquote for variety.\n",
+                i
+            );
+            pages.push(content);
+        }
+
+        // Measure total parse + assign time for all pages.
+        let t0 = Instant::now();
+        let mut total_blocks = 0usize;
+        let mut total_assigned = 0usize;
+        for content in &pages {
+            let doc = parser.parse(content);
+            total_blocks += doc.blocks.len();
+            if block_id_gen::assign_block_ids(content, &doc).is_some() {
+                total_assigned += 1;
+            }
+        }
+        let total_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        let per_page_ms = total_ms / pages.len() as f64;
+
+        eprintln!(
+            "profile_block_id_bulk_1000_pages: {} pages, {} blocks, {:.0}ms total, {:.3}ms/page, {} assigned",
+            pages.len(), total_blocks, total_ms, per_page_ms, total_assigned
+        );
+
+        assert_eq!(total_assigned, 1000, "all pages should get IDs");
+        // Performance gate: 1000 pages should complete under 2 seconds.
+        assert!(
+            total_ms < 2000.0,
+            "too slow: {total_ms:.0}ms for 1000 pages"
+        );
+    }
+
+    /// Profile idempotency — re-parsing pages that already have IDs.
+    #[test]
+    fn profile_block_id_idempotent_1000_pages() {
+        use std::time::Instant;
+
+        let parser = parser::BloomMarkdownParser::new();
+
+        // Generate 1000 pages, assign IDs, then re-check (should be no-op).
+        let mut pages_with_ids: Vec<String> = Vec::with_capacity(1000);
+        for i in 0..1000 {
+            let content = format!(
+                "---\nid: {:08x}\ntitle: \"Page {i}\"\ncreated: 2026-01-01\ntags: [test]\n---\n\n\
+                 # Page {i} ^a\n\n\
+                 Content for page {i}. ^b\n\n\
+                 - Item one ^c\n\
+                 - [ ] Task ^d\n\n\
+                 > Quote ^e\n",
+                i
+            );
+            pages_with_ids.push(content);
+        }
+
+        let t0 = Instant::now();
+        let mut any_changed = false;
+        for content in &pages_with_ids {
+            let doc = parser.parse(content);
+            if block_id_gen::assign_block_ids(content, &doc).is_some() {
+                any_changed = true;
+            }
+        }
+        let total_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        let per_page_ms = total_ms / pages_with_ids.len() as f64;
+
+        eprintln!(
+            "profile_block_id_idempotent_1000_pages: {:.0}ms total, {:.3}ms/page, changed={}",
+            total_ms, per_page_ms, any_changed
+        );
+
+        assert!(!any_changed, "no pages should need changes");
+        // Idempotent check should be even faster.
+        assert!(
+            total_ms < 1000.0,
+            "too slow for no-op: {total_ms:.0}ms"
+        );
+    }
 }
