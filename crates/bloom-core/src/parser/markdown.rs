@@ -39,8 +39,11 @@ impl DocumentParser for BloomMarkdownParser {
         let mut timestamps = Vec::new();
         let mut block_ids = Vec::new();
         let mut blocks = Vec::new();
+        let mut bql_blocks = Vec::new();
 
         let mut in_code_block = false;
+        let mut bql_fence_start: Option<usize> = None; // line of opening ```bql
+        let mut bql_query_lines: Vec<&str> = Vec::new();
         let mut current_section_start: Option<(u8, String, Option<BlockId>, usize)> = None;
 
         // Block tracking state: (first_line, last_line, has_id)
@@ -66,12 +69,37 @@ impl DocumentParser for BloomMarkdownParser {
             // Track code fences — flush any open block, skip contents.
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                 flush_block(&mut block_start, &mut blocks);
-                in_code_block = !in_code_block;
+                if in_code_block {
+                    // Closing fence — check if this was a BQL block.
+                    if let Some(fence_start) = bql_fence_start.take() {
+                        let query = bql_query_lines.join("\n").trim().to_string();
+                        if !query.is_empty() {
+                            bql_blocks.push(super::traits::BqlBlock {
+                                query,
+                                fence_start,
+                                fence_end: line_idx,
+                            });
+                        }
+                        bql_query_lines.clear();
+                    }
+                    in_code_block = false;
+                } else {
+                    // Opening fence — check for ```bql language hint.
+                    in_code_block = true;
+                    let lang = trimmed.trim_start_matches('`').trim_start_matches('~').trim();
+                    if lang.eq_ignore_ascii_case("bql") {
+                        bql_fence_start = Some(line_idx);
+                    }
+                }
                 line_idx += 1;
                 continue;
             }
 
             if in_code_block {
+                // Collect BQL query lines if inside a ```bql block.
+                if bql_fence_start.is_some() {
+                    bql_query_lines.push(line);
+                }
                 line_idx += 1;
                 continue;
             }
@@ -237,6 +265,7 @@ impl DocumentParser for BloomMarkdownParser {
             timestamps,
             block_ids,
             blocks,
+            bql_blocks,
         }
     }
 
@@ -470,5 +499,45 @@ mod tests {
         assert!(doc.sections.is_empty());
         assert!(doc.links.is_empty());
         assert!(doc.tags.is_empty());
+    }
+
+    #[test]
+    fn test_bql_block_detection() {
+        let text = "# Dashboard\n\n```bql\ntasks | where not done\n```\n\nSome text\n";
+        let parser = BloomMarkdownParser::new();
+        let doc = parser.parse(text);
+        assert_eq!(doc.bql_blocks.len(), 1);
+        assert_eq!(doc.bql_blocks[0].query, "tasks | where not done");
+        assert_eq!(doc.bql_blocks[0].fence_start, 2);
+        assert_eq!(doc.bql_blocks[0].fence_end, 4);
+    }
+
+    #[test]
+    fn test_bql_block_multiple() {
+        let text = "```bql\ntasks\n```\n\ntext\n\n```bql\npages | sort title\n```\n";
+        let parser = BloomMarkdownParser::new();
+        let doc = parser.parse(text);
+        assert_eq!(doc.bql_blocks.len(), 2);
+        assert_eq!(doc.bql_blocks[0].query, "tasks");
+        assert_eq!(doc.bql_blocks[1].query, "pages | sort title");
+    }
+
+    #[test]
+    fn test_bql_block_not_regular_code() {
+        let text = "```rust\nfn main() {}\n```\n\n```bql\ntasks\n```\n";
+        let parser = BloomMarkdownParser::new();
+        let doc = parser.parse(text);
+        assert_eq!(doc.bql_blocks.len(), 1);
+        assert_eq!(doc.bql_blocks[0].query, "tasks");
+    }
+
+    #[test]
+    fn test_bql_block_multiline_query() {
+        let text = "```bql\ntasks | where not done\n  and due < today\n```\n";
+        let parser = BloomMarkdownParser::new();
+        let doc = parser.parse(text);
+        assert_eq!(doc.bql_blocks.len(), 1);
+        assert!(doc.bql_blocks[0].query.contains("not done"));
+        assert!(doc.bql_blocks[0].query.contains("due < today"));
     }
 }
