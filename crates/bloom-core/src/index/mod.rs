@@ -113,6 +113,11 @@ impl Index {
         schema::create_tables(&conn)?;
         Ok(Index { conn })
     }
+
+    /// Read-only access to the underlying SQLite connection (for BQL queries).
+    pub fn connection(&self) -> &Connection {
+        &self.conn
+    }
 }
 
 #[cfg(test)]

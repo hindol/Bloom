@@ -27,6 +27,7 @@ impl BloomEditor {
                     dirty: false,
                     status_bar: render::StatusBarFrame::default(),
                     rect: render::PaneRectFrame::default(),
+                    query_blocks: Vec::new(),
                 }],
                 maximized: false,
                 hidden_pane_count: 0,
@@ -217,6 +218,7 @@ impl BloomEditor {
                     content_height: rect.content_height,
                     total_height: rect.height,
                 },
+                query_blocks: Vec::new(),
             });
         }
 
@@ -666,10 +668,15 @@ impl BloomEditor {
         let mut in_code_block = false;
         let mut code_fence_lang: Option<String> = None;
         let mut seen_first_delimiter = false;
+        let mut bql_query_lines: Vec<String> = Vec::new();
+        let mut in_bql_block = false;
+
+        // Get today's date for BQL query compilation
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
         for line_idx in 0..scan_end {
             let line_text = buf.line(line_idx).to_string();
-            let trimmed = line_text.trim();
+            let trimmed = line_text.trim().to_string();
 
             if line_idx == 0 && trimmed == "---" {
                 in_frontmatter = true;
@@ -696,17 +703,98 @@ impl BloomEditor {
 
             if !in_frontmatter && trimmed.starts_with("```") {
                 if in_code_block {
+                    // Closing fence
+                    if in_bql_block {
+                        // Execute BQL query and emit result lines
+                        if line_idx >= range.start {
+                            let query_text = bql_query_lines.join("\n");
+                            let result_lines =
+                                self.execute_bql_for_render(&query_text, &today, line_idx);
+                            lines.extend(result_lines);
+                        }
+                        bql_query_lines.clear();
+                        in_bql_block = false;
+                    } else if line_idx >= range.start {
+                        // Regular code fence closing — render normally
+                        let spans = self.parser.highlight_line(
+                            &line_text,
+                            &parser::traits::LineContext {
+                                in_code_block: true,
+                                in_frontmatter: false,
+                                code_fence_lang: code_fence_lang.clone(),
+                            },
+                        );
+                        lines.push(render::RenderedLine {
+                            line_number: line_idx,
+                            text: line_text,
+                            spans,
+                        });
+                    }
                     in_code_block = false;
                     code_fence_lang = None;
                 } else {
+                    // Opening fence
                     in_code_block = true;
                     let lang = trimmed[3..].trim();
-                    code_fence_lang = if lang.is_empty() {
-                        None
+                    if lang.eq_ignore_ascii_case("bql") {
+                        in_bql_block = true;
+                        // Render the opening fence dimmed
+                        if line_idx >= range.start {
+                            lines.push(render::RenderedLine {
+                                line_number: line_idx,
+                                text: line_text,
+                                spans: vec![parser::traits::StyledSpan {
+                                    range: 0..trimmed.len(),
+                                    style: parser::traits::Style::SyntaxNoise,
+                                }],
+                            });
+                        }
                     } else {
-                        Some(lang.to_string())
-                    };
+                        code_fence_lang = if lang.is_empty() {
+                            None
+                        } else {
+                            Some(lang.to_string())
+                        };
+                        if line_idx >= range.start {
+                            let spans = self.parser.highlight_line(
+                                &line_text,
+                                &parser::traits::LineContext {
+                                    in_code_block: true,
+                                    in_frontmatter: false,
+                                    code_fence_lang: code_fence_lang.clone(),
+                                },
+                            );
+                            lines.push(render::RenderedLine {
+                                line_number: line_idx,
+                                text: line_text,
+                                spans,
+                            });
+                        }
+                    }
                 }
+                continue;
+            }
+
+            if in_code_block {
+                if in_bql_block {
+                    // Collect BQL query lines (don't render raw query text)
+                    bql_query_lines.push(line_text.trim().to_string());
+                } else if line_idx >= range.start {
+                    let spans = self.parser.highlight_line(
+                        &line_text,
+                        &parser::traits::LineContext {
+                            in_code_block: true,
+                            in_frontmatter: false,
+                            code_fence_lang: code_fence_lang.clone(),
+                        },
+                    );
+                    lines.push(render::RenderedLine {
+                        line_number: line_idx,
+                        text: line_text,
+                        spans,
+                    });
+                }
+                continue;
             }
 
             if line_idx >= range.start {
@@ -726,6 +814,116 @@ impl BloomEditor {
             }
         }
         lines
+    }
+
+    /// Execute a BQL query and return RenderedLines for the results.
+    fn execute_bql_for_render(
+        &self,
+        query_text: &str,
+        today: &str,
+        line_number: usize,
+    ) -> Vec<render::RenderedLine> {
+        let Some(idx) = &self.index else {
+            return vec![render::RenderedLine {
+                line_number,
+                text: "  ⚠ No index available".to_string(),
+                spans: vec![parser::traits::StyledSpan {
+                    range: 0..22,
+                    style: parser::traits::Style::BrokenLink,
+                }],
+            }];
+        };
+        let conn = idx.connection();
+
+        // Get current page ID for $page resolution
+        let page_id = self
+            .active_page()
+            .and_then(|pid| Some(pid.to_hex()));
+
+        match query::run_query(query_text, conn, today, page_id.as_deref()) {
+            Ok(query::QueryResult::Rows(result)) => {
+                let mut lines = Vec::new();
+                if result.rows.is_empty() {
+                    lines.push(render::RenderedLine {
+                        line_number,
+                        text: "  (no results)".to_string(),
+                        spans: vec![parser::traits::StyledSpan {
+                            range: 0..14,
+                            style: parser::traits::Style::Tag,
+                        }],
+                    });
+                } else {
+                    for row in &result.rows {
+                        let text = format!(
+                            "  {}",
+                            row.values
+                                .iter()
+                                .map(|v| v.to_string())
+                                .collect::<Vec<_>>()
+                                .join("  │  ")
+                        );
+                        let len = text.len();
+                        lines.push(render::RenderedLine {
+                            line_number,
+                            text,
+                            spans: vec![parser::traits::StyledSpan {
+                                range: 0..len,
+                                style: parser::traits::Style::Normal,
+                            }],
+                        });
+                    }
+                    lines.push(render::RenderedLine {
+                        line_number,
+                        text: format!("  {} results", result.rows.len()),
+                        spans: vec![parser::traits::StyledSpan {
+                            range: 0..format!("  {} results", result.rows.len()).len(),
+                            style: parser::traits::Style::Tag,
+                        }],
+                    });
+                }
+                lines
+            }
+            Ok(query::QueryResult::Count(n)) => {
+                let text = format!("  {n}");
+                let len = text.len();
+                vec![render::RenderedLine {
+                    line_number,
+                    text,
+                    spans: vec![parser::traits::StyledSpan {
+                        range: 0..len,
+                        style: parser::traits::Style::Normal,
+                    }],
+                }]
+            }
+            Ok(query::QueryResult::GroupCounts(groups)) => {
+                let mut lines = Vec::new();
+                for (key, count) in &groups {
+                    let text = format!("  {key}: {count}");
+                    let len = text.len();
+                    lines.push(render::RenderedLine {
+                        line_number,
+                        text,
+                        spans: vec![parser::traits::StyledSpan {
+                            range: 0..len,
+                            style: parser::traits::Style::Normal,
+                        }],
+                    });
+                }
+                lines
+            }
+            Err(e) => {
+                let text = format!("  ⚠ {e}");
+                let len = text.len();
+                vec![render::RenderedLine {
+                    line_number,
+                    text,
+                    spans: vec![parser::traits::StyledSpan {
+                        range: 0..len,
+                        style: parser::traits::Style::BrokenLink,
+                    }],
+                }]
+            }
+        }
     }
 
     /// Compute cursor (line, col) for a given char offset in a buffer.
