@@ -82,9 +82,9 @@ One key cycles through densities. Same data, different zoom. Not a configuration
 
 ## Navigation
 
-### Calendar (`SPC j c`)
+### Calendar (`SPC H c`)
 
-`SPC j c` opens a month-grid calendar to land at an approximate date.
+`SPC H c` opens a month-grid calendar to land at an approximate date.
 
 ```
          March 2026

@@ -93,7 +93,7 @@ This is a gentle nudge, not a gate. Ignoring it is fine — the content is still
 | Namespace | Contents | Picker | Index |
 |-----------|----------|--------|-------|
 | **Pages** (`pages/`) | Named ideas with identity | `SPC f f` | Full |
-| **Journal** (`journal.md` + `.journal/`) | Daily stream, temporal | `SPC j c` (calendar) | Full |
+| **Journal** (`journal.md` + `.journal/`) | Daily stream, temporal | `SPC H c` (calendar) | Full |
 
 Pages are things you navigate by *name*. The journal is something you navigate by *time*. Mixing them in the same picker confuses both.
 

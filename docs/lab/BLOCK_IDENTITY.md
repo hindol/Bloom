@@ -220,39 +220,56 @@ Embedding chunks get stable identity via block IDs. When Bloom says "these two c
 
 ## Codebase Impact
 
-### Modified modules
-
-| Module | Change |
-|--------|--------|
-| `index/writer.rs` | Track block IDs per page; detect missing IDs on re-index |
-| `parser/` | Auto-assign IDs to blocks without them during parse→serialize |
-| `store/` | Write-back modified pages (with new/restored IDs) via disk writer |
-
 ### New module
 
 | Module | Responsibility |
 |--------|---------------|
-| `healing/` | Self-healing pipeline: detect missing IDs, git lookup, content match, restore |
+| `block_id_gen.rs` | ID generation (shortest available base36), block classification (which lines need IDs) |
+
+### Modified modules
+
+| Module | Change |
+|--------|--------|
+| `lib.rs` (save path) | Call `assign_block_ids` before writing buffer to disk |
+| `buffer/rope.rs` | Add `insert_at_end_of_line(line_idx, text)` helper if needed |
+| `index/writer.rs` | Detect missing IDs on re-index (for future self-healing handoff) |
+| `index/schema.rs` | Add `retired_block_ids` table (reserve for future self-healing) |
+
+### Future module (not in this phase)
+
+| Module | Responsibility |
+|--------|---------------|
+| `healing/` | Self-healing pipeline: detect missing IDs, git lookup, content match, restore. Runs on history thread. |
 
 ### Dependencies
 
-No new crate dependencies. Self-healing uses `gix` (already required for TIME_TRAVEL) and the existing indexer infrastructure.
+No new crate dependencies.
+
+---
+
+## Decisions
+
+1. **No opt-out.** Block IDs are fundamental to Bloom. Every feature that says "act on this thing" depends on stable identity. The IDs are nearly invisible (faded + dim, Tier 3 noise). No configuration flag.
+
+2. **Eager assignment on first run.** A vault with 10K pages gets all IDs assigned immediately during first indexing. The disk writer's fingerprint-based self-write detection suppresses file watcher re-triggers (stat match → event dropped), so 10K writes don't cause 10K re-index cycles. Needs verification at scale.
+
+3. **`^` at end of line is sufficient disambiguation.** No prefix needed. The parser requires `^` preceded by space or at start of line — this is an unambiguous position that won't collide with prose.
+
+4. **Self-healing runs on the history thread.** Detection happens in the indexer (compare old vs new block ID sets). Repair requests are sent via channel to the history thread, which does the git lookup and content match. The indexer never blocks on git. Needs profiling.
+
+5. **Non-deterministic assignment.** IDs are stored in file content, not out-of-band. A rebuild re-reads files which already contain their IDs. No need for deterministic regeneration. Simple shortest-available incrementing is fine.
+
+6. **Cross-page move detection.** When the indexer sees orphaned content in page A and identical new content in page B in the same cycle, prompt the user via a persistent notification (visible in `:messages`). Don't auto-update links.
 
 ---
 
 ## Open Questions
 
-1. **Opt-out for power users?** Some users may not want Bloom modifying their files. A `config.toml` flag like `auto_block_ids = false` could disable auto-assignment (but then day view actions, BQL result actions, and deep linking degrade). Leaning towards: always on — the IDs are nearly invisible and the benefits are too fundamental.
+1. **Self-healing profiling.** Git lookup + content match per missing ID — how much latency does this add? Needs benchmarking on the reference vault (10K pages, 18K commits). The common case (no IDs missing) is a set comparison — microseconds. The repair case should be rare.
 
-2. **Bulk assignment on first run.** A vault with 10K pages and no block IDs — the first index assigns IDs to every block in every page. That's thousands of file writes. Should this be: (a) immediate (noisy but done), (b) lazy (assign when a page is opened/saved), (c) background batch with progress indicator? Leaning towards (b) — assign on save, so only pages you touch get IDs immediately.
+2. **First-run write storm verification.** Assigning IDs to 10K pages means 10K file writes. The self-write detection (fingerprint match) should suppress watcher events, but this needs testing at scale. If the watcher floods the indexer despite fingerprints, we fall back to a background batch with progress indicator.
 
-3. **ID format.** Base-36 (`a-z0-9`) is compact but IDs like `^a3` could collide with content. Should we prefix? `^.a3`? Or is the `^` caret at end-of-line sufficient disambiguation? The current parser already handles `^block-id` syntax — need to ensure short IDs don't accidentally match inline content.
-
-4. **Performance of self-healing.** Git lookup + content match on every save adds latency to the indexer pipeline. For the common case (no IDs missing), this is just a set comparison — microseconds. For the repair case, one `gix` diff per missing ID. Should be rare and fast, but needs profiling.
-
-5. **Deterministic assignment.** "Same content, same position → same ID" means the assignment algorithm must be deterministic. Proposal: hash of (page_id, block_index) → base36, truncated. This means IDs survive `:rebuild-index` without changing.
-
-6. **Cross-page move detection.** When the indexer sees orphaned content in page A and identical new content in page B in the same cycle, should it automatically suggest updating links? Or is this too risky as a heuristic? Leaning towards: prompt the user, don't auto-update.
+3. **Multi-line paragraph boundaries.** How do we decide where one paragraph ends and the next begins? Blank-line separated is the obvious rule, but edge cases: a blockquote spanning 5 lines gets one ID on the first `>` line? A list item with continuation lines gets one ID on the `- ` line? Need clear rules.
 
 ---
 

@@ -72,9 +72,9 @@ Message: "2026-03-08 14:32 — edited Text Editor Theory, journal"
 
 The history of a single page over time.
 
-### Page History (`SPC l h`)
+### Page History (`SPC H h`)
 
-While viewing any page, `SPC l h` opens its **commit history** — a list of every version of that file, newest first.
+While viewing any page, `SPC H h` opens its **commit history** — a list of every version of that file, newest first.
 
 ```
 ═══ Text Editor Theory — History ══════════════════════════════════
@@ -115,7 +115,7 @@ When you press `Enter` on a history entry, Bloom retrieves the file content at t
 
 You can scroll, search, even yank text — but not edit. This is a snapshot, not a live document. `q` returns to the current version.
 
-### Side-by-Side Diff (`SPC l d`)
+### Side-by-Side Diff (`SPC H d`)
 
 From the history view, pressing `d` opens a **split diff** between the selected version and the current page:
 
@@ -145,7 +145,7 @@ Pressing `r` on a history entry copies that version's full content into the curr
 
 ### Block-Level History
 
-With universal block IDs (see [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md)), file time travel extends to individual blocks. Place your cursor on any block and `SPC l H` (block history) shows every version of *that specific block* across time:
+With universal block IDs (see [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md)), file time travel extends to individual blocks. Place your cursor on any block and `SPC H H` (block history) shows every version of *that specific block* across time:
 
 ```
 ═══ ^a3 — Block History ═══════════════════════════════════════════
@@ -163,18 +163,79 @@ This uses `gix` blame to trace the block ID through commits — finding every co
 
 ## Performance
 
-| Operation | Source | Cost |
-|-----------|--------|------|
-| Page history list | `gix` revwalk filtered by path | ~10-50 ms |
-| View past version | `gix` blob lookup at commit | < 5 ms |
-| Diff two versions | `gix` blob diff | < 10 ms |
-| Block history | `gix` blame on single file | ~50-100 ms |
-| Day view (cache hit) | SQLite row lookup | < 1 ms |
-| Day view (cache miss) | `gix` revwalk + tree diff | ~100-200 ms |
+### Design Target
 
-All operations run on the history thread. The UI shows a spinner for anything over ~50 ms, but in practice most operations feel instant.
+All performance estimates assume the **reference vault**: 10,000 pages (~25 MB of Markdown), 10 years of history, ~18,000 commits (~5 commits/day), ~8-10 MB git repo after pack compression.
 
-**Caching rule:** cache only when latency matters for interactive browsing. The day view is cached because `[d`/`]d` hopping needs sub-millisecond response. File history, past versions, and diffs are computed live from `gix` — fast enough and accessed infrequently.
+**Assumptions:**
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| Pages | 10,000 | Heavy long-term user |
+| Average page size | 2.5 KB | Markdown notes, not novels |
+| Total vault size | ~25 MB | 10K × 2.5 KB |
+| Daily edit volume | 5-20 pages/day, ~5 KB net change | Active daily use |
+| Commits per day | ~5 (idle-debounced) | 5-min idle window batches edits |
+| History duration | 10 years (3,650 days) | Long-term use |
+| Total commits | ~18,000 | 3,650 × 5 |
+| Git repo size (packed) | ~8-10 MB | Delta compression + zlib on text |
+| Versions per page (median) | ~20 | Most pages have light edit history |
+| Versions per block (median) | < 5 | Blocks are rarely rewritten many times |
+
+### Latency Budget
+
+The target: **every user-initiated operation completes in < 10 ms,** or the result is already pre-computed when the user asks.
+
+| Operation | Raw cost | Mitigation | User-perceived |
+|-----------|----------|------------|----------------|
+| **Commit** (auto, 5-min idle) | ~10-20 ms | Background thread, user never waits | 0 ms (invisible) |
+| **Day view (cache hit)** | < 1 ms | LRU cache in SQLite | < 1 ms ✓ |
+| **Day view (cache miss)** | ~100-200 ms | Predictive prefetch on `[d`/`]d` and calendar hover | < 1 ms (prefetched) |
+| **Page history list** | ~50-100 ms | Prefetch on `SPC l` keypress (which-key delay = free compute time) | < 10 ms ✓ |
+| **View past version** | < 5 ms | Prefetch adjacent entries while browsing history list | < 5 ms ✓ |
+| **Diff two versions** | < 10 ms | Prefetch on history list navigation | < 10 ms ✓ |
+| **Block history (blame)** | ~200-500 ms | Prefetch on `SPC H` keypress; which-key delay = free compute time | < 10 ms (prefetched) |
+| **Calendar markers** | < 1 ms | Read from day view cache | < 1 ms ✓ |
+
+### Prefetch Strategy
+
+The principle: **never compute on demand — compute before the user asks.** Two mechanisms:
+
+**1. Which-key prefix prefetch.** When the user presses a leader prefix, the history thread starts computing what that prefix's commands will need — before the user presses the second key.
+
+| Prefix | Prefetches |
+|--------|-----------|
+| `SPC H` | Page history for current page + block blame for cursor line |
+| `SPC j` | Today's journal content + yesterday's day view |
+| `SPC a` | Agenda task query results |
+
+The which-key popup appears after 300ms. The user reads it and decides for 300-800ms. Total free compute time: 600-1100ms — enough for page history and block blame.
+
+**2. Adjacency prefetch inside temporal views.** Once inside a browsing context (day view, history list, calendar), prefetch the adjacent entries in the direction of navigation.
+
+| Context | On navigate to item N | Prefetch |
+|---------|----------------------|----------|
+| Day view (`[d`/`]d`) | Opened day N | Day N-1 and N+1 |
+| History list (`j`/`k`) | Selected entry N | Blob + diff for N-1 and N+1 |
+| Calendar (arrow keys) | Hovered day N | Day view for N |
+| Calendar (month change) | Entered new month | Day views for days with `◆` markers |
+
+**What we don't prefetch:** anything outside an active temporal context. Opening a page does not prefetch its history. Moving the cursor does not prefetch block blame. These operations are infrequent enough that a one-time spinner (< 500ms) on first access is acceptable. Prefetch only kicks in once the user has entered a temporal browsing mode.
+
+### Storage Budget
+
+All history data lives in `.index/` (rebuildable, gitignored):
+
+| Component | Size (10-year reference vault) |
+|-----------|-------------------------------|
+| Git repo (`.index/.git/`) | ~8-10 MB |
+| Day view LRU cache (50 entries) | ~250 KB |
+| SQLite index (FTS5 + metadata) | ~15-20 MB |
+| **Total `.index/`** | **~25-30 MB** |
+
+Periodic `git gc` runs on the history thread during idle time (no more than once per day) to repack loose objects. This keeps the git repo compact.
+
+If `.index/` is deleted, Bloom rebuilds everything: SQLite index from files on disk, git repo from current file state (historical day views are lost but future ones accumulate again).
 
 ---
 
@@ -184,28 +245,33 @@ All operations run on the history thread. The UI shows a spinner for anything ov
 UI Thread
     │
     │  requests (page history, day view, block blame, etc.)
+    │  prefix hints (SPC H pressed → prefetch)
     │
     ▼
 History Thread (new)
     │
-    │  Owns: gix::Repository handle
-    │  Owns: day_views cache (read-write SQLite connection)
+    │  Owns: gix::Repository handle (GIT_DIR=.index/.git/)
+    │  Owns: day_view_cache + prefetch_cache (SQLite)
     │
     ├── Read queries: revwalk, blob lookup, diff, blame
     │
+    ├── Prefetch: triggered by prefix keys and navigation
+    │
     ├── Auto-commits: debounced from disk writer signals
     │
-    └── Day view computation: on-demand + predictive prefetch
+    └── Periodic git gc (idle, max once/day)
     │
     ▼
 UI Thread: render result frames
 ```
 
-The history thread owns the `gix::Repository` handle and the day view cache. Auto-commits also go through this thread — the disk writer signals it (via channel) after each successful write, and the history thread debounces these signals (5-minute idle window) before committing.
+The history thread owns the `gix::Repository` handle and all caches. Auto-commits also go through this thread — the disk writer signals it (via channel) after each successful write, and the history thread debounces these signals (5-minute idle window) before committing.
 
 ---
 
 ## Vault Structure
+
+Bloom's git repo lives inside `.index/` — separate from any user-managed `.git/` repo. This means users who `git init` their vault for backup/sync have zero conflicts with Bloom's history.
 
 ```
 ~/bloom/
@@ -217,16 +283,19 @@ The history thread owns the `gix::Repository` handle and the day view cache. Aut
 │   ├── 2026-03-07.md
 │   ├── 2026-03-06.md
 │   └── ...
-├── .git/                   ← auto-managed by Bloom via gix (user never touches)
-├── .index/                 ← SQLite index + day_views cache
-│   └── bloom.db
+├── .git/                   ← user's own repo (optional, theirs entirely)
+├── .index/                 ← Bloom internals (gitignored, rebuildable)
+│   ├── bloom.db            ← SQLite index
+│   └── .git/               ← Bloom's history repo (separate from user's)
 ├── templates/
 ├── images/
-├── .gitignore
+├── .gitignore              ← excludes .index/ (so user's git ignores Bloom internals)
 └── config.toml
 ```
 
-`.gitignore` excludes `.index/` (rebuildable) but NOT `.journal/` (archived content, should be versioned).
+Bloom opens its repo with `GIT_DIR=.index/.git/` and working tree at the vault root. The user's `.git/` (if present) is completely independent — different objects, different history, different commits. `git log` in the vault shows the user's commits, not Bloom's.
+
+`.index/` is already excluded by the auto-generated `.gitignore` (from G21), so no additional gitignore entries are needed.
 
 ---
 
@@ -270,13 +339,13 @@ Users who manage their own git workflow can set `enabled = false` — Bloom won'
 
 ## Open Questions
 
-1. **User's existing git repo.** If the vault already has a `.git/` with the user's manual commits, Bloom's auto-commits would interleave. Options: (a) Bloom uses a separate orphan branch `bloom/history`, (b) Bloom's commits use a distinct author and the user filters in their own tooling, (c) Bloom only auto-inits git if no `.git/` exists. Leaning towards (c) — respect the user's existing setup.
+1. **Commit message richness.** Auto-generated messages like "edited Text Editor Theory, journal" are useful. But should we include more? Tags changed, tasks created, links added? Richer messages = more context, but more computation per commit.
 
-2. **Commit message richness.** Auto-generated messages like "edited Text Editor Theory, journal" are useful. But should we include more? Tags changed, tasks created, links added? Richer messages = more context, but more computation per commit.
+2. **Day boundary.** What defines "a day"? Local timezone midnight? Configurable? If you work past midnight, do those edits belong to yesterday or today? Leaning towards: the day boundary is when journal rotation happens (first launch of the new calendar day), not strict midnight.
 
-3. **Storage budget.** Git packfiles are efficient, but a year of daily commits with 10K files — how large does `.git/` get? Need to benchmark. Periodic `git gc` (via `gix`) could run on the history thread during idle time.
+3. **Prefetch cancellation.** When `SPC H` triggers a prefetch but the user presses `Esc` (abandons the prefix), should the history thread cancel in-flight work? Or let it finish and cache anyway? Leaning towards: let it finish — the work is cheap and the cache may be useful next time.
 
-4. **Day boundary.** What defines "a day"? Local timezone midnight? Configurable? If you work past midnight, do those edits belong to yesterday or today? Leaning towards: the day boundary is when journal rotation happens (first launch of the new calendar day), not strict midnight.
+4. **Cold start.** A brand new vault has no git history. Time travel features show empty results gracefully. After the first day of use, the first day view is computed on journal rotation. No special cold-start logic needed beyond graceful empty states.
 
 ---
 
