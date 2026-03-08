@@ -16,6 +16,7 @@ pub struct Document {
     pub tasks: Vec<ParsedTask>,
     pub timestamps: Vec<ParsedTimestamp>,
     pub block_ids: Vec<ParsedBlockId>,
+    pub blocks: Vec<ParsedBlock>,
 }
 
 #[derive(Debug, Clone)]
@@ -72,6 +73,17 @@ pub struct ParsedTimestamp {
 pub struct ParsedBlockId {
     pub id: BlockId,
     pub line: usize,
+}
+
+/// A content block identified during parsing, for block ID assignment.
+#[derive(Debug, Clone)]
+pub struct ParsedBlock {
+    /// First line of the block (zero-based).
+    pub first_line: usize,
+    /// Last line of the block — where `^id` should be appended.
+    pub last_line: usize,
+    /// Whether any line in the block already has a `^block-id`.
+    pub has_id: bool,
 }
 
 // --- Highlighting types ---

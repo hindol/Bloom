@@ -38,30 +38,61 @@ impl DocumentParser for BloomMarkdownParser {
         let mut tasks = Vec::new();
         let mut timestamps = Vec::new();
         let mut block_ids = Vec::new();
+        let mut blocks = Vec::new();
 
         let mut in_code_block = false;
         let mut current_section_start: Option<(u8, String, Option<BlockId>, usize)> = None;
 
-        for (line_idx, &line) in lines.iter().enumerate() {
-            // Track frontmatter region (skip for extension parsing)
-            if line_idx < body_start {
-                continue;
-            }
+        // Block tracking state: (first_line, last_line, has_id)
+        let mut block_start: Option<(usize, usize, bool)> = None;
 
-            // Track code fences
+        // Flush the current block into `blocks`.
+        let flush_block =
+            |block_start: &mut Option<(usize, usize, bool)>, blocks: &mut Vec<super::traits::ParsedBlock>| {
+                if let Some((first, last, has_id)) = block_start.take() {
+                    blocks.push(super::traits::ParsedBlock {
+                        first_line: first,
+                        last_line: last,
+                        has_id,
+                    });
+                }
+            };
+
+        let mut line_idx = body_start;
+        while line_idx < lines.len() {
+            let line = lines[line_idx];
             let trimmed = line.trim_start();
-            if trimmed.starts_with("```") {
+
+            // Track code fences — flush any open block, skip contents.
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                flush_block(&mut block_start, &mut blocks);
                 in_code_block = !in_code_block;
+                line_idx += 1;
                 continue;
             }
 
             if in_code_block {
+                line_idx += 1;
                 continue;
             }
 
-            // Parse heading
+            let trimmed_end = line.trim();
+
+            // Blank lines and horizontal rules end the current block.
+            if trimmed_end.is_empty() || is_horizontal_rule(trimmed_end) {
+                flush_block(&mut block_start, &mut blocks);
+                line_idx += 1;
+                continue;
+            }
+
+            let line_bid = parse_block_id(line, line_idx);
+            let has_bid = line_bid.is_some();
+
+            // Parse heading — always a single-line block.
             if let Some(heading) = parse_heading(line) {
-                // Close the previous section
+                flush_block(&mut block_start, &mut blocks);
+
+                // Section tracking (existing logic).
                 if let Some((level, title, block_id, start_line)) = current_section_start.take() {
                     sections.push(Section {
                         level,
@@ -70,34 +101,124 @@ impl DocumentParser for BloomMarkdownParser {
                         line_range: start_line..line_idx,
                     });
                 }
-                let block = parse_block_id(line, line_idx);
                 current_section_start = Some((
                     heading.0,
                     heading.1.to_string(),
-                    block.as_ref().map(|b| b.id.clone()),
+                    line_bid.as_ref().map(|b| b.id.clone()),
                     line_idx,
                 ));
-                if let Some(b) = block {
+                if let Some(b) = line_bid {
                     block_ids.push(b);
                 }
+
+                // Heading = single-line block.
+                blocks.push(super::traits::ParsedBlock {
+                    first_line: line_idx,
+                    last_line: line_idx,
+                    has_id: has_bid,
+                });
+
+                line_idx += 1;
                 continue;
             }
 
-            // Parse extensions
+            // Parse extensions (always, for any non-heading body line).
             links.extend(parse_links(line, line_idx));
             tags.extend(parse_tags(line, line_idx));
             timestamps.extend(parse_timestamps(line, line_idx));
-
             if let Some(task) = parse_task(line, line_idx) {
                 tasks.push(task);
             }
-
-            if let Some(bid) = parse_block_id(line, line_idx) {
-                block_ids.push(bid);
+            if let Some(b) = line_bid {
+                block_ids.push(b);
             }
+
+            // Blockquote block: consecutive `>` lines.
+            if trimmed_end.starts_with('>') {
+                if let Some((_, _, _)) = &block_start {
+                    // We were in a different block type — flush it.
+                    if !is_blockquote_block(&block_start, &lines) {
+                        flush_block(&mut block_start, &mut blocks);
+                    }
+                }
+                match &mut block_start {
+                    Some((_, last, hid)) if is_blockquote_line(&lines, *last) => {
+                        // Continue existing blockquote.
+                        *last = line_idx;
+                        *hid = *hid || has_bid;
+                    }
+                    _ => {
+                        flush_block(&mut block_start, &mut blocks);
+                        block_start = Some((line_idx, line_idx, has_bid));
+                    }
+                }
+                line_idx += 1;
+                continue;
+            }
+
+            // List item: starts a new block. Continuation lines (indented past
+            // the marker, not themselves list items) extend the block.
+            if is_list_item(trimmed_end) {
+                flush_block(&mut block_start, &mut blocks);
+                let indent = line.len() - trimmed.len();
+                let mw = list_marker_width(trimmed_end);
+                let content_indent = indent + mw;
+                let mut last = line_idx;
+                let mut hid = has_bid;
+
+                // Scan ahead for continuation lines.
+                let mut j = line_idx + 1;
+                while j < lines.len() {
+                    let next = lines[j];
+                    let next_trimmed = next.trim();
+                    if next_trimmed.is_empty() {
+                        break;
+                    }
+                    let next_indent = next.len() - next.trim_start().len();
+                    if next_indent >= content_indent && !is_list_item(next_trimmed) {
+                        // Continuation: parse extensions for this line too.
+                        links.extend(parse_links(next, j));
+                        tags.extend(parse_tags(next, j));
+                        timestamps.extend(parse_timestamps(next, j));
+                        let next_bid = parse_block_id(next, j);
+                        if let Some(b) = &next_bid {
+                            block_ids.push(b.clone());
+                        }
+                        hid = hid || next_bid.is_some();
+                        last = j;
+                        j += 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                blocks.push(super::traits::ParsedBlock {
+                    first_line: line_idx,
+                    last_line: last,
+                    has_id: hid,
+                });
+                line_idx = j;
+                continue;
+            }
+
+            // Paragraph: extend current block or start a new one.
+            match &mut block_start {
+                Some((_, last, hid)) => {
+                    *last = line_idx;
+                    *hid = *hid || has_bid;
+                }
+                None => {
+                    block_start = Some((line_idx, line_idx, has_bid));
+                }
+            }
+
+            line_idx += 1;
         }
 
-        // Close last section
+        // Flush any remaining block.
+        flush_block(&mut block_start, &mut blocks);
+
+        // Close last section.
         if let Some((level, title, block_id, start_line)) = current_section_start {
             sections.push(Section {
                 level,
@@ -115,6 +236,7 @@ impl DocumentParser for BloomMarkdownParser {
             tasks,
             timestamps,
             block_ids,
+            blocks,
         }
     }
 
@@ -142,6 +264,53 @@ fn parse_heading(line: &str) -> Option<(u8, &str)> {
         return None;
     }
     Some((level as u8, line[level + 1..].trim_end()))
+}
+
+fn is_list_item(trimmed: &str) -> bool {
+    list_marker_width(trimmed) > 0
+}
+
+fn list_marker_width(trimmed: &str) -> usize {
+    let bytes = trimmed.as_bytes();
+    if bytes.len() >= 2
+        && (bytes[0] == b'-' || bytes[0] == b'*' || bytes[0] == b'+')
+        && bytes[1] == b' '
+    {
+        return 2;
+    }
+    let digit_count = bytes.iter().take_while(|b| b.is_ascii_digit()).count();
+    if digit_count > 0 && bytes.len() > digit_count + 1 {
+        let delim = bytes[digit_count];
+        if (delim == b'.' || delim == b')') && bytes.get(digit_count + 1) == Some(&b' ') {
+            return digit_count + 2;
+        }
+    }
+    0
+}
+
+fn is_horizontal_rule(trimmed: &str) -> bool {
+    if trimmed.len() < 3 {
+        return false;
+    }
+    let chars: Vec<char> = trimmed.chars().filter(|c| !c.is_whitespace()).collect();
+    if chars.len() < 3 {
+        return false;
+    }
+    let first = chars[0];
+    (first == '-' || first == '*' || first == '_') && chars.iter().all(|&c| c == first)
+}
+
+fn is_blockquote_line(lines: &[&str], idx: usize) -> bool {
+    lines.get(idx).map_or(false, |l| l.trim().starts_with('>'))
+}
+
+fn is_blockquote_block(
+    block_start: &Option<(usize, usize, bool)>,
+    lines: &[&str],
+) -> bool {
+    block_start
+        .as_ref()
+        .map_or(false, |(first, _, _)| is_blockquote_line(lines, *first))
 }
 
 #[cfg(test)]
