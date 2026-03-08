@@ -200,11 +200,7 @@ impl BloomEditor {
                     self.window_mgr.move_buffer(dir);
                 }
                 keymap::dispatch::Action::OpenAgenda => {
-                    if self.agenda_state.is_some() {
-                        self.agenda_state = None;
-                    } else {
-                        self.open_agenda();
-                    }
+                    self.open_agenda();
                 }
                 keymap::dispatch::Action::OpenUndoTree => {
                     // TODO: open undo tree in split pane
@@ -746,58 +742,58 @@ impl BloomEditor {
     // -----------------------------------------------------------------------
 
     pub(crate) fn open_agenda(&mut self) {
-        let today = chrono::Local::now().date_naive();
-        let filters = index::AgendaFilters {
-            tags: vec![],
-            page: None,
-            date_range: None,
-        };
-        let Some(idx) = &self.index else {
-            self.agenda_state = Some(AgendaState {
-                selected_index: 0,
-                items: Vec::new(),
-            });
-            return;
-        };
-        let view = self.agenda.build(today, idx, &filters);
-        let mut items = Vec::new();
-        for task in &view.overdue {
-            let source_title = idx
-                .find_page_by_id(&task.source_page)
-                .map(|m| m.title)
-                .unwrap_or_default();
-            items.push(AgendaFlatItem {
-                task: task.clone(),
-                source_title,
-                bucket: AgendaBucket::Overdue,
-            });
+        // Look for an existing page titled "Agenda"
+        if let Some(idx) = &self.index {
+            if let Some(meta) = idx.find_page_by_title("Agenda") {
+                // Already open in a buffer?
+                if self.buffer_mgr.get(&meta.id).is_some() {
+                    self.set_active_page(Some(meta.id.clone()));
+                    return;
+                }
+                // Load from disk
+                if let Some(vault_root) = &self.vault_root {
+                    let path = vault_root.join(&meta.path);
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        self.open_page_with_content(&meta.id, "Agenda", &path, &content);
+                        return;
+                    }
+                }
+            }
         }
-        for task in &view.today {
-            let source_title = idx
-                .find_page_by_id(&task.source_page)
-                .map(|m| m.title)
-                .unwrap_or_default();
-            items.push(AgendaFlatItem {
-                task: task.clone(),
-                source_title,
-                bucket: AgendaBucket::Today,
-            });
+
+        // No Agenda page exists — create one from the built-in template
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let id = crate::uuid::generate_hex_id();
+        let content = format!(
+            "---\nid: {}\ntitle: \"Agenda\"\ncreated: {}\ntags: []\n---\n\n\
+             ## Overdue\n\n\
+             ```bql\ntasks | where not done and due < today | sort due\n```\n\n\
+             ## This Week\n\n\
+             ```bql\ntasks | where not done and due this week | sort due\n```\n\n\
+             ## No Due Date\n\n\
+             ```bql\ntasks | where not done and due = none | sort page\n```\n",
+            id.to_hex(),
+            today,
+        );
+
+        // Write to disk if vault is initialized
+        if let Some(vault_root) = &self.vault_root {
+            let path = vault_root.join("pages").join("Agenda.md");
+            if let Some(tx) = &self.autosave_tx {
+                let _ = tx.send(store::disk_writer::WriteRequest {
+                    path: path.clone(),
+                    content: content.clone(),
+                });
+            }
+            self.open_page_with_content(&id, "Agenda", &path, &content);
+        } else {
+            self.open_page_with_content(
+                &id,
+                "Agenda",
+                std::path::Path::new("[agenda]"),
+                &content,
+            );
         }
-        for task in &view.upcoming {
-            let source_title = idx
-                .find_page_by_id(&task.source_page)
-                .map(|m| m.title)
-                .unwrap_or_default();
-            items.push(AgendaFlatItem {
-                task: task.clone(),
-                source_title,
-                bucket: AgendaBucket::Upcoming,
-            });
-        }
-        self.agenda_state = Some(AgendaState {
-            selected_index: 0,
-            items,
-        });
     }
 
     pub(crate) fn handle_agenda_key(
