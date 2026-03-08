@@ -124,6 +124,11 @@ impl BloomEditor {
         let Some(info) = buffers.iter().find(|b| b.page_id == *page_id) else {
             return;
         };
+        // Assign block IDs before extracting content for write.
+        // We can't mutate the buffer here (we only have &self), but block IDs
+        // will be assigned on the next save_current() or when the buffer is
+        // next obtained mutably. For autosave, we send the current text as-is
+        // and rely on save_current() for ID assignment.
         let content = buf.text().to_string();
         let _ = tx.send(store::disk_writer::WriteRequest {
             path: info.path.clone(),
@@ -131,8 +136,59 @@ impl BloomEditor {
         });
     }
 
+    /// Assign block IDs to the buffer if any blocks are missing them.
+    /// Modifies the rope in-place. Returns true if any IDs were added.
+    fn ensure_block_ids(&mut self, page_id: &types::PageId) -> bool {
+        let Some(buf) = self.buffer_mgr.get(page_id) else {
+            return false;
+        };
+        let text = buf.text().to_string();
+        let doc = self.parser.parse(&text);
+        let insertions = block_id_gen::compute_block_id_assignments(&doc);
+        if insertions.is_empty() {
+            return false;
+        }
+
+        let Some(buf) = self.buffer_mgr.get_mut(page_id) else {
+            return false;
+        };
+
+        // Apply insertions in reverse order to preserve char offsets.
+        buf.begin_edit_group();
+        for ins in insertions.iter().rev() {
+            let line_idx = ins.line;
+            if line_idx >= buf.len_lines() {
+                continue;
+            }
+            let line_slice = buf.line(line_idx);
+            let line_str: String = line_slice.chars().collect();
+            let trimmed_len = line_str.trim_end_matches(['\n', '\r']).trim_end().len();
+            let line_start = buf.text().line_to_char(line_idx);
+            let insert_at = line_start + trimmed_len;
+            let insertion_text = format!(" ^{}", ins.id);
+            buf.insert(insert_at, &insertion_text);
+        }
+        buf.end_edit_group();
+
+        true
+    }
+
     pub fn save_current(&mut self) -> Result<(), error::BloomError> {
         if let Some(page_id) = self.active_page().cloned() {
+            // Skip pseudo-paths like [scratch]
+            let is_pseudo = self
+                .buffer_mgr
+                .open_buffers()
+                .iter()
+                .find(|b| b.page_id == page_id)
+                .map_or(true, |info| info.path.to_string_lossy().starts_with('['));
+            if is_pseudo {
+                return Ok(());
+            }
+
+            // Assign block IDs before saving.
+            self.ensure_block_ids(&page_id);
+
             let (content, path) = {
                 if let Some((buf, info)) = self.buffer_mgr.get_with_info(&page_id) {
                     if !buf.is_dirty() {
@@ -144,17 +200,9 @@ impl BloomEditor {
                 }
             };
 
-            // Skip pseudo-paths like [scratch]
-            if path.to_string_lossy().starts_with('[') {
-                return Ok(());
-            }
-
             if let Some(tx) = &self.autosave_tx {
-                // Route through DiskWriter (same path as autosave).
-                // DiskWriter will send WriteComplete → handle_write_complete marks clean.
                 let _ = tx.send(store::disk_writer::WriteRequest { path, content });
             } else {
-                // No DiskWriter (tests, pre-init). Inline atomic write.
                 store::disk_writer::atomic_write(&path, &content)?;
                 if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                     buf.mark_clean();

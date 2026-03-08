@@ -1133,9 +1133,9 @@ mod tests {
 
         editor.save_current().unwrap();
 
-        // Verify file on disk has the new content
+        // Verify file on disk has the new content (with auto-assigned block ID)
         let on_disk = std::fs::read_to_string(&file_path).unwrap();
-        assert_eq!(on_disk, "Xhello");
+        assert_eq!(on_disk, "Xhello ^a");
     }
 
     // Startup: Journal mode opens today's journal
