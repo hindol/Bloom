@@ -285,19 +285,17 @@ This is **backwards-compatible** — users see the same tasks, same grouping, sa
 
 ---
 
+## Decisions (from design review)
+
+1. **Error rendering:** Dimmed query text + error message in `critical` colour below the block.
+2. **Performance guardrails:** No implicit limit. Show result count. Warn if >1000.
+3. **Week start:** `[calendar] week_starts = "monday"` in config. Default Monday (ISO 8601).
+4. **`$page` resolution:** Resolves to the current page's frontmatter ID. Always available, no tracking.
+5. **Cursor at block boundaries:** `j`/`k` enters and exits query blocks automatically — no mode switch. The block behaves like a tall line. `▸` marks the selected row; action hints appear in footer.
+
 ## Open Questions
 
-1. **Error rendering in query blocks.** Show error inline with caret position? Or show the raw query text with a diagnostic message below? Leaning towards: dimmed query text + error message in `critical` colour below.
-
-2. **Performance guardrails.** Should we prevent `blocks` queries on huge vaults (100K+ blocks)? Auto-add `limit 1000`? Leaning towards: no implicit limit, but show result count and warn if > 1000.
-
-3. **Week start configuration.** `this week` range depends on week start day. Config: `[calendar] week_starts = "monday"`. Default: Monday (ISO 8601).
-
-4. **`contains` operator.** Useful for `tasks | where text contains "?"` (find questions). Not in the grammar yet. Leaning towards: add it — it's the only substring predicate needed.
-
-5. **Context variable resolution.** `$page` should resolve to the page the user was on *before* navigating to the query page. Need to track "previous page" in the jump list.
-
-6. **Cursor behaviour at block boundaries.** When the cursor moves from prose into a query result block, how does the transition feel? Does the cursor "enter" the block (switching to result-row navigation)? Or does `j`/`k` skip over the block entirely unless the user explicitly enters it?
+1. **`contains` operator.** Useful for `tasks | where text contains "?"`. Not in the grammar yet. Leaning towards: add it — the only substring predicate needed.
 
 ---
 
