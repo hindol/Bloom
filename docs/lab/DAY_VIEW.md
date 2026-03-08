@@ -130,7 +130,7 @@ Day-hopping between cached days is sub-millisecond. Between uncached days, the p
 
 Tasks in the day view are **actionable.** Pressing `x` on a task toggles it in the source file.
 
-**How it works:** The day view stores tasks by block ID (see [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md)). The toggle resolves `page_id#block_id` → current line in the index → flip `[ ]` ↔ `[x]` in the rope buffer. Same code path as the agenda's toggle.
+**How it works:** The day view stores tasks by block ID (see [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md)). The toggle resolves `page_id^block_id` → current line in the index → flip `[ ]` ↔ `[x]` in the rope buffer. Same code path as the agenda's toggle.
 
 If the block ID is orphaned (the content was deleted since that day), the task renders as historical — no action available, dimmed styling.
 

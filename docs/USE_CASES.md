@@ -359,7 +359,7 @@ Verifies: G4
 
 1. User's cursor is on a line with `^rope-perf` block ID.
 2. User presses `SPC l Y`.
-3. `[[8f3a1b2c#rope-perf|Ropes are O(log n)...]]` is copied to the clipboard.
+3. `[[8f3a1b2c^rope-perf|Ropes are O(log n)...]]` is copied to the clipboard.
 4. If the current line has no block ID, Bloom generates one, appends it to the line, then copies the link.
 
 ---
@@ -876,7 +876,7 @@ Verifies: G13 (Logseq Import)
    - `pages/` → `pages/`
    - `assets/` → `images/`
    - `[[page link]]` → `[[uuid|page link]]`
-   - `((block-ref))` → `[[page-uuid#block-id|text]]`
+   - `((block-ref))` → `[[page-uuid^block-id|text]]`
    - `{{embed ...}}` → `[[uuid|page]]` (converted to links)
    - Properties → YAML frontmatter
 5. An import report is displayed: pages imported, links resolved, warnings, errors.

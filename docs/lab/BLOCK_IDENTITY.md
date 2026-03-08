@@ -33,13 +33,13 @@ Some paragraph about rope data structures. ^c
 
 A page with 100 blocks needs 100 unique IDs. Two base-36 characters give 1,296 combinations — more than enough for any realistic page.
 
-**Global identity** is the composite `page_id#block_id`:
+**Global identity** is the composite `page_id^block_id`:
 
 ```
-8f3a1b2c#a3    ← globally unique across the entire vault
+8f3a1b2c^a3    ← globally unique across the entire vault
 ```
 
-This is already Bloom's deep-link syntax: `[[8f3a1b2c#a3|Review ropey API]]`. The linking architecture already expects this format — we're just ensuring every block *has* an ID, not only blocks that happen to be linked.
+This is Bloom's deep-link syntax: `[[8f3a1b2c^a3|Review ropey API]]`. The `^` mirrors the block ID marker in the file, so the user sees a consistent symbol. We're just ensuring every block *has* an ID, not only blocks that happen to be linked.
 
 ### Assignment Strategy
 
@@ -156,7 +156,7 @@ Content match:
     │
     └── No match (content was deleted or rewritten beyond recognition)
         └── Mark ^a3 as orphaned in the index
-            └── Any links to 8f3a1b2c#a3 become broken links (G20)
+            └── Any links to 8f3a1b2c^a3 become broken links (G20)
 ```
 
 When multiple IDs are missing (e.g., an external tool stripped all IDs), all restorations are **batched into a single file write** — detect all missing IDs, compute all matches, write once. No write storm.
@@ -228,7 +228,7 @@ If `^a3` is orphaned (content deleted), the day view shows the task as historica
 
 ### BQL (LIVE_VIEWS.md)
 
-Query results carry block identity. Acting on a result (toggle task, jump to source) resolves by `page_id#block_id`. This makes every BQL result reliably actionable.
+Query results carry block identity. Acting on a result (toggle task, jump to source) resolves by `page_id^block_id`. This makes every BQL result reliably actionable.
 
 ### Emergence Detection (EMERGENCE.md)
 
@@ -240,7 +240,7 @@ Embedding chunks get stable identity via block IDs. When Bloom says "these two c
 
 ### Links
 
-`[[8f3a1b2c#a3|Review ropey API]]` — deep links to blocks become reliable by default, not just for blocks that were manually or lazily assigned an ID. Every block is linkable from the moment it's indexed.
+`[[8f3a1b2c^a3|Review ropey API]]` — deep links to blocks become reliable by default, not just for blocks that were manually or lazily assigned an ID. Every block is linkable from the moment it's indexed.
 
 ---
 

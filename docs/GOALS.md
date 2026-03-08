@@ -44,8 +44,8 @@ You should never have to think about where a note belongs. Keep adding notes to 
 | Syntax | Purpose |
 |--------|---------|
 | `[[page-id\|display]]` | Link to page |
-| `[[page-id#section-id\|display]]` | Deep link to heading |
-| `[[page-id#block-id\|display]]` | Deep link to block |
+| `[[page-id^section-id\|display]]` | Deep link to heading |
+| `[[page-id^block-id\|display]]` | Deep link to block |
 
 **Block IDs:**
 
@@ -145,9 +145,9 @@ One-way, non-destructive import from Logseq. The importer reads from the Logseq 
 | Logseq Syntax | Bloom Equivalent | Notes |
 |---------------|-----------------|-------|
 | `[[page link]]` | `[[uuid\|page link]]` | UUID generated, title preserved |
-| `((block-ref))` | `[[page-uuid#block-id\|text]]` | Logseq `id::` properties mapped to `^block-id` anchors |
+| `((block-ref))` | `[[page-uuid^block-id\|text]]` | Logseq `id::` properties mapped to `^block-id` anchors |
 | `{{embed [[page]]}}` | `[[uuid\|page]]` | Converted to Bloom link (transclusion deferred to post-v1) |
-| `{{embed ((block))}}` | `[[page-uuid#block-id\|text]]` | Converted to block link (transclusion deferred to post-v1) |
+| `{{embed ((block))}}` | `[[page-uuid^block-id\|text]]` | Converted to block link (transclusion deferred to post-v1) |
 | `/namespace/page` | Page titled "Namespace - Page" with auto-tags `#namespace` | Hierarchy flattened to title + tags |
 | `TODO item` | `- [ ] item` | |
 | `DONE item` | `- [x] item` | |
