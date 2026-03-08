@@ -2,57 +2,42 @@ mod palette;
 mod resolve;
 
 pub use palette::{
-    Rgb, ThemePalette, AGED_PAPER, BASALT, BIRCH, BLOOM_DARK, BLOOM_DARK_FADED, BLOOM_LIGHT,
-    BLOOM_LIGHT_FADED, CANOPY, DRIFTWOOD, EMBER, INK, LICHEN, MOSS, NEWSPRINT, PARCHMENT, SLATE,
-    SOLARIUM, TIDEPOOL, TWILIGHT,
+    Rgb, ThemePalette, AURORA, BLOOM_DARK, BLOOM_LIGHT, EMBER, FROST, INK, LICHEN, PAPER, SAKURA,
+    SOLARIUM, TWILIGHT, VERDANT,
 };
 pub use resolve::{resolve, resolve_chrome, resolve_status_bar, Chrome, StyleProps};
 
-/// All built-in theme names, in display order.
+/// All built-in theme names, in display order (dark themes first, then light).
 pub const THEME_NAMES: &[&str] = &[
     "bloom-dark",
-    "bloom-dark-faded",
     "bloom-light",
-    "bloom-light-faded",
-    "parchment",
-    "newsprint",
-    "aged-paper",
-    "moss",
-    "slate",
-    "solarium",
-    "ink",
-    "driftwood",
-    "twilight",
-    "lichen",
+    "aurora",
+    "frost",
     "ember",
-    "basalt",
-    "canopy",
-    "tidepool",
-    "birch",
+    "solarium",
+    "twilight",
+    "sakura",
+    "verdant",
+    "lichen",
+    "ink",
+    "paper",
 ];
 
 /// Look up a built-in palette by name.
 pub fn palette_by_name(name: &str) -> Option<&'static ThemePalette> {
     match name {
         "bloom-dark" => Some(&BLOOM_DARK),
-        "bloom-dark-faded" => Some(&BLOOM_DARK_FADED),
         "bloom-light" => Some(&BLOOM_LIGHT),
-        "bloom-light-faded" => Some(&BLOOM_LIGHT_FADED),
-        "parchment" => Some(&PARCHMENT),
-        "newsprint" => Some(&NEWSPRINT),
-        "aged-paper" => Some(&AGED_PAPER),
-        "moss" => Some(&MOSS),
-        "slate" => Some(&SLATE),
-        "solarium" => Some(&SOLARIUM),
-        "ink" => Some(&INK),
-        "driftwood" => Some(&DRIFTWOOD),
-        "twilight" => Some(&TWILIGHT),
-        "lichen" => Some(&LICHEN),
+        "aurora" => Some(&AURORA),
+        "frost" => Some(&FROST),
         "ember" => Some(&EMBER),
-        "basalt" => Some(&BASALT),
-        "canopy" => Some(&CANOPY),
-        "tidepool" => Some(&TIDEPOOL),
-        "birch" => Some(&BIRCH),
+        "solarium" => Some(&SOLARIUM),
+        "twilight" => Some(&TWILIGHT),
+        "sakura" => Some(&SAKURA),
+        "verdant" => Some(&VERDANT),
+        "lichen" => Some(&LICHEN),
+        "ink" => Some(&INK),
+        "paper" => Some(&PAPER),
         _ => None,
     }
 }
@@ -61,20 +46,17 @@ pub fn palette_by_name(name: &str) -> Option<&'static ThemePalette> {
 pub fn theme_description(name: &str) -> &'static str {
     match name {
         "bloom-dark" => "warm dark, medium contrast",
-        "bloom-dark-faded" => "softer, Nord-influenced",
-        "bloom-light" => "warm white, soft contrast",
-        "bloom-light-faded" => "cool, muted light",
-        "parchment" => "cream paper, sepia ink",
-        "newsprint" => "cool grey paper, charcoal type",
-        "aged-paper" => "dark brown, candlelight warmth",
-        "moss" => "dark green-grey, forest floor",
-        "slate" => "cool blue-grey, architectural",
-        "solarium" => "warm solarized cream",
-        "ink" => "pure monochrome, white on black",
-        "driftwood" => "warm sand, bleached wood",
-        "twilight" => "deep blue-purple, edge of night",
-        "lichen" => "pale green-grey stone",
-        "ember" => "charcoal with warm orange glow",
+        "bloom-light" => "warm white, clean reading",
+        "aurora" => "cool Arctic dark, Nordic blue-grey",
+        "frost" => "cool ice-blue light, crystalline",
+        "ember" => "deep charcoal, warm orange glow",
+        "solarium" => "warm golden light, sunlit study",
+        "twilight" => "deep violet-blue, edge of night",
+        "sakura" => "soft pink light, cherry blossom",
+        "verdant" => "deep forest green, dense canopy",
+        "lichen" => "sage green light, stone garden",
+        "ink" => "pure monochrome dark, minimalist",
+        "paper" => "pure monochrome light, minimalist",
         _ => "",
     }
 }
@@ -134,7 +116,7 @@ mod tests {
     #[test]
     fn test_palette_lookup() {
         assert!(palette_by_name("bloom-dark").is_some());
-        assert!(palette_by_name("bloom-light-faded").is_some());
+        assert!(palette_by_name("bloom-light").is_some());
         assert!(palette_by_name("nonexistent").is_none());
     }
 

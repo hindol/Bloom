@@ -7,50 +7,7 @@
 
 Bloom is a keyboard-driven note-taking editor built in Rust. Your notes are plain Markdown files on disk, linked with stable UUIDs, indexed with SQLite, and entirely yours — no cloud, no sync, no lock-in. Think Obsidian's linking model with Neovim's editing feel and Doom Emacs' discoverability.
 
-```
-┌─────────────────────────────────────────────────┬─────────────────────────────────────────────────┐
-│  42  ## Rope Data Structure                     │  1   ---                                        │
-│  43                                             │  2   id: 8f3a1b2c                               │
-│  44  Ropes are O(log n) for inserts. They       │  3   title: "Daily Log"                         │
-│  45  use balanced binary trees to represent     │  4   created: 2026-03-07                        │
-│  46  text. Each leaf holds a string fragment,   │  5   tags: [journal]                            │
-│  47  and internal nodes store the weight.       │  6   ---                                        │
-│  48                                             │  7                                              │
-│  49  See [[8f3a1b2c|Text Editor Theory]] for    │  8   - Explored ropey crate for buffer model    │
-│  50  background. Related: #rust #editors        │  9   - Read about Xi Editor architecture        │
-│  51                                             │ 10   - [ ] Review gap buffer tradeoffs @due(03- │
-│  52  - [ ] Benchmark insert performance         │   ↪  08)                                        |
-│  53        @due(2026-03-10)                     │ 11   - [x] Compare with PieceTable              │
-│  54  - [x] Read Xi Editor source                │ 12                                              │
-│  55                                             │ 13   #rust #editors #data-structures            │
-│                                                 │                                                 │
-│  ~                                              │  ~                                              │
-│  ~                                              │  ~                                              │
-├─────────────────────────────────────────────────┼──────────────────────────────────────────────-──┤
-│ NORMAL  Text Editor Theory  [+]       52:3  ⟳  │ NORMAL  2026-03-07                     10:5     │
-└─────────────────────────────────────────────────┴─────────────────────────────────────────────────┘
-```
-
-```
-┌─ Find Page ─────────────────────────────────────────────────────────────┐
-│ > rope_                                                                 │
-│                                                                         │
-│ ▸ Rope Data Structure              #rust #editors         2026-02-28    │
-│   Rope vs Gap Buffer               #data-structures       2026-03-01    │
-│   Xi Editor Architecture           #editors               2026-02-20    │
-│                                                                         │
-│   3 of 10,365 pages                                                     │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│   ## Rope Data Structure                                                │
-│                                                                         │
-│   Ropes are O(log n) for inserts. They use balanced binary              │
-│   trees to represent text. Each leaf holds a string fragment,           │
-│   and internal nodes store the weight (character count of               │
-│   left subtree).                                                        │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+![Split panes showing Bloom Markdown with semantic highlighting, wiki-links, tags, and architecture diagrams](screenshots/split-panes.png)
 
 ## Features
 
@@ -77,7 +34,7 @@ Bloom is a keyboard-driven note-taking editor built in Rust. Your notes are plai
 
 ### Interface
 - **Window splits** — Doom Emacs-style binary splits with resize, swap, rotate, and spatial navigation
-- **19 built-in themes** — nature-inspired dimmed palettes (Moss, Canopy, Tidepool, Ember, Twilight, Birch, ...) plus classic light/dark
+- **12 built-in themes** — 6 dark + 6 light with maximum variety (Aurora, Ember, Twilight, Verdant, Sakura, Frost, ...)
 - **Adaptive layout** — picker width, preview panels, and column density adapt to terminal dimensions
 - **Session restore** — window layout, per-pane buffers, cursor positions, and scroll offsets persist across restarts
 
@@ -152,13 +109,13 @@ Benchmarked on a 10,365-page vault (24 MB of Markdown), Windows 11, NVMe SSD:
 
 ## Themes
 
-19 built-in themes, selectable with `SPC T t` (live preview):
+12 built-in themes, selectable with `SPC T t` (live preview):
 
-**Dark:** Bloom Dark, Bloom Dark Faded, Aged Paper, Moss, Slate, Ink, Twilight, Ember, Basalt, Canopy, Tidepool
+**Dark:** Bloom Dark (warm neutral), Aurora (Nordic blue-grey), Ember (charcoal orange glow), Twilight (violet-blue dusk), Verdant (deep forest green), Ink (pure monochrome)
 
-**Light:** Bloom Light, Bloom Light Faded, Parchment, Newsprint, Solarium, Driftwood, Lichen, Birch
+**Light:** Bloom Light (warm neutral), Frost (ice-blue crystalline), Solarium (golden sunlit), Sakura (pink cherry blossom), Lichen (sage green), Paper (pure monochrome)
 
-All themes follow a 16-slot semantic palette: 6 semantic roles, 4 surfaces, 2 mid-tones, 4 accents. See [docs/THEMING.md](docs/THEMING.md).
+All themes follow a 16-slot semantic palette (6 roles, 4 surfaces, 2 mid-tones, 4 accents) and are validated against WCAG contrast targets. See [docs/THEMING.md](docs/THEMING.md).
 
 ## Configuration
 

@@ -1541,12 +1541,12 @@ mod tests {
         assert!(frame.picker.is_some());
         let picker = frame.picker.unwrap();
         assert_eq!(picker.title, "Theme");
-        assert_eq!(picker.results.len(), 19);
+        assert_eq!(picker.results.len(), 12);
 
         // Move down — live preview changes theme (now typed as Char, goes to query)
         // Use Ctrl+J for navigation
         editor.handle_key(KeyEvent::ctrl('j'));
-        assert_eq!(editor.theme().name, "bloom-dark-faded");
+        assert_eq!(editor.theme().name, "bloom-light");
 
         // Esc reverts
         editor.handle_key(KeyEvent::esc());
@@ -1568,14 +1568,14 @@ mod tests {
             modifiers: types::Modifiers::shift(),
         });
         editor.handle_key(KeyEvent::char('t'));
-        editor.handle_key(KeyEvent::ctrl('j')); // bloom-dark-faded
         editor.handle_key(KeyEvent::ctrl('j')); // bloom-light
-        assert_eq!(editor.theme().name, "bloom-light");
+        editor.handle_key(KeyEvent::ctrl('j')); // aurora
+        assert_eq!(editor.theme().name, "aurora");
 
         // Enter confirms
         editor.handle_key(KeyEvent::enter());
         assert!(editor.picker_state.is_none());
-        assert_eq!(editor.theme().name, "bloom-light");
+        assert_eq!(editor.theme().name, "aurora");
     }
 
     #[test]
@@ -1594,7 +1594,7 @@ mod tests {
 
         // Ctrl+N moves down
         editor.handle_key(KeyEvent::ctrl('n'));
-        assert_eq!(editor.theme().name, "bloom-dark-faded");
+        assert_eq!(editor.theme().name, "bloom-light");
 
         // Ctrl+P moves back up
         editor.handle_key(KeyEvent::ctrl('p'));
