@@ -160,11 +160,21 @@ impl BloomEditor {
             if line_idx >= buf.len_lines() {
                 continue;
             }
-            let line_slice = buf.line(line_idx);
-            let line_str: String = line_slice.chars().collect();
-            let trimmed_len = line_str.trim_end_matches(['\n', '\r']).trim_end().len();
             let line_start = buf.text().line_to_char(line_idx);
-            let insert_at = line_start + trimmed_len;
+            let line_slice = buf.line(line_idx);
+            // Count content chars (exclude trailing \n and \r, then trailing whitespace).
+            let mut content_chars = line_slice.len_chars();
+            // Walk backwards past line endings and whitespace.
+            let chars: Vec<char> = line_slice.chars().collect();
+            while content_chars > 0
+                && matches!(
+                    chars[content_chars - 1],
+                    '\n' | '\r' | ' ' | '\t'
+                )
+            {
+                content_chars -= 1;
+            }
+            let insert_at = line_start + content_chars;
             let insertion_text = format!(" ^{}", ins.id);
             buf.insert(insert_at, &insertion_text);
         }

@@ -1148,6 +1148,34 @@ mod tests {
         assert_eq!(on_disk, "Xhello ^a");
     }
 
+    #[test]
+    fn test_save_block_ids_multiline() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file_path = dir.path().join("test.md");
+        let content = "Line one\nLine two\n\nLine three\n";
+        std::fs::write(&file_path, content).unwrap();
+
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", &file_path, content);
+
+        // Make dirty
+        editor.handle_key(KeyEvent::char('i'));
+        editor.handle_key(KeyEvent::char('X'));
+        editor.handle_key(KeyEvent::esc());
+
+        editor.save_current().unwrap();
+
+        let on_disk = std::fs::read_to_string(&file_path).unwrap();
+        // Paragraph 1 (lines 0-1): ID on last line (line 1)
+        // Paragraph 2 (line 3): ID on its own line
+        assert!(on_disk.contains("Line two ^a\n"), "got: {on_disk}");
+        assert!(on_disk.contains("Line three ^b\n"), "got: {on_disk}");
+        // Line one should NOT have an ID (it's not the last line of the block)
+        assert!(!on_disk.contains("Line one ^"), "got: {on_disk}");
+    }
+
     // Startup: Journal mode opens today's journal
     #[test]
     fn test_startup_journal_mode() {
