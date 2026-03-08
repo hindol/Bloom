@@ -289,6 +289,29 @@ No new crate dependencies.
 
 ---
 
+## Profiling Results
+
+Measured on macOS, Apple Silicon, debug build. Production (release) will be faster.
+
+| Scenario | Pages | Blocks | Time | Per-page |
+|----------|-------|--------|------|----------|
+| **No-op** (all blocks have IDs) | 1,000 | 5,000 | 46 ms | 0.05 ms |
+| **Bulk assignment** (no IDs → all assigned) | 1,000 | 7,000 | 71 ms | 0.07 ms |
+| **Single large page** (250 blocks) | 1 | 250 | 14 ms | — |
+
+**Extrapolated to reference vault (10K pages):**
+- No-op per keystroke: ~0.5 ms — imperceptible
+- Bulk first-run: ~710 ms — acceptable, one-time cost
+
+**Per-keystroke overhead:** The autosave path calls `ensure_block_ids` on every `handle_key`. For the common case (all blocks already have IDs), this is parse + empty-check = **0.05 ms**. No performance concern.
+
+**Performance gates in CI** (tests fail if exceeded):
+- Single large page (250 blocks): < 50 ms
+- Bulk 1000 pages: < 2,000 ms
+- Idempotent 1000 pages: < 1,000 ms
+
+---
+
 ## Open Questions
 
 1. **Self-healing profiling.** Git lookup + content match per missing ID — how much latency does this add? Needs benchmarking on the reference vault (10K pages, 18K commits). The common case (no IDs missing) is a set comparison — microseconds. The repair case should be rare.
