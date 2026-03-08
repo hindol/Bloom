@@ -213,7 +213,7 @@ impl BloomEditor {
                 return Ok(());
             }
 
-            // Assign block IDs before saving.
+            // Ensure block IDs (no-op if already assigned).
             self.ensure_block_ids(&page_id);
 
             let (content, path) = {
