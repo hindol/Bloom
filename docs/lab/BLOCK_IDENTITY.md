@@ -49,7 +49,33 @@ This is already Bloom's deep-link syntax: `[[8f3a1b2c#a3|Review ropey API]]`. Th
 | Auto-assigned on first index | Every task, list item, paragraph, heading gets an ID when the indexer processes the page |
 | Never reused within a page | Deleted block's ID is retired — avoids stale references in git history, day view caches, and external links |
 | Manually-set IDs are respected | If a user writes `^my-note`, Bloom keeps it — auto-assignment only fills gaps |
-| Deterministic | Same content in same position always gets the same ID on first assignment — no randomness, reproducible across rebuilds |
+
+### ID Placement
+
+The ID is always appended to the **last line of the block** — end of the thought, never interrupting content mid-flow.
+
+| Block type | Placement | Example |
+|-----------|-----------|---------|
+| Single-line (task, heading, simple list item) | End of that line | `- [ ] Review ropey API ^a3` |
+| Multi-line paragraph | End of last line before the blank line | `...structures for editing. ^b` |
+| Multi-line blockquote | End of last `>` line | `> — Someone wise ^c` |
+| List item with continuations | End of last continuation line | `  final detail here ^d` |
+
+```markdown
+> The best tool is one that
+> disappears in your hand.
+> — Someone wise ^c
+
+Some paragraph that spans
+multiple lines about rope
+data structures for editing. ^b
+
+- A list item that continues
+  onto the next line with
+  additional detail ^d
+```
+
+One rule: **end of the last line of the block.** No special cases.
 
 ### What Gets an ID
 
