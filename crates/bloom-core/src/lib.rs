@@ -1541,7 +1541,7 @@ mod tests {
         assert!(frame.picker.is_some());
         let picker = frame.picker.unwrap();
         assert_eq!(picker.title, "Theme");
-        assert_eq!(picker.results.len(), 15);
+        assert_eq!(picker.results.len(), 19);
 
         // Move down — live preview changes theme (now typed as Char, goes to query)
         // Use Ctrl+J for navigation

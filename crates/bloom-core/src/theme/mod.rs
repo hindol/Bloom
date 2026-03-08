@@ -2,8 +2,9 @@ mod palette;
 mod resolve;
 
 pub use palette::{
-    Rgb, ThemePalette, AGED_PAPER, BLOOM_DARK, BLOOM_DARK_FADED, BLOOM_LIGHT, BLOOM_LIGHT_FADED,
-    DRIFTWOOD, EMBER, INK, LICHEN, MOSS, NEWSPRINT, PARCHMENT, SLATE, SOLARIUM, TWILIGHT,
+    Rgb, ThemePalette, AGED_PAPER, BASALT, BIRCH, BLOOM_DARK, BLOOM_DARK_FADED, BLOOM_LIGHT,
+    BLOOM_LIGHT_FADED, CANOPY, DRIFTWOOD, EMBER, INK, LICHEN, MOSS, NEWSPRINT, PARCHMENT, SLATE,
+    SOLARIUM, TIDEPOOL, TWILIGHT,
 };
 pub use resolve::{resolve, resolve_chrome, resolve_status_bar, Chrome, StyleProps};
 
@@ -24,6 +25,10 @@ pub const THEME_NAMES: &[&str] = &[
     "twilight",
     "lichen",
     "ember",
+    "basalt",
+    "canopy",
+    "tidepool",
+    "birch",
 ];
 
 /// Look up a built-in palette by name.
@@ -44,6 +49,10 @@ pub fn palette_by_name(name: &str) -> Option<&'static ThemePalette> {
         "twilight" => Some(&TWILIGHT),
         "lichen" => Some(&LICHEN),
         "ember" => Some(&EMBER),
+        "basalt" => Some(&BASALT),
+        "canopy" => Some(&CANOPY),
+        "tidepool" => Some(&TIDEPOOL),
+        "birch" => Some(&BIRCH),
         _ => None,
     }
 }
