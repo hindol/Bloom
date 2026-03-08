@@ -7,7 +7,7 @@
 
 Bloom is a keyboard-driven note-taking editor built in Rust. Your notes are plain Markdown files on disk, linked with stable UUIDs, indexed with SQLite, and entirely yours — no cloud, no sync, no lock-in. Think Obsidian's linking model with Neovim's editing feel and Doom Emacs' discoverability.
 
-![Split panes showing Bloom Markdown with semantic highlighting, wiki-links, tags, and architecture diagrams](screenshots/split-panes.png)
+![Split panes showing Bloom Markdown with semantic highlighting, wiki-links, tags, and architecture diagrams](screenshots/split-panes-dark.png)
 
 ## Features
 
