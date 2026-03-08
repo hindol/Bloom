@@ -349,6 +349,50 @@ Users who manage their own git workflow can set `enabled = false` — Bloom won'
 
 ---
 
+## Testing and Demo Vault
+
+Time travel features need realistic historical data for both automated tests and the demo experience. Since production auto-commits always use `now()`, we need a way to create backdated commits.
+
+### Backdated Commits
+
+`gix` commit objects accept explicit `author_date` and `committer_date` timestamps. A test helper in `bloom-test-harness` exposes this:
+
+```rust
+/// Create a commit with a backdated timestamp.
+/// Writes files, stages them, and commits with the given date.
+pub fn commit_at(
+    repo: &gix::Repository,
+    files: &[(&str, &str)],  // (path, content) pairs
+    date: NaiveDateTime,
+    message: &str,
+)
+```
+
+This is a **dev-dependency only** — `bloom-test-harness` is never shipped in the release binary. Production code in `bloom-core` and `bloom-tui` has no access to backdating.
+
+### Demo Vault
+
+A `:demo-vault` command (or a setup wizard option) generates a realistic vault with months of simulated history:
+
+- Creates pages with evolving content across simulated days
+- Generates journal entries with tasks, links, and tags
+- Backdates all commits to produce a rich calendar and day view
+- Page history, block history, and day views all light up immediately
+
+This gives new users an instant feel for time travel features without needing weeks of real usage first.
+
+### Test Plan
+
+Integration tests use `commit_at` to set up controlled histories:
+
+- Day view: create commits across 3 days, verify correct grouping
+- Page history: create 5 versions of one file, verify revwalk
+- Block history: edit a line across commits, verify blame chain
+- Calendar markers: verify `◆` appears only on days with activity
+- Cache: verify LRU eviction and predictive prefetch behaviour
+
+---
+
 ## New Dependency
 
 | Crate | Purpose | Size impact |
