@@ -657,7 +657,7 @@ impl BloomEditor {
                         if line_idx >= range.start {
                             let query_text = bql_query_lines.join("\n");
                             let result_lines =
-                                self.execute_bql_for_render(&query_text, &today, line_idx);
+                                self.execute_bql_for_render(&query_text, &today);
                             lines.extend(result_lines);
                         }
                         bql_query_lines.clear();
@@ -765,15 +765,18 @@ impl BloomEditor {
     }
 
     /// Execute a BQL query and return RenderedLines for the results.
+    /// Result lines use `usize::MAX` as line_number so they never match
+    /// the cursor line for current-line highlighting.
     fn execute_bql_for_render(
         &self,
         query_text: &str,
         today: &str,
-        line_number: usize,
     ) -> Vec<render::RenderedLine> {
+        const BQL_LINE: usize = usize::MAX;
+
         let Some(idx) = &self.index else {
             return vec![render::RenderedLine {
-                line_number,
+                line_number: BQL_LINE,
                 text: "  ⚠ No index available".to_string(),
                 spans: vec![parser::traits::StyledSpan {
                     range: 0..22,
@@ -793,7 +796,7 @@ impl BloomEditor {
                 let mut lines = Vec::new();
                 if result.rows.is_empty() {
                     lines.push(render::RenderedLine {
-                        line_number,
+                        line_number: BQL_LINE,
                         text: "  (no results)".to_string(),
                         spans: vec![parser::traits::StyledSpan {
                             range: 0..14,
@@ -801,30 +804,26 @@ impl BloomEditor {
                         }],
                     });
                 } else {
+                    // Determine source for formatting
+                    let source = query::parse(query_text)
+                        .map(|q| q.source)
+                        .unwrap_or(query::Source::Pages);
+
                     for row in &result.rows {
-                        let text = format!(
-                            "  {}",
-                            row.values
-                                .iter()
-                                .map(|v| v.to_string())
-                                .collect::<Vec<_>>()
-                                .join("  │  ")
-                        );
-                        let len = text.len();
+                        let (text, spans) = format_result_row(&row.values, &result.columns, &source);
                         lines.push(render::RenderedLine {
-                            line_number,
+                            line_number: BQL_LINE,
                             text,
-                            spans: vec![parser::traits::StyledSpan {
-                                range: 0..len,
-                                style: parser::traits::Style::Normal,
-                            }],
+                            spans,
                         });
                     }
+                    let footer = format!("  {} results", result.rows.len());
+                    let footer_len = footer.len();
                     lines.push(render::RenderedLine {
-                        line_number,
-                        text: format!("  {} results", result.rows.len()),
+                        line_number: BQL_LINE,
+                        text: footer,
                         spans: vec![parser::traits::StyledSpan {
-                            range: 0..format!("  {} results", result.rows.len()).len(),
+                            range: 0..footer_len,
                             style: parser::traits::Style::Tag,
                         }],
                     });
@@ -835,7 +834,7 @@ impl BloomEditor {
                 let text = format!("  {n}");
                 let len = text.len();
                 vec![render::RenderedLine {
-                    line_number,
+                    line_number: BQL_LINE,
                     text,
                     spans: vec![parser::traits::StyledSpan {
                         range: 0..len,
@@ -849,7 +848,7 @@ impl BloomEditor {
                     let text = format!("  {key}: {count}");
                     let len = text.len();
                     lines.push(render::RenderedLine {
-                        line_number,
+                        line_number: BQL_LINE,
                         text,
                         spans: vec![parser::traits::StyledSpan {
                             range: 0..len,
@@ -863,7 +862,7 @@ impl BloomEditor {
                 let text = format!("  ⚠ {e}");
                 let len = text.len();
                 vec![render::RenderedLine {
-                    line_number,
+                    line_number: BQL_LINE,
                     text,
                     spans: vec![parser::traits::StyledSpan {
                         range: 0..len,
@@ -917,4 +916,181 @@ impl BloomEditor {
         }
         (0, 0)
     }
+}
+
+/// Format a BQL result row based on the source type.
+fn format_result_row(
+    values: &[query::CellValue],
+    columns: &[String],
+    source: &query::Source,
+) -> (String, Vec<parser::traits::StyledSpan>) {
+    match source {
+        query::Source::Tasks => format_task_row(values, columns),
+        query::Source::Pages => format_page_row(values, columns),
+        query::Source::Tags => format_tag_row(values, columns),
+        _ => format_generic_row(values),
+    }
+}
+
+/// Tasks: ☐/☑ task_text    page_title    due_date
+fn format_task_row(
+    values: &[query::CellValue],
+    columns: &[String],
+) -> (String, Vec<parser::traits::StyledSpan>) {
+    let col_idx = |name: &str| columns.iter().position(|c| c == name);
+
+    let done = col_idx("done")
+        .and_then(|i| values.get(i))
+        .map(|v| matches!(v, query::CellValue::Int(1)))
+        .unwrap_or(false);
+    let text = col_idx("text")
+        .and_then(|i| values.get(i))
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+    let page = col_idx("page_title")
+        .and_then(|i| values.get(i))
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+    let due = col_idx("due_date")
+        .and_then(|i| values.get(i))
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+
+    let checkbox = if done { "  ☑ " } else { "  ☐ " };
+    let task_text = text.trim_start_matches("- [ ] ").trim_start_matches("- [x] ");
+
+    let mut line = format!("{checkbox}{task_text}");
+    let text_end = line.len();
+
+    if !page.is_empty() {
+        line.push_str(&format!("  {page}"));
+    }
+    let page_end = line.len();
+
+    if !due.is_empty() {
+        line.push_str(&format!("  {due}"));
+    }
+    let full_len = line.len();
+
+    let checkbox_style = if done {
+        parser::traits::Style::CheckboxChecked
+    } else {
+        parser::traits::Style::CheckboxUnchecked
+    };
+
+    let mut spans = vec![
+        parser::traits::StyledSpan {
+            range: 0..4,
+            style: checkbox_style,
+        },
+    ];
+    if done {
+        spans.push(parser::traits::StyledSpan {
+            range: 4..text_end,
+            style: parser::traits::Style::CheckedTaskText,
+        });
+    } else {
+        spans.push(parser::traits::StyledSpan {
+            range: 4..text_end,
+            style: parser::traits::Style::Normal,
+        });
+    }
+    if text_end < page_end {
+        spans.push(parser::traits::StyledSpan {
+            range: text_end..page_end,
+            style: parser::traits::Style::Tag,
+        });
+    }
+    if page_end < full_len {
+        spans.push(parser::traits::StyledSpan {
+            range: page_end..full_len,
+            style: parser::traits::Style::Tag,
+        });
+    }
+
+    (line, spans)
+}
+
+/// Pages: title    created
+fn format_page_row(
+    values: &[query::CellValue],
+    columns: &[String],
+) -> (String, Vec<parser::traits::StyledSpan>) {
+    let col_idx = |name: &str| columns.iter().position(|c| c == name);
+
+    let title = col_idx("title")
+        .and_then(|i| values.get(i))
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+    let created = col_idx("created")
+        .and_then(|i| values.get(i))
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+
+    let line = format!("  {title}  {created}");
+    let title_end = 2 + title.len();
+    let full_len = line.len();
+
+    let spans = vec![
+        parser::traits::StyledSpan {
+            range: 0..title_end,
+            style: parser::traits::Style::Bold,
+        },
+        parser::traits::StyledSpan {
+            range: title_end..full_len,
+            style: parser::traits::Style::Tag,
+        },
+    ];
+
+    (line, spans)
+}
+
+/// Tags: #name (count)
+fn format_tag_row(
+    values: &[query::CellValue],
+    columns: &[String],
+) -> (String, Vec<parser::traits::StyledSpan>) {
+    let col_idx = |name: &str| columns.iter().position(|c| c == name);
+
+    let name = col_idx("name")
+        .and_then(|i| values.get(i))
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+    let count = col_idx("cnt")
+        .and_then(|i| values.get(i))
+        .map(|v| v.to_string())
+        .unwrap_or("0".to_string());
+
+    let line = format!("  #{name}  ({count})");
+    let tag_end = 3 + name.len();
+    let full_len = line.len();
+
+    let spans = vec![
+        parser::traits::StyledSpan {
+            range: 0..tag_end,
+            style: parser::traits::Style::Tag,
+        },
+        parser::traits::StyledSpan {
+            range: tag_end..full_len,
+            style: parser::traits::Style::Tag,
+        },
+    ];
+
+    (line, spans)
+}
+
+/// Generic: column values joined
+fn format_generic_row(values: &[query::CellValue]) -> (String, Vec<parser::traits::StyledSpan>) {
+    let text = format!(
+        "  {}",
+        values.iter().map(|v| v.to_string()).collect::<Vec<_>>().join("  ")
+    );
+    let len = text.len();
+    (
+        text,
+        vec![parser::traits::StyledSpan {
+            range: 0..len,
+            style: parser::traits::Style::Normal,
+        }],
+    )
 }
