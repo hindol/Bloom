@@ -32,7 +32,6 @@ impl BloomEditor {
                 maximized: false,
                 hidden_pane_count: 0,
                 picker: None,
-                agenda: None,
                 inline_menu: None,
                 which_key: None,
                 date_picker: None,
@@ -309,7 +308,6 @@ impl BloomEditor {
             } else {
                 None
             },
-            agenda: None,
             inline_menu: if let Some(ic) = &self.inline_completion {
                 let items = self.collect_inline_items(ic);
                 let (cursor_line, cursor_col) = self.cursor_position();

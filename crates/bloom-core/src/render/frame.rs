@@ -19,7 +19,6 @@ pub struct RenderFrame {
     pub maximized: bool,
     pub hidden_pane_count: usize,
     pub picker: Option<PickerFrame>,
-    pub agenda: Option<AgendaFrame>,
     pub inline_menu: Option<InlineMenuFrame>,
     pub which_key: Option<WhichKeyFrame>,
     pub date_picker: Option<DatePickerFrame>,
@@ -65,7 +64,6 @@ pub struct PaneRectFrame {
 pub enum PaneKind {
     Editor,
     UndoTree(UndoTreeFrame),
-    Agenda(AgendaFrame),
     Timeline(TimelineFrame),
     SetupWizard(SetupWizardFrame),
 }
@@ -86,27 +84,6 @@ pub struct UndoTreeNode {
     pub branch: usize,
     pub description: String,
     pub is_current: bool,
-}
-
-// ---------------------------------------------------------------------------
-// Agenda
-// ---------------------------------------------------------------------------
-
-pub struct AgendaFrame {
-    pub overdue: Vec<AgendaItem>,
-    pub today: Vec<AgendaItem>,
-    pub upcoming: Vec<AgendaItem>,
-    pub selected_index: usize,
-    pub total_open: usize,
-    pub total_pages: usize,
-    pub preview: Option<String>,
-}
-
-pub struct AgendaItem {
-    pub task_text: String,
-    pub source_page: String,
-    pub date: Option<NaiveDate>,
-    pub tags: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------

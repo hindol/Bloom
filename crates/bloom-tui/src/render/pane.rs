@@ -65,10 +65,6 @@ pub(super) fn draw_pane(
 
     let wrap_cursor = match &pane.kind {
         PaneKind::Editor => draw_editor_content(f, content_area, pane, theme, config),
-        PaneKind::Agenda(agenda) => {
-            super::agenda::draw_agenda(f, content_area, agenda, theme, 0);
-            None
-        }
         PaneKind::Timeline(tl) => {
             super::timeline::draw_timeline(f, content_area, tl, theme);
             None

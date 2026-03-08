@@ -1,4 +1,3 @@
-mod agenda;
 mod dialog;
 mod inline_menu;
 mod notifications;
@@ -11,7 +10,7 @@ mod which_key;
 mod wizard;
 
 use bloom_core::render::{
-    AgendaFrame, DialogFrame, InlineMenuAnchor, InlineMenuFrame, McpIndicator, NotificationLevel,
+    DialogFrame, InlineMenuAnchor, InlineMenuFrame, McpIndicator, NotificationLevel,
     PaneFrame, PaneKind, PickerFrame, RenderFrame, StatusBarContent, StatusBarFrame, WhichKeyFrame,
 };
 use ratatui::layout::Rect;

@@ -168,7 +168,7 @@ pub struct BloomEditor {
     pub(crate) template_engine: Option<template::TemplateEngine>,
     pub(crate) template_mode: Option<template::TemplateModeState>,
     pub(crate) _linker: linker::Linker,
-    pub(crate) agenda: agenda::Agenda,
+
     pub(crate) _timeline: timeline::Timeline,
     pub(crate) _refactorer: refactor::Refactor,
     pub(crate) note_store: Option<store::local::LocalFileStore>,
@@ -404,7 +404,7 @@ impl BloomEditor {
             template_engine: None,
             template_mode: None,
             _linker: linker::Linker::new(),
-            agenda: agenda::Agenda::new(),
+
             _timeline: timeline::Timeline::new(),
             _refactorer: refactor::Refactor::new(),
             note_store: None,
