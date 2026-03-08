@@ -27,7 +27,7 @@
 | MCP security | Read-only / read-write modes + path exclusion in config.toml | All-or-nothing enable/disable |
 | Abstraction | Traits for format, storage, keybindings | Hard-coded implementations |
 | Journal | `journal/` directory, one file per day, lazy file creation, quick-capture | Inbox page, single journal file |
-| Vault structure | Single `~/.bloom/` directory, auto `.gitignore`, everything inside | Separate config/data directories |
+| Vault structure | Single `~/bloom/` directory, auto `.gitignore`, everything inside | Separate config/data directories |
 | Data safety | Atomic writes (write→fsync→rename), 300ms debounced auto-save | Direct writes, no crash protection |
 | Filename sanitization | Invalid chars → `-`, capped at 200 chars, case-collision detection | No sanitization, UUID-only filenames |
 | Unicode | NFC normalization for filenames and lookups, diacritic-insensitive search | No normalization |

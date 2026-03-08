@@ -31,14 +31,14 @@ Default level: `info` for file output. Status bar notifications surface `error` 
 ## Log File Location
 
 ```
-~/.bloom/logs/
+~/bloom/logs/
 ├── bloom.log          ← current log (append)
 ├── bloom.1.log        ← previous rotation
 ├── bloom.2.log
 └── bloom.3.log        ← oldest, deleted on next rotation
 ```
 
-- **Path:** `{vault_root}/.bloom/logs/` — colocated with the vault, travels with it.
+- **Path:** `{vault_root}/logs/` — colocated with the vault, travels with it.
 - **Rotation trigger:** File exceeds 5 MB or on startup.
 - **Retention:** 3 rotated files (≤20 MB total). Oldest deleted on rotation.
 - **Format:** One JSON object per line (machine-parseable, grep-friendly).

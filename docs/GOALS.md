@@ -287,7 +287,7 @@ exclude_paths = ["journal/therapy/*", "pages/Passwords.md"]  # glob patterns
 Bloom ships with default templates for common note types and supports user-created templates.
 
 - **Built-in templates**: Daily journal, meeting notes, book review, project page.
-- **User templates**: Stored in `.bloom/templates/` as Markdown files with placeholder syntax.
+- **User templates**: Stored in `templates/` as Markdown files with placeholder syntax.
 - **Template selection**: When creating a new page (`SPC n`), the picker offers available templates.
 - Templates can include pre-filled frontmatter, headings, tags, and placeholder text. Placeholder syntax uses `${N:description}` (snippet-style tab-stops): `${1:Title}`, `${2:Attendees}`, etc. Magic variables `${AUTO}` (UUID), `${DATE}` (today), and `${TITLE}` (user-entered title) are filled automatically. `$0` marks the final cursor position. On template creation, the cursor jumps to `$1`, then `Tab` advances through stops. After the last stop, `Tab` exits template mode. Escape returns to Normal mode without ending template mode. If `${1:desc}` appears multiple times, advancing past it replaces all occurrences. Placeholders inside code blocks are not expanded. See [FILE_FORMAT.md](FILE_FORMAT.md) for full syntax reference.
 
@@ -299,13 +299,13 @@ When a page is open, Bloom validates all links against the index and shows **sub
 
 On first launch, Bloom runs a setup wizard:
 
-- Choose vault location (default: `~/.bloom/`)
+- Choose vault location (default: `~/bloom/`)
 - Optionally import from Logseq (G13)
 
 **Vault directory structure:**
 
 ```
-~/.bloom/                   # vault root (all of Bloom in one directory)
+~/bloom/                    # vault root (all of Bloom in one directory)
 ├── pages/                  # topic pages
 │   └── Text Editor Theory.md
 ├── journal/                # daily journal pages
@@ -321,7 +321,7 @@ On first launch, Bloom runs a setup wizard:
 └── config.toml             # user settings, keybindings, MCP toggle
 ```
 
-Backing up notes = copy `~/.bloom/`. Version control = `git init` inside `~/.bloom/`. Simple.
+Backing up notes = copy `~/bloom/`. Version control = `git init` inside `~/bloom/`. Simple.
 On vault creation, Bloom auto-generates a `.gitignore` that excludes `.index/` (rebuildable) and any OS metadata files. Running `git init` in the vault immediately works correctly.
 
 **File adoption:** If a `.md` file without frontmatter appears in `pages/` or `journal/`, Bloom auto-adds frontmatter (generates UUID, derives title from filename) and shows a notification. Non-`.md` files outside `images/` are ignored.

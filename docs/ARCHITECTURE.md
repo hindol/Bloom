@@ -366,7 +366,7 @@ The core library has **zero dependency on any async runtime**. All concurrency i
 2. **Vim grammar state machine** — checked second, handles modal editing.
 3. **Insert mode passthrough** — if in insert mode, character goes to buffer.
 4. **Which-key popup** — appears after timeout during pending key sequences.
-5. **User customization** — keymap config file (`~/.bloom/keymap.toml`) for overrides.
+5. **User customization** — keymap config file (`~/bloom/keymap.toml`) for overrides.
 
 ---
 

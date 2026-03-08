@@ -83,7 +83,7 @@ Verifies: G14, G4 (Linking)
 Verifies: G19 (Templates)
 
 1. User presses `SPC n` in Normal mode.
-2. A picker shows available templates: "Blank page", "Daily journal", "Meeting notes", "Book review", "Project page", plus any user templates from `.bloom/templates/`.
+2. A picker shows available templates: "Blank page", "Daily journal", "Meeting notes", "Book review", "Project page", plus any user templates from `templates/`.
 3. User selects "Meeting notes".
 4. Picker prompts: "Page title: _". User types "Q1 Review".
 5. A new buffer is created with the template content. Magic variables are auto-filled: `${AUTO}` → UUID, `${DATE}` → today, `${TITLE}` → "Q1 Review". Tags from the template are set.
@@ -688,7 +688,7 @@ Verifies: G19 (Templates)
 
 Verifies: G19
 
-1. User creates a file `.bloom/templates/bug-report.md`:
+1. User creates a file `templates/bug-report.md`:
    ```markdown
    <!-- template: Bug Report | Track and document software bugs with reproduction steps -->
    ---
@@ -857,7 +857,7 @@ Verifies: G17
 Verifies: G21 (Setup Wizard)
 
 1. User launches Bloom for the first time. No vault exists.
-2. Setup wizard appears: "Choose vault location" (default: `~/.bloom/`).
+2. Setup wizard appears: "Choose vault location" (default: `~/bloom/`).
 3. User accepts the default.
 4. Bloom creates the vault directory structure: `pages/`, `journal/`, `templates/`, `images/`, `.index/`, `.gitignore`, `config.toml`.
 5. Wizard asks: "Import from Logseq?" with options "Yes" / "No".
