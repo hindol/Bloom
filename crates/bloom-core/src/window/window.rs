@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::error::BloomError;
 use crate::render::Viewport;
+use crate::session::SessionLayout;
 use crate::types::{PageId, PaneId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -623,6 +624,100 @@ impl WindowManager {
         };
         compute_cell_rects(tree, 0, 0, total_width, total_height, &mut rects);
         rects
+    }
+
+    /// Serialize the current layout tree to session format.
+    pub fn tree_to_session_layout(&self) -> SessionLayout {
+        fn convert(tree: &LayoutTree) -> SessionLayout {
+            match tree {
+                LayoutTree::Leaf(id) => SessionLayout::Leaf(id.0),
+                LayoutTree::Split {
+                    direction,
+                    ratio,
+                    left,
+                    right,
+                } => SessionLayout::Split {
+                    direction: match direction {
+                        SplitDirection::Vertical => "vertical".to_string(),
+                        SplitDirection::Horizontal => "horizontal".to_string(),
+                    },
+                    ratio: *ratio,
+                    left: Box::new(convert(left)),
+                    right: Box::new(convert(right)),
+                },
+            }
+        }
+        convert(&self.tree)
+    }
+
+    /// Get all pane states as (PaneId, &PaneState) pairs.
+    pub fn all_pane_states(&self) -> Vec<(PaneId, &PaneState)> {
+        self.pane_states
+            .iter()
+            .map(|(id, state)| (*id, state))
+            .collect()
+    }
+
+    /// Restore layout from session data. Creates LayoutTree and empty PaneState entries.
+    pub fn restore_layout(&mut self, layout: &SessionLayout) {
+        fn convert(layout: &SessionLayout) -> LayoutTree {
+            match layout {
+                SessionLayout::Leaf(id) => LayoutTree::Leaf(PaneId(*id)),
+                SessionLayout::Split {
+                    direction,
+                    ratio,
+                    left,
+                    right,
+                } => LayoutTree::Split {
+                    direction: if direction == "vertical" {
+                        SplitDirection::Vertical
+                    } else {
+                        SplitDirection::Horizontal
+                    },
+                    ratio: *ratio,
+                    left: Box::new(convert(left)),
+                    right: Box::new(convert(right)),
+                },
+            }
+        }
+        self.tree = convert(layout);
+
+        self.pane_states.clear();
+        self.pane_kinds.clear();
+        let mut max_id = 0u64;
+        let mut pane_ids = Vec::new();
+        fn collect_ids(tree: &LayoutTree, ids: &mut Vec<PaneId>, max_id: &mut u64) {
+            match tree {
+                LayoutTree::Leaf(id) => {
+                    ids.push(*id);
+                    *max_id = (*max_id).max(id.0);
+                }
+                LayoutTree::Split { left, right, .. } => {
+                    collect_ids(left, ids, max_id);
+                    collect_ids(right, ids, max_id);
+                }
+            }
+        }
+        collect_ids(&self.tree, &mut pane_ids, &mut max_id);
+        for id in pane_ids {
+            self.pane_states.insert(
+                id,
+                PaneState {
+                    page_id: None,
+                    cursor: 0,
+                    viewport: Viewport::new(24, 80),
+                },
+            );
+            self.pane_kinds.insert(id, PaneKind::Editor);
+        }
+        self.next_pane_id = max_id + 1;
+    }
+
+    /// Set the active pane by ID.
+    pub fn set_active(&mut self, id: PaneId) {
+        if self.pane_states.contains_key(&id) {
+            self.active = id;
+        }
     }
 }
 

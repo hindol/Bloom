@@ -679,31 +679,50 @@ impl BloomEditor {
             return Ok(());
         };
         let session_path = root.join(".session.json");
-        let active_page = self.active_page().cloned();
-        let scroll_offset = self.viewport().first_visible_line;
+
+        let layout = self.window_mgr.tree_to_session_layout();
+
         let buffers: Vec<session::SessionBuffer> = self
-            .buffer_mgr
-            .open_buffers()
+            .window_mgr
+            .all_pane_states()
             .iter()
-            .map(|info| {
-                let (cursor_line, cursor_col) = if Some(&info.page_id) == active_page.as_ref() {
-                    self.cursor_position()
+            .filter_map(|(pane_id, state)| {
+                let page_id = state.page_id.as_ref()?;
+                let path = self
+                    .buffer_mgr
+                    .open_buffers()
+                    .iter()
+                    .find(|b| b.page_id == *page_id)?
+                    .path
+                    .clone();
+                let (cursor_line, cursor_col) = if let Some(buf) = self.buffer_mgr.get(page_id) {
+                    let rope = buf.text();
+                    let len = rope.len_chars();
+                    let clamped = state.cursor.min(len.saturating_sub(1));
+                    if len == 0 {
+                        (0, 0)
+                    } else {
+                        let line = rope.char_to_line(clamped);
+                        let line_start = rope.line_to_char(line);
+                        (line, clamped - line_start)
+                    }
                 } else {
                     (0, 0)
                 };
-                session::SessionBuffer {
-                    page_path: info.path.clone(),
+                Some(session::SessionBuffer {
+                    page_path: path,
                     cursor_line,
                     cursor_column: cursor_col,
-                    scroll_offset,
-                    pane: 0,
-                }
+                    scroll_offset: state.viewport.first_visible_line,
+                    pane: pane_id.0,
+                })
             })
             .collect();
+
         let state = session::SessionState {
             buffers,
-            layout: session::SessionLayout::Leaf(0),
-            active_pane: 0,
+            layout,
+            active_pane: self.window_mgr.active_pane().0,
         };
         state.save(&session_path)
     }
@@ -717,41 +736,56 @@ impl BloomEditor {
             return Ok(());
         }
         let state = session::SessionState::load(&session_path)?;
+
+        // Restore layout tree and create empty pane states
+        self.window_mgr.restore_layout(&state.layout);
+
+        // Open each buffer in its assigned pane
         for buf_state in &state.buffers {
-            if buf_state.page_path.exists() {
-                if let Ok(content) = std::fs::read_to_string(&buf_state.page_path) {
-                    let title = self
-                        .parser
-                        .parse_frontmatter(&content)
-                        .and_then(|fm| fm.title)
-                        .unwrap_or_else(|| {
-                            buf_state
-                                .page_path
-                                .file_stem()
-                                .unwrap_or_default()
-                                .to_string_lossy()
-                                .to_string()
-                        });
-                    let id = crate::uuid::generate_hex_id();
-                    self.open_page_with_content(&id, &title, &buf_state.page_path, &content);
-                    self.set_cursor(0);
-                    if let Some(buf) = self.buffer_mgr.get(&id) {
-                        let rope = buf.text();
-                        if buf_state.cursor_line < rope.len_lines() {
-                            let line_start = rope.line_to_char(buf_state.cursor_line);
-                            self.set_cursor(
-                                line_start
-                                    + buf_state.cursor_column.min(
-                                        rope.line(buf_state.cursor_line)
-                                            .len_chars()
-                                            .saturating_sub(1),
-                                    ),
-                            );
-                        }
-                    }
+            if !buf_state.page_path.exists() {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&buf_state.page_path) else {
+                continue;
+            };
+            let title = self
+                .parser
+                .parse_frontmatter(&content)
+                .and_then(|fm| fm.title)
+                .unwrap_or_else(|| {
+                    buf_state
+                        .page_path
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string()
+                });
+            let id = crate::uuid::generate_hex_id();
+
+            // Switch to the target pane and open buffer there
+            let pane_id = types::PaneId(buf_state.pane);
+            self.window_mgr.set_active(pane_id);
+            self.open_page_with_content(&id, &title, &buf_state.page_path, &content);
+
+            // Restore cursor position and scroll offset
+            if let Some(buf) = self.buffer_mgr.get(&id) {
+                let rope = buf.text();
+                if buf_state.cursor_line < rope.len_lines() {
+                    let line_start = rope.line_to_char(buf_state.cursor_line);
+                    let line_len = rope.line(buf_state.cursor_line).len_chars();
+                    self.set_cursor(
+                        line_start + buf_state.cursor_column.min(line_len.saturating_sub(1)),
+                    );
                 }
             }
+            if let Some(ps) = self.window_mgr.pane_state_mut(pane_id) {
+                ps.viewport.first_visible_line = buf_state.scroll_offset;
+            }
         }
+
+        // Restore active pane
+        self.window_mgr.set_active(types::PaneId(state.active_pane));
+
         Ok(())
     }
 }
