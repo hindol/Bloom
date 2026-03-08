@@ -138,14 +138,15 @@ impl BloomEditor {
         vec![keymap::dispatch::Action::Noop]
     }
 
-    /// Schedule autosave if the active buffer is dirty.
+    /// Assign block IDs and schedule autosave if the active buffer is dirty.
     /// Called once at the end of handle_key() — covers edits, undo, redo,
     /// task toggle, and any other mutation without each handler needing to
     /// remember to call schedule_autosave().
-    fn autosave_if_dirty(&self) {
-        if let Some(page_id) = self.active_page() {
-            if self.buffer_mgr.get(page_id).is_some_and(|b| b.is_dirty()) {
-                self.schedule_autosave(page_id);
+    fn autosave_if_dirty(&mut self) {
+        if let Some(page_id) = self.active_page().cloned() {
+            if self.buffer_mgr.get(&page_id).is_some_and(|b| b.is_dirty()) {
+                self.ensure_block_ids(&page_id);
+                self.schedule_autosave(&page_id);
             }
         }
     }

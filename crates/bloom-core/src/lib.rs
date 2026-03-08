@@ -1133,6 +1133,7 @@ mod tests {
 
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
+        editor.vault_root = Some(dir.path().to_path_buf());
         let id = crate::uuid::generate_hex_id();
         editor.open_page_with_content(&id, "Test", &file_path, "hello");
 
@@ -1157,6 +1158,7 @@ mod tests {
 
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
+        editor.vault_root = Some(dir.path().to_path_buf());
         let id = crate::uuid::generate_hex_id();
         editor.open_page_with_content(&id, "Test", &file_path, content);
 

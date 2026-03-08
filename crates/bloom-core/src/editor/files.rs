@@ -138,7 +138,24 @@ impl BloomEditor {
 
     /// Assign block IDs to the buffer if any blocks are missing them.
     /// Modifies the rope in-place. Returns true if any IDs were added.
-    fn ensure_block_ids(&mut self, page_id: &types::PageId) -> bool {
+    /// Skips when no vault is initialized (tests) or for pseudo-path buffers.
+    pub(crate) fn ensure_block_ids(&mut self, page_id: &types::PageId) -> bool {
+        // Only assign block IDs when a vault is initialized.
+        if self.vault_root.is_none() {
+            return false;
+        }
+
+        // Skip pseudo-paths like [scratch].
+        let is_pseudo = self
+            .buffer_mgr
+            .open_buffers()
+            .iter()
+            .find(|b| b.page_id == *page_id)
+            .map_or(true, |info| info.path.to_string_lossy().starts_with('['));
+        if is_pseudo {
+            return false;
+        }
+
         let Some(buf) = self.buffer_mgr.get(page_id) else {
             return false;
         };
