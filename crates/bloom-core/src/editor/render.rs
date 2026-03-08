@@ -358,7 +358,24 @@ impl BloomEditor {
             } else {
                 None
             },
-            inline_menu: if matches!(self.vim_state.mode(), vim::Mode::Command) {
+            inline_menu: if let Some(ic) = &self.inline_completion {
+                let items = self.collect_inline_items(ic);
+                let (cursor_line, cursor_col) = self.cursor_position();
+                if !items.is_empty() {
+                    let selected = ic.selected.min(items.len().saturating_sub(1));
+                    Some(render::InlineMenuFrame {
+                        items,
+                        selected,
+                        anchor: render::InlineMenuAnchor::Cursor {
+                            line: cursor_line.saturating_sub(self.viewport().first_visible_line),
+                            col: cursor_col + 5, // 5 = gutter width
+                        },
+                        hint: None,
+                    })
+                } else {
+                    None
+                }
+            } else if matches!(self.vim_state.mode(), vim::Mode::Command) {
                 let input = self.vim_state.pending_keys();
 
                 // Detect argument completion: "theme <partial>"
@@ -368,6 +385,7 @@ impl BloomEditor {
                         .iter()
                         .filter(|name| arg_prefix.is_empty() || name.starts_with(arg_prefix))
                         .map(|name| render::InlineMenuItem {
+                            id: None,
                             label: name.to_string(),
                             right: None,
                         })
@@ -378,6 +396,7 @@ impl BloomEditor {
                         .iter()
                         .filter(|(cmd, _)| input.is_empty() || cmd.starts_with(input))
                         .map(|(cmd, desc)| render::InlineMenuItem {
+                            id: None,
                             label: cmd.to_string(),
                             right: Some(desc.to_string()),
                         })

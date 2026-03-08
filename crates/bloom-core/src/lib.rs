@@ -203,6 +203,20 @@ pub struct BloomEditor {
     pub(crate) file_event_deadline: Option<Instant>,
     // External file change dialog
     pub(crate) active_dialog: Option<ActiveDialog>,
+    // Inline completion (link picker / tag completion)
+    pub(crate) inline_completion: Option<InlineCompletion>,
+}
+
+pub(crate) struct InlineCompletion {
+    pub kind: InlineCompletionKind,
+    /// Char position in buffer where the query starts (after the trigger).
+    pub trigger_pos: usize,
+    pub selected: usize,
+}
+
+pub(crate) enum InlineCompletionKind {
+    Link, // triggered by [[
+    Tag,  // triggered by #
 }
 
 pub(crate) enum ActiveDialog {
@@ -438,6 +452,7 @@ impl BloomEditor {
             pending_file_events: std::collections::HashSet::new(),
             file_event_deadline: None,
             active_dialog: None,
+            inline_completion: None,
             config,
         })
     }

@@ -48,6 +48,35 @@ impl BloomEditor {
             return self.handle_quick_capture_key(&key);
         }
 
+        // If inline completion is active, intercept navigation/accept keys
+        if self.inline_completion.is_some() {
+            match &key.code {
+                types::KeyCode::Enter | types::KeyCode::Tab => {
+                    self.accept_inline_completion();
+                    return vec![keymap::dispatch::Action::Noop];
+                }
+                types::KeyCode::Esc => {
+                    self.inline_completion = None;
+                    // fall through to vim (Esc exits insert mode)
+                }
+                types::KeyCode::Up => {
+                    if let Some(ic) = &mut self.inline_completion {
+                        ic.selected = ic.selected.saturating_sub(1);
+                    }
+                    return vec![keymap::dispatch::Action::Noop];
+                }
+                types::KeyCode::Down => {
+                    if let Some(ic) = &mut self.inline_completion {
+                        ic.selected += 1; // clamped during render
+                    }
+                    return vec![keymap::dispatch::Action::Noop];
+                }
+                _ => {
+                    // Let the key pass through to vim (typing continues)
+                }
+            }
+        }
+
         // If we're in a leader key sequence (SPC was pressed), route to which-key
         if !self.leader_keys.is_empty() {
             let actions = self.handle_leader_key(key);
@@ -919,6 +948,10 @@ impl BloomEditor {
                         self.set_cursor(edit.cursor_after);
                     }
                 }
+                // Check for inline completion triggers after an edit in Insert mode
+                if matches!(self.vim_state.mode(), vim::Mode::Insert) {
+                    self.check_inline_triggers();
+                }
                 vec![keymap::dispatch::Action::Edit(buffer::EditOp {
                     range: edit.range,
                     replacement: edit.replacement,
@@ -928,6 +961,7 @@ impl BloomEditor {
             vim::VimAction::Motion(motion) => {
                 self.pending_since = None;
                 self.which_key_visible = false;
+                self.inline_completion = None;
                 self.set_cursor(motion.new_position);
                 vec![keymap::dispatch::Action::Motion(
                     keymap::dispatch::MotionResult {
@@ -937,6 +971,9 @@ impl BloomEditor {
                 )]
             }
             vim::VimAction::ModeChange(ref mode) => {
+                if !matches!(mode, vim::Mode::Insert) {
+                    self.inline_completion = None;
+                }
                 let was_insert = matches!(prev_mode, vim::Mode::Insert);
                 if matches!(mode, vim::Mode::Command) {
                     self.pending_since = Some(Instant::now());
@@ -1011,6 +1048,159 @@ impl BloomEditor {
             "undo" => vec![keymap::dispatch::Action::Undo],
             "redo" => vec![keymap::dispatch::Action::Redo],
             _ => self.translate_ex_command(cmd),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Inline completion (link picker / tag completion)
+    // -----------------------------------------------------------------------
+
+    fn check_inline_triggers(&mut self) {
+        let cursor = self.cursor();
+        let Some(page_id) = self.active_page().cloned() else {
+            return;
+        };
+        let Some(buf) = self.buffer_mgr.get(&page_id) else {
+            return;
+        };
+        let rope = buf.text();
+
+        // Already in a completion session — validate the cursor is still past
+        // the trigger position; if not, cancel.
+        if let Some(ref ic) = self.inline_completion {
+            if cursor < ic.trigger_pos {
+                self.inline_completion = None;
+            }
+            return;
+        }
+
+        // Check for [[ trigger: cursor >= 2, two preceding chars are '[['
+        if cursor >= 2 {
+            let c1 = rope.char(cursor - 2);
+            let c2 = rope.char(cursor - 1);
+            if c1 == '[' && c2 == '[' {
+                self.inline_completion = Some(InlineCompletion {
+                    kind: InlineCompletionKind::Link,
+                    trigger_pos: cursor, // query starts after [[
+                    selected: 0,
+                });
+                return;
+            }
+        }
+
+        // Check for # trigger: char before cursor is #, preceded by whitespace
+        // or start-of-line.
+        if cursor >= 1 {
+            let prev = rope.char(cursor - 1);
+            if prev == '#' {
+                let is_valid_start = cursor < 2 || {
+                    let before_hash = rope.char(cursor - 2);
+                    before_hash.is_whitespace() || before_hash == '\n'
+                };
+                if is_valid_start {
+                    self.inline_completion = Some(InlineCompletion {
+                        kind: InlineCompletionKind::Tag,
+                        trigger_pos: cursor, // query starts after #
+                        selected: 0,
+                    });
+                }
+            }
+        }
+    }
+
+    fn accept_inline_completion(&mut self) {
+        let Some(ic) = self.inline_completion.take() else {
+            return;
+        };
+        let items = self.collect_inline_items(&ic);
+        let selected = ic.selected.min(items.len().saturating_sub(1));
+        let Some(item) = items.get(selected) else {
+            return;
+        };
+
+        let Some(page_id) = self.active_page().cloned() else {
+            return;
+        };
+
+        let cursor = self.cursor();
+
+        let Some(buf) = self.buffer_mgr.get_mut(&page_id) else {
+            return;
+        };
+
+        match ic.kind {
+            InlineCompletionKind::Link => {
+                // Replace from [[ (trigger_pos - 2) to cursor with [[id|label]]
+                let start = ic.trigger_pos.saturating_sub(2);
+                let replacement = format!(
+                    "[[{}|{}]]",
+                    item.id.as_deref().unwrap_or(&item.label),
+                    item.label
+                );
+                let new_cursor = start + replacement.len();
+                buf.replace(start..cursor, &replacement);
+                self.set_cursor(new_cursor);
+            }
+            InlineCompletionKind::Tag => {
+                // Replace from # (trigger_pos - 1) to cursor with #tagname
+                let start = ic.trigger_pos.saturating_sub(1);
+                let replacement = format!("#{}", item.label);
+                let new_cursor = start + replacement.len();
+                buf.replace(start..cursor, &replacement);
+                self.set_cursor(new_cursor);
+            }
+        }
+    }
+
+    pub(crate) fn collect_inline_items(
+        &self,
+        ic: &InlineCompletion,
+    ) -> Vec<render::InlineMenuItem> {
+        // Extract query text from the buffer (text between trigger_pos and cursor).
+        let query = if let Some(page_id) = self.active_page() {
+            if let Some(buf) = self.buffer_mgr.get(page_id) {
+                let rope = buf.text();
+                let end = self.cursor().min(rope.len_chars());
+                let start = ic.trigger_pos.min(end);
+                rope.slice(start..end).to_string()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+        let query_lower = query.to_lowercase();
+
+        match ic.kind {
+            InlineCompletionKind::Link => self
+                .collect_page_items()
+                .into_iter()
+                .filter(|item| query.is_empty() || item.label.to_lowercase().contains(&query_lower))
+                .take(10)
+                .map(|item| render::InlineMenuItem {
+                    id: Some(item.id),
+                    label: item.label,
+                    right: item.right,
+                })
+                .collect(),
+            InlineCompletionKind::Tag => {
+                if let Some(idx) = &self.index {
+                    idx.all_tags()
+                        .into_iter()
+                        .filter(|(tag, _)| {
+                            query.is_empty() || tag.0.to_lowercase().contains(&query_lower)
+                        })
+                        .take(10)
+                        .map(|(tag, count)| render::InlineMenuItem {
+                            id: None,
+                            label: tag.0,
+                            right: Some(format!("{count}")),
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                }
+            }
         }
     }
 }

@@ -136,6 +136,7 @@ pub struct InlineMenuFrame {
 }
 
 pub struct InlineMenuItem {
+    pub id: Option<String>,
     pub label: String,
     pub right: Option<String>,
 }
