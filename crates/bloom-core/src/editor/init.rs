@@ -81,10 +81,14 @@ impl BloomEditor {
 
     /// Perform startup according to config. Guarantees `active_page` is `Some` on return.
     pub fn startup(&mut self) {
+        // Always restore window layout from session (if available)
+        let _ = self.restore_session();
+
         match self.config.startup.mode {
             config::StartupMode::Journal => self.open_journal_today(),
             config::StartupMode::Restore => {
-                if self.restore_session().is_err() || self.active_page().is_none() {
+                // Session already restored above; just ensure we have a buffer
+                if self.active_page().is_none() {
                     self.open_scratch_buffer();
                 }
             }
