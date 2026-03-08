@@ -794,7 +794,7 @@ mod tests {
         editor.open_page_with_content(
             &id,
             "Test",
-            std::path::Path::new("test.md"),
+            std::path::Path::new("[scratch]"),
             "# Hello\n\nWorld\n",
         );
         let frame = editor.render(80, 24);
@@ -813,7 +813,7 @@ mod tests {
         editor.open_page_with_content(
             &id,
             "Test",
-            std::path::Path::new("test.md"),
+            std::path::Path::new("[scratch]"),
             "hello\nworld\n",
         );
         // Move down twice: line 0 → line 1 → line 2 (empty last line)
@@ -831,7 +831,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "hello");
         editor.handle_key(KeyEvent::char('i'));
         let frame = editor.render(80, 24);
         assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
@@ -847,7 +847,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "");
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "");
         editor.handle_key(KeyEvent::char('i')); // enter insert mode
         editor.handle_key(KeyEvent::char('H'));
         editor.handle_key(KeyEvent::char('i'));
@@ -861,7 +861,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "");
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "");
         editor.handle_key(KeyEvent::char('i'));
         editor.handle_key(KeyEvent::char('a'));
         editor.handle_key(KeyEvent::enter());
@@ -876,7 +876,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "");
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "");
         editor.handle_key(KeyEvent::char('i'));
         editor.handle_key(KeyEvent::char('a'));
         editor.handle_key(KeyEvent::char('b'));
@@ -891,7 +891,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "ab");
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "ab");
         editor.handle_key(KeyEvent::char('i')); // insert at pos 0
                                                 // Move right twice to end
         editor.handle_key(KeyEvent {
@@ -920,7 +920,7 @@ mod tests {
         editor.open_page_with_content(
             &id,
             "Test",
-            std::path::Path::new("test.md"),
+            std::path::Path::new("[scratch]"),
             "hello\nworld\n",
         );
         editor.handle_key(KeyEvent::char('o'));
@@ -945,7 +945,7 @@ mod tests {
         editor.open_page_with_content(
             &id,
             "Test",
-            std::path::Path::new("test.md"),
+            std::path::Path::new("[scratch]"),
             "hello\nworld\n",
         );
         editor.handle_key(KeyEvent::char('O'));
@@ -965,7 +965,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "hello");
         editor.handle_key(KeyEvent::char('o'));
         let frame = editor.render(80, 24);
         assert_eq!(frame.panes[0].status_bar.mode, "INSERT");
@@ -983,7 +983,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "hello");
         editor.handle_key(KeyEvent::char('i'));
         editor.handle_key(KeyEvent::esc());
         let frame = editor.render(80, 24);
@@ -1000,7 +1000,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "hello");
         let actions = editor.handle_key(KeyEvent::ctrl('s'));
         assert!(actions
             .iter()
@@ -1013,7 +1013,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "hello");
 
         // Count initial panes
         let frame = editor.render(80, 24);
@@ -1027,7 +1027,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "hello");
         // Type 'u' for undo in normal mode
         editor.handle_key(KeyEvent::char('u'));
         // Shouldn't crash, even with no edits to undo
@@ -1039,7 +1039,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "");
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "");
 
         // Enter insert mode, type "abc", exit
         editor.handle_key(KeyEvent::char('i'));
@@ -1393,7 +1393,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "hello");
         editor.handle_key(KeyEvent::char(' ')); // SPC
         editor.handle_key(KeyEvent::char('f')); // f (group)
         editor.handle_key(KeyEvent::char('f')); // f (action)
@@ -1464,7 +1464,7 @@ mod tests {
         cfg.which_key_timeout_ms = 0; // instant for testing
         let mut editor = BloomEditor::new(cfg).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "hello");
         editor.handle_key(KeyEvent::char(' ')); // SPC
         let frame = editor.render(80, 24);
         assert!(frame.which_key.is_some());
@@ -1479,7 +1479,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "hello");
         editor.handle_key(KeyEvent::char(' ')); // SPC
         editor.handle_key(KeyEvent::esc()); // Cancel
         let frame = editor.render(80, 24);
@@ -1492,7 +1492,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "hello");
         editor.handle_key(KeyEvent::char(':')); // enter command mode
         editor.handle_key(KeyEvent::char('q'));
         let actions = editor.handle_key(KeyEvent::enter());
@@ -1507,7 +1507,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "hello");
         editor.handle_key(KeyEvent::char(':'));
         editor.handle_key(KeyEvent::char('w'));
         let actions = editor.handle_key(KeyEvent::enter());
@@ -1522,7 +1522,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(&id, "Test", std::path::Path::new("test.md"), "hello");
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "hello");
         editor.handle_key(KeyEvent::char(':'));
         editor.handle_key(KeyEvent::char('w'));
         editor.handle_key(KeyEvent::char('q'));
