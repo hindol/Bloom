@@ -36,7 +36,7 @@ The agenda is `tasks where status = open, grouped by due date`. The timeline is 
 
 5. **Live feedback.** The interactive query prompt (`SPC v v`) parses and executes on every pause (150ms debounce), showing results or a clear error with position info.
 
-6. **Embeddable in notes.** A `` ```bloom `` code block renders as a live view. Other editors see readable code.
+6. **Embeddable in notes.** A `` ```bql `` code block renders as a live view. Other editors see readable code.
 
 ---
 
@@ -136,7 +136,7 @@ blocks | where modified = today                -- everything touched today
 
 ## Queries Live in Pages
 
-There is no separate "view" mode. A query is a `` ```bloom `` code block in a regular page. The page is the view.
+There is no separate "view" mode. A query is a `` ```bql `` code block in a regular page. The page is the view.
 
 ### Example: A User-Created Agenda Page
 
@@ -169,11 +169,11 @@ tasks | where not done and due = none | sort page
 ` ``
 ```
 
-This is a normal page. It shows up in `SPC f f`. It can have prose, headings, links, tags — anything. The `` ```bloom `` blocks render as live, interactive result sets inside the page content.
+This is a normal page. It shows up in `SPC f f`. It can have prose, headings, links, tags — anything. The `` ```bql `` blocks render as live, interactive result sets inside the page content.
 
 ### Rendering
 
-- **In Bloom:** Each `` ```bloom `` block is replaced inline with a result table. The query text is hidden (shown dimmed above the results, like a code fence label). Results update on `IndexComplete`.
+- **In Bloom:** Each `` ```bql `` block is replaced inline with a result table. The query text is hidden (shown dimmed above the results, like a code fence label). Results update on `IndexComplete`.
 - **In other editors / GitHub:** It's a readable code block. Portable Markdown. No lock-in.
 - **Inline queries:** `` `bloom: tasks | where not done | count` `` renders as an inline number (e.g., "12").
 
@@ -251,7 +251,7 @@ Execution always goes through the existing read-only index connection. No new da
 
 Query blocks re-execute when the index changes (after `IndexComplete`). The editor re-runs queries for the visible page and re-renders if results changed. Same pattern as backlinks/agenda refresh. Cost: <1ms per query.
 
-When the user edits the query text in a `` ```bloom `` block, a 150ms debounce triggers re-parse + re-execute + re-render.
+When the user edits the query text in a `` ```bql `` block, a 150ms debounce triggers re-parse + re-execute + re-render.
 
 ### New Modules
 
@@ -264,7 +264,7 @@ When the user edits the query text in a `` ```bloom `` block, a 150ms debounce t
 
 ### Render Integration
 
-The editor's content renderer detects `` ```bloom `` blocks during `render()`. For each:
+The editor's content renderer detects `` ```bql `` blocks during `render()`. For each:
 
 1. Parse the query text
 2. If valid: compile → execute → produce `QueryResultBlock` (rows, columns, group headers, actions)
