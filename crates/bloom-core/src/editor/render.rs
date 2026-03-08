@@ -957,6 +957,7 @@ fn format_task_row(
         .unwrap_or_default();
 
     let checkbox = if done { "  ☑ " } else { "  ☐ " };
+    let checkbox_len = checkbox.len(); // byte length (6 for "  ☐ ")
     let task_text = text.trim_start_matches("- [ ] ").trim_start_matches("- [x] ");
 
     let mut line = format!("{checkbox}{task_text}");
@@ -980,18 +981,18 @@ fn format_task_row(
 
     let mut spans = vec![
         parser::traits::StyledSpan {
-            range: 0..4,
+            range: 0..checkbox_len,
             style: checkbox_style,
         },
     ];
     if done {
         spans.push(parser::traits::StyledSpan {
-            range: 4..text_end,
+            range: checkbox_len..text_end,
             style: parser::traits::Style::CheckedTaskText,
         });
     } else {
         spans.push(parser::traits::StyledSpan {
-            range: 4..text_end,
+            range: checkbox_len..text_end,
             style: parser::traits::Style::Normal,
         });
     }
