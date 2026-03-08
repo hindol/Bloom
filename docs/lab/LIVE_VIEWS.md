@@ -26,186 +26,110 @@ The agenda is `tasks where status = open, grouped by due date`. The timeline is 
 
 ## Design Principles
 
-1. **Learnable in 10 minutes.** If it takes longer, it's failed. No programming background required. The entire language should fit on one screen.
+1. **Learnable in 5 minutes.** The entire language fits on one screen. No programming background required.
 
-2. **Reads like English.** `tasks where due before today` not `SELECT * FROM tasks WHERE due_date < date('now')`. The syntax should be guessable.
+2. **Reads like English.** `tasks | where not done and due < today` not `SELECT * FROM tasks WHERE done = 0 AND due_date < date('now')`.
 
-3. **Composable by piping.** Small operations chained together, Unix-style. Each step transforms the result set. `tasks | where tag = "work" | where due before friday | sort due | group by page`
+3. **Composable by piping.** Small operations chained with `|`. Each step transforms the result set.
 
-4. **Zero boilerplate.** A query with no clauses returns everything. Every clause is optional. `tasks` alone is a valid query that shows all tasks.
+4. **Zero boilerplate.** A query with no clauses returns everything. Every clause is optional. `tasks` alone is valid.
 
-5. **Live by default.** Query results update in real-time as notes change. There's no "run" button — it's a view, not a report.
+5. **Live feedback.** The interactive query prompt (`SPC v v`) parses and executes on every pause (150ms debounce), showing results or a clear error with position info.
 
-6. **Embeddable in notes.** A query inside a fenced code block renders as a live view when the page is displayed. The Markdown source stays portable — other editors see the query as a code block.
+6. **Embeddable in notes.** A `` ```bloom `` code block renders as a live view. Other editors see readable code.
 
 ---
 
 ## The Language: Bloom Query Language (BQL)
 
+### Grammar
+
+```
+QUERY  = SOURCE ("|" CLAUSE)*
+
+SOURCE = "pages" | "tasks" | "journal" | "blocks" | "tags" | "links"
+
+CLAUSE = WHERE | SORT | GROUP | LIMIT | COUNT
+
+WHERE  = "where" EXPR
+EXPR   = PRED (("and" | "or") PRED)*
+PRED   = "not" ATOM | ATOM
+ATOM   = "(" EXPR ")"
+       | FIELD OP VALUE
+       | FIELD "has" TAG
+       | FIELD RANGE
+
+OP     = "=" | "!=" | "<" | ">" | "<=" | ">="
+
+RANGE  = "this week" | "last week" | "next week"
+       | "this month" | "last month" | "next month"
+
+TAG    = "#" identifier
+
+FIELD  = identifier ("." identifier)*
+VALUE  = STRING | DATE | NUMBER | BOOL | VAR | "none"
+STRING = '"..."' | "'...'"
+DATE   = YYYY-MM-DD | "today" | "yesterday" | "tomorrow"
+NUMBER = digits
+BOOL   = "true" | "false"
+VAR    = "$page" | "$today"
+
+SORT   = "sort" FIELD ["asc"|"desc"] ("," FIELD ["asc"|"desc"])*
+GROUP  = "group" FIELD
+LIMIT  = "limit" NUMBER
+COUNT  = "count"
+```
+
+### Rules
+
+- Strings **must** be quoted. `"hello"` or `'hello'`.
+- `and`/`or` combine predicates within a single `where`. Parentheses control precedence.
+- `not` can only precede an atom (no double negation).
+- `count` must be the last clause. With `group`, it returns per-group counts. Without `group`, a single total.
+- Sort only works on scalar fields (not lists like `tags`).
+- `$page` resolves to the current page's ID. Returns empty results if no page is open.
+- `none` represents a missing value: `where due = none` (no due date), `where due != none` (has due date).
+- Range predicates (`this week`, etc.) only apply to date fields. Week start day is configured in `config.toml`.
+- `has` only applies to list fields (`tags`). Uses Bloom's tag syntax: `tags has #rust`.
+- Unknown fields or type mismatches produce compile-time errors with clear messages.
+
 ### Sources
 
-A query starts with a **source** — what kind of thing you're looking at.
-
-| Source | Returns | Fields available |
-|--------|---------|-----------------|
-| `pages` | All pages in the vault | `title`, `created`, `tags`, `path`, `links`, `backlinks` |
+| Source | Returns | Fields |
+|--------|---------|--------|
+| `pages` | All pages | `title`, `created`, `tags`, `path`, `backlinks.count` |
 | `tasks` | All tasks (checkbox items) | `text`, `done`, `due`, `start`, `page`, `tags`, `line` |
-| `journal` | Journal pages only | `date`, `title`, `tags` |
-| `blocks` | All blocks/paragraphs | `text`, `page`, `line`, `tags`, `links` |
+| `journal` | Journal entries only | `date`, `title`, `tags` |
+| `blocks` | All content blocks | `text`, `page`, `line`, `tags`, `modified` |
 | `tags` | All unique tags | `name`, `count` |
-| `links` | All links in the vault | `from`, `to`, `display`, `section` |
+| `links` | All links | `from`, `to`, `display` |
 
-The source name alone is a valid query: `tasks` returns all tasks, `pages` returns all pages.
-
-### Pipes
-
-Clauses chain with `|` (pipe). Each pipe transforms the result set.
+### Examples
 
 ```
-tasks | where due before today | sort due
-```
+tasks                                          -- all tasks
+tasks | where not done                         -- open tasks
+tasks | where not done and due < today         -- overdue
+tasks | where not done and due this week       -- due this week
+  and tags has #work
+tasks | where tags has #work                   -- work tasks
+  or tags has #urgent
+tasks | where not done and due = none          -- tasks with no due date
+tasks | where not done                         -- agenda
+  | sort due | group due.category
+tasks | where not done | count                 -- total open tasks
+tasks | where not done                         -- per-page open task counts
+  | group page | count
 
-### Clauses
+pages | sort created desc | limit 20           -- recently created
+pages | where tags has #rust | sort title      -- all Rust pages
+pages | where backlinks.count = 0              -- orphan pages
 
-#### `where` — filter
+links | where to = $page                       -- what links here
 
-```
-where <field> <operator> <value>
+tags | sort count desc                         -- all tags by frequency
 
-Operators:
-  =, !=           exact match (strings are case-insensitive)
-  <, >, <=, >=    comparison (dates, numbers)
-  contains        substring match
-  matches         fuzzy match (same as picker)
-  before, after   date comparison (sugar for < and >)
-  has             set membership: `where tags has "rust"`
-  not             negation prefix: `where not done`
-```
-
-Multiple `where` clauses AND together. For OR, use `any`:
-
-```
-tasks | where any(tag = "work", tag = "urgent")
-```
-
-**Date literals** are human-friendly:
-
-```
-today, yesterday, tomorrow
-monday, tuesday, ... (next occurrence)
-last week, this week, next week
-last month, this month, next month
-2026-03-08 (ISO date)
-3 days ago, in 2 weeks
-```
-
-#### `sort` — order results
-
-```
-sort <field> [asc|desc]
-```
-
-Default is ascending. Multiple sort fields separate with `,`:
-
-```
-pages | sort created desc, title
-```
-
-#### `group` — group results with headers
-
-```
-group <field>
-group <expression>
-```
-
-Groups produce visual section headers in the rendered view.
-
-```
-tasks | where not done | group due category
-```
-
-`due category` is a built-in grouping that produces Overdue / Today / Upcoming / Undated — exactly what the current agenda does.
-
-Custom grouping expressions:
-
-```
-tasks | group page           -- group by source page
-pages | group created month  -- group by month created
-blocks | group tags first    -- group by first tag
-```
-
-#### `select` — choose which fields to display
-
-```
-tasks | select text, due, page
-```
-
-If omitted, a sensible default per source is used.
-
-#### `limit` — cap result count
-
-```
-pages | sort created desc | limit 10
-```
-
-#### `count` — aggregate to a number
-
-```
-tasks | where not done | count
-```
-
-Returns a single number instead of a result set. Useful in embedded views for dashboards.
-
-### Complete Examples
-
-**The current agenda, as a query:**
-
-```
-tasks | where not done | sort due | group due category
-```
-
-That's it. The entire hard-coded agenda view in one line.
-
-**Tasks due this week tagged #work:**
-
-```
-tasks | where not done | where due this week | where tags has "work" | sort due
-```
-
-**Recently created pages:**
-
-```
-pages | sort created desc | limit 20
-```
-
-**All pages about Rust, most linked first:**
-
-```
-pages | where tags has "rust" | sort backlinks count desc
-```
-
-**Orphan pages (no incoming links):**
-
-```
-pages | where backlinks count = 0
-```
-
-**Journal entries from February:**
-
-```
-journal | where date after 2026-02-01 | where date before 2026-03-01
-```
-
-**Open questions (tasks I wrote as questions):**
-
-```
-tasks | where not done | where text contains "?"
-```
-
-**Dashboard: how much did I write this week?**
-
-```
-blocks | where created this week | group page | count
+blocks | where modified = today                -- everything touched today
 ```
 
 ---
@@ -220,13 +144,13 @@ A fenced code block with the `bloom` language tag becomes a live view:
 Open tasks for this week:
 
 ```bloom
-tasks | where not done | where tags has "work" | where due this week | sort due
+tasks | where not done and due this week and tags has #work | sort due
 ```
 
-Recently modified pages:
+Recently created pages:
 
 ```bloom
-pages | sort modified desc | limit 5
+pages | sort created desc | limit 5
 ```
 
 Total open tasks: `bloom: tasks | where not done | count`
@@ -259,14 +183,14 @@ Write a `bloom` code block in any note. The results render live in the editor pa
 
 | Current feature | BQL equivalent | Keybinding (unchanged) |
 |----------------|----------------|----------------------|
-| Agenda | `tasks \| where not done \| sort due \| group due category` | `SPC a a` |
-| Backlinks | `links \| where to = $current \| sort from` | `SPC s l` |
+| Agenda | `tasks \| where not done \| sort due \| group due.category` | `SPC a a` |
+| Backlinks | `links \| where to = $page` | `SPC s l` |
 | Tag browse | `tags \| sort count desc` | `SPC s t` |
 | Journal search | `journal \| sort date desc` | `SPC s j` |
 
 The keybindings still work exactly as today — they just invoke a BQL query under the hood. Users who never learn BQL see zero difference. Users who do can customise or create their own.
 
-`$current` is a context variable — the current page's ID. Other context variables: `$today`, `$yesterday`, `$tomorrow`.
+`$page` is a context variable — the current page's ID. `$today` resolves to today's date.
 
 ---
 
@@ -274,27 +198,14 @@ The keybindings still work exactly as today — they just invoke a BQL query und
 
 ### Parser
 
-A simple hand-written recursive descent parser. The grammar is small enough that a parser generator is overkill. Parsing a query should take microseconds.
-
-```
-Query     = Source ("|" Clause)*
-Source    = "pages" | "tasks" | "journal" | "blocks" | "tags" | "links"
-Clause    = Where | Sort | Group | Select | Limit | Count
-Where     = "where" Predicate
-Sort      = "sort" FieldOrder ("," FieldOrder)*
-Group     = "group" Field GroupModifier?
-Select    = "select" Field ("," Field)*
-Limit     = "limit" Number
-Count     = "count"
-Predicate = Field Operator Value | "not" Predicate | "any(" Predicate ("," Predicate)* ")"
-```
+A hand-written recursive descent parser. The grammar is small enough that a parser generator is overkill. Parsing takes microseconds. Errors include position info for the live feedback UI.
 
 ### Execution
 
-Queries execute against the SQLite index. Each clause maps to SQL operations:
+Queries compile to SQL and execute against the SQLite index:
 
 ```
-tasks | where not done | where tags has "work" | sort due
+tasks | where not done and tags has #work | sort due
        ↓
 SELECT t.*, GROUP_CONCAT(tg.tag) as tags
 FROM tasks t
@@ -310,21 +221,31 @@ The BQL-to-SQL compiler is straightforward because:
 - `sort` maps to `ORDER BY`
 - `group` maps to result-set post-processing (grouping is a display concern, not a SQL concern)
 - `limit` maps to `LIMIT`
+- `count` maps to `COUNT(*)`, with `GROUP BY` when preceded by `group`
 
 Execution always goes through the existing read-only index connection. No new database access patterns.
 
-### Live Updates
+### Live Feedback (`SPC v v`)
 
-Embedded queries re-execute when the index changes (after the indexer sends `IndexComplete`). The UI thread receives the notification, re-runs any visible queries, and re-renders if results changed. This is the same pattern as the current backlinks/agenda refresh.
+The interactive query prompt debounces at 150ms. On each pause:
 
-Cost: a few extra SQLite queries per index update. At <1 ms per query, this is negligible even with dozens of embedded views.
+1. **Tokenise + parse** → AST or error with position
+2. **Compile** → SQL or semantic error (unknown field, type mismatch)
+3. **Execute** → result set
+4. **Render** → results below the input, or error inline with caret
+
+This reuses the picker infrastructure: the query input is the picker input, the results are the picker results. BQL replaces the fuzzy matcher with parse → compile → execute.
+
+### Embedded Views
+
+Embedded queries (`` ```bloom ``) re-execute when the index changes (after `IndexComplete`). The UI thread re-runs visible queries and re-renders if results changed. Same pattern as backlinks/agenda refresh. Cost: <1ms per query.
 
 ### New Modules
 
 | Module | Responsibility |
 |--------|---------------|
-| `query/parse.rs` | BQL tokeniser + parser → AST |
-| `query/compile.rs` | AST → SQL query string |
+| `query/parse.rs` | BQL tokeniser + parser → AST, with position-aware error diagnostics |
+| `query/compile.rs` | AST → SQL query string, field/type validation |
 | `query/execute.rs` | Run compiled query against index, return typed result sets |
 | `query/builtins.rs` | Built-in queries (agenda, backlinks, etc.) as BQL constants |
 | `query/mod.rs` | Public API: `parse()`, `execute()`, `QueryResult` types |
@@ -332,10 +253,10 @@ Cost: a few extra SQLite queries per index update. At <1 ms per query, this is n
 ### Render Integration
 
 Query results produce a `QueryResultFrame` (new variant in `RenderFrame`) containing:
-- Column headers (derived from `select` or source defaults)
+- Column headers (derived from source defaults)
 - Typed rows (strings, dates, booleans, numbers)
 - Group headers (from `group`)
-- Source locations (page + line, for jump-to-source)
+- Source locations (page + line, for jump-to-source via block ID)
 - Actions available per row (toggle task, open page, etc.)
 
 The TUI renders this as a table/list — same visual language as the existing agenda and picker results.
@@ -359,28 +280,25 @@ This is a **backwards-compatible** change — users see the exact same agenda. B
 
 ## Open Questions
 
-1. **Error reporting.** What happens when a query has a syntax error in an embedded block? Show the error inline (like a broken link indicator)? Show the raw query text with a diagnostic underline?
+1. **Error rendering in embedded blocks.** Show error inline with caret position? Or show the raw query text with a diagnostic underline? Leaning towards: red-tinted code block with error message below the query text.
 
-2. **Performance guardrails.** Should we prevent `blocks` queries on huge vaults (100K+ blocks)? Auto-add `limit 1000`? Show a warning?
+2. **Performance guardrails.** Should we prevent `blocks` queries on huge vaults (100K+ blocks)? Auto-add `limit 1000`? Show a warning? Leaning towards: no implicit limit, but show result count and warn if > 1000.
 
-3. **Extensibility.** Can users define custom sources? (e.g., a source backed by a shell command or external data.) Probably out of scope for v1 but the architecture should allow it.
+3. **Week start configuration.** `this week` range depends on week start day. Config: `[calendar] week_starts = "monday"`. Default: Monday (ISO 8601).
 
-4. **Aggregations beyond count.** Do we need `sum`, `avg`, `min`, `max`? Probably not for v1. `count` covers 90% of dashboard use cases.
+4. **`contains` operator.** Useful for `tasks | where text contains "?"` (find questions). Not in the grammar yet. Add as a string operator alongside `=` and `!=`? Leaning towards: yes, add it — it's the only substring predicate users will need.
 
-5. **Field arithmetic.** `where backlinks count > links count` — do we support computed fields? Adds complexity. Probably defer.
-
-6. **Result caching.** If the same query appears in 5 different notes, do we cache the result? The index connection is read-only and queries are fast (<1 ms), so maybe not worth the complexity.
-
-7. **Cross-referencing queries.** Can one query reference another? `saved:my-work-tasks | count` — referring to a saved view by name. Useful for dashboards but adds a dependency graph.
+5. **`select` clause.** The original design had `select` to choose display columns. Removed for simplicity. Revisit if users request it.
 
 ---
 
 ## Non-Goals
 
-- **Turing completeness.** BQL is a query language, not a programming language. No variables, no loops, no conditionals, no functions. If you need that, use the MCP server.
+- **Turing completeness.** BQL is a query language, not a programming language. No variables, no loops, no conditionals, no user-defined functions.
 - **Write operations.** Queries are read-only projections. You can *act on* results (toggle a task), but the query itself never mutates data.
 - **Cross-vault queries.** Single vault only (consistent with Bloom's v1 scope).
-- **Real-time typing queries.** Queries in embedded blocks re-execute on index change, not on every keystroke in the query text. The `SPC v v` interactive prompt does update live as you type, same as the picker.
+- **Source OR-ing.** `pages or journal | ...` is not supported. Use `blocks` for cross-source queries.
+- **Double negation.** `not not done` is a parse error. Keep the grammar simple.
 
 ---
 
