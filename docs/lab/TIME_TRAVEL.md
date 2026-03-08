@@ -1,7 +1,8 @@
 # Time Travel 🕰️
 
-> Git-backed history with cached day views for instant cognitive time travel.
+> Git-backed history via `gix` — the infrastructure layer for temporal features.
 > Status: **Draft** — exploratory, not committed.
+> See also: [DAY_VIEW.md](DAY_VIEW.md) for the daily activity summary built on this layer.
 
 ---
 
@@ -15,9 +16,9 @@ Today's tools give you two options: full-text search (requires remembering keywo
 
 ## The Vision
 
-Bloom maintains a complete, automatic history of every change to your vault. Not as a backup feature — as a **thinking tool.** You can travel to any past day and see a rich summary of your mental activity: what you journaled, which pages you edited, what you created, what tasks you completed. It feels like flipping through a diary, except the diary writes itself.
+Bloom maintains a complete, automatic history of every change to your vault. Not as a backup feature — as a **thinking tool.** Time becomes a first-class dimension you can navigate — per-file version history, per-block evolution, and vault-wide daily activity summaries.
 
-Navigation is temporal — a calendar to land approximately, then day-hopping to browse fluidly. Past day views load instantly because they're pre-computed and cached.
+This document covers the **infrastructure layer**: git as the time-series store, auto-commit strategy, file and block history, and the threading model. The [Day View](DAY_VIEW.md) document covers the vault-wide daily activity summary built on top of this infrastructure.
 
 ---
 
@@ -29,9 +30,10 @@ Bloom silently maintains a git repository in the vault. The user never interacts
 
 **Why git:**
 - Battle-tested delta compression — a year of daily changes to 10K files stays small
-- Line-level diffs for free — exactly what the day view needs
+- Line-level diffs for free — exactly what temporal features need
 - Portable — the vault is a valid git repo, browsable with any git tool
 - No new storage format to invent, debug, or migrate
+- Enables self-healing block IDs (see [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md))
 
 **Why `gix` (not subprocess):**
 - No requirement that the user has git installed
@@ -64,125 +66,115 @@ Message: "2026-03-08 14:32 — edited Text Editor Theory, journal"
 - Timestamp + summary of what changed (auto-generated from the staged diff)
 - All files staged with `git add -A` before each commit
 
-### The Day View
+---
 
-The day view is a **rich summary of your mental activity on a given day.** It combines journal content, page edit diffs, page creation, and task completions into a single scrollable document.
+## File Time Travel
 
-```
-═══ Saturday, March 8, 2026 ═══════════════════════════════════════
+The history of a single page over time.
 
- 📓 Journal
- ─────────────────────────────────────────────────────────────────
-  - Explored ropey crate for buffer model
-  - Read about Xi Editor architecture
-  - [ ] Review gap buffer tradeoffs @due(03-10)
-  - [x] Compare with PieceTable
-  #rust #editors #data-structures
+### Page History (`SPC l h`)
 
- ✏️  Edited
- ─────────────────────────────────────────────────────────────────
-  Text Editor Theory                            +12 lines
-    + "Ropes are O(log n) for inserts. They use balanced
-       binary trees to represent text."
-    + "See Xi Editor for a real-world implementation."
-
-  Rust Programming                               +3 lines
-    + "The ropey crate handles Unicode correctly via
-       grapheme cluster boundaries."
-
- 🌱 Created
- ─────────────────────────────────────────────────────────────────
-  Gap Buffer Tradeoffs                    #data-structures
-
- ✅ Completed
- ─────────────────────────────────────────────────────────────────
-  [x] Compare with PieceTable             Text Editor Theory
-  [x] Read Neovim buffer internals        Rust Programming
-
-═══════════════════════════════════════════════════════════════════
-  3 pages edited · 1 page created · 2 tasks completed
-```
-
-**Sections:**
-
-| Section | Source | Content |
-|---------|--------|---------|
-| 📓 Journal | Archived journal file for that day | Full journal content |
-| ✏️ Edited | Git diff (first commit of day → last commit of day) | Page name, lines added/removed, 2-3 line snippets of additions |
-| 🌱 Created | Git diff (new files) | Page titles + tags |
-| ✅ Completed | Index: tasks toggled from `[ ]` to `[x]` on that day | Task text + source page |
-
-**Philosophy: over-surface, recall over precision.** The day view shows everything, because when you're browsing back through time you're trying to re-enter a mental context. The stray detail is what triggers the memory.
-
-### Eager Caching
-
-A past day's view is **immutable** — once midnight passes, that day's summary never changes. We compute it once and store it forever.
-
-```sql
-CREATE TABLE day_views (
-    date        TEXT PRIMARY KEY,   -- "2026-03-08"
-    journal     TEXT,               -- archived journal content (markdown)
-    edits       TEXT NOT NULL,       -- JSON: [{page, added, removed, snippets}]
-    created     TEXT NOT NULL,       -- JSON: [{title, tags}]
-    completed   TEXT NOT NULL,       -- JSON: [{task_text, source_page}]
-    computed_at TEXT NOT NULL
-);
-```
-
-**Cache lifecycle:**
-
-| Event | Action |
-|-------|--------|
-| Journal rotation (new day starts) | Background thread computes yesterday's day view, writes to `day_views` |
-| Calendar navigation to past day | Read from `day_views` — single SQLite lookup, sub-millisecond |
-| Today's day view | Computed live from git diff since this morning's first commit (cheap — narrow window) |
-| First launch with existing vault | Background backfill: walk git history, compute all historical day views. Heavy once (~seconds for a year of history), never again |
-| `:rebuild-index` | Invalidate and recompute all `day_views` from git history |
-
-**Result:** flipping between days with `[d` / `]d` feels like scrolling a local file. Zero git operations, zero diff computation for cached days.
-
-**Cache invalidation:** If the user amends git history outside Bloom (rebase, squash), Bloom detects that the commit range for a cached date no longer matches and invalidates that entry. For normal use this never happens.
-
-### Calendar Navigation
-
-`SPC j c` opens a month-grid calendar.
+While viewing any page, `SPC l h` opens its **commit history** — a list of every version of that file, newest first.
 
 ```
-         March 2026
-  Mo Tu We Th Fr Sa Su
-                    1
-   2  3  4  5 ◆6  7 ◆8
-   9 10 11 ◆12 13 14 15
-  16 17 18 19 20 21 22
-  23 24 25 ◆26 27 28 29
-  30 31
+═══ Text Editor Theory — History ══════════════════════════════════
 
-  ◆ = has activity (journal or page edits)
+  ◆ Mar 8, 14:32                                    +12 / -0
+    Added section on rope data structures
+
+  ◆ Mar 6, 09:15                                     +3 / -1
+    Updated Xi Editor reference
+
+  ◆ Mar 1, 20:48                                    +45 / -0
+    Initial creation
+
+══════════════════════════════════════════════════════════════════
+  3 versions · created Mar 1
 ```
+
+Each entry is a commit that touched this file. The summary is auto-generated from the diff (`+N / -M` lines, first changed line as a description hint).
+
+**Navigation:**
 
 | Key | Action |
 |-----|--------|
-| `h` / `l` | Previous / next day |
-| `j` / `k` | Next / previous week |
-| `H` / `L` | Previous / next month |
-| `Enter` | Open day view |
-| `q` / `Esc` | Close calendar |
+| `j` / `k` | Move between versions |
+| `Enter` | Open that version read-only (full page at that point in time) |
+| `d` | Show diff between selected version and current (or between two selected versions) |
+| `r` | Restore — copy this version's content into the current buffer (undo-able) |
+| `e` | Toggle between compact and expanded diff view |
+| `q` | Close history |
 
-The `◆` markers come from the `day_views` cache — days with non-empty entries are highlighted. This is a single query: `SELECT date FROM day_views`.
+### Viewing a Past Version
 
-### Day-Hopping
+When you press `Enter` on a history entry, Bloom retrieves the file content at that commit via `gix` (a single blob lookup — instant) and opens it in a **read-only buffer**. The status bar shows:
 
-Once inside a day view, temporal navigation keys let you browse fluidly:
+```
+ HISTORY  Text Editor Theory  Mar 6, 09:15  (read-only)
+```
 
-| Key | Action |
-|-----|--------|
-| `]d` | Jump to next day with activity (skip empty days) |
-| `[d` | Jump to previous day with activity |
-| `j` / `k` | Scroll within the current day view |
-| `Enter` | On an edit snippet or page name — jump to that page |
-| `q` | Back to calendar (or close if opened directly) |
+You can scroll, search, even yank text — but not edit. This is a snapshot, not a live document. `q` returns to the current version.
 
-Day-hopping queries: `SELECT date FROM day_views WHERE date > ? ORDER BY date LIMIT 1`. Instant.
+### Side-by-Side Diff (`SPC l d`)
+
+From the history view, pressing `d` opens a **split diff** between the selected version and the current page:
+
+```
+┌─ Text Editor Theory (Mar 6) ──────┬─ Text Editor Theory (current) ─────┐
+│  ## Rope Data Structure            │  ## Rope Data Structure             │
+│                                    │                                     │
+│                                    │+ Ropes are O(log n) for inserts.   │
+│                                    │+ They use balanced binary trees     │
+│                                    │+ to represent text.                 │
+│                                    │+                                    │
+│  See Xi Editor for details.        │  See Xi Editor for a real-world     │
+│                                    │  implementation.                    │
+│                                    │                                     │
+├────────────────────────────────────┼─────────────────────────────────────┤
+│ HISTORY  Mar 6, 09:15             │ NORMAL  Text Editor Theory          │
+└────────────────────────────────────┴─────────────────────────────────────┘
+```
+
+Added lines highlighted in `accent_green`, removed in `accent_red`. The diff is computed by `gix` (blob diff between two commits) and rendered using Bloom's existing split pane infrastructure.
+
+With two versions selected in the history list (mark with `Tab`), `d` diffs those two versions against each other — not against current.
+
+### Restore
+
+Pressing `r` on a history entry copies that version's full content into the current buffer. This is a normal edit — it goes through the rope, it's undo-able, it triggers auto-save. You can restore a past version and then `u` to undo if you change your mind. The git history gains a new commit showing the restore.
+
+### Block-Level History
+
+With universal block IDs (see [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md)), file time travel extends to individual blocks. Place your cursor on any block and `SPC l H` (block history) shows every version of *that specific block* across time:
+
+```
+═══ ^a3 — Block History ═══════════════════════════════════════════
+
+  ◆ Mar 8    - [ ] Review the ropey API @due(2026-03-10)
+  ◆ Mar 6    - [ ] Review the ropey API @due(2026-03-08)
+  ◆ Mar 1    - [ ] Review the ropey crate
+
+  3 versions · first appeared Mar 1
+```
+
+This uses `gix` blame to trace the block ID through commits — finding every commit that changed the line containing `^a3`. The block ID is the stable anchor that makes this possible even when lines shift around it.
+
+---
+
+## Performance
+
+| Operation | Source | Cost |
+|-----------|--------|------|
+| Page history list | `gix` revwalk filtered by path | ~10-50 ms |
+| View past version | `gix` blob lookup at commit | < 5 ms |
+| Diff two versions | `gix` blob diff | < 10 ms |
+| Block history | `gix` blame on single file | ~50-100 ms |
+| Day view (cache hit) | SQLite row lookup | < 1 ms |
+| Day view (cache miss) | `gix` revwalk + tree diff | ~100-200 ms |
+
+All operations run on the history thread. The UI shows a spinner for anything over ~50 ms, but in practice most operations feel instant.
+
+**Caching rule:** cache only when latency matters for interactive browsing. The day view is cached because `[d`/`]d` hopping needs sub-millisecond response. File history, past versions, and diffs are computed live from `gix` — fast enough and accessed infrequently.
 
 ---
 
@@ -191,26 +183,29 @@ Day-hopping queries: `SELECT date FROM day_views WHERE date > ? ORDER BY date LI
 ```text
 UI Thread
     │
-    │  "show day view for 2026-03-08"
+    │  requests (page history, day view, block blame, etc.)
     │
     ▼
-History Thread (new, or shared with indexer)
+History Thread (new)
     │
-    ├── Cache hit? → return from day_views table
+    │  Owns: gix::Repository handle
+    │  Owns: day_views cache (read-write SQLite connection)
     │
-    └── Cache miss? → gix: revwalk + tree diff → compute → cache → return
+    ├── Read queries: revwalk, blob lookup, diff, blame
+    │
+    ├── Auto-commits: debounced from disk writer signals
+    │
+    └── Day view computation: on-demand + predictive prefetch
     │
     ▼
-UI Thread: render DayViewFrame
+UI Thread: render result frames
 ```
 
-The history thread owns the `gix::Repository` handle (read-only for queries) and the read-write connection to the `day_views` cache table. Auto-commits also go through this thread.
-
-For auto-commits, the disk writer thread signals the history thread (via channel) after each successful write. The history thread debounces these signals (5-minute idle window) and commits when appropriate.
+The history thread owns the `gix::Repository` handle and the day view cache. Auto-commits also go through this thread — the disk writer signals it (via channel) after each successful write, and the history thread debounces these signals (5-minute idle window) before committing.
 
 ---
 
-## Vault Structure (revised)
+## Vault Structure
 
 ```
 ~/bloom/
@@ -239,16 +234,14 @@ For auto-commits, the disk writer thread signals the history thread (via channel
 
 ### BQL (Live Views)
 
-Day views are expressible as queries:
+File history extends the query surface:
 
 ```
-blocks | where modified on 2026-03-08                    -- everything touched that day
-blocks | where page = $journal | where created on 2026-03-08  -- just journal entries
-tasks  | where completed on 2026-03-08                   -- tasks checked off that day
-pages  | where created on 2026-03-08                     -- pages created that day
+history | where page = "Text Editor Theory"              -- all versions of a page
+history | where page = "Text Editor Theory" | where date before 2026-03-01
 ```
 
-The cached day view is the *pre-computed, rendered* version of these queries. BQL gives you ad-hoc flexibility; the day view gives you instant, opinionated, over-surfaced context.
+See [DAY_VIEW.md](DAY_VIEW.md) for day-level BQL queries.
 
 ### Emergence (Semantic Embeddings)
 
@@ -256,7 +249,10 @@ With time as a first-class dimension, emergence detection gains temporal awarene
 
 - "You wrote about X in March and independently arrived at the same idea in June" — the temporal gap is what makes it interesting
 - Cognitive drift: how has the embedding cluster for a concept shifted over months?
-- The day view could surface emergence discoveries for that day: "On this day, you wrote something that connects to what you'd write 3 months later"
+
+### Block Identity (Self-Healing)
+
+Git history is the backstop that makes block ID self-healing possible. See [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md).
 
 ---
 
@@ -268,7 +264,7 @@ enabled = true                  # default: true
 auto_commit_idle_minutes = 5    # commit after N minutes of inactivity
 ```
 
-Users who manage their own git workflow can set `enabled = false` — Bloom won't touch `.git/`. Time travel features degrade gracefully (calendar shows journal archive only, no edit diffs).
+Users who manage their own git workflow can set `enabled = false` — Bloom won't touch `.git/`. Time travel features degrade gracefully (calendar shows journal archive only, no edit diffs, no self-healing).
 
 ---
 
@@ -276,15 +272,11 @@ Users who manage their own git workflow can set `enabled = false` — Bloom won'
 
 1. **User's existing git repo.** If the vault already has a `.git/` with the user's manual commits, Bloom's auto-commits would interleave. Options: (a) Bloom uses a separate orphan branch `bloom/history`, (b) Bloom's commits use a distinct author and the user filters in their own tooling, (c) Bloom only auto-inits git if no `.git/` exists. Leaning towards (c) — respect the user's existing setup.
 
-2. **Commit message richness.** Auto-generated messages like "edited Text Editor Theory, journal" are useful for the day view summary. But should we include more? Tags changed, tasks created, links added? Richer messages = richer day view cache, but more computation per commit.
+2. **Commit message richness.** Auto-generated messages like "edited Text Editor Theory, journal" are useful. But should we include more? Tags changed, tasks created, links added? Richer messages = more context, but more computation per commit.
 
 3. **Storage budget.** Git packfiles are efficient, but a year of daily commits with 10K files — how large does `.git/` get? Need to benchmark. Periodic `git gc` (via `gix`) could run on the history thread during idle time.
 
 4. **Day boundary.** What defines "a day"? Local timezone midnight? Configurable? If you work past midnight, do those edits belong to yesterday or today? Leaning towards: the day boundary is when journal rotation happens (first launch of the new calendar day), not strict midnight.
-
-5. **Deleted content.** The day view shows additions and edits. Should it also show deletions? "You removed the section about gap buffers from Text Editor Theory." Useful for recall ("oh right, I decided that wasn't relevant") but potentially noisy.
-
-6. **Day view for today.** Today's view is computed live (not cached). How often to refresh? On every render? On a timer? On index-complete? Leaning towards: on index-complete (same trigger as backlinks refresh), so it updates when files are saved.
 
 ---
 
@@ -292,7 +284,7 @@ Users who manage their own git workflow can set `enabled = false` — Bloom won'
 
 | Crate | Purpose | Size impact |
 |-------|---------|-------------|
-| `gix` | Pure Rust git: init, commit, revwalk, tree diff | ~2-3 MB binary size |
+| `gix` | Pure Rust git: init, commit, revwalk, tree diff, blame | ~2-3 MB binary size |
 
 No external runtime dependencies. No `git` binary required. Works on macOS and Windows identically.
 
@@ -301,6 +293,6 @@ No external runtime dependencies. No `git` binary required. Works on macOS and W
 ## References
 
 - [`gix` crate](https://github.com/GitoxideLabs/gitoxide) — pure Rust git implementation, used by `cargo`
-- Current journal design: [GOALS.md G14](../GOALS.md)
-- Bullet Journal migration: the inspiration for task carry-forward
-- [Journal Redesign](JOURNAL_REDESIGN.md) — companion doc covering the `journal.md` rotation model
+- [DAY_VIEW.md](DAY_VIEW.md) — daily activity summary built on this layer
+- [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md) — self-healing block IDs powered by git history
+- [Journal Redesign](JOURNAL_REDESIGN.md) — `journal.md` rotation model
