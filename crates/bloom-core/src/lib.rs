@@ -1178,6 +1178,43 @@ mod tests {
         assert!(!on_disk.contains("Line one ^"), "got: {on_disk}");
     }
 
+    #[test]
+    fn test_block_id_after_split_via_enter() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file_path = dir.path().join("test.md");
+        // One paragraph, one block.
+        let content = "Hello world";
+        std::fs::write(&file_path, content).unwrap();
+
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        editor.vault_root = Some(dir.path().to_path_buf());
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", &file_path, content);
+
+        // Enter insert mode, move to middle, add newline+blank line to split into two paragraphs.
+        editor.handle_key(KeyEvent::char('i'));
+        // Move past "Hello" (5 chars + space)
+        for _ in 0..5 {
+            editor.handle_key(KeyEvent {
+                code: types::KeyCode::Right,
+                modifiers: types::Modifiers::none(),
+            });
+        }
+        // Insert blank line (two Enters) to create paragraph break.
+        editor.handle_key(KeyEvent::enter());
+        editor.handle_key(KeyEvent::enter());
+        editor.handle_key(KeyEvent::esc());
+
+        // Save — should assign IDs to both paragraphs.
+        editor.save_current().unwrap();
+
+        let on_disk = std::fs::read_to_string(&file_path).unwrap();
+        // Should have two block IDs.
+        let id_count = on_disk.matches(" ^").count();
+        assert_eq!(id_count, 2, "expected 2 block IDs, got {id_count}. Content:\n{on_disk}");
+    }
+
     // Startup: Journal mode opens today's journal
     #[test]
     fn test_startup_journal_mode() {
