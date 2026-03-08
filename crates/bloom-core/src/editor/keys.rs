@@ -138,18 +138,11 @@ impl BloomEditor {
         vec![keymap::dispatch::Action::Noop]
     }
 
-    /// Assign block IDs and schedule autosave if the active buffer is dirty.
-    /// Block ID assignment runs unconditionally (it's a no-op when all blocks
-    /// already have IDs). Autosave only fires when the buffer is dirty.
+    /// Assign block IDs and save if the active buffer is dirty.
+    /// Called once at the end of handle_key(). Uses the single save path.
     fn autosave_if_dirty(&mut self) {
         if let Some(page_id) = self.active_page().cloned() {
-            // Always check for missing block IDs — even if the buffer is clean,
-            // a prior autosave may have written content before a split created
-            // a new block. ensure_block_ids is a fast no-op when nothing is needed.
-            let ids_added = self.ensure_block_ids(&page_id);
-            if ids_added || self.buffer_mgr.get(&page_id).is_some_and(|b| b.is_dirty()) {
-                self.schedule_autosave(&page_id);
-            }
+            self.save_page(&page_id);
         }
     }
 

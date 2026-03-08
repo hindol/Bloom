@@ -1,8 +1,8 @@
 //! File save, auto-save, and watcher integration.
 //!
-//! Handles explicit `:w` saves, debounced auto-save via the background
-//! [`DiskWriter`](crate::store::DiskWriter), and file-watcher events with
-//! conflict detection (external-change dialog when a buffer is dirty).
+//! All saves go through [`BloomEditor::save_page`] — the single save path.
+//! It handles block ID assignment, content extraction, and routing to the
+//! [`DiskWriter`](crate::store::DiskWriter) (or inline atomic write in tests).
 
 use crate::*;
 
@@ -114,37 +114,16 @@ impl BloomEditor {
         false
     }
 
-    /// Schedule an auto-save for the given page via the disk writer thread.
-    pub(crate) fn schedule_autosave(&self, page_id: &types::PageId) {
-        let Some(tx) = &self.autosave_tx else { return };
-        let Some(buf) = self.buffer_mgr.get(page_id) else {
-            return;
-        };
-        let buffers = self.buffer_mgr.open_buffers();
-        let Some(info) = buffers.iter().find(|b| b.page_id == *page_id) else {
-            return;
-        };
-        // Assign block IDs before extracting content for write.
-        // We can't mutate the buffer here (we only have &self), but block IDs
-        // will be assigned on the next save_current() or when the buffer is
-        // next obtained mutably. For autosave, we send the current text as-is
-        // and rely on save_current() for ID assignment.
-        let content = buf.text().to_string();
-        let _ = tx.send(store::disk_writer::WriteRequest {
-            path: info.path.clone(),
-            content,
-        });
-    }
+    // ---------------------------------------------------------------------
+    // Unified save path
+    // ---------------------------------------------------------------------
 
-    /// Assign block IDs to the buffer if any blocks are missing them.
-    /// Modifies the rope in-place. Returns true if any IDs were added.
-    /// Skips when no vault is initialized (tests) or for pseudo-path buffers.
-    pub(crate) fn ensure_block_ids(&mut self, page_id: &types::PageId) -> bool {
-        // Only assign block IDs when a vault is initialized.
-        if self.vault_root.is_none() {
-            return false;
-        }
-
+    /// The single save path. All saves — autosave, `:w`, session save — go here.
+    ///
+    /// 1. Skips pseudo-paths (`[scratch]`) and uninitialized vaults
+    /// 2. Assigns block IDs to blocks that don't have them
+    /// 3. Extracts content and writes via DiskWriter (or inline in tests)
+    pub(crate) fn save_page(&mut self, page_id: &types::PageId) {
         // Skip pseudo-paths like [scratch].
         let is_pseudo = self
             .buffer_mgr
@@ -153,6 +132,48 @@ impl BloomEditor {
             .find(|b| b.page_id == *page_id)
             .map_or(true, |info| info.path.to_string_lossy().starts_with('['));
         if is_pseudo {
+            return;
+        }
+
+        // Assign block IDs (no-op when vault not initialized or all blocks have IDs).
+        self.ensure_block_ids(page_id);
+
+        // Extract content and path.
+        let (content, path) = {
+            let Some((buf, info)) = self.buffer_mgr.get_with_info(page_id) else {
+                return;
+            };
+            if !buf.is_dirty() {
+                return;
+            }
+            (buf.text().to_string(), info.path.clone())
+        };
+
+        // Write.
+        if let Some(tx) = &self.autosave_tx {
+            let _ = tx.send(store::disk_writer::WriteRequest { path, content });
+        } else {
+            // No DiskWriter (tests, pre-init). Inline atomic write.
+            if store::disk_writer::atomic_write(&path, &content).is_ok() {
+                if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                    buf.mark_clean();
+                }
+            }
+        }
+    }
+
+    /// Public save for `:w` and TUI `Action::Save`.
+    pub fn save_current(&mut self) -> Result<(), error::BloomError> {
+        if let Some(page_id) = self.active_page().cloned() {
+            self.save_page(&page_id);
+        }
+        Ok(())
+    }
+
+    /// Assign block IDs to the buffer if any blocks are missing them.
+    /// Modifies the rope in-place. Returns true if any IDs were added.
+    fn ensure_block_ids(&mut self, page_id: &types::PageId) -> bool {
+        if self.vault_root.is_none() {
             return false;
         }
 
@@ -170,7 +191,6 @@ impl BloomEditor {
             return false;
         };
 
-        // Apply insertions in reverse order to preserve char offsets.
         buf.begin_edit_group();
         for ins in insertions.iter().rev() {
             let line_idx = ins.line;
@@ -179,15 +199,10 @@ impl BloomEditor {
             }
             let line_start = buf.text().line_to_char(line_idx);
             let line_slice = buf.line(line_idx);
-            // Count content chars (exclude trailing \n and \r, then trailing whitespace).
             let mut content_chars = line_slice.len_chars();
-            // Walk backwards past line endings and whitespace.
             let chars: Vec<char> = line_slice.chars().collect();
             while content_chars > 0
-                && matches!(
-                    chars[content_chars - 1],
-                    '\n' | '\r' | ' ' | '\t'
-                )
+                && matches!(chars[content_chars - 1], '\n' | '\r' | ' ' | '\t')
             {
                 content_chars -= 1;
             }
@@ -198,45 +213,6 @@ impl BloomEditor {
         buf.end_edit_group();
 
         true
-    }
-
-    pub fn save_current(&mut self) -> Result<(), error::BloomError> {
-        if let Some(page_id) = self.active_page().cloned() {
-            // Skip pseudo-paths like [scratch]
-            let is_pseudo = self
-                .buffer_mgr
-                .open_buffers()
-                .iter()
-                .find(|b| b.page_id == page_id)
-                .map_or(true, |info| info.path.to_string_lossy().starts_with('['));
-            if is_pseudo {
-                return Ok(());
-            }
-
-            // Ensure block IDs (no-op if already assigned).
-            self.ensure_block_ids(&page_id);
-
-            let (content, path) = {
-                if let Some((buf, info)) = self.buffer_mgr.get_with_info(&page_id) {
-                    if !buf.is_dirty() {
-                        return Ok(());
-                    }
-                    (buf.text().to_string(), info.path.clone())
-                } else {
-                    return Ok(());
-                }
-            };
-
-            if let Some(tx) = &self.autosave_tx {
-                let _ = tx.send(store::disk_writer::WriteRequest { path, content });
-            } else {
-                store::disk_writer::atomic_write(&path, &content)?;
-                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
-                    buf.mark_clean();
-                }
-            }
-        }
-        Ok(())
     }
 
     /// Assign block IDs to all vault files that are missing them.
