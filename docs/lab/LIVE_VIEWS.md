@@ -1,6 +1,6 @@
 # Live Views 🔭
 
-> An embedded query language for composable, real-time views over your knowledge.
+> A composable query language (BQL) with named views as dedicated surfaces.
 > Status: **Draft** — exploratory, not committed.
 
 ---
@@ -18,7 +18,6 @@ The agenda is `tasks where status = open, grouped by due date`. The timeline is 
 - Every new view requires core code changes
 - The agenda can't be customised — its grouping and filtering are frozen
 - There's no way to save a useful query for reuse
-- There's no way to embed a live result set inside a note
 
 **The opportunity:** A small query language that unifies all of these into one composable system. The agenda becomes a built-in query. The user can write their own.
 
@@ -36,7 +35,7 @@ The agenda is `tasks where status = open, grouped by due date`. The timeline is 
 
 5. **Live feedback.** The interactive query prompt (`SPC v v`) parses and executes on every pause (150ms debounce), showing results or a clear error with position info.
 
-6. **Embeddable in notes.** A `{{...}}` block renders as a live view. Other editors see readable text.
+6. **Views are surfaces, not documents.** A view is a dedicated full-screen overlay — not text embedded in a note. No cursor confusion, no mode-dependent rendering. Notes are for writing; views are for querying.
 
 ---
 
@@ -83,7 +82,7 @@ COUNT  = "count"
 ### Rules
 
 - Strings **must** be quoted. `"hello"` or `'hello'`.
-- `and`/`or` combine predicates within a single `where`. Parentheses control precedence.
+- `and` binds tighter than `or`: `a or b and c` parses as `a or (b and c)`.
 - `not` can only precede an atom (no double negation).
 - `count` must be the last clause. With `group`, it returns per-group counts. Without `group`, a single total.
 - Sort only works on scalar fields (not lists like `tags`).
@@ -134,158 +133,135 @@ blocks | where modified = today                -- everything touched today
 
 ---
 
-## Queries Live in Pages
+## Named Views
 
-There is no separate "view" mode. A query is a `{{...}}` block in a regular page. The page is the view.
+### Why Not Embed Queries in Notes?
 
-### Example: A User-Created Agenda Page
+An earlier design had `{{query}}` blocks rendering live results inline in page content. This was abandoned because:
 
-The user creates a page called "Agenda" (`pages/Agenda.md`):
+- **Cursor navigation breaks.** The cursor operates on buffer lines, but query results are synthetic — navigating through mixed buffer/synthetic content requires a second cursor context, mode-dependent rendering, and complex entry/exit semantics.
+- **Notes become two things.** A page with embedded queries is both a document and a UI surface. These are different concerns — editing the query text vs. reading the results require different interactions.
+- **Insert mode must show raw text.** The `{{...}}` source needs to be visible and editable in Insert mode, but hidden in Normal mode. Mode-dependent rendering is confusing.
 
-```markdown
----
-id: a1b2c3d4
-title: "Agenda"
-created: 2026-03-08
-tags: []
----
+**Views as dedicated surfaces** solve the same problem without these issues: a view owns the full screen, has its own navigation (`j`/`k`/`x`/`Enter`/`q`), and never conflicts with buffer editing.
 
-## Overdue
+### Keybindings
 
-{{tasks | where not done and due < today | sort due}}
+| Binding | Action |
+|---------|--------|
+| `SPC v v` | **Query prompt** — type BQL, see live results, `Ctrl-S` saves as a named view |
+| `SPC v l` | **List views** — fuzzy picker of all saved views, `Enter` opens |
+| `SPC v d` | **Delete view** — picker, select, confirm |
+| `SPC v e` | **Edit view** — picker, select, opens query prompt pre-filled |
+| `SPC a a` | **Agenda** — shortcut for the built-in Agenda view |
 
-## This Week
+Same pattern as `SPC f f/r/D` (files), `SPC t a/r` (tags), `SPC j j/p/n/a/t` (journal).
 
-{{tasks | where not done and due this week | sort due}}
+### Configuration
 
-## No Due Date
+```toml
+[[views]]
+name = "Agenda"
+query = "tasks | where not done | sort due | group due.category"
+key = "SPC a a"
 
-{{tasks | where not done and due = none | sort page}}
+[[views]]
+name = "Work Tasks"
+query = "tasks | where not done and tags has #work | sort due"
+key = "SPC v w"
+
+[[views]]
+name = "Orphan Pages"
+query = "pages | where backlinks.count = 0 | sort created desc"
+# no key — accessible via SPC v l only
 ```
 
-This is a normal page. It shows up in `SPC f f`. It can have prose, headings, links, tags — anything. The `{{...}}` blocks render as live, interactive result sets inside the page content.
+Bloom ships with the Agenda view pre-filled. Users add their own. Custom keybindings are optional — views without `key` are accessible through `SPC v l`. The which-key popup under `SPC v` shows both built-in sub-keys (`v`/`l`/`d`/`e`) and user-defined view keybindings.
 
-### Rendering
+### Query Prompt (`SPC v v`)
 
-- **In Bloom:** Each `{{...}}` block is replaced inline with a result table. The query text is shown dimmed above the results. Results update on `IndexComplete`.
-- **In other editors / GitHub:** It's readable text with a clear `{{...}}` marker. Portable Markdown. No lock-in.
-- **Inline queries:** `{{tasks | where not done | count}}` renders as an inline number (e.g., "12").
+Full-screen overlay. Top: BQL input with syntax highlighting and error display. Bottom: live results that update on each pause (150ms debounce). Same rendering as the agenda — task rows with checkbox, page name, due date.
 
-**Code-block safety:** `{{...}}` blocks inside fenced code blocks are NOT evaluated. Same rule as all Bloom extensions.
-
-### Interaction Within a Query Block
-
-When the cursor enters a query result block:
+Navigation within results:
 
 | Key | Action |
 |-----|--------|
-| `j` / `k` | Navigate between result rows |
-| `x` | Toggle task (writes to source file via block ID, undo-able) |
-| `Enter` | Jump to source page at the block |
-| `Ctrl-o` | Jump back to the query page (same row) |
-| `u` | Undo last toggle (task reappears if it still matches the query) |
-| `q` | Move cursor out of the result block |
+| `j` / `k` | Navigate result rows |
+| `x` | Toggle task (writes to source file, undo-able) |
+| `Enter` | Jump to source page at the result's line |
+| `o` | Open source in split |
+| `q` / `Esc` | Close view |
+| `Ctrl-S` | Save current query as a named view (prompts for name) |
 
-The query block text itself is editable — you can modify the query, and after 150ms debounce the results re-render.
+`$page` resolves to the page that was active *before* the view opened. `$today` resolves to today's date.
 
-### Built-in Query Pages
+### View Rendering
 
-Bloom ships (or auto-creates on first launch) template query pages:
+A named view renders as a full-screen takeover — same as the current agenda. Task list with sections (if `group` clause), source preview below, footer with count and keybinding hints. All views share one rendering path.
 
-| Keybinding | Opens page | Default query |
-|-----------|-----------|---------------|
-| `SPC a a` | "Agenda" | `tasks \| where not done \| sort due \| group due.category` |
+### Saved Views Picker (`SPC v l`)
 
-The user can edit, rename, or delete this page. `SPC a a` simply opens the page titled "Agenda" — if deleted, the keybinding does nothing (or offers to re-create it).
-
-Other built-in features don't need dedicated pages — they already work as picker surfaces:
-
-| Feature | Mechanism |
-|---------|-----------|
-| Backlinks (`SPC s l`) | Picker (existing) |
-| Tag browse (`SPC s t`) | Picker (existing) |
-| Journal search (`SPC s j`) | Picker (existing) |
-
-`$page` is a context variable — the current page's ID. `$today` resolves to today's date. These resolve based on the page you were viewing *before* opening the query page.
+Standard fuzzy picker. Each row: view name, keybinding (if any), truncated query as marginalia. Preview pane shows the query results. `Enter` opens the view. `Tab` action menu: edit, delete, copy query.
 
 ---
 
 ## Implementation Architecture
 
-### Parser
+### BQL Pipeline (implemented)
 
-A hand-written recursive descent parser. The grammar is small enough that a parser generator is overkill. Parsing takes microseconds. Errors include position info for inline display.
-
-### Execution
-
-Queries compile to SQL and execute against the SQLite index:
+The BQL engine is built and tested (88 tests):
 
 ```
-tasks | where not done and tags has #work | sort due
-       ↓
-SELECT t.*, GROUP_CONCAT(tg.tag) as tags
-FROM tasks t
-LEFT JOIN tags tg ON t.page_id = tg.page_id
-WHERE t.done = 0
-AND t.page_id IN (SELECT page_id FROM tags WHERE tag = 'work')
-ORDER BY t.due_date
+Input string
+    → Tokeniser → Vec<Token>
+    → Parser → Query AST
+    → Validator → ValidatedQuery (field resolution, type checking)
+    → Codegen → CompiledQuery (SQL + params)
+    → Executor → QueryResult (typed rows with source metadata)
+    → Cache → generation-based invalidation on IndexComplete
 ```
 
-The BQL-to-SQL compiler is straightforward because:
-- Sources map to tables (already exist in the index)
-- `where` maps to `WHERE`
-- `sort` maps to `ORDER BY`
-- `group` maps to result-set post-processing (grouping is a display concern, not a SQL concern)
-- `limit` maps to `LIMIT`
-- `count` maps to `COUNT(*)`, with `GROUP BY` when preceded by `group`
+Modules: `query/parse.rs`, `query/schema.rs`, `query/validate.rs`, `query/compile.rs`, `query/execute.rs`, `query/cache.rs`.
 
-Execution always goes through the existing read-only index connection. No new database access patterns.
-
-### Live Updates
-
-Query blocks re-execute when the index changes (after `IndexComplete`). The editor re-runs queries for the visible page and re-renders if results changed. Same pattern as backlinks/agenda refresh. Cost: <1ms per query.
-
-When the user edits the query text in a `{{...}}` block, a 150ms debounce triggers re-parse + re-execute + re-render.
-
-### New Modules
+### New Modules (for views)
 
 | Module | Responsibility |
 |--------|---------------|
-| `query/parse.rs` | BQL tokeniser + parser → AST, with position-aware error diagnostics |
-| `query/compile.rs` | AST → SQL query string, field/type validation |
-| `query/execute.rs` | Run compiled query against index, return typed result sets |
-| `query/mod.rs` | Public API: `parse()`, `execute()`, `QueryResult` types |
+| `views/mod.rs` | View storage, config deserialization, CRUD operations |
+| `views/prompt.rs` | Interactive query prompt state (input, debounce, live results) |
+| `editor/render.rs` | View overlay rendering (reuse agenda rendering patterns) |
 
-### Render Integration
+### View Storage
 
-The editor's content renderer detects `{{...}}` blocks during `render()`. For each:
+Views are defined in `config.toml` under `[[views]]`. The editor loads them on startup. `Ctrl-S` in the query prompt appends a new `[[views]]` entry to the config file. Delete removes the entry.
 
-1. Parse the query text
-2. If valid: compile → execute → produce `QueryResultBlock` (rows, columns, group headers, actions)
-3. If error: produce `QueryErrorBlock` (error message with position)
-4. The TUI renders result blocks inline where the code block would be, with the same visual language as agenda/picker results
-
-No new `RenderFrame` variant needed — query results are part of the page's `RenderedLine` stream, rendered inline with the rest of the page content.
+No separate view files, no separate database table. Views are config — portable, editable, version-controllable.
 
 ---
 
-## Migration: Agenda as a Page
+## Migration: Agenda as a View
 
-The current `Agenda` struct, `AgendaView`, `AgendaFrame`, and the dedicated agenda overlay become unnecessary. The agenda is a page with query blocks.
+The current `AgendaFrame` and dedicated agenda overlay rendering are replaced by the general view renderer. The Agenda becomes a named view with a default query:
 
-On first launch (or upgrade), Bloom creates `pages/Agenda.md` with default queries. `SPC a a` opens this page. The dedicated agenda rendering code is replaced by the general query block renderer.
+```toml
+[[views]]
+name = "Agenda"
+query = "tasks | where not done | sort due | group due.category"
+key = "SPC a a"
+```
 
-This is **backwards-compatible** — users see the same tasks, same grouping, same actions. But now they can edit the queries, add sections, combine with prose. The agenda is theirs.
+`SPC a a` opens this view. Users can edit the query, add sections, or delete the view entirely. The dedicated agenda rendering code is replaced by the general view renderer.
 
 ---
 
-## Decisions (from design review)
+## Decisions
 
-1. **Error rendering:** Dimmed query text + error message in `critical` colour below the block.
-2. **Performance guardrails:** No implicit limit. Show result count. Warn if >1000.
-3. **Week start:** `[calendar] week_starts = "monday"` in config. Default Monday (ISO 8601).
-4. **`$page` resolution:** Resolves to the current page's frontmatter ID. Always available, no tracking.
-5. **Cursor at block boundaries:** `j`/`k` enters and exits query blocks automatically — no mode switch. The block behaves like a tall line. `▸` marks the selected row; action hints appear in footer.
+1. **Views are surfaces, not documents.** Full-screen takeover, not embedded in notes.
+2. **Error rendering:** Error message in `critical` colour below the query input.
+3. **Performance guardrails:** No implicit limit. Show result count. Warn if >1000.
+4. **Week start:** `[calendar] week_starts = "monday"` in config. Default Monday (ISO 8601).
+5. **`$page` resolution:** Resolves to the page active before the view opened.
+6. **`and` binds tighter than `or`.** Standard precedence, parentheses for override.
 
 ## Open Questions
 
@@ -300,6 +276,7 @@ This is **backwards-compatible** — users see the same tasks, same grouping, sa
 - **Cross-vault queries.** Single vault only (consistent with Bloom's v1 scope).
 - **Source OR-ing.** `pages or journal | ...` is not supported. Use `blocks` for cross-source queries.
 - **Double negation.** `not not done` is a parse error. Keep the grammar simple.
+- **Embedded queries.** No `{{...}}` syntax in notes. Views are dedicated surfaces, not document elements.
 
 ---
 
