@@ -87,15 +87,13 @@ pub struct ParsedBlock {
     pub has_id: bool,
 }
 
-/// A ```` ```bql ```` code block detected during parsing.
+/// A `{{query}}` block detected during parsing.
 #[derive(Debug, Clone)]
 pub struct BqlBlock {
-    /// The query text (content between the fences, trimmed).
+    /// The query text (content between `{{` and `}}`).
     pub query: String,
-    /// Line of the opening ```` ```bql ```` fence (zero-based).
-    pub fence_start: usize,
-    /// Line of the closing ```` ``` ```` fence.
-    pub fence_end: usize,
+    /// Line where the `{{...}}` appears (zero-based).
+    pub line: usize,
 }
 
 // --- Highlighting types ---

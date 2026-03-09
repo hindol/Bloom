@@ -762,11 +762,11 @@ impl BloomEditor {
         let content = format!(
             "---\nid: {}\ntitle: \"Agenda\"\ncreated: {}\ntags: []\n---\n\n\
              ## Overdue\n\n\
-             ```bql\ntasks | where not done and due < today | sort due\n```\n\n\
+             {{{{tasks | where not done and due < today | sort due}}}}\n\n\
              ## This Week\n\n\
-             ```bql\ntasks | where not done and due this week | sort due\n```\n\n\
+             {{{{tasks | where not done and due this week | sort due}}}}\n\n\
              ## No Due Date\n\n\
-             ```bql\ntasks | where not done and due = none | sort page\n```\n",
+             {{{{tasks | where not done and due = none | sort page}}}}\n",
             id.to_hex(),
             today,
         );

@@ -42,8 +42,6 @@ impl DocumentParser for BloomMarkdownParser {
         let mut bql_blocks = Vec::new();
 
         let mut in_code_block = false;
-        let mut bql_fence_start: Option<usize> = None; // line of opening ```bql
-        let mut bql_query_lines: Vec<&str> = Vec::new();
         let mut current_section_start: Option<(u8, String, Option<BlockId>, usize)> = None;
 
         // Block tracking state: (first_line, last_line, has_id)
@@ -69,42 +67,28 @@ impl DocumentParser for BloomMarkdownParser {
             // Track code fences — flush any open block, skip contents.
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                 flush_block(&mut block_start, &mut blocks);
-                if in_code_block {
-                    // Closing fence — check if this was a BQL block.
-                    if let Some(fence_start) = bql_fence_start.take() {
-                        let query = bql_query_lines.join("\n").trim().to_string();
-                        if !query.is_empty() {
-                            bql_blocks.push(super::traits::BqlBlock {
-                                query,
-                                fence_start,
-                                fence_end: line_idx,
-                            });
-                        }
-                        bql_query_lines.clear();
-                    }
-                    in_code_block = false;
-                } else {
-                    // Opening fence — check for ```bql language hint.
-                    in_code_block = true;
-                    let lang = trimmed.trim_start_matches('`').trim_start_matches('~').trim();
-                    if lang.eq_ignore_ascii_case("bql") {
-                        bql_fence_start = Some(line_idx);
-                    }
-                }
+                in_code_block = !in_code_block;
                 line_idx += 1;
                 continue;
             }
 
             if in_code_block {
-                // Collect BQL query lines if inside a ```bql block.
-                if bql_fence_start.is_some() {
-                    bql_query_lines.push(line);
-                }
                 line_idx += 1;
                 continue;
             }
 
             let trimmed_end = line.trim();
+
+            // Detect {{query}} blocks — must be on its own line.
+            if let Some(query) = extract_bql_query(trimmed_end) {
+                flush_block(&mut block_start, &mut blocks);
+                bql_blocks.push(super::traits::BqlBlock {
+                    query,
+                    line: line_idx,
+                });
+                line_idx += 1;
+                continue;
+            }
 
             // Blank lines and horizontal rules end the current block.
             if trimmed_end.is_empty() || is_horizontal_rule(trimmed_end) {
@@ -333,6 +317,17 @@ fn is_blockquote_line(lines: &[&str], idx: usize) -> bool {
     lines.get(idx).map_or(false, |l| l.trim().starts_with('>'))
 }
 
+/// Extract a BQL query from `{{...}}` syntax. Returns None if not a query line.
+fn extract_bql_query(trimmed: &str) -> Option<String> {
+    if trimmed.starts_with("{{") && trimmed.ends_with("}}") && trimmed.len() > 4 {
+        let inner = trimmed[2..trimmed.len() - 2].trim();
+        if !inner.is_empty() {
+            return Some(inner.to_string());
+        }
+    }
+    None
+}
+
 fn is_blockquote_block(
     block_start: &Option<(usize, usize, bool)>,
     lines: &[&str],
@@ -503,18 +498,17 @@ mod tests {
 
     #[test]
     fn test_bql_block_detection() {
-        let text = "# Dashboard\n\n```bql\ntasks | where not done\n```\n\nSome text\n";
+        let text = "# Dashboard\n\n{{tasks | where not done}}\n\nSome text\n";
         let parser = BloomMarkdownParser::new();
         let doc = parser.parse(text);
         assert_eq!(doc.bql_blocks.len(), 1);
         assert_eq!(doc.bql_blocks[0].query, "tasks | where not done");
-        assert_eq!(doc.bql_blocks[0].fence_start, 2);
-        assert_eq!(doc.bql_blocks[0].fence_end, 4);
+        assert_eq!(doc.bql_blocks[0].line, 2);
     }
 
     #[test]
     fn test_bql_block_multiple() {
-        let text = "```bql\ntasks\n```\n\ntext\n\n```bql\npages | sort title\n```\n";
+        let text = "{{tasks}}\n\ntext\n\n{{pages | sort title}}\n";
         let parser = BloomMarkdownParser::new();
         let doc = parser.parse(text);
         assert_eq!(doc.bql_blocks.len(), 2);
@@ -523,21 +517,20 @@ mod tests {
     }
 
     #[test]
-    fn test_bql_block_not_regular_code() {
-        let text = "```rust\nfn main() {}\n```\n\n```bql\ntasks\n```\n";
+    fn test_bql_block_not_in_code_fence() {
+        let text = "```\n{{tasks}}\n```\n\n{{pages}}\n";
+        let parser = BloomMarkdownParser::new();
+        let doc = parser.parse(text);
+        assert_eq!(doc.bql_blocks.len(), 1);
+        assert_eq!(doc.bql_blocks[0].query, "pages");
+    }
+
+    #[test]
+    fn test_bql_block_not_in_frontmatter() {
+        let text = "---\nid: abc12345\ntitle: \"T\"\n---\n\n{{tasks}}\n";
         let parser = BloomMarkdownParser::new();
         let doc = parser.parse(text);
         assert_eq!(doc.bql_blocks.len(), 1);
         assert_eq!(doc.bql_blocks[0].query, "tasks");
-    }
-
-    #[test]
-    fn test_bql_block_multiline_query() {
-        let text = "```bql\ntasks | where not done\n  and due < today\n```\n";
-        let parser = BloomMarkdownParser::new();
-        let doc = parser.parse(text);
-        assert_eq!(doc.bql_blocks.len(), 1);
-        assert!(doc.bql_blocks[0].query.contains("not done"));
-        assert!(doc.bql_blocks[0].query.contains("due < today"));
     }
 }

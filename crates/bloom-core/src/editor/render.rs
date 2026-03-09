@@ -616,8 +616,6 @@ impl BloomEditor {
         let mut in_code_block = false;
         let mut code_fence_lang: Option<String> = None;
         let mut seen_first_delimiter = false;
-        let mut bql_query_lines: Vec<String> = Vec::new();
-        let mut in_bql_block = false;
 
         // Get today's date for BQL query compilation
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
@@ -649,100 +647,41 @@ impl BloomEditor {
                 continue;
             }
 
-            if !in_frontmatter && trimmed.starts_with("```") {
+            if !in_frontmatter && (trimmed.starts_with("```") || trimmed.starts_with("~~~")) {
                 if in_code_block {
-                    // Closing fence
-                    if in_bql_block {
-                        // Execute BQL query and emit result lines
-                        if line_idx >= range.start {
-                            let query_text = bql_query_lines.join("\n");
-                            let result_lines =
-                                self.execute_bql_for_render(&query_text, &today);
-                            lines.extend(result_lines);
-                        }
-                        bql_query_lines.clear();
-                        in_bql_block = false;
-                    } else if line_idx >= range.start {
-                        // Regular code fence closing — render normally
-                        let spans = self.parser.highlight_line(
-                            &line_text,
-                            &parser::traits::LineContext {
-                                in_code_block: true,
-                                in_frontmatter: false,
-                                code_fence_lang: code_fence_lang.clone(),
-                            },
-                        );
-                        lines.push(render::RenderedLine {
-                            line_number: line_idx,
-                            text: line_text,
-                            spans,
-                        });
-                    }
                     in_code_block = false;
                     code_fence_lang = None;
                 } else {
-                    // Opening fence
                     in_code_block = true;
-                    let lang = trimmed[3..].trim();
-                    if lang.eq_ignore_ascii_case("bql") {
-                        in_bql_block = true;
-                        // Render the opening fence dimmed
-                        if line_idx >= range.start {
-                            lines.push(render::RenderedLine {
-                                line_number: line_idx,
-                                text: line_text,
-                                spans: vec![parser::traits::StyledSpan {
-                                    range: 0..trimmed.len(),
-                                    style: parser::traits::Style::SyntaxNoise,
-                                }],
-                            });
-                        }
+                    let lang = trimmed.trim_start_matches('`').trim_start_matches('~').trim();
+                    code_fence_lang = if lang.is_empty() {
+                        None
                     } else {
-                        code_fence_lang = if lang.is_empty() {
-                            None
-                        } else {
-                            Some(lang.to_string())
-                        };
-                        if line_idx >= range.start {
-                            let spans = self.parser.highlight_line(
-                                &line_text,
-                                &parser::traits::LineContext {
-                                    in_code_block: true,
-                                    in_frontmatter: false,
-                                    code_fence_lang: code_fence_lang.clone(),
-                                },
-                            );
-                            lines.push(render::RenderedLine {
-                                line_number: line_idx,
-                                text: line_text,
-                                spans,
-                            });
-                        }
-                    }
+                        Some(lang.to_string())
+                    };
                 }
-                continue;
             }
 
-            if in_code_block {
-                if in_bql_block {
-                    // Collect BQL query lines (don't render raw query text)
-                    bql_query_lines.push(line_text.trim().to_string());
-                } else if line_idx >= range.start {
-                    let spans = self.parser.highlight_line(
-                        &line_text,
-                        &parser::traits::LineContext {
-                            in_code_block: true,
-                            in_frontmatter: false,
-                            code_fence_lang: code_fence_lang.clone(),
-                        },
-                    );
-                    lines.push(render::RenderedLine {
-                        line_number: line_idx,
-                        text: line_text,
-                        spans,
-                    });
+            // Detect {{query}} lines — render query results instead of the raw line.
+            if !in_frontmatter && !in_code_block {
+                if let Some(query_text) = extract_bql_query(&trimmed) {
+                    if line_idx >= range.start {
+                        // Render the {{...}} line itself dimmed
+                        let line_len = line_text.len();
+                        lines.push(render::RenderedLine {
+                            line_number: line_idx,
+                            text: line_text.clone(),
+                            spans: vec![parser::traits::StyledSpan {
+                                range: 0..line_len,
+                                style: parser::traits::Style::SyntaxNoise,
+                            }],
+                        });
+                        // Execute and render results
+                        let result_lines = self.execute_bql_for_render(&query_text, &today);
+                        lines.extend(result_lines);
+                    }
+                    continue;
                 }
-                continue;
             }
 
             if line_idx >= range.start {
@@ -1094,4 +1033,15 @@ fn format_generic_row(values: &[query::CellValue]) -> (String, Vec<parser::trait
             style: parser::traits::Style::Normal,
         }],
     )
+}
+
+/// Extract a BQL query from `{{...}}` syntax.
+fn extract_bql_query(trimmed: &str) -> Option<String> {
+    if trimmed.starts_with("{{") && trimmed.ends_with("}}") && trimmed.len() > 4 {
+        let inner = trimmed[2..trimmed.len() - 2].trim();
+        if !inner.is_empty() {
+            return Some(inner.to_string());
+        }
+    }
+    None
 }
