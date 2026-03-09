@@ -17,7 +17,6 @@ pub struct Document {
     pub timestamps: Vec<ParsedTimestamp>,
     pub block_ids: Vec<ParsedBlockId>,
     pub blocks: Vec<ParsedBlock>,
-    pub bql_blocks: Vec<BqlBlock>,
 }
 
 #[derive(Debug, Clone)]
@@ -85,17 +84,6 @@ pub struct ParsedBlock {
     pub last_line: usize,
     /// Whether any line in the block already has a `^block-id`.
     pub has_id: bool,
-}
-
-/// A `{{query}}` block detected during parsing.
-#[derive(Debug, Clone)]
-pub struct BqlBlock {
-    /// The query text (content between `{{` and `}}`).
-    pub query: String,
-    /// Line where `{{` starts (zero-based).
-    pub line: usize,
-    /// Line where `}}` ends (same as `line` for single-line queries).
-    pub end_line: usize,
 }
 
 // --- Highlighting types ---

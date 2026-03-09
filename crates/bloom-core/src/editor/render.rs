@@ -27,7 +27,6 @@ impl BloomEditor {
                     dirty: false,
                     status_bar: render::StatusBarFrame::default(),
                     rect: render::PaneRectFrame::default(),
-                    query_blocks: Vec::new(),
                 }],
                 maximized: false,
                 hidden_pane_count: 0,
@@ -94,7 +93,7 @@ impl BloomEditor {
             let is_active = rect.pane_id == self.window_mgr.active_pane();
             let pane_state = self.window_mgr.pane_state(rect.pane_id);
 
-            let (title, dirty, visible_lines, pane_cursor_line, pane_cursor_col, scroll_offset, pane_query_blocks) =
+            let (title, dirty, visible_lines, pane_cursor_line, pane_cursor_col, scroll_offset) =
                 if let Some(ps) = pane_state {
                     if let Some(page_id) = &ps.page_id {
                         if let Some(buf) = self.buffer_mgr.get(page_id) {
@@ -104,7 +103,7 @@ impl BloomEditor {
                                 .find(|i| i.page_id == *page_id)
                                 .map(|i| i.title.clone())
                                 .unwrap_or_default();
-                            let (lines, qblocks) = self.render_buffer_lines_with_viewport(buf, &ps.viewport);
+                            let lines = self.render_buffer_lines_with_viewport(buf, &ps.viewport);
                             let (cl, cc) =
                                 Self::cursor_position_for(ps.cursor, buf, &self.vim_state);
                             (
@@ -114,16 +113,15 @@ impl BloomEditor {
                                 cl,
                                 cc,
                                 ps.viewport.first_visible_line,
-                                qblocks,
                             )
                         } else {
-                            (String::new(), false, Vec::new(), 0, 0, 0, Vec::new())
+                            (String::new(), false, Vec::new(), 0, 0, 0)
                         }
                     } else {
-                        (String::new(), false, Vec::new(), 0, 0, 0, Vec::new())
+                        (String::new(), false, Vec::new(), 0, 0, 0)
                     }
                 } else {
-                    (String::new(), false, Vec::new(), 0, 0, 0, Vec::new())
+                    (String::new(), false, Vec::new(), 0, 0, 0)
                 };
 
             // Build per-pane status bar
@@ -218,7 +216,6 @@ impl BloomEditor {
                     content_height: rect.content_height,
                     total_height: rect.height,
                 },
-                query_blocks: pane_query_blocks,
             });
         }
 
@@ -603,11 +600,10 @@ impl BloomEditor {
         &self,
         buf: &buffer::Buffer,
         viewport: &render::Viewport,
-    ) -> (Vec<render::RenderedLine>, Vec<render::QueryResultBlock>) {
+    ) -> Vec<render::RenderedLine> {
         let range = viewport.visible_range();
         let screen_height = viewport.height;
         let mut lines = Vec::new();
-        let mut query_blocks = Vec::new();
         let line_count = buf.len_lines();
 
         let mut in_frontmatter = false;
@@ -615,13 +611,9 @@ impl BloomEditor {
         let mut code_fence_lang: Option<String> = None;
         let mut seen_first_delimiter = false;
 
-        // Get today's date for BQL query compilation
-        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-
         // Scan from line 0 for state tracking (frontmatter/code-block), but only
         // emit lines from range.start onward. Stop when the screen is full or we
-        // run out of buffer lines — query result expansion may consume screen rows,
-        // so we scan beyond the original viewport end to fill the screen.
+        // run out of buffer lines.
         let mut line_idx = 0;
         while line_idx < line_count {
             // Stop once we've filled the screen (only count emitted lines).
@@ -670,55 +662,6 @@ impl BloomEditor {
                 }
             }
 
-            // Detect {{query}} lines — replace with query results (transclusion).
-            if !in_frontmatter && !in_code_block && trimmed.starts_with("{{") {
-                if let Some(query_text) = extract_bql_query(&trimmed) {
-                    // Single-line {{query}} — hidden, replaced by results.
-                    if line_idx >= range.start {
-                        let screen_start = lines.len();
-                        let (result_lines, block) = self.execute_bql_for_render(&query_text, &today, screen_start);
-                        lines.extend(result_lines);
-                        if let Some(b) = block {
-                            query_blocks.push(b);
-                        }
-                    }
-                    line_idx += 1;
-                    continue;
-                } else {
-                    // Multi-line: {{ on this line, scan until }} — all source lines hidden.
-                    let query_start_line = line_idx;
-                    let mut query_parts = vec![trimmed[2..].to_string()];
-                    line_idx += 1;
-                    let mut depth = 0;
-                    let mut found_closing = false;
-                    while line_idx < line_count && depth < 20 {
-                        let next_text = buf.line(line_idx).to_string();
-                        let next_trimmed = next_text.trim();
-                        if next_trimmed.ends_with("}}") {
-                            query_parts.push(next_trimmed[..next_trimmed.len() - 2].to_string());
-                            found_closing = true;
-                            break;
-                        }
-                        query_parts.push(next_trimmed.to_string());
-                        line_idx += 1;
-                        depth += 1;
-                    }
-                    if query_start_line >= range.start {
-                        let query_text = query_parts.join(" ").trim().to_string();
-                        if !query_text.is_empty() && found_closing && line_idx < line_count {
-                            let screen_start = lines.len();
-                            let (result_lines, block) = self.execute_bql_for_render(&query_text, &today, screen_start);
-                            lines.extend(result_lines);
-                            if let Some(b) = block {
-                                query_blocks.push(b);
-                            }
-                        }
-                    }
-                    line_idx += 1;
-                    continue;
-                }
-            }
-
             if line_idx >= range.start {
                 let spans = self.parser.highlight_line(
                     &line_text,
@@ -736,193 +679,7 @@ impl BloomEditor {
             }
             line_idx += 1;
         }
-        (lines, query_blocks)
-    }
-
-    /// Get BQL query results, using cache when available.
-    /// Returns rendered lines and a structured QueryResultBlock for actions.
-    fn execute_bql_for_render(
-        &self,
-        query_text: &str,
-        today: &str,
-        screen_line_start: usize,
-    ) -> (Vec<render::RenderedLine>, Option<render::QueryResultBlock>) {
-        let Some(idx) = &self.index else {
-            return (vec![render::RenderedLine {
-                source: render::LineSource::QueryResult,
-                text: "  ⚠ No index available".to_string(),
-                spans: vec![parser::traits::StyledSpan {
-                    range: 0..22,
-                    style: parser::traits::Style::BrokenLink,
-                }],
-            }], None);
-        };
-
-        // Check cache first.
-        {
-            let cache = self.query_cache.borrow();
-            if let Some(qr) = cache.get(query_text) {
-                let (lines, block) = self.render_query_result(qr, screen_line_start);
-                return (lines, Some(block));
-            }
-        }
-
-        // Cache miss — execute and cache.
-        let conn = idx.connection();
-        let page_id = self
-            .active_page()
-            .and_then(|pid| Some(pid.to_hex()));
-
-        match query::run_query(query_text, conn, today, page_id.as_deref()) {
-            Ok(qr) => {
-                let (lines, block) = self.render_query_result(&qr, screen_line_start);
-                self.query_cache.borrow_mut().put(query_text.to_string(), qr, today);
-                (lines, Some(block))
-            }
-            Err(e) => {
-                let text = format!("  ⚠ {e}");
-                let len = text.len();
-                let block = render::QueryResultBlock {
-                    screen_line_start,
-                    row_count: 0,
-                    columns: vec![],
-                    result_rows: vec![],
-                    error: Some(e),
-                };
-                (vec![render::RenderedLine {
-                    source: render::LineSource::QueryResult,
-                    text,
-                    spans: vec![parser::traits::StyledSpan {
-                        range: 0..len,
-                        style: parser::traits::Style::BrokenLink,
-                    }],
-                }], Some(block))
-            }
-        }
-    }
-
-    /// Render a QueryResult into RenderedLines and a structured QueryResultBlock.
-    fn render_query_result(
-        &self,
-        qr: &query::QueryResult,
-        screen_line_start: usize,
-    ) -> (Vec<render::RenderedLine>, render::QueryResultBlock) {
-        match &qr.kind {
-            query::QueryResultKind::Rows(result) => {
-                let mut lines = Vec::new();
-                let mut result_rows = Vec::new();
-
-                if result.rows.is_empty() {
-                    lines.push(render::RenderedLine {
-                        source: render::LineSource::QueryResult,
-                        text: "  (no results)".to_string(),
-                        spans: vec![parser::traits::StyledSpan {
-                            range: 0..14,
-                            style: parser::traits::Style::Tag,
-                        }],
-                    });
-                } else {
-                    let col_idx = |name: &str| result.columns.iter().position(|c| c == name);
-
-                    for row in &result.rows {
-                        let (text, spans) = format_result_row(&row.values, &result.columns, &qr.source);
-                        lines.push(render::RenderedLine {
-                            source: render::LineSource::QueryResult,
-                            text,
-                            spans,
-                        });
-
-                        // Extract structured data for actions.
-                        let page_id = col_idx("page_id")
-                            .or_else(|| col_idx("id"))
-                            .and_then(|i| row.values.get(i))
-                            .and_then(|v| match v {
-                                query::CellValue::Text(s) if !s.is_empty() => Some(s.clone()),
-                                _ => None,
-                            });
-                        let source_line = col_idx("line")
-                            .and_then(|i| row.values.get(i))
-                            .and_then(|v| match v {
-                                query::CellValue::Int(n) => Some(*n as usize),
-                                _ => None,
-                            });
-                        result_rows.push(render::QueryResultRow {
-                            cells: row.values.iter().map(|v| v.to_string()).collect(),
-                            page_id,
-                            block_id: None,
-                            source_line,
-                        });
-                    }
-                    let footer = format!("  {} results", result.rows.len());
-                    let footer_len = footer.len();
-                    lines.push(render::RenderedLine {
-                        source: render::LineSource::QueryResult,
-                        text: footer,
-                        spans: vec![parser::traits::StyledSpan {
-                            range: 0..footer_len,
-                            style: parser::traits::Style::Tag,
-                        }],
-                    });
-                }
-
-                let block = render::QueryResultBlock {
-                    screen_line_start,
-                    row_count: result_rows.len(),
-                    columns: result.columns.clone(),
-                    result_rows,
-                    error: None,
-                };
-                (lines, block)
-            }
-            query::QueryResultKind::Count(n) => {
-                let text = format!("  {n}");
-                let len = text.len();
-                let block = render::QueryResultBlock {
-                    screen_line_start,
-                    row_count: 0,
-                    columns: vec![],
-                    result_rows: vec![],
-                    error: None,
-                };
-                (vec![render::RenderedLine {
-                    source: render::LineSource::QueryResult,
-                    text,
-                    spans: vec![parser::traits::StyledSpan {
-                        range: 0..len,
-                        style: parser::traits::Style::Normal,
-                    }],
-                }], block)
-            }
-            query::QueryResultKind::GroupCounts(groups) => {
-                let mut lines = Vec::new();
-                let result_rows: Vec<render::QueryResultRow> = groups.iter().map(|(key, count)| {
-                    let text = format!("  {key}: {count}");
-                    let len = text.len();
-                    lines.push(render::RenderedLine {
-                        source: render::LineSource::QueryResult,
-                        text,
-                        spans: vec![parser::traits::StyledSpan {
-                            range: 0..len,
-                            style: parser::traits::Style::Normal,
-                        }],
-                    });
-                    render::QueryResultRow {
-                        cells: vec![key.clone(), count.to_string()],
-                        page_id: None,
-                        block_id: None,
-                        source_line: None,
-                    }
-                }).collect();
-                let block = render::QueryResultBlock {
-                    screen_line_start,
-                    row_count: result_rows.len(),
-                    columns: vec!["group".into(), "count".into()],
-                    result_rows,
-                    error: None,
-                };
-                (lines, block)
-            }
-        }
+        lines
     }
 
     /// Compute cursor (line, col) for a given char offset in a buffer.
@@ -968,187 +725,4 @@ impl BloomEditor {
         }
         (0, 0)
     }
-}
-
-/// Format a BQL result row based on the source type.
-fn format_result_row(
-    values: &[query::CellValue],
-    columns: &[String],
-    source: &query::Source,
-) -> (String, Vec<parser::traits::StyledSpan>) {
-    match source {
-        query::Source::Tasks => format_task_row(values, columns),
-        query::Source::Pages => format_page_row(values, columns),
-        query::Source::Tags => format_tag_row(values, columns),
-        _ => format_generic_row(values),
-    }
-}
-
-/// Tasks: ☐/☑ task_text    page_title    due_date
-fn format_task_row(
-    values: &[query::CellValue],
-    columns: &[String],
-) -> (String, Vec<parser::traits::StyledSpan>) {
-    let col_idx = |name: &str| columns.iter().position(|c| c == name);
-
-    let done = col_idx("done")
-        .and_then(|i| values.get(i))
-        .map(|v| matches!(v, query::CellValue::Int(1)))
-        .unwrap_or(false);
-    let text = col_idx("text")
-        .and_then(|i| values.get(i))
-        .map(|v| v.to_string())
-        .unwrap_or_default();
-    let page = col_idx("page_title")
-        .and_then(|i| values.get(i))
-        .map(|v| v.to_string())
-        .unwrap_or_default();
-    let due = col_idx("due_date")
-        .and_then(|i| values.get(i))
-        .map(|v| v.to_string())
-        .unwrap_or_default();
-
-    let checkbox = if done { "  ☑ " } else { "  ☐ " };
-    let checkbox_len = checkbox.len(); // byte length (6 for "  ☐ ")
-    let task_text = text.trim_start_matches("- [ ] ").trim_start_matches("- [x] ");
-
-    let mut line = format!("{checkbox}{task_text}");
-    let text_end = line.len();
-
-    if !page.is_empty() {
-        line.push_str(&format!("  {page}"));
-    }
-    let page_end = line.len();
-
-    if !due.is_empty() {
-        line.push_str(&format!("  {due}"));
-    }
-    let full_len = line.len();
-
-    let checkbox_style = if done {
-        parser::traits::Style::CheckboxChecked
-    } else {
-        parser::traits::Style::CheckboxUnchecked
-    };
-
-    let mut spans = vec![
-        parser::traits::StyledSpan {
-            range: 0..checkbox_len,
-            style: checkbox_style,
-        },
-    ];
-    if done {
-        spans.push(parser::traits::StyledSpan {
-            range: checkbox_len..text_end,
-            style: parser::traits::Style::CheckedTaskText,
-        });
-    } else {
-        spans.push(parser::traits::StyledSpan {
-            range: checkbox_len..text_end,
-            style: parser::traits::Style::Normal,
-        });
-    }
-    if text_end < page_end {
-        spans.push(parser::traits::StyledSpan {
-            range: text_end..page_end,
-            style: parser::traits::Style::Tag,
-        });
-    }
-    if page_end < full_len {
-        spans.push(parser::traits::StyledSpan {
-            range: page_end..full_len,
-            style: parser::traits::Style::Tag,
-        });
-    }
-
-    (line, spans)
-}
-
-/// Pages: title    created
-fn format_page_row(
-    values: &[query::CellValue],
-    columns: &[String],
-) -> (String, Vec<parser::traits::StyledSpan>) {
-    let col_idx = |name: &str| columns.iter().position(|c| c == name);
-
-    let title = col_idx("title")
-        .and_then(|i| values.get(i))
-        .map(|v| v.to_string())
-        .unwrap_or_default();
-    let created = col_idx("created")
-        .and_then(|i| values.get(i))
-        .map(|v| v.to_string())
-        .unwrap_or_default();
-
-    let line = format!("  {title}  {created}");
-    let title_end = 2 + title.len();
-    let full_len = line.len();
-
-    let spans = vec![
-        parser::traits::StyledSpan {
-            range: 0..title_end,
-            style: parser::traits::Style::Bold,
-        },
-        parser::traits::StyledSpan {
-            range: title_end..full_len,
-            style: parser::traits::Style::Tag,
-        },
-    ];
-
-    (line, spans)
-}
-
-/// Tags: #name (count)
-fn format_tag_row(
-    values: &[query::CellValue],
-    columns: &[String],
-) -> (String, Vec<parser::traits::StyledSpan>) {
-    let col_idx = |name: &str| columns.iter().position(|c| c == name);
-
-    let name = col_idx("name")
-        .and_then(|i| values.get(i))
-        .map(|v| v.to_string())
-        .unwrap_or_default();
-    let count = col_idx("cnt")
-        .and_then(|i| values.get(i))
-        .map(|v| v.to_string())
-        .unwrap_or("0".to_string());
-
-    let line = format!("  #{name}  ({count})");
-    let tag_end = 3 + name.len();
-    let full_len = line.len();
-
-    let spans = vec![
-        parser::traits::StyledSpan {
-            range: 0..tag_end,
-            style: parser::traits::Style::Tag,
-        },
-        parser::traits::StyledSpan {
-            range: tag_end..full_len,
-            style: parser::traits::Style::Tag,
-        },
-    ];
-
-    (line, spans)
-}
-
-/// Generic: column values joined
-fn format_generic_row(values: &[query::CellValue]) -> (String, Vec<parser::traits::StyledSpan>) {
-    let text = format!(
-        "  {}",
-        values.iter().map(|v| v.to_string()).collect::<Vec<_>>().join("  ")
-    );
-    let len = text.len();
-    (
-        text,
-        vec![parser::traits::StyledSpan {
-            range: 0..len,
-            style: parser::traits::Style::Normal,
-        }],
-    )
-}
-
-/// Extract a BQL query from `{{...}}` syntax — delegates to the parser's shared implementation.
-fn extract_bql_query(trimmed: &str) -> Option<String> {
-    crate::parser::markdown::extract_bql_query(trimmed)
 }

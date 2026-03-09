@@ -33,13 +33,8 @@ impl ScreenMap {
         let mut screen_row = 0;
 
         for line in lines {
-            // QueryResult lines are pre-formatted — never wrap them.
-            let breaks = if matches!(line.source, bloom_core::render::LineSource::QueryResult) {
-                vec![0]
-            } else {
-                let text = line.text.trim_end_matches(['\n', '\r']);
-                compute_breaks(text, effective_width, measure)
-            };
+            let text = line.text.trim_end_matches(['\n', '\r']);
+            let breaks = compute_breaks(text, effective_width, measure);
             let row_count = breaks.len();
             entries.push(ScreenEntry {
                 screen_row_start: screen_row,

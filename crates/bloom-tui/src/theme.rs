@@ -154,13 +154,4 @@ impl<'a> TuiTheme<'a> {
         to_rstyle(&theme::resolve_chrome(chrome, self.palette))
     }
 
-    /// Background style for BQL result blocks.
-    pub fn query_result_block(&self) -> RStyle {
-        to_rstyle(&theme::resolve_chrome(Chrome::QueryResultBlock, self.palette))
-    }
-
-    /// Selected row style within a BQL result block.
-    pub fn query_result_selected(&self) -> RStyle {
-        to_rstyle(&theme::resolve_chrome(Chrome::QueryResultSelected, self.palette))
-    }
 }

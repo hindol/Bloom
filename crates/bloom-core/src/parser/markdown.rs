@@ -39,8 +39,6 @@ impl DocumentParser for BloomMarkdownParser {
         let mut timestamps = Vec::new();
         let mut block_ids = Vec::new();
         let mut blocks = Vec::new();
-        let mut bql_blocks = Vec::new();
-
         let mut in_code_block = false;
         let mut current_section_start: Option<(u8, String, Option<BlockId>, usize)> = None;
 
@@ -78,43 +76,6 @@ impl DocumentParser for BloomMarkdownParser {
             }
 
             let trimmed_end = line.trim();
-
-            // Detect {{query}} blocks — single-line or multi-line.
-            if trimmed_end.starts_with("{{") {
-                flush_block(&mut block_start, &mut blocks);
-                if let Some(query) = extract_bql_query(trimmed_end) {
-                    // Single-line: {{query}}
-                    bql_blocks.push(super::traits::BqlBlock {
-                        query,
-                        line: line_idx,
-                        end_line: line_idx,
-                    });
-                } else {
-                    // Multi-line: {{ on this line, scan until }}
-                    let mut query_parts = vec![trimmed_end[2..].to_string()];
-                    let start_line = line_idx;
-                    line_idx += 1;
-                    while line_idx < lines.len() {
-                        let next = lines[line_idx].trim();
-                        if next.ends_with("}}") {
-                            query_parts.push(next[..next.len() - 2].to_string());
-                            break;
-                        }
-                        query_parts.push(next.to_string());
-                        line_idx += 1;
-                    }
-                    let query = query_parts.join(" ").trim().to_string();
-                    if !query.is_empty() {
-                        bql_blocks.push(super::traits::BqlBlock {
-                            query,
-                            line: start_line,
-                            end_line: line_idx,
-                        });
-                    }
-                }
-                line_idx += 1;
-                continue;
-            }
 
             // Blank lines and horizontal rules end the current block.
             if trimmed_end.is_empty() || is_horizontal_rule(trimmed_end) {
@@ -275,7 +236,6 @@ impl DocumentParser for BloomMarkdownParser {
             timestamps,
             block_ids,
             blocks,
-            bql_blocks,
         }
     }
 
@@ -341,17 +301,6 @@ fn is_horizontal_rule(trimmed: &str) -> bool {
 
 fn is_blockquote_line(lines: &[&str], idx: usize) -> bool {
     lines.get(idx).map_or(false, |l| l.trim().starts_with('>'))
-}
-
-/// Extract a BQL query from `{{...}}` syntax. Returns None if not a query line.
-pub(crate) fn extract_bql_query(trimmed: &str) -> Option<String> {
-    if trimmed.starts_with("{{") && trimmed.ends_with("}}") && trimmed.len() > 4 {
-        let inner = trimmed[2..trimmed.len() - 2].trim();
-        if !inner.is_empty() {
-            return Some(inner.to_string());
-        }
-    }
-    None
 }
 
 fn is_blockquote_block(
@@ -522,55 +471,4 @@ mod tests {
         assert!(doc.tags.is_empty());
     }
 
-    #[test]
-    fn test_bql_block_detection() {
-        let text = "# Dashboard\n\n{{tasks | where not done}}\n\nSome text\n";
-        let parser = BloomMarkdownParser::new();
-        let doc = parser.parse(text);
-        assert_eq!(doc.bql_blocks.len(), 1);
-        assert_eq!(doc.bql_blocks[0].query, "tasks | where not done");
-        assert_eq!(doc.bql_blocks[0].line, 2);
-        assert_eq!(doc.bql_blocks[0].end_line, 2);
-    }
-
-    #[test]
-    fn test_bql_block_multiple() {
-        let text = "{{tasks}}\n\ntext\n\n{{pages | sort title}}\n";
-        let parser = BloomMarkdownParser::new();
-        let doc = parser.parse(text);
-        assert_eq!(doc.bql_blocks.len(), 2);
-        assert_eq!(doc.bql_blocks[0].query, "tasks");
-        assert_eq!(doc.bql_blocks[1].query, "pages | sort title");
-    }
-
-    #[test]
-    fn test_bql_block_multiline() {
-        let text = "{{tasks\n  | where not done\n  | sort due}}\n";
-        let parser = BloomMarkdownParser::new();
-        let doc = parser.parse(text);
-        assert_eq!(doc.bql_blocks.len(), 1);
-        assert_eq!(doc.bql_blocks[0].line, 0);
-        assert_eq!(doc.bql_blocks[0].end_line, 2);
-        assert!(doc.bql_blocks[0].query.contains("tasks"));
-        assert!(doc.bql_blocks[0].query.contains("not done"));
-        assert!(doc.bql_blocks[0].query.contains("sort due"));
-    }
-
-    #[test]
-    fn test_bql_block_not_in_code_fence() {
-        let text = "```\n{{tasks}}\n```\n\n{{pages}}\n";
-        let parser = BloomMarkdownParser::new();
-        let doc = parser.parse(text);
-        assert_eq!(doc.bql_blocks.len(), 1);
-        assert_eq!(doc.bql_blocks[0].query, "pages");
-    }
-
-    #[test]
-    fn test_bql_block_not_in_frontmatter() {
-        let text = "---\nid: abc12345\ntitle: \"T\"\n---\n\n{{tasks}}\n";
-        let parser = BloomMarkdownParser::new();
-        let doc = parser.parse(text);
-        assert_eq!(doc.bql_blocks.len(), 1);
-        assert_eq!(doc.bql_blocks[0].query, "tasks");
-    }
 }

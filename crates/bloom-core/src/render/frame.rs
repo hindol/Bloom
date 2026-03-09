@@ -47,8 +47,6 @@ pub struct PaneFrame {
     pub status_bar: StatusBarFrame,
     /// Cell rect computed by core layout — TUI reads this directly.
     pub rect: PaneRectFrame,
-    /// BQL query result blocks embedded in this pane's content.
-    pub query_blocks: Vec<QueryResultBlock>,
 }
 
 /// Pane positioning info for the TUI renderer.
@@ -210,8 +208,6 @@ pub struct RenderedLine {
 pub enum LineSource {
     /// A line from the text buffer at the given line index (0-based).
     Buffer(usize),
-    /// A synthetic line from an embedded BQL query result.
-    QueryResult,
     /// A tilde line beyond the end of the buffer.
     BeyondEof,
 }
@@ -224,34 +220,6 @@ impl LineSource {
             _ => None,
         }
     }
-}
-
-/// A BQL query result block embedded in page content.
-#[derive(Debug, Clone)]
-pub struct QueryResultBlock {
-    /// Screen line index where results start (within visible_lines).
-    pub screen_line_start: usize,
-    /// Number of result rows rendered.
-    pub row_count: usize,
-    /// Column headers for the result table.
-    pub columns: Vec<String>,
-    /// Result rows with display values and optional block IDs for actions.
-    pub result_rows: Vec<QueryResultRow>,
-    /// Error message if the query failed to parse/compile/execute.
-    pub error: Option<String>,
-}
-
-/// A single row in a BQL query result.
-#[derive(Debug, Clone)]
-pub struct QueryResultRow {
-    /// Display values for each column.
-    pub cells: Vec<String>,
-    /// Page ID for jump-to-source (if available).
-    pub page_id: Option<String>,
-    /// Block ID for targeted actions like toggle (if available).
-    pub block_id: Option<String>,
-    /// Line number in source page (for cursor positioning on jump).
-    pub source_line: Option<usize>,
 }
 
 pub struct CursorState {
