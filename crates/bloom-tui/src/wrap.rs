@@ -218,7 +218,7 @@ mod tests {
 
     fn make_line(text: &str) -> RenderedLine {
         RenderedLine {
-            line_number: 0,
+            source: bloom_core::render::LineSource::Buffer(0),
             text: text.to_string(),
             spans: vec![],
         }

@@ -179,7 +179,11 @@ impl SnapshotHelpers {
         let mut output = String::new();
         for pane in &frame.panes {
             for line in &pane.visible_lines {
-                output.push_str(&format!("{:>3}| ", line.line_number + 1));
+                let lnum = match line.source.buffer_line() {
+                    Some(n) => format!("{:>3}| ", n + 1),
+                    None => "    | ".to_string(),
+                };
+                output.push_str(&lnum);
                 output.push('\n');
             }
         }

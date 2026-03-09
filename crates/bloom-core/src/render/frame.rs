@@ -200,9 +200,30 @@ pub struct DialogFrame {
 // ---------------------------------------------------------------------------
 
 pub struct RenderedLine {
-    pub line_number: usize,
+    pub source: LineSource,
     pub text: String,
     pub spans: Vec<StyledSpan>,
+}
+
+/// Where a rendered line originated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineSource {
+    /// A line from the text buffer at the given line index (0-based).
+    Buffer(usize),
+    /// A synthetic line from an embedded BQL query result.
+    QueryResult,
+    /// A tilde line beyond the end of the buffer.
+    BeyondEof,
+}
+
+impl LineSource {
+    /// Returns the buffer line index if this is a Buffer line.
+    pub fn buffer_line(&self) -> Option<usize> {
+        match self {
+            LineSource::Buffer(n) => Some(*n),
+            _ => None,
+        }
+    }
 }
 
 /// A BQL query result block embedded in page content.

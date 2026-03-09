@@ -151,7 +151,8 @@ fn draw_editor_content_nowrap(f: &mut Frame, area: Rect, pane: &PaneFrame, theme
 
         let rendered_line = &pane.visible_lines[row];
 
-        let is_cursor_line = pane.is_active && rendered_line.line_number == pane.cursor.line;
+        let is_cursor_line = pane.is_active
+            && rendered_line.source.buffer_line() == Some(pane.cursor.line);
         let base_style = if is_cursor_line {
             theme.current_line_style()
         } else {
@@ -160,7 +161,10 @@ fn draw_editor_content_nowrap(f: &mut Frame, area: Rect, pane: &PaneFrame, theme
 
         let mut spans: Vec<Span> = Vec::new();
 
-        let lnum = format!("{:>3}  ", rendered_line.line_number + 1);
+        let lnum = match rendered_line.source.buffer_line() {
+            Some(n) => format!("{:>3}  ", n + 1),
+            None => "     ".to_string(),
+        };
         let lnum_style = if is_cursor_line { base_style } else { faded_bg };
         spans.push(Span::styled(lnum, lnum_style));
 
@@ -266,7 +270,8 @@ fn draw_editor_content_wrapped(
         let rendered_line = &pane.visible_lines[line_idx];
         let text = rendered_line.text.trim_end_matches(['\n', '\r']);
 
-        let is_cursor_line = pane.is_active && rendered_line.line_number == pane.cursor.line;
+        let is_cursor_line = pane.is_active
+            && rendered_line.source.buffer_line() == Some(pane.cursor.line);
         let base_style = if is_cursor_line {
             theme.current_line_style()
         } else {
@@ -277,7 +282,10 @@ fn draw_editor_content_wrapped(
 
         // Gutter
         if wrap_offset == 0 {
-            let lnum = format!("{:>3}  ", rendered_line.line_number + 1);
+            let lnum = match rendered_line.source.buffer_line() {
+                Some(n) => format!("{:>3}  ", n + 1),
+                None => "     ".to_string(),
+            };
             let lnum_style = if is_cursor_line { base_style } else { faded_bg };
             spans.push(Span::styled(lnum, lnum_style));
         } else {
