@@ -1097,13 +1097,7 @@ fn format_generic_row(values: &[query::CellValue]) -> (String, Vec<parser::trait
     )
 }
 
-/// Extract a BQL query from `{{...}}` syntax.
+/// Extract a BQL query from `{{...}}` syntax — delegates to the parser's shared implementation.
 fn extract_bql_query(trimmed: &str) -> Option<String> {
-    if trimmed.starts_with("{{") && trimmed.ends_with("}}") && trimmed.len() > 4 {
-        let inner = trimmed[2..trimmed.len() - 2].trim();
-        if !inner.is_empty() {
-            return Some(inner.to_string());
-        }
-    }
-    None
+    crate::parser::markdown::extract_bql_query(trimmed)
 }

@@ -344,7 +344,7 @@ fn is_blockquote_line(lines: &[&str], idx: usize) -> bool {
 }
 
 /// Extract a BQL query from `{{...}}` syntax. Returns None if not a query line.
-fn extract_bql_query(trimmed: &str) -> Option<String> {
+pub(crate) fn extract_bql_query(trimmed: &str) -> Option<String> {
     if trimmed.starts_with("{{") && trimmed.ends_with("}}") && trimmed.len() > 4 {
         let inner = trimmed[2..trimmed.len() - 2].trim();
         if !inner.is_empty() {
