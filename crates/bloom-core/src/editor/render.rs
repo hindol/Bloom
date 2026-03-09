@@ -686,25 +686,32 @@ impl BloomEditor {
                     continue;
                 } else {
                     // Multi-line: {{ on this line, scan until }} — all source lines hidden.
+                    let query_start_line = line_idx;
                     let mut query_parts = vec![trimmed[2..].to_string()];
                     line_idx += 1;
-                    while line_idx < line_count {
+                    let mut depth = 0;
+                    let mut found_closing = false;
+                    while line_idx < line_count && depth < 20 {
                         let next_text = buf.line(line_idx).to_string();
                         let next_trimmed = next_text.trim();
                         if next_trimmed.ends_with("}}") {
                             query_parts.push(next_trimmed[..next_trimmed.len() - 2].to_string());
+                            found_closing = true;
                             break;
                         }
                         query_parts.push(next_trimmed.to_string());
                         line_idx += 1;
+                        depth += 1;
                     }
-                    let query_text = query_parts.join(" ").trim().to_string();
-                    if !query_text.is_empty() && line_idx < line_count {
-                        let screen_start = lines.len();
-                        let (result_lines, block) = self.execute_bql_for_render(&query_text, &today, screen_start);
-                        lines.extend(result_lines);
-                        if let Some(b) = block {
-                            query_blocks.push(b);
+                    if query_start_line >= range.start {
+                        let query_text = query_parts.join(" ").trim().to_string();
+                        if !query_text.is_empty() && found_closing && line_idx < line_count {
+                            let screen_start = lines.len();
+                            let (result_lines, block) = self.execute_bql_for_render(&query_text, &today, screen_start);
+                            lines.extend(result_lines);
+                            if let Some(b) = block {
+                                query_blocks.push(b);
+                            }
                         }
                     }
                     line_idx += 1;
@@ -769,7 +776,7 @@ impl BloomEditor {
         match query::run_query(query_text, conn, today, page_id.as_deref()) {
             Ok(qr) => {
                 let (lines, block) = self.render_query_result(&qr, screen_line_start);
-                self.query_cache.borrow_mut().put(query_text.to_string(), qr);
+                self.query_cache.borrow_mut().put(query_text.to_string(), qr, today);
                 (lines, Some(block))
             }
             Err(e) => {

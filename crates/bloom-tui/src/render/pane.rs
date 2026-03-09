@@ -188,6 +188,11 @@ fn draw_editor_content_unified(
         } else {
             base_normal
         };
+        let base_style = if matches!(rendered_line.source, bloom_core::render::LineSource::QueryResult) {
+            base_style.patch(theme.query_result_block())
+        } else {
+            base_style
+        };
 
         let mut spans: Vec<Span> = Vec::new();
 

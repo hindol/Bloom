@@ -17,6 +17,7 @@ pub struct QueryCache {
 struct CacheEntry {
     result: QueryResult,
     generation: u64,
+    today: String,
 }
 
 impl QueryCache {
@@ -32,10 +33,11 @@ impl QueryCache {
         self.generation += 1;
     }
 
-    /// Get a cached result if it's still fresh (same generation).
+    /// Get a cached result if it's still fresh (same generation and same day).
     pub fn get(&self, query_text: &str) -> Option<&QueryResult> {
+        let current_today = chrono::Local::now().format("%Y-%m-%d").to_string();
         self.entries.get(query_text).and_then(|entry| {
-            if entry.generation == self.generation {
+            if entry.generation == self.generation && entry.today == current_today {
                 Some(&entry.result)
             } else {
                 None
@@ -44,12 +46,13 @@ impl QueryCache {
     }
 
     /// Store a freshly-computed result at the current generation.
-    pub fn put(&mut self, query_text: String, result: QueryResult) {
+    pub fn put(&mut self, query_text: String, result: QueryResult, today: &str) {
         self.entries.insert(
             query_text,
             CacheEntry {
                 result,
                 generation: self.generation,
+                today: today.to_string(),
             },
         );
     }
@@ -86,17 +89,21 @@ mod tests {
         }
     }
 
+    fn today() -> String {
+        chrono::Local::now().format("%Y-%m-%d").to_string()
+    }
+
     #[test]
     fn cache_hit_same_generation() {
         let mut cache = QueryCache::new();
-        cache.put("tasks".into(), dummy_result());
+        cache.put("tasks".into(), dummy_result(), &today());
         assert!(cache.get("tasks").is_some());
     }
 
     #[test]
     fn cache_miss_after_invalidate() {
         let mut cache = QueryCache::new();
-        cache.put("tasks".into(), dummy_result());
+        cache.put("tasks".into(), dummy_result(), &today());
         cache.invalidate();
         assert!(cache.get("tasks").is_none());
     }
@@ -104,10 +111,10 @@ mod tests {
     #[test]
     fn cache_fresh_after_re_put() {
         let mut cache = QueryCache::new();
-        cache.put("tasks".into(), dummy_result());
+        cache.put("tasks".into(), dummy_result(), &today());
         cache.invalidate();
         assert!(cache.get("tasks").is_none());
-        cache.put("tasks".into(), dummy_result());
+        cache.put("tasks".into(), dummy_result(), &today());
         assert!(cache.get("tasks").is_some());
     }
 
