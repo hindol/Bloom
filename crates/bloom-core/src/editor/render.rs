@@ -666,20 +666,11 @@ impl BloomEditor {
                 }
             }
 
-            // Detect {{query}} lines — render query results instead of the raw line.
+            // Detect {{query}} lines — replace with query results (transclusion).
             if !in_frontmatter && !in_code_block && trimmed.starts_with("{{") {
                 if let Some(query_text) = extract_bql_query(&trimmed) {
-                    // Single-line {{query}}
+                    // Single-line {{query}} — hidden, replaced by results.
                     if line_idx >= range.start {
-                        let line_len = line_text.len();
-                        lines.push(render::RenderedLine {
-                            source: render::LineSource::Buffer(line_idx),
-                            text: line_text.clone(),
-                            spans: vec![parser::traits::StyledSpan {
-                                range: 0..line_len,
-                                style: parser::traits::Style::SyntaxNoise,
-                            }],
-                        });
                         let screen_start = lines.len();
                         let (result_lines, block) = self.execute_bql_for_render(&query_text, &today, screen_start);
                         lines.extend(result_lines);
@@ -690,34 +681,12 @@ impl BloomEditor {
                     line_idx += 1;
                     continue;
                 } else {
-                    // Multi-line: {{ on this line, scan until }}
+                    // Multi-line: {{ on this line, scan until }} — all source lines hidden.
                     let mut query_parts = vec![trimmed[2..].to_string()];
-                    if line_idx >= range.start {
-                        let line_len = line_text.len();
-                        lines.push(render::RenderedLine {
-                            source: render::LineSource::Buffer(line_idx),
-                            text: line_text.clone(),
-                            spans: vec![parser::traits::StyledSpan {
-                                range: 0..line_len,
-                                style: parser::traits::Style::SyntaxNoise,
-                            }],
-                        });
-                    }
                     line_idx += 1;
                     while line_idx < scan_end {
                         let next_text = buf.line(line_idx).to_string();
                         let next_trimmed = next_text.trim();
-                        if line_idx >= range.start {
-                            let next_len = next_text.len();
-                            lines.push(render::RenderedLine {
-                                source: render::LineSource::Buffer(line_idx),
-                                text: next_text.clone(),
-                                spans: vec![parser::traits::StyledSpan {
-                                    range: 0..next_len,
-                                    style: parser::traits::Style::SyntaxNoise,
-                                }],
-                            });
-                        }
                         if next_trimmed.ends_with("}}") {
                             query_parts.push(next_trimmed[..next_trimmed.len() - 2].to_string());
                             break;
@@ -726,7 +695,7 @@ impl BloomEditor {
                         line_idx += 1;
                     }
                     let query_text = query_parts.join(" ").trim().to_string();
-                    if !query_text.is_empty() {
+                    if !query_text.is_empty() && line_idx <= scan_end {
                         let screen_start = lines.len();
                         let (result_lines, block) = self.execute_bql_for_render(&query_text, &today, screen_start);
                         lines.extend(result_lines);
