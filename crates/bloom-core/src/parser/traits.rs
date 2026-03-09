@@ -92,8 +92,10 @@ pub struct ParsedBlock {
 pub struct BqlBlock {
     /// The query text (content between `{{` and `}}`).
     pub query: String,
-    /// Line where the `{{...}}` appears (zero-based).
+    /// Line where `{{` starts (zero-based).
     pub line: usize,
+    /// Line where `}}` ends (same as `line` for single-line queries).
+    pub end_line: usize,
 }
 
 // --- Highlighting types ---

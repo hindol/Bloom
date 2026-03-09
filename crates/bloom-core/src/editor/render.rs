@@ -620,7 +620,8 @@ impl BloomEditor {
         // Get today's date for BQL query compilation
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
-        for line_idx in 0..scan_end {
+        let mut line_idx = 0;
+        while line_idx < scan_end {
             let line_text = buf.line(line_idx).to_string();
             let trimmed = line_text.trim().to_string();
 
@@ -644,6 +645,7 @@ impl BloomEditor {
                     });
                 }
                 in_frontmatter = false;
+                line_idx += 1;
                 continue;
             }
 
@@ -663,10 +665,10 @@ impl BloomEditor {
             }
 
             // Detect {{query}} lines — render query results instead of the raw line.
-            if !in_frontmatter && !in_code_block {
+            if !in_frontmatter && !in_code_block && trimmed.starts_with("{{") {
                 if let Some(query_text) = extract_bql_query(&trimmed) {
+                    // Single-line {{query}}
                     if line_idx >= range.start {
-                        // Render the {{...}} line itself dimmed
                         let line_len = line_text.len();
                         lines.push(render::RenderedLine {
                             line_number: line_idx,
@@ -676,10 +678,53 @@ impl BloomEditor {
                                 style: parser::traits::Style::SyntaxNoise,
                             }],
                         });
-                        // Execute and render results
                         let result_lines = self.execute_bql_for_render(&query_text, &today);
                         lines.extend(result_lines);
                     }
+                    line_idx += 1;
+                    continue;
+                } else {
+                    // Multi-line: {{ on this line, scan until }}
+                    let mut query_parts = vec![trimmed[2..].to_string()];
+                    if line_idx >= range.start {
+                        let line_len = line_text.len();
+                        lines.push(render::RenderedLine {
+                            line_number: line_idx,
+                            text: line_text.clone(),
+                            spans: vec![parser::traits::StyledSpan {
+                                range: 0..line_len,
+                                style: parser::traits::Style::SyntaxNoise,
+                            }],
+                        });
+                    }
+                    line_idx += 1;
+                    while line_idx < scan_end {
+                        let next_text = buf.line(line_idx).to_string();
+                        let next_trimmed = next_text.trim();
+                        if line_idx >= range.start {
+                            let next_len = next_text.len();
+                            lines.push(render::RenderedLine {
+                                line_number: line_idx,
+                                text: next_text.clone(),
+                                spans: vec![parser::traits::StyledSpan {
+                                    range: 0..next_len,
+                                    style: parser::traits::Style::SyntaxNoise,
+                                }],
+                            });
+                        }
+                        if next_trimmed.ends_with("}}") {
+                            query_parts.push(next_trimmed[..next_trimmed.len() - 2].to_string());
+                            break;
+                        }
+                        query_parts.push(next_trimmed.to_string());
+                        line_idx += 1;
+                    }
+                    let query_text = query_parts.join(" ").trim().to_string();
+                    if !query_text.is_empty() {
+                        let result_lines = self.execute_bql_for_render(&query_text, &today);
+                        lines.extend(result_lines);
+                    }
+                    line_idx += 1;
                     continue;
                 }
             }
@@ -699,6 +744,7 @@ impl BloomEditor {
                     spans,
                 });
             }
+            line_idx += 1;
         }
         lines
     }

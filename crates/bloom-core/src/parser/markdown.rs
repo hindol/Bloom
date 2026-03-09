@@ -79,13 +79,39 @@ impl DocumentParser for BloomMarkdownParser {
 
             let trimmed_end = line.trim();
 
-            // Detect {{query}} blocks — must be on its own line.
-            if let Some(query) = extract_bql_query(trimmed_end) {
+            // Detect {{query}} blocks — single-line or multi-line.
+            if trimmed_end.starts_with("{{") {
                 flush_block(&mut block_start, &mut blocks);
-                bql_blocks.push(super::traits::BqlBlock {
-                    query,
-                    line: line_idx,
-                });
+                if let Some(query) = extract_bql_query(trimmed_end) {
+                    // Single-line: {{query}}
+                    bql_blocks.push(super::traits::BqlBlock {
+                        query,
+                        line: line_idx,
+                        end_line: line_idx,
+                    });
+                } else {
+                    // Multi-line: {{ on this line, scan until }}
+                    let mut query_parts = vec![trimmed_end[2..].to_string()];
+                    let start_line = line_idx;
+                    line_idx += 1;
+                    while line_idx < lines.len() {
+                        let next = lines[line_idx].trim();
+                        if next.ends_with("}}") {
+                            query_parts.push(next[..next.len() - 2].to_string());
+                            break;
+                        }
+                        query_parts.push(next.to_string());
+                        line_idx += 1;
+                    }
+                    let query = query_parts.join(" ").trim().to_string();
+                    if !query.is_empty() {
+                        bql_blocks.push(super::traits::BqlBlock {
+                            query,
+                            line: start_line,
+                            end_line: line_idx,
+                        });
+                    }
+                }
                 line_idx += 1;
                 continue;
             }
@@ -504,6 +530,7 @@ mod tests {
         assert_eq!(doc.bql_blocks.len(), 1);
         assert_eq!(doc.bql_blocks[0].query, "tasks | where not done");
         assert_eq!(doc.bql_blocks[0].line, 2);
+        assert_eq!(doc.bql_blocks[0].end_line, 2);
     }
 
     #[test]
@@ -514,6 +541,19 @@ mod tests {
         assert_eq!(doc.bql_blocks.len(), 2);
         assert_eq!(doc.bql_blocks[0].query, "tasks");
         assert_eq!(doc.bql_blocks[1].query, "pages | sort title");
+    }
+
+    #[test]
+    fn test_bql_block_multiline() {
+        let text = "{{tasks\n  | where not done\n  | sort due}}\n";
+        let parser = BloomMarkdownParser::new();
+        let doc = parser.parse(text);
+        assert_eq!(doc.bql_blocks.len(), 1);
+        assert_eq!(doc.bql_blocks[0].line, 0);
+        assert_eq!(doc.bql_blocks[0].end_line, 2);
+        assert!(doc.bql_blocks[0].query.contains("tasks"));
+        assert!(doc.bql_blocks[0].query.contains("not done"));
+        assert!(doc.bql_blocks[0].query.contains("sort due"));
     }
 
     #[test]
