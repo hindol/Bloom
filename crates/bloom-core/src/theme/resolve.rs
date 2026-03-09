@@ -212,6 +212,11 @@ pub fn resolve_status_bar(mode: &str, active: bool, p: &ThemePalette) -> StylePr
             bg: Some(p.accent_blue),
             ..Default::default()
         },
+        "QUERY" => StyleProps {
+            fg: Some(p.background),
+            bg: Some(p.salient),
+            ..Default::default()
+        },
         _ => StyleProps {
             fg: Some(p.foreground),
             bg: Some(p.highlight),
@@ -232,6 +237,10 @@ pub enum Chrome {
     NotificationInfo,
     NotificationWarning,
     NotificationError,
+    /// Background wash for BQL result blocks (distinct from code blocks).
+    QueryResultBlock,
+    /// Selected row within a BQL result block.
+    QueryResultSelected,
 }
 
 /// Resolve UI chrome element styles per THEMING.md.
@@ -273,6 +282,16 @@ pub fn resolve_chrome(element: Chrome, p: &ThemePalette) -> StyleProps {
         Chrome::NotificationError => StyleProps {
             fg: Some(p.background),
             bg: Some(p.critical),
+            ..Default::default()
+        },
+        Chrome::QueryResultBlock => StyleProps {
+            fg: Some(p.foreground),
+            bg: Some(p.ultralight),
+            ..Default::default()
+        },
+        Chrome::QueryResultSelected => StyleProps {
+            fg: Some(p.foreground),
+            bg: Some(p.mild),
             ..Default::default()
         },
     }

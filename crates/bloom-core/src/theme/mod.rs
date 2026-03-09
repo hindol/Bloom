@@ -123,7 +123,7 @@ mod tests {
     #[test]
     fn test_status_bar_modes() {
         let palette = &BLOOM_DARK;
-        for mode in &["NORMAL", "INSERT", "VISUAL", "COMMAND"] {
+        for mode in &["NORMAL", "INSERT", "VISUAL", "COMMAND", "QUERY"] {
             let props = resolve_status_bar(mode, true, palette);
             assert!(props.fg.is_some());
             assert!(props.bg.is_some());
