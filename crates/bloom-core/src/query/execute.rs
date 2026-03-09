@@ -6,12 +6,27 @@ use super::compile::{CompiledQuery, SqlParam};
 use super::parse::Source;
 
 // ---------------------------------------------------------------------------
+// Query context
+// ---------------------------------------------------------------------------
+
+/// Runtime context for BQL query execution.
+pub struct QueryContext {
+    pub page_id: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
 // Query result types
 // ---------------------------------------------------------------------------
 
 /// Result of executing a BQL query.
 #[derive(Debug, Clone)]
-pub enum QueryResult {
+pub struct QueryResult {
+    pub source: Source,
+    pub kind: QueryResultKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum QueryResultKind {
     /// A list of rows (the common case).
     Rows(RowResult),
     /// A single count (from `| count` without group).
@@ -35,6 +50,7 @@ pub struct Row {
 pub enum CellValue {
     Text(String),
     Int(i64),
+    Float(f64),
     Bool(bool),
     Null,
 }
@@ -44,6 +60,7 @@ impl std::fmt::Display for CellValue {
         match self {
             CellValue::Text(s) => write!(f, "{s}"),
             CellValue::Int(n) => write!(f, "{n}"),
+            CellValue::Float(n) => write!(f, "{n}"),
             CellValue::Bool(b) => write!(f, "{b}"),
             CellValue::Null => write!(f, ""),
         }
@@ -58,30 +75,25 @@ impl std::fmt::Display for CellValue {
 pub fn execute(
     compiled: &CompiledQuery,
     conn: &Connection,
-    page_id: Option<&str>,
+    context: &QueryContext,
 ) -> Result<QueryResult, String> {
     let mut stmt = conn
         .prepare(&compiled.sql)
         .map_err(|e| format!("SQL prepare error: {e}"))?;
 
-    // Bind parameters, resolving $page at runtime.
+    // Bind parameters, resolving PageRef at runtime.
     let params: Vec<Box<dyn rusqlite::types::ToSql>> = compiled
         .params
         .iter()
-        .enumerate()
-        .map(|(i, p)| -> Box<dyn rusqlite::types::ToSql> {
+        .map(|p| -> Box<dyn rusqlite::types::ToSql> {
             match p {
-                SqlParam::Text(s) => {
-                    // Check if this is a $page placeholder (empty string from compiler).
-                    if s.is_empty() && is_page_param(&compiled, i) {
-                        Box::new(page_id.unwrap_or("").to_string())
-                    } else {
-                        Box::new(s.clone())
-                    }
-                }
+                SqlParam::Text(s) => Box::new(s.clone()),
                 SqlParam::Int(n) => Box::new(*n),
                 SqlParam::Float(n) => Box::new(*n),
                 SqlParam::Null => Box::new(rusqlite::types::Null),
+                SqlParam::PageRef => {
+                    Box::new(context.page_id.clone().unwrap_or_default())
+                }
             }
         })
         .collect();
@@ -89,14 +101,17 @@ pub fn execute(
     let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
 
     // Count queries
-    if compiled.has_count && !compiled.has_group {
+    if compiled.has_count && compiled.group_field.is_none() {
         let count: u64 = stmt
             .query_row(param_refs.as_slice(), |row| row.get(0))
             .map_err(|e| format!("SQL query error: {e}"))?;
-        return Ok(QueryResult::Count(count));
+        return Ok(QueryResult {
+            source: compiled.source.clone(),
+            kind: QueryResultKind::Count(count),
+        });
     }
 
-    if compiled.has_count && compiled.has_group {
+    if compiled.has_count && compiled.group_field.is_some() {
         let mut rows = stmt
             .query(param_refs.as_slice())
             .map_err(|e| format!("SQL query error: {e}"))?;
@@ -106,7 +121,10 @@ pub fn execute(
             let count: u64 = row.get(1).unwrap_or(0);
             groups.push((key, count));
         }
-        return Ok(QueryResult::GroupCounts(groups));
+        return Ok(QueryResult {
+            source: compiled.source.clone(),
+            kind: QueryResultKind::GroupCounts(groups),
+        });
     }
 
     // Row queries
@@ -129,37 +147,35 @@ pub fn execute(
         result_rows.push(Row { values });
     }
 
-    Ok(QueryResult::Rows(RowResult {
-        columns,
-        rows: result_rows,
-    }))
+    Ok(QueryResult {
+        source: compiled.source.clone(),
+        kind: QueryResultKind::Rows(RowResult {
+            columns,
+            rows: result_rows,
+        }),
+    })
 }
 
+/// Read a SQLite cell using its actual runtime type.
 fn row_to_cell(row: &rusqlite::Row, idx: usize) -> CellValue {
-    // Try integer first, then text, then null.
-    if let Ok(n) = row.get::<_, i64>(idx) {
-        // Check if it's a boolean column (0/1 for done)
-        CellValue::Int(n)
-    } else if let Ok(s) = row.get::<_, String>(idx) {
-        CellValue::Text(s)
-    } else {
-        CellValue::Null
+    use rusqlite::types::ValueRef;
+    match row.get_ref(idx) {
+        Ok(ValueRef::Null) => CellValue::Null,
+        Ok(ValueRef::Integer(n)) => CellValue::Int(n),
+        Ok(ValueRef::Real(n)) => CellValue::Float(n),
+        Ok(ValueRef::Text(bytes)) => {
+            CellValue::Text(String::from_utf8_lossy(bytes).to_string())
+        }
+        Ok(ValueRef::Blob(_)) => CellValue::Text("<blob>".to_string()),
+        Err(_) => CellValue::Null,
     }
 }
 
-/// Check if a parameter at the given index is a $page placeholder.
-fn is_page_param(compiled: &CompiledQuery, param_idx: usize) -> bool {
-    // The compiler inserts an empty string for $page. We check by matching
-    // the SQL for the corresponding ?N placeholder in a position context.
-    // Simple heuristic: empty text params are $page placeholders.
-    matches!(&compiled.params[param_idx], SqlParam::Text(s) if s.is_empty())
-}
-
 // ---------------------------------------------------------------------------
-// Convenience: parse + compile + execute
+// Convenience: parse + validate + compile + execute
 // ---------------------------------------------------------------------------
 
-/// Parse, compile, and execute a BQL query string.
+/// Parse, validate, compile, and execute a BQL query string.
 pub fn run_query(
     input: &str,
     conn: &Connection,
@@ -167,8 +183,12 @@ pub fn run_query(
     page_id: Option<&str>,
 ) -> Result<QueryResult, String> {
     let query = super::parse(input).map_err(|e| e.to_string())?;
-    let compiled = super::compile(&query, today).map_err(|e| e.to_string())?;
-    execute(&compiled, conn, page_id)
+    let validated = super::validate(&query, today).map_err(|e| e.to_string())?;
+    let compiled = super::compile(&validated);
+    let context = QueryContext {
+        page_id: page_id.map(String::from),
+    };
+    execute(&compiled, conn, &context)
 }
 
 // ---------------------------------------------------------------------------
@@ -244,8 +264,8 @@ mod tests {
     fn execute_tasks_all() {
         let conn = setup_test_db();
         let result = run_query("tasks", &conn, "2026-03-08", None).unwrap();
-        match result {
-            QueryResult::Rows(r) => assert_eq!(r.rows.len(), 4),
+        match result.kind {
+            QueryResultKind::Rows(r) => assert_eq!(r.rows.len(), 4),
             _ => panic!("expected Rows"),
         }
     }
@@ -254,8 +274,8 @@ mod tests {
     fn execute_tasks_not_done() {
         let conn = setup_test_db();
         let result = run_query("tasks | where not done", &conn, "2026-03-08", None).unwrap();
-        match result {
-            QueryResult::Rows(r) => assert_eq!(r.rows.len(), 3),
+        match result.kind {
+            QueryResultKind::Rows(r) => assert_eq!(r.rows.len(), 3),
             _ => panic!("expected Rows"),
         }
     }
@@ -270,9 +290,9 @@ mod tests {
             None,
         )
         .unwrap();
-        match result {
-            QueryResult::Rows(r) => {
-                assert_eq!(r.rows.len(), 1); // "Review ropey API" due 2026-03-05
+        match result.kind {
+            QueryResultKind::Rows(r) => {
+                assert_eq!(r.rows.len(), 1);
             }
             _ => panic!("expected Rows"),
         }
@@ -288,8 +308,8 @@ mod tests {
             None,
         )
         .unwrap();
-        match result {
-            QueryResult::Rows(r) => assert_eq!(r.rows.len(), 3), // p1 has 2 tasks + p2 has 1 task, both tagged #rust
+        match result.kind {
+            QueryResultKind::Rows(r) => assert_eq!(r.rows.len(), 3),
             _ => panic!("expected Rows"),
         }
     }
@@ -299,8 +319,8 @@ mod tests {
         let conn = setup_test_db();
         let result =
             run_query("tasks | where not done | count", &conn, "2026-03-08", None).unwrap();
-        match result {
-            QueryResult::Count(n) => assert_eq!(n, 3),
+        match result.kind {
+            QueryResultKind::Count(n) => assert_eq!(n, 3),
             _ => panic!("expected Count"),
         }
     }
@@ -315,8 +335,8 @@ mod tests {
             None,
         )
         .unwrap();
-        match result {
-            QueryResult::Rows(r) => assert_eq!(r.rows.len(), 1), // "Follow up"
+        match result.kind {
+            QueryResultKind::Rows(r) => assert_eq!(r.rows.len(), 1),
             _ => panic!("expected Rows"),
         }
     }
@@ -325,8 +345,8 @@ mod tests {
     fn execute_pages_all() {
         let conn = setup_test_db();
         let result = run_query("pages", &conn, "2026-03-08", None).unwrap();
-        match result {
-            QueryResult::Rows(r) => assert_eq!(r.rows.len(), 3),
+        match result.kind {
+            QueryResultKind::Rows(r) => assert_eq!(r.rows.len(), 3),
             _ => panic!("expected Rows"),
         }
     }
@@ -341,10 +361,9 @@ mod tests {
             None,
         )
         .unwrap();
-        match result {
-            QueryResult::Rows(r) => {
+        match result.kind {
+            QueryResultKind::Rows(r) => {
                 assert_eq!(r.rows.len(), 2);
-                // Most recent first: Meeting Notes (Mar 8), then Text Editor Theory (Feb 1)
                 match &r.rows[0].values[1] {
                     CellValue::Text(t) => assert_eq!(t, "Meeting Notes"),
                     other => panic!("expected text, got {other:?}"),
@@ -364,9 +383,9 @@ mod tests {
             None,
         )
         .unwrap();
-        match result {
-            QueryResult::Rows(r) => {
-                assert_eq!(r.rows.len(), 1); // Meeting Notes has no incoming links
+        match result.kind {
+            QueryResultKind::Rows(r) => {
+                assert_eq!(r.rows.len(), 1);
                 match &r.rows[0].values[1] {
                     CellValue::Text(t) => assert_eq!(t, "Meeting Notes"),
                     other => panic!("expected text, got {other:?}"),
@@ -380,10 +399,9 @@ mod tests {
     fn execute_tags_all() {
         let conn = setup_test_db();
         let result = run_query("tags | sort count desc", &conn, "2026-03-08", None).unwrap();
-        match result {
-            QueryResult::Rows(r) => {
-                assert!(r.rows.len() >= 2); // at least rust, editors, programming
-                // rust appears in 2 pages, should be first
+        match result.kind {
+            QueryResultKind::Rows(r) => {
+                assert!(r.rows.len() >= 2);
                 match &r.rows[0].values[0] {
                     CellValue::Text(t) => assert_eq!(t, "rust"),
                     other => panic!("expected text, got {other:?}"),
@@ -403,9 +421,9 @@ mod tests {
             Some("p2"),
         )
         .unwrap();
-        match result {
-            QueryResult::Rows(r) => {
-                assert_eq!(r.rows.len(), 1); // p1 links to p2
+        match result.kind {
+            QueryResultKind::Rows(r) => {
+                assert_eq!(r.rows.len(), 1);
             }
             _ => panic!("expected Rows"),
         }
@@ -421,11 +439,20 @@ mod tests {
             None,
         )
         .unwrap();
-        match result {
-            QueryResult::Rows(r) => {
-                assert_eq!(r.rows.len(), 2); // p1's two open tasks
+        match result.kind {
+            QueryResultKind::Rows(r) => {
+                assert_eq!(r.rows.len(), 2);
             }
             _ => panic!("expected Rows"),
         }
+    }
+
+    #[test]
+    fn execute_result_carries_source() {
+        let conn = setup_test_db();
+        let result = run_query("tasks", &conn, "2026-03-08", None).unwrap();
+        assert!(matches!(result.source, Source::Tasks));
+        let result = run_query("pages", &conn, "2026-03-08", None).unwrap();
+        assert!(matches!(result.source, Source::Pages));
     }
 }

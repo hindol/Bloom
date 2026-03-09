@@ -777,72 +777,69 @@ impl BloomEditor {
             .and_then(|pid| Some(pid.to_hex()));
 
         match query::run_query(query_text, conn, today, page_id.as_deref()) {
-            Ok(query::QueryResult::Rows(result)) => {
-                let mut lines = Vec::new();
-                if result.rows.is_empty() {
-                    lines.push(render::RenderedLine {
-                        line_number: BQL_LINE,
-                        text: "  (no results)".to_string(),
-                        spans: vec![parser::traits::StyledSpan {
-                            range: 0..14,
-                            style: parser::traits::Style::Tag,
-                        }],
-                    });
-                } else {
-                    // Determine source for formatting
-                    let source = query::parse(query_text)
-                        .map(|q| q.source)
-                        .unwrap_or(query::Source::Pages);
-
-                    for row in &result.rows {
-                        let (text, spans) = format_result_row(&row.values, &result.columns, &source);
+            Ok(qr) => match qr.kind {
+                query::QueryResultKind::Rows(result) => {
+                    let mut lines = Vec::new();
+                    if result.rows.is_empty() {
                         lines.push(render::RenderedLine {
                             line_number: BQL_LINE,
-                            text,
-                            spans,
+                            text: "  (no results)".to_string(),
+                            spans: vec![parser::traits::StyledSpan {
+                                range: 0..14,
+                                style: parser::traits::Style::Tag,
+                            }],
+                        });
+                    } else {
+                        for row in &result.rows {
+                            let (text, spans) = format_result_row(&row.values, &result.columns, &qr.source);
+                            lines.push(render::RenderedLine {
+                                line_number: BQL_LINE,
+                                text,
+                                spans,
+                            });
+                        }
+                        let footer = format!("  {} results", result.rows.len());
+                        let footer_len = footer.len();
+                        lines.push(render::RenderedLine {
+                            line_number: BQL_LINE,
+                            text: footer,
+                            spans: vec![parser::traits::StyledSpan {
+                                range: 0..footer_len,
+                                style: parser::traits::Style::Tag,
+                            }],
                         });
                     }
-                    let footer = format!("  {} results", result.rows.len());
-                    let footer_len = footer.len();
-                    lines.push(render::RenderedLine {
-                        line_number: BQL_LINE,
-                        text: footer,
-                        spans: vec![parser::traits::StyledSpan {
-                            range: 0..footer_len,
-                            style: parser::traits::Style::Tag,
-                        }],
-                    });
+                    lines
                 }
-                lines
-            }
-            Ok(query::QueryResult::Count(n)) => {
-                let text = format!("  {n}");
-                let len = text.len();
-                vec![render::RenderedLine {
-                    line_number: BQL_LINE,
-                    text,
-                    spans: vec![parser::traits::StyledSpan {
-                        range: 0..len,
-                        style: parser::traits::Style::Normal,
-                    }],
-                }]
-            }
-            Ok(query::QueryResult::GroupCounts(groups)) => {
-                let mut lines = Vec::new();
-                for (key, count) in &groups {
-                    let text = format!("  {key}: {count}");
+                query::QueryResultKind::Count(n) => {
+                    let text = format!("  {n}");
                     let len = text.len();
-                    lines.push(render::RenderedLine {
+                    vec![render::RenderedLine {
                         line_number: BQL_LINE,
                         text,
                         spans: vec![parser::traits::StyledSpan {
                             range: 0..len,
                             style: parser::traits::Style::Normal,
                         }],
-                    });
+                    }]
                 }
-                lines
-            }
+                query::QueryResultKind::GroupCounts(groups) => {
+                    let mut lines = Vec::new();
+                    for (key, count) in &groups {
+                        let text = format!("  {key}: {count}");
+                        let len = text.len();
+                        lines.push(render::RenderedLine {
+                            line_number: BQL_LINE,
+                            text,
+                            spans: vec![parser::traits::StyledSpan {
+                                range: 0..len,
+                                style: parser::traits::Style::Normal,
+                            }],
+                        });
+                    }
+                    lines
+                }
+            },
             Err(e) => {
                 let text = format!("  ⚠ {e}");
                 let len = text.len();

@@ -219,14 +219,10 @@ pub fn tokenise(input: &str) -> Result<Vec<Token>, ParseError> {
             continue;
         }
 
-        // Tag: #identifier
+        // Tag: #identifier (Unicode-aware single-pass scan)
         if bytes[i] == b'#' {
             i += 1;
             let tag_start = i;
-            while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'-' || bytes[i] == b'_') {
-                i += 1;
-            }
-            // Also accept Unicode letters for tags.
             while i < bytes.len() {
                 let ch = input[i..].chars().next().unwrap();
                 if ch.is_alphanumeric() || ch == '-' || ch == '_' {
@@ -562,22 +558,30 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
+        self.parse_or()
+    }
+
+    /// Or has lower precedence: `a or b and c` parses as `a or (b and c)`.
+    fn parse_or(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_and()?;
+
+        while self.peek().is_some_and(|t| t.kind == TokenKind::Or) {
+            self.advance();
+            let right = self.parse_and()?;
+            left = Expr::Or(Box::new(left), Box::new(right));
+        }
+
+        Ok(left)
+    }
+
+    /// And has higher precedence than or.
+    fn parse_and(&mut self) -> Result<Expr, ParseError> {
         let mut left = self.parse_pred()?;
 
-        loop {
-            match self.peek().map(|t| &t.kind) {
-                Some(TokenKind::And) => {
-                    self.advance();
-                    let right = self.parse_pred()?;
-                    left = Expr::And(Box::new(left), Box::new(right));
-                }
-                Some(TokenKind::Or) => {
-                    self.advance();
-                    let right = self.parse_pred()?;
-                    left = Expr::Or(Box::new(left), Box::new(right));
-                }
-                _ => break,
-            }
+        while self.peek().is_some_and(|t| t.kind == TokenKind::And) {
+            self.advance();
+            let right = self.parse_pred()?;
+            left = Expr::And(Box::new(left), Box::new(right));
         }
 
         Ok(left)
@@ -1075,5 +1079,27 @@ mod tests {
         assert_eq!(q.clauses.len(), 3);
         assert!(matches!(q.clauses[1], Clause::Group(_)));
         assert!(matches!(q.clauses[2], Clause::Count));
+    }
+
+    #[test]
+    fn parse_and_binds_tighter_than_or() {
+        // `a or b and c` should parse as `a or (b and c)`, not `(a or b) and c`.
+        let q = parse("tasks | where done or tags has #work and due < today").unwrap();
+        match &q.clauses[0] {
+            Clause::Where(Expr::Or(left, right)) => {
+                // left = done (bare field)
+                assert!(matches!(left.as_ref(), Expr::Compare(_, Op::Eq, Value::Bool(true))));
+                // right = tags has #work and due < today
+                assert!(matches!(right.as_ref(), Expr::And(_, _)));
+            }
+            other => panic!("expected Or(done, And(...)), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tokenise_unicode_tag() {
+        let tokens = tokenise("tags has #café").unwrap();
+        assert_eq!(tokens[2].kind, TokenKind::Tag);
+        assert_eq!(tokens[2].text, "café");
     }
 }
