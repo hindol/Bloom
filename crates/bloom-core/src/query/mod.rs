@@ -7,7 +7,9 @@ mod execute;
 mod parse;
 pub mod schema;
 mod validate;
+mod cache;
 
+pub use cache::QueryCache;
 pub use compile::{CompiledQuery, CompileError, SqlParam, compile};
 pub use execute::{CellValue, QueryContext, QueryResult, QueryResultKind, Row, RowResult, execute, run_query};
 pub use parse::{

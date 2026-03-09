@@ -209,6 +209,8 @@ pub struct BloomEditor {
     pub(crate) inline_completion: Option<InlineCompletion>,
     // Block ID bulk assignment (run once after first index)
     pub(crate) block_ids_bulk_done: bool,
+    // BQL query cache (invalidated on IndexComplete)
+    pub(crate) query_cache: std::cell::RefCell<query::QueryCache>,
 }
 
 pub(crate) struct InlineCompletion {
@@ -436,6 +438,7 @@ impl BloomEditor {
             active_dialog: None,
             inline_completion: None,
             block_ids_bulk_done: false,
+            query_cache: std::cell::RefCell::new(query::QueryCache::new()),
             config,
         })
     }
@@ -559,6 +562,9 @@ impl BloomEditor {
                 self.index = Some(idx);
             }
         }
+
+        // Invalidate the BQL query cache so visible queries re-execute.
+        self.query_cache.borrow_mut().invalidate();
 
         // On first indexing (files_changed == files_scanned means everything was new),
         // assign block IDs to all pages that need them.

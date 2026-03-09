@@ -749,7 +749,7 @@ impl BloomEditor {
         lines
     }
 
-    /// Execute a BQL query and return RenderedLines for the results.
+    /// Get BQL query results, using cache when available.
     /// Result lines use `usize::MAX` as line_number so they never match
     /// the cursor line for current-line highlighting.
     fn execute_bql_for_render(
@@ -769,77 +769,27 @@ impl BloomEditor {
                 }],
             }];
         };
-        let conn = idx.connection();
 
-        // Get current page ID for $page resolution
+        // Check cache first.
+        {
+            let cache = self.query_cache.borrow();
+            if let Some(qr) = cache.get(query_text) {
+                return self.render_query_result(qr);
+            }
+        }
+
+        // Cache miss — execute and cache.
+        let conn = idx.connection();
         let page_id = self
             .active_page()
             .and_then(|pid| Some(pid.to_hex()));
 
         match query::run_query(query_text, conn, today, page_id.as_deref()) {
-            Ok(qr) => match qr.kind {
-                query::QueryResultKind::Rows(result) => {
-                    let mut lines = Vec::new();
-                    if result.rows.is_empty() {
-                        lines.push(render::RenderedLine {
-                            line_number: BQL_LINE,
-                            text: "  (no results)".to_string(),
-                            spans: vec![parser::traits::StyledSpan {
-                                range: 0..14,
-                                style: parser::traits::Style::Tag,
-                            }],
-                        });
-                    } else {
-                        for row in &result.rows {
-                            let (text, spans) = format_result_row(&row.values, &result.columns, &qr.source);
-                            lines.push(render::RenderedLine {
-                                line_number: BQL_LINE,
-                                text,
-                                spans,
-                            });
-                        }
-                        let footer = format!("  {} results", result.rows.len());
-                        let footer_len = footer.len();
-                        lines.push(render::RenderedLine {
-                            line_number: BQL_LINE,
-                            text: footer,
-                            spans: vec![parser::traits::StyledSpan {
-                                range: 0..footer_len,
-                                style: parser::traits::Style::Tag,
-                            }],
-                        });
-                    }
-                    lines
-                }
-                query::QueryResultKind::Count(n) => {
-                    let text = format!("  {n}");
-                    let len = text.len();
-                    vec![render::RenderedLine {
-                        line_number: BQL_LINE,
-                        text,
-                        spans: vec![parser::traits::StyledSpan {
-                            range: 0..len,
-                            style: parser::traits::Style::Normal,
-                        }],
-                    }]
-                }
-                query::QueryResultKind::GroupCounts(groups) => {
-                    let mut lines = Vec::new();
-                    for (key, count) in &groups {
-                        let text = format!("  {key}: {count}");
-                        let len = text.len();
-                        lines.push(render::RenderedLine {
-                            line_number: BQL_LINE,
-                            text,
-                            spans: vec![parser::traits::StyledSpan {
-                                range: 0..len,
-                                style: parser::traits::Style::Normal,
-                            }],
-                        });
-                    }
-                    lines
-                }
-            },
+            Ok(qr) => {
+                let lines = self.render_query_result(&qr);
+                self.query_cache.borrow_mut().put(query_text.to_string(), qr);
+                lines
+            }
             Err(e) => {
                 let text = format!("  ⚠ {e}");
                 let len = text.len();
@@ -851,6 +801,75 @@ impl BloomEditor {
                         style: parser::traits::Style::BrokenLink,
                     }],
                 }]
+            }
+        }
+    }
+
+    /// Render a QueryResult into RenderedLines for display.
+    fn render_query_result(&self, qr: &query::QueryResult) -> Vec<render::RenderedLine> {
+        const BQL_LINE: usize = usize::MAX;
+
+        match &qr.kind {
+            query::QueryResultKind::Rows(result) => {
+                let mut lines = Vec::new();
+                if result.rows.is_empty() {
+                    lines.push(render::RenderedLine {
+                        line_number: BQL_LINE,
+                        text: "  (no results)".to_string(),
+                        spans: vec![parser::traits::StyledSpan {
+                            range: 0..14,
+                            style: parser::traits::Style::Tag,
+                        }],
+                    });
+                } else {
+                    for row in &result.rows {
+                        let (text, spans) = format_result_row(&row.values, &result.columns, &qr.source);
+                        lines.push(render::RenderedLine {
+                            line_number: BQL_LINE,
+                            text,
+                            spans,
+                        });
+                    }
+                    let footer = format!("  {} results", result.rows.len());
+                    let footer_len = footer.len();
+                    lines.push(render::RenderedLine {
+                        line_number: BQL_LINE,
+                        text: footer,
+                        spans: vec![parser::traits::StyledSpan {
+                            range: 0..footer_len,
+                            style: parser::traits::Style::Tag,
+                        }],
+                    });
+                }
+                lines
+            }
+            query::QueryResultKind::Count(n) => {
+                let text = format!("  {n}");
+                let len = text.len();
+                vec![render::RenderedLine {
+                    line_number: BQL_LINE,
+                    text,
+                    spans: vec![parser::traits::StyledSpan {
+                        range: 0..len,
+                        style: parser::traits::Style::Normal,
+                    }],
+                }]
+            }
+            query::QueryResultKind::GroupCounts(groups) => {
+                let mut lines = Vec::new();
+                for (key, count) in groups {
+                    let text = format!("  {key}: {count}");
+                    let len = text.len();
+                    lines.push(render::RenderedLine {
+                        line_number: BQL_LINE,
+                        text,
+                        spans: vec![parser::traits::StyledSpan {
+                            range: 0..len,
+                            style: parser::traits::Style::Normal,
+                        }],
+                    });
+                }
+                lines
             }
         }
     }
