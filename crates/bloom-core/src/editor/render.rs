@@ -605,15 +605,11 @@ impl BloomEditor {
         viewport: &render::Viewport,
     ) -> (Vec<render::RenderedLine>, Vec<render::QueryResultBlock>) {
         let range = viewport.visible_range();
+        let screen_height = viewport.height;
         let mut lines = Vec::new();
         let mut query_blocks = Vec::new();
         let line_count = buf.len_lines();
 
-        let scan_end = if range.end < line_count {
-            range.end
-        } else {
-            line_count
-        };
         let mut in_frontmatter = false;
         let mut in_code_block = false;
         let mut code_fence_lang: Option<String> = None;
@@ -622,8 +618,16 @@ impl BloomEditor {
         // Get today's date for BQL query compilation
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
+        // Scan from line 0 for state tracking (frontmatter/code-block), but only
+        // emit lines from range.start onward. Stop when the screen is full or we
+        // run out of buffer lines — query result expansion may consume screen rows,
+        // so we scan beyond the original viewport end to fill the screen.
         let mut line_idx = 0;
-        while line_idx < scan_end {
+        while line_idx < line_count {
+            // Stop once we've filled the screen (only count emitted lines).
+            if line_idx >= range.start && lines.len() >= screen_height {
+                break;
+            }
             let line_text = buf.line(line_idx).to_string();
             let trimmed = line_text.trim().to_string();
 
@@ -684,7 +688,7 @@ impl BloomEditor {
                     // Multi-line: {{ on this line, scan until }} — all source lines hidden.
                     let mut query_parts = vec![trimmed[2..].to_string()];
                     line_idx += 1;
-                    while line_idx < scan_end {
+                    while line_idx < line_count {
                         let next_text = buf.line(line_idx).to_string();
                         let next_trimmed = next_text.trim();
                         if next_trimmed.ends_with("}}") {
@@ -695,7 +699,7 @@ impl BloomEditor {
                         line_idx += 1;
                     }
                     let query_text = query_parts.join(" ").trim().to_string();
-                    if !query_text.is_empty() && line_idx <= scan_end {
+                    if !query_text.is_empty() && line_idx < line_count {
                         let screen_start = lines.len();
                         let (result_lines, block) = self.execute_bql_for_render(&query_text, &today, screen_start);
                         lines.extend(result_lines);

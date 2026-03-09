@@ -87,19 +87,9 @@ pub(super) fn draw_pane(
         if let Some((cx, cy)) = cursor {
             f.set_cursor_position((cx, cy));
         } else if matches!(&pane.kind, PaneKind::Editor) {
+            // ScreenMap computes cursor position for both wrap and no-wrap modes.
             if let Some((cx, cy)) = wrap_cursor {
-                // Word wrap: cursor position computed by wrap map
                 f.set_cursor_position((cx, cy));
-            } else {
-                // No wrap: use original logic
-                let line_number_width = 5u16;
-                let cursor_y = pane.cursor.line.saturating_sub(pane.scroll_offset);
-                let cy = content_area.y + cursor_y as u16;
-                let cx = content_area.x + line_number_width + pane.cursor.column as u16;
-                let frame_area = f.area();
-                if cy < content_area.bottom() && cx < frame_area.width {
-                    f.set_cursor_position((cx, cy));
-                }
             }
         }
     } else {
@@ -107,9 +97,8 @@ pub(super) fn draw_pane(
     }
 }
 
-/// Draw the editor content area. Returns `Some((cx, cy))` cursor position when
-/// word_wrap is active (so the caller uses it instead of the original logic),
-/// or `None` when wrapping is off.
+/// Draw the editor content area. Always returns the cursor `(cx, cy)` position.
+/// Uses ScreenMap for both wrap and no-wrap modes — no-wrap is just max-width.
 pub(super) fn draw_editor_content(
     f: &mut Frame,
     area: Rect,
@@ -117,95 +106,12 @@ pub(super) fn draw_editor_content(
     theme: &TuiTheme,
     config: &bloom_core::config::Config,
 ) -> Option<(u16, u16)> {
-    if config.word_wrap {
-        draw_editor_content_wrapped(f, area, pane, theme, config)
-    } else {
-        draw_editor_content_nowrap(f, area, pane, theme);
-        None
-    }
+    draw_editor_content_unified(f, area, pane, theme, config)
 }
 
-/// Original (no-wrap) rendering — identical to the pre-wrap-feature code.
-fn draw_editor_content_nowrap(f: &mut Frame, area: Rect, pane: &PaneFrame, theme: &TuiTheme) {
-    let height = area.height as usize;
-    let line_number_width = 5u16;
-    let total_width = area.width as usize;
-    let _content_width = total_width.saturating_sub(line_number_width as usize);
-
-    let bg = theme.background();
-    let base_normal = RStyle::default().fg(theme.foreground()).bg(bg);
-    let faded_bg = theme.faded_style().bg(bg);
-
-    for row in 0..height {
-        let y = area.y + row as u16;
-
-        if row >= pane.visible_lines.len() {
-            let tilde_pad = " ".repeat(total_width.saturating_sub(5));
-            let line = Line::from(vec![
-                Span::styled("  ~  ", faded_bg),
-                Span::styled(tilde_pad, RStyle::default().bg(bg)),
-            ]);
-            f.render_widget(Paragraph::new(line), Rect::new(area.x, y, area.width, 1));
-            continue;
-        }
-
-        let rendered_line = &pane.visible_lines[row];
-
-        let is_cursor_line = pane.is_active
-            && rendered_line.source.buffer_line() == Some(pane.cursor.line);
-        let base_style = if is_cursor_line {
-            theme.current_line_style()
-        } else {
-            base_normal
-        };
-
-        let mut spans: Vec<Span> = Vec::new();
-
-        let lnum = match rendered_line.source.buffer_line() {
-            Some(n) => format!("{:>3}  ", n + 1),
-            None => "     ".to_string(),
-        };
-        let lnum_style = if is_cursor_line { base_style } else { faded_bg };
-        spans.push(Span::styled(lnum, lnum_style));
-
-        let text = rendered_line.text.trim_end_matches(['\n', '\r']);
-        let text_width = text.width();
-
-        if rendered_line.spans.is_empty() {
-            spans.push(Span::styled(text, base_style));
-        } else {
-            let mut last_end = 0usize;
-            for span_info in &rendered_line.spans {
-                let start = span_info.range.start.min(text.len());
-                let end = span_info.range.end.min(text.len());
-                if last_end < start {
-                    let gap = &text[last_end..start];
-                    spans.push(Span::styled(gap.to_string(), base_style));
-                }
-                let slice = &text[start..end];
-                let style = base_style.patch(theme.style_for(&span_info.style));
-                spans.push(Span::styled(slice.to_string(), style));
-                last_end = end;
-            }
-            if last_end < text.len() {
-                spans.push(Span::styled(&text[last_end..], base_style));
-            }
-        }
-
-        let used = line_number_width as usize + text_width;
-        if used < total_width {
-            spans.push(Span::styled(" ".repeat(total_width - used), base_style));
-        }
-
-        f.render_widget(
-            Paragraph::new(Line::from(spans)),
-            Rect::new(area.x, y, area.width, 1),
-        );
-    }
-}
-
-/// Word-wrap rendering path. Returns cursor `(cx, cy)` for the active pane.
-fn draw_editor_content_wrapped(
+/// Unified rendering path — ScreenMap handles both wrap and no-wrap.
+/// Returns cursor `(cx, cy)` for the active pane.
+fn draw_editor_content_unified(
     f: &mut Frame,
     area: Rect,
     pane: &PaneFrame,
@@ -213,30 +119,35 @@ fn draw_editor_content_wrapped(
     config: &bloom_core::config::Config,
 ) -> Option<(u16, u16)> {
     use crate::scroll::ScreenScroll;
-    use crate::wrap::{MonospaceWidth, WrapMap};
+    use crate::wrap::{MonospaceWidth, ScreenMap};
 
     let height = area.height as usize;
     let line_number_width = 5u16;
     let total_width = area.width as usize;
-    let content_width = total_width.saturating_sub(line_number_width as usize);
+    let content_width = if config.word_wrap {
+        total_width.saturating_sub(line_number_width as usize)
+    } else {
+        usize::MAX // no wrapping
+    };
 
     let bg = theme.background();
     let base_normal = RStyle::default().fg(theme.foreground()).bg(bg);
     let faded_bg = theme.faded_style().bg(bg);
 
     let measure = MonospaceWidth;
-    let wrap_map = WrapMap::new(&pane.visible_lines, content_width, &measure);
+    let screen_map = ScreenMap::new(&pane.visible_lines, content_width, &measure);
 
-    // Compute cursor screen row and use ScreenScroll for scrolloff
-    let cursor_line_in_visible = pane.cursor.line.saturating_sub(pane.scroll_offset);
-    let cursor_screen_row = wrap_map.cursor_screen_row(
-        cursor_line_in_visible,
+    // Find the cursor's position in visible_lines by scanning for its buffer line.
+    let cursor_entry_idx = ScreenMap::find_buffer_line(&pane.visible_lines, pane.cursor.line)
+        .unwrap_or(0);
+    let cursor_screen_row = screen_map.cursor_screen_row(
+        cursor_entry_idx,
         pane.cursor.column,
         &measure,
         &pane.visible_lines,
     );
-    let cursor_col_in_row = wrap_map.cursor_col_in_row(
-        cursor_line_in_visible,
+    let cursor_col_in_row = screen_map.cursor_col_in_row(
+        cursor_entry_idx,
         pane.cursor.column,
         &measure,
         &pane.visible_lines,
@@ -254,7 +165,7 @@ fn draw_editor_content_wrapped(
         let y = area.y + display_row as u16;
         let screen_row = first_screen_row + display_row;
 
-        let info = wrap_map.screen_row_to_line(screen_row);
+        let info = screen_map.screen_row_to_line(screen_row);
         if info.is_none() {
             // Beyond EOF
             let tilde_pad = " ".repeat(total_width.saturating_sub(5));
@@ -296,7 +207,6 @@ fn draw_editor_content_wrapped(
                 width = gutter_w.saturating_sub(1)
             );
             let indicator_display = super::truncate_to_width(&indicator_display, gutter_w);
-            // Pad to exact gutter width if needed
             let pad = gutter_w.saturating_sub(indicator_display.width());
             let indicator_display = if pad > 0 {
                 format!("{}{}", " ".repeat(pad), indicator_display)
@@ -307,7 +217,7 @@ fn draw_editor_content_wrapped(
         }
 
         // Content: slice from byte_start to next break
-        let byte_end = wrap_map.row_byte_end(line_idx, wrap_offset, &pane.visible_lines);
+        let byte_end = screen_map.row_byte_end(line_idx, wrap_offset, &pane.visible_lines);
         let row_text = &text[byte_start..byte_end.min(text.len())];
         let row_text_width = row_text.width();
 
