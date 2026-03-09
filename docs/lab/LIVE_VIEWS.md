@@ -36,7 +36,7 @@ The agenda is `tasks where status = open, grouped by due date`. The timeline is 
 
 5. **Live feedback.** The interactive query prompt (`SPC v v`) parses and executes on every pause (150ms debounce), showing results or a clear error with position info.
 
-6. **Embeddable in notes.** A `{{...}}` code block renders as a live view. Other editors see readable code.
+6. **Embeddable in notes.** A `{{...}}` block renders as a live view. Other editors see readable text.
 
 ---
 
@@ -136,7 +136,7 @@ blocks | where modified = today                -- everything touched today
 
 ## Queries Live in Pages
 
-There is no separate "view" mode. A query is a `{{...}}` code block in a regular page. The page is the view.
+There is no separate "view" mode. A query is a `{{...}}` block in a regular page. The page is the view.
 
 ### Example: A User-Created Agenda Page
 
@@ -152,32 +152,26 @@ tags: []
 
 ## Overdue
 
-` ``bloom
-tasks | where not done and due < today | sort due
-` ``
+{{tasks | where not done and due < today | sort due}}
 
 ## This Week
 
-` ``bloom
-tasks | where not done and due this week | sort due
-` ``
+{{tasks | where not done and due this week | sort due}}
 
 ## No Due Date
 
-` ``bloom
-tasks | where not done and due = none | sort page
-` ``
+{{tasks | where not done and due = none | sort page}}
 ```
 
 This is a normal page. It shows up in `SPC f f`. It can have prose, headings, links, tags — anything. The `{{...}}` blocks render as live, interactive result sets inside the page content.
 
 ### Rendering
 
-- **In Bloom:** Each `{{...}}` block is replaced inline with a result table. The query text is hidden (shown dimmed above the results, like a code fence label). Results update on `IndexComplete`.
-- **In other editors / GitHub:** It's a readable code block. Portable Markdown. No lock-in.
-- **Inline queries:** `` `bloom: tasks | where not done | count` `` renders as an inline number (e.g., "12").
+- **In Bloom:** Each `{{...}}` block is replaced inline with a result table. The query text is shown dimmed above the results. Results update on `IndexComplete`.
+- **In other editors / GitHub:** It's readable text with a clear `{{...}}` marker. Portable Markdown. No lock-in.
+- **Inline queries:** `{{tasks | where not done | count}}` renders as an inline number (e.g., "12").
 
-**Code-block safety:** Bloom query blocks inside regular fenced code blocks or nested code blocks are NOT evaluated. Same rule as all Bloom extensions.
+**Code-block safety:** `{{...}}` blocks inside fenced code blocks are NOT evaluated. Same rule as all Bloom extensions.
 
 ### Interaction Within a Query Block
 

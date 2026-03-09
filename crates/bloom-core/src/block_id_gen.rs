@@ -3,7 +3,8 @@
 //! Block boundaries are identified by the parser (`Document.blocks`). This
 //! module handles ID generation and text insertion only — no parsing.
 //!
-//! See `docs/lab/BLOCK_IDENTITY.md` for the full design.
+//! IDs are vault-scoped: 5-character base36 (a-z0-9), globally unique across
+//! the entire vault and all time. See `docs/lab/BLOCK_IDENTITY.md`.
 
 use std::collections::HashSet;
 
@@ -22,40 +23,57 @@ pub struct BlockIdInsertion {
 // ID generation
 // ---------------------------------------------------------------------------
 
-/// Generate the shortest available block ID not in `existing`.
+const ID_LEN: usize = 5;
+const ALPHABET: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+
+/// Generate a random 5-char base36 block ID not in `existing`.
 ///
-/// Sequence: `a`, `b`, …, `z`, `a0`, `a1`, …, `az`, `b0`, …, `zz`,
-/// `a00`, …, `zzz`. First character is always a letter (`a`–`z`);
-/// subsequent characters are alphanumeric (`0`–`9`, `a`–`z`).
+/// Uses a simple xorshift64 PRNG seeded from the existing set size plus a
+/// counter, avoiding the need for `rand` as a dependency. Retries on
+/// collision — at typical vault densities (<10%), this averages ~1.1 attempts.
 pub fn next_block_id(existing: &HashSet<String>) -> String {
-    // Length 1: a–z (26)
-    for c in b'a'..=b'z' {
-        let id = String::from(c as char);
+    let mut seed: u64 = 0xcafe_f00d_dead_beef ^ (existing.len() as u64).wrapping_mul(6364136223846793005);
+    // Mix in a counter so repeated calls with the same set size produce different IDs.
+    // The counter is derived from a thread-local to avoid needing external state.
+    seed ^= thread_counter();
+
+    loop {
+        seed = xorshift64(seed);
+        let id = seed_to_id(seed);
         if !existing.contains(&id) {
             return id;
         }
+        seed = xorshift64(seed);
     }
-    // Length 2: [a-z][0-9a-z] (936)
-    for first in b'a'..=b'z' {
-        for second in (b'0'..=b'9').chain(b'a'..=b'z') {
-            let id = format!("{}{}", first as char, second as char);
-            if !existing.contains(&id) {
-                return id;
-            }
-        }
+}
+
+fn xorshift64(mut x: u64) -> u64 {
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    x
+}
+
+fn seed_to_id(mut seed: u64) -> String {
+    let mut buf = [0u8; ID_LEN];
+    for b in &mut buf {
+        *b = ALPHABET[(seed % 36) as usize];
+        seed /= 36;
     }
-    // Length 3: [a-z][0-9a-z][0-9a-z] (33,696)
-    for first in b'a'..=b'z' {
-        for second in (b'0'..=b'9').chain(b'a'..=b'z') {
-            for third in (b'0'..=b'9').chain(b'a'..=b'z') {
-                let id = format!("{}{}{}", first as char, second as char, third as char);
-                if !existing.contains(&id) {
-                    return id;
-                }
-            }
-        }
+    // Safety: all bytes are ASCII alphanumeric.
+    unsafe { String::from_utf8_unchecked(buf.to_vec()) }
+}
+
+fn thread_counter() -> u64 {
+    use std::cell::Cell;
+    thread_local! {
+        static COUNTER: Cell<u64> = const { Cell::new(0) };
     }
-    unreachable!("exhausted 34,658 block IDs — no page has this many blocks")
+    COUNTER.with(|c| {
+        let v = c.get().wrapping_add(1);
+        c.set(v);
+        v
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -134,35 +152,32 @@ mod tests {
     // -- next_block_id --
 
     #[test]
-    fn first_id_is_a() {
-        assert_eq!(next_block_id(&HashSet::new()), "a");
+    fn generates_5_char_base36() {
+        let id = next_block_id(&HashSet::new());
+        assert_eq!(id.len(), 5, "ID should be exactly 5 chars: {id}");
+        assert!(
+            id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
+            "ID should be base36: {id}"
+        );
+    }
+
+    #[test]
+    fn generates_unique_ids() {
+        let mut existing = HashSet::new();
+        for _ in 0..1000 {
+            let id = next_block_id(&existing);
+            assert!(existing.insert(id), "collision detected");
+        }
     }
 
     #[test]
     fn skips_existing() {
-        let existing: HashSet<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
-        assert_eq!(next_block_id(&existing), "d");
-    }
-
-    #[test]
-    fn wraps_to_length_two() {
-        let existing: HashSet<String> = (b'a'..=b'z').map(|c| String::from(c as char)).collect();
-        assert_eq!(next_block_id(&existing), "a0");
-    }
-
-    #[test]
-    fn skips_existing_length_two() {
-        let mut existing: HashSet<String> =
-            (b'a'..=b'z').map(|c| String::from(c as char)).collect();
-        existing.insert("a0".into());
-        assert_eq!(next_block_id(&existing), "a1");
-    }
-
-    #[test]
-    fn respects_manually_set_ids() {
-        let existing: HashSet<String> =
-            ["a", "b", "my-custom-id"].iter().map(|s| s.to_string()).collect();
-        assert_eq!(next_block_id(&existing), "c");
+        let mut existing = HashSet::new();
+        let first = next_block_id(&existing);
+        existing.insert(first.clone());
+        let second = next_block_id(&existing);
+        assert_ne!(first, second);
+        assert_eq!(second.len(), 5);
     }
 
     // -- parser block detection (via Document.blocks) --
@@ -225,7 +240,7 @@ mod tests {
 
     #[test]
     fn blocks_with_existing_id_marked() {
-        let text = "Paragraph one ^existing\n\nParagraph two\n";
+        let text = "Paragraph one ^k7m2x\n\nParagraph two\n";
         let doc = parse(text);
         assert!(doc.blocks[0].has_id);
         assert!(!doc.blocks[1].has_id);
@@ -278,24 +293,34 @@ Another paragraph.
         let text = "---\nid: abc12345\ntitle: \"T\"\n---\n\n# Heading\n\nA paragraph.\n";
         let doc = parse(text);
         let result = assign_block_ids(text, &doc).unwrap();
-        assert!(result.contains("# Heading ^a\n"));
-        assert!(result.contains("A paragraph. ^b\n"));
+        // Verify both blocks got 5-char IDs.
+        let doc2 = parse(&result);
+        assert_eq!(doc2.block_ids.len(), 2);
+        for bid in &doc2.block_ids {
+            assert_eq!(bid.id.0.len(), 5, "ID should be 5 chars: {}", bid.id.0);
+        }
     }
 
     #[test]
     fn no_change_when_all_have_ids() {
-        let text = "# Heading ^a\n\nA paragraph. ^b\n";
+        let text = "# Heading ^k7m2x\n\nA paragraph. ^p3a9f\n";
         let doc = parse(text);
         assert!(assign_block_ids(text, &doc).is_none());
     }
 
     #[test]
     fn preserves_existing_ids() {
-        let text = "First ^existing\n\nSecond\n";
+        let text = "First ^k7m2x\n\nSecond\n";
         let doc = parse(text);
         let result = assign_block_ids(text, &doc).unwrap();
-        assert!(result.contains("First ^existing\n"));
-        assert!(result.contains("Second ^a\n"));
+        assert!(result.contains("First ^k7m2x\n"));
+        // Second block gets a new 5-char ID.
+        let doc2 = parse(&result);
+        assert_eq!(doc2.block_ids.len(), 2);
+        let ids: Vec<&str> = doc2.block_ids.iter().map(|b| b.id.0.as_str()).collect();
+        assert!(ids.contains(&"k7m2x"));
+        let auto_id = ids.iter().find(|&&id| id != "k7m2x").unwrap();
+        assert_eq!(auto_id.len(), 5);
     }
 
     #[test]
@@ -304,7 +329,7 @@ Another paragraph.
         let doc = parse(text);
         let result = assign_block_ids(text, &doc).unwrap();
         assert!(!result.contains("> Quote line one ^"));
-        assert!(result.contains("> Quote line two ^a\n"));
+        assert!(result.contains("> Quote line two ^"));
     }
 
     #[test]
@@ -313,7 +338,7 @@ Another paragraph.
         let doc = parse(text);
         let result = assign_block_ids(text, &doc).unwrap();
         assert!(!result.contains("- Long item ^"));
-        assert!(result.contains("  continuation ^a\n"));
+        assert!(result.contains("  continuation ^"));
     }
 
     #[test]
@@ -380,32 +405,18 @@ Another paragraph.
             "block_ids count should equal blocks count"
         );
 
-        // All generated IDs are unique.
+        // All generated IDs are unique and 5 chars.
         let ids: Vec<&str> = doc2.block_ids.iter().map(|b| b.id.0.as_str()).collect();
         let unique: std::collections::HashSet<&str> = ids.iter().copied().collect();
         assert_eq!(ids.len(), unique.len(), "IDs should be unique: {:?}", ids);
+        for id in &ids {
+            assert_eq!(id.len(), 5, "ID should be 5 chars: {id}");
+        }
 
         // Third pass: re-assigning should produce no changes (idempotent).
         assert!(
             assign_block_ids(&with_ids, &doc2).is_none(),
             "second assignment should be a no-op"
         );
-    }
-
-    #[test]
-    fn round_trip_preserves_manually_set_ids() {
-        let text = "# Heading ^my-heading\n\nParagraph one\n\nParagraph two ^custom\n";
-        let doc1 = parse(text);
-        let with_ids = assign_block_ids(text, &doc1).expect("should assign to paragraph one");
-        let doc2 = parse(&with_ids);
-
-        // Manual IDs preserved.
-        let ids: Vec<&str> = doc2.block_ids.iter().map(|b| b.id.0.as_str()).collect();
-        assert!(ids.contains(&"my-heading"), "manual heading ID preserved");
-        assert!(ids.contains(&"custom"), "manual paragraph ID preserved");
-
-        // Auto-assigned ID didn't collide with manual ones.
-        let auto_id = ids.iter().find(|&&id| id != "my-heading" && id != "custom").unwrap();
-        assert_eq!(*auto_id, "a", "auto-assigned gets 'a'");
     }
 }

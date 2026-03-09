@@ -329,11 +329,10 @@ Git history is the backstop that makes block ID self-healing possible. See [BLOC
 
 ```toml
 [history]
-enabled = true                  # default: true
 auto_commit_idle_minutes = 5    # commit after N minutes of inactivity
 ```
 
-Users who manage their own git workflow can set `enabled = false` — Bloom won't touch `.git/`. Time travel features degrade gracefully (calendar shows journal archive only, no edit diffs, no self-healing).
+Git history is always on — it powers self-healing block IDs, time travel, and the day view. Bloom's internal repo (`.index/.git/`) is separate from any user-managed `.git/`, so there is no conflict with the user's own git workflow.
 
 ---
 

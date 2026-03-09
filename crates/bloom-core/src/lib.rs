@@ -1699,9 +1699,9 @@ mod tests {
 
         assert!(ids_assigned, "should have assigned IDs");
         assert!(block_count >= 200, "expected ~200+ blocks, got {block_count}");
-        // Performance gate: parse + assign should be under 50ms for a large page.
+        // Performance gate: parse + assign should be under 5ms in release.
         assert!(
-            parse_ms + assign_ms < 50.0,
+            parse_ms + assign_ms < 5.0,
             "too slow: parse={parse_ms:.2}ms + assign={assign_ms:.2}ms"
         );
     }
@@ -1750,9 +1750,9 @@ mod tests {
         );
 
         assert_eq!(total_assigned, 1000, "all pages should get IDs");
-        // Performance gate: 1000 pages should complete under 2 seconds.
+        // Performance gate: 1000 pages should complete under 200ms in release.
         assert!(
-            total_ms < 2000.0,
+            total_ms < 200.0,
             "too slow: {total_ms:.0}ms for 1000 pages"
         );
     }
@@ -1796,9 +1796,9 @@ mod tests {
         );
 
         assert!(!any_changed, "no pages should need changes");
-        // Idempotent check should be even faster.
+        // Idempotent check should be fast in release.
         assert!(
-            total_ms < 1000.0,
+            total_ms < 100.0,
             "too slow for no-op: {total_ms:.0}ms"
         );
     }
