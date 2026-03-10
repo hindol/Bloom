@@ -546,7 +546,7 @@ Not a full picker — a minimal single-line input anchored to the bottom of the 
 For `SPC j t` (task variant):
 ```
 ├──────────────────────────────────────────────────────────────┤
-│ ☐ Append task to journal > Review the ropey crate API_       │
+│ - [ ] Append task to journal > Review the ropey crate API_       │
 └──────────────────────────────────────────────────────────────┘
 ```
 

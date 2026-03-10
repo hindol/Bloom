@@ -39,7 +39,7 @@ Verifies: G14 (Daily Journal)
 Verifies: G14 (Daily Journal)
 
 1. User presses `SPC j t` in Normal mode.
-2. A single-line input appears: `☐ Append task to journal > _`
+2. A single-line input appears: `- [ ] Append task to journal > _`
 3. User types "Review the ropey crate API".
 4. User presses Enter.
 5. The line `- [ ] Review the ropey crate API` is appended to today's journal.

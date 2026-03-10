@@ -159,11 +159,11 @@ Another common layout: a main editor on the left, two supplementary views on the
 │  string fragment.            ├─ Agenda ───────────────────────┤
 │                              │                                │
 │  Good for large files.       │  Overdue                       │
-│  Used by Xi Editor and Zed.  │  ☐ Read Xi Editor paper Feb 25 │
+│  Used by Xi Editor and Zed.  │  - [ ] Read Xi Editor paper Feb 25 │
 │                              │                                │
 │  ## Piece Table              │  Today · Mar 3                 │
-│                              │  ☐ Review PR for auth          │
-│  Used by VS Code.            │  ☐ Buy groceries               │
+│                              │  - [ ] Review PR for auth          │
+│  Used by VS Code.            │  - [ ] Buy groceries               │
 │                              │                                │
 │  ~                           │  3 open tasks across 2 pages   │
 ├──────────────────────────────┼────────────────────────────────┤
@@ -475,16 +475,16 @@ Full-screen takeover with a task list (top ~60%) and source preview (bottom ~40%
 ┌─ Agenda ──────────────────────────────────────────────────────────────────┐
 │                                                                           │
 │  Overdue                                                                  │
-│ ▸☐ Read Xi Editor retrospective #rust        Rust Notes          Feb 25  │
-│  ☐ Set up CI pipeline for Bloom              Bloom Dev           Feb 22  │
+│ ▸- [ ] Read Xi Editor retrospective #rust     Rust Notes          Feb 25  │
+│  - [ ] Set up CI pipeline for Bloom           Bloom Dev           Feb 22  │
 │                                                                           │
 │  Today · Mar 5                                                            │
-│  ☐ Review PR for auth module                 Work Log            Today   │
-│  ☐ Buy groceries                             Mar 5               Today   │
+│  - [ ] Review PR for auth module              Work Log            Today   │
+│  - [ ] Buy groceries                          Mar 5               Today   │
 │                                                                           │
 │  Upcoming                                                                 │
-│  ☐ Prepare Monday presentation               Work Log            Mar 10  │
-│  ☐ Write blog post draft #writing            Blog Ideas          Mar 12  │
+│  - [ ] Prepare Monday presentation            Work Log            Mar 10  │
+│  - [ ] Write blog post draft #writing         Blog Ideas          Mar 12  │
 │                                                                           │
 │  ▸ 1/6 tasks   4 pages   [x]toggle [Enter]jump [q]close                 │
 ├───────────────────────────────────────────────────────────────────────────┤
@@ -505,7 +505,7 @@ Full-screen takeover with a task list (top ~60%) and source preview (bottom ~40%
 | Column | Content | Width | Style |
 |--------|---------|-------|-------|
 | Marker | `▸` or blank | 3 chars | — |
-| Checkbox | `☐` or `☑` | 2 chars | `accent_yellow` |
+| Checkbox | `[ ]` or `[x]` | 3 chars | `accent_yellow` / `accent_green` |
 | Task text + inline tags | Task description, tags appended naturally | flexible fill | varies by bucket (see below) |
 | Source page | Page the task lives in | right-aligned, max 20 chars | `faded` |
 | Date | Due date or "Today" | right-aligned, max 8 chars | `faded` (or `critical` for overdue) |

@@ -138,7 +138,7 @@ impl BloomEditor {
                         keymap::dispatch::QuickCaptureKind::Note => {
                             "📓 Append to journal > ".to_string()
                         }
-                        keymap::dispatch::QuickCaptureKind::Task => "☐ Append task > ".to_string(),
+                        keymap::dispatch::QuickCaptureKind::Task => "- [ ] Append task > ".to_string(),
                     };
                     render::StatusBarContent::QuickCapture(render::QuickCaptureSlot {
                         prompt,
