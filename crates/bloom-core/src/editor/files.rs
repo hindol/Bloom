@@ -135,7 +135,7 @@ impl BloomEditor {
             .open_buffers()
             .iter()
             .find(|b| b.page_id == *page_id)
-            .map_or(true, |info| info.path.to_string_lossy().starts_with('['));
+            .is_none_or(|info| info.path.to_string_lossy().starts_with('['));
         if is_pseudo {
             return;
         }
@@ -206,8 +206,7 @@ impl BloomEditor {
             let line_slice = buf.line(line_idx);
             let mut content_chars = line_slice.len_chars();
             let chars: Vec<char> = line_slice.chars().collect();
-            while content_chars > 0
-                && matches!(chars[content_chars - 1], '\n' | '\r' | ' ' | '\t')
+            while content_chars > 0 && matches!(chars[content_chars - 1], '\n' | '\r' | ' ' | '\t')
             {
                 content_chars -= 1;
             }
@@ -257,7 +256,10 @@ impl BloomEditor {
         }
 
         if assigned_count > 0 {
-            tracing::info!(assigned_count, "assign_block_ids_bulk: wrote files via DiskWriter");
+            tracing::info!(
+                assigned_count,
+                "assign_block_ids_bulk: wrote files via DiskWriter"
+            );
             self.push_notification(
                 format!("Assigned block IDs to {assigned_count} files"),
                 render::NotificationLevel::Info,

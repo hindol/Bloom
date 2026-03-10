@@ -138,7 +138,9 @@ impl BloomEditor {
                         keymap::dispatch::QuickCaptureKind::Note => {
                             "📓 Append to journal > ".to_string()
                         }
-                        keymap::dispatch::QuickCaptureKind::Task => "- [ ] Append task > ".to_string(),
+                        keymap::dispatch::QuickCaptureKind::Task => {
+                            "- [ ] Append task > ".to_string()
+                        }
                     };
                     render::StatusBarContent::QuickCapture(render::QuickCaptureSlot {
                         prompt,
@@ -653,7 +655,10 @@ impl BloomEditor {
                     code_fence_lang = None;
                 } else {
                     in_code_block = true;
-                    let lang = trimmed.trim_start_matches('`').trim_start_matches('~').trim();
+                    let lang = trimmed
+                        .trim_start_matches('`')
+                        .trim_start_matches('~')
+                        .trim();
                     code_fence_lang = if lang.is_empty() {
                         None
                     } else {

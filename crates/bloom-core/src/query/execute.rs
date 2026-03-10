@@ -91,9 +91,7 @@ pub fn execute(
                 SqlParam::Int(n) => Box::new(*n),
                 SqlParam::Float(n) => Box::new(*n),
                 SqlParam::Null => Box::new(rusqlite::types::Null),
-                SqlParam::PageRef => {
-                    Box::new(context.page_id.clone().unwrap_or_default())
-                }
+                SqlParam::PageRef => Box::new(context.page_id.clone().unwrap_or_default()),
             }
         })
         .collect();
@@ -163,9 +161,7 @@ fn row_to_cell(row: &rusqlite::Row, idx: usize) -> CellValue {
         Ok(ValueRef::Null) => CellValue::Null,
         Ok(ValueRef::Integer(n)) => CellValue::Int(n),
         Ok(ValueRef::Real(n)) => CellValue::Float(n),
-        Ok(ValueRef::Text(bytes)) => {
-            CellValue::Text(String::from_utf8_lossy(bytes).to_string())
-        }
+        Ok(ValueRef::Text(bytes)) => CellValue::Text(String::from_utf8_lossy(bytes).to_string()),
         Ok(ValueRef::Blob(_)) => CellValue::Text("<blob>".to_string()),
         Err(_) => CellValue::Null,
     }
@@ -301,13 +297,7 @@ mod tests {
     #[test]
     fn execute_tasks_with_tag() {
         let conn = setup_test_db();
-        let result = run_query(
-            "tasks | where tags has #rust",
-            &conn,
-            "2026-03-08",
-            None,
-        )
-        .unwrap();
+        let result = run_query("tasks | where tags has #rust", &conn, "2026-03-08", None).unwrap();
         match result.kind {
             QueryResultKind::Rows(r) => assert_eq!(r.rows.len(), 3),
             _ => panic!("expected Rows"),
@@ -328,13 +318,7 @@ mod tests {
     #[test]
     fn execute_tasks_due_none() {
         let conn = setup_test_db();
-        let result = run_query(
-            "tasks | where due = none",
-            &conn,
-            "2026-03-08",
-            None,
-        )
-        .unwrap();
+        let result = run_query("tasks | where due = none", &conn, "2026-03-08", None).unwrap();
         match result.kind {
             QueryResultKind::Rows(r) => assert_eq!(r.rows.len(), 1),
             _ => panic!("expected Rows"),
@@ -414,13 +398,8 @@ mod tests {
     #[test]
     fn execute_links_to_page() {
         let conn = setup_test_db();
-        let result = run_query(
-            "links | where to = $page",
-            &conn,
-            "2026-03-08",
-            Some("p2"),
-        )
-        .unwrap();
+        let result =
+            run_query("links | where to = $page", &conn, "2026-03-08", Some("p2")).unwrap();
         match result.kind {
             QueryResultKind::Rows(r) => {
                 assert_eq!(r.rows.len(), 1);

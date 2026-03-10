@@ -10,8 +10,8 @@ mod which_key;
 mod wizard;
 
 use bloom_core::render::{
-    DialogFrame, InlineMenuAnchor, InlineMenuFrame, McpIndicator, NotificationLevel,
-    PaneFrame, PaneKind, PickerFrame, RenderFrame, StatusBarContent, StatusBarFrame, WhichKeyFrame,
+    DialogFrame, InlineMenuAnchor, InlineMenuFrame, McpIndicator, NotificationLevel, PaneFrame,
+    PaneKind, PickerFrame, RenderFrame, StatusBarContent, StatusBarFrame, WhichKeyFrame,
 };
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style as RStyle};
@@ -112,25 +112,6 @@ pub(crate) fn truncate_to_width(s: &str, max_width: usize) -> String {
         end = i + ch.len_utf8();
     }
     format!("{}…", &s[..end])
-}
-
-/// Strip @due(...), @start(...), @at(...) timestamps from task text.
-/// The dates are shown in a separate column so they're redundant in the label.
-fn strip_timestamps(s: &str) -> String {
-    let mut result = s.to_string();
-    // Remove @due(...), @start(...), @at(...) with any content inside parens
-    for prefix in &["@due(", "@start(", "@at("] {
-        while let Some(start) = result.find(prefix) {
-            if let Some(end) = result[start..].find(')') {
-                // Remove the timestamp and any surrounding whitespace
-                let remove_end = start + end + 1;
-                result = format!("{}{}", result[..start].trim_end(), &result[remove_end..],);
-            } else {
-                break;
-            }
-        }
-    }
-    result.trim().to_string()
 }
 
 #[cfg(test)]

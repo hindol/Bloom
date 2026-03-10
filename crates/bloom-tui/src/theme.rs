@@ -153,5 +153,4 @@ impl<'a> TuiTheme<'a> {
         };
         to_rstyle(&theme::resolve_chrome(chrome, self.palette))
     }
-
 }

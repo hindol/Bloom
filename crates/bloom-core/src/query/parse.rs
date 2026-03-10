@@ -40,13 +40,13 @@ pub enum TokenKind {
     Not,
 
     // Operators
-    Eq,       // =
-    Neq,      // !=
-    Lt,       // <
-    Gt,       // >
-    Lte,      // <=
-    Gte,      // >=
-    Has,      // has
+    Eq,  // =
+    Neq, // !=
+    Lt,  // <
+    Gt,  // >
+    Lte, // <=
+    Gte, // >=
+    Has, // has
 
     // Sort direction
     Asc,
@@ -56,9 +56,9 @@ pub enum TokenKind {
     Range, // "this week", "last month", etc. — stored as text
 
     // Values
-    String,    // "..." or '...'
-    Number,    // 123
-    Date,      // 2026-03-08
+    String, // "..." or '...'
+    Number, // 123
+    Date,   // 2026-03-08
     True,
     False,
     None,
@@ -139,8 +139,12 @@ impl fmt::Display for ParseError {
 const SOURCES: &[&str] = &["pages", "tasks", "journal", "blocks", "tags", "links"];
 
 const RANGE_PREFIXES: &[&str] = &[
-    "this week", "last week", "next week",
-    "this month", "last month", "next month",
+    "this week",
+    "last week",
+    "next week",
+    "this month",
+    "last month",
+    "next month",
 ];
 
 pub fn tokenise(input: &str) -> Result<Vec<Token>, ParseError> {
@@ -159,11 +163,31 @@ pub fn tokenise(input: &str) -> Result<Vec<Token>, ParseError> {
 
         // Single-char punctuation.
         match bytes[i] {
-            b'|' => { tokens.push(tok(TokenKind::Pipe, start, start + 1, "|")); i += 1; continue; }
-            b'(' => { tokens.push(tok(TokenKind::LParen, start, start + 1, "(")); i += 1; continue; }
-            b')' => { tokens.push(tok(TokenKind::RParen, start, start + 1, ")")); i += 1; continue; }
-            b',' => { tokens.push(tok(TokenKind::Comma, start, start + 1, ",")); i += 1; continue; }
-            b'.' => { tokens.push(tok(TokenKind::Dot, start, start + 1, ".")); i += 1; continue; }
+            b'|' => {
+                tokens.push(tok(TokenKind::Pipe, start, start + 1, "|"));
+                i += 1;
+                continue;
+            }
+            b'(' => {
+                tokens.push(tok(TokenKind::LParen, start, start + 1, "("));
+                i += 1;
+                continue;
+            }
+            b')' => {
+                tokens.push(tok(TokenKind::RParen, start, start + 1, ")"));
+                i += 1;
+                continue;
+            }
+            b',' => {
+                tokens.push(tok(TokenKind::Comma, start, start + 1, ","));
+                i += 1;
+                continue;
+            }
+            b'.' => {
+                tokens.push(tok(TokenKind::Dot, start, start + 1, "."));
+                i += 1;
+                continue;
+            }
             _ => {}
         }
 
@@ -267,11 +291,14 @@ pub fn tokenise(input: &str) -> Result<Vec<Token>, ParseError> {
                 i += 1;
             }
             // Check for date: NNNN-NN-NN
-            if i - num_start == 4 && i + 6 <= bytes.len()
+            if i - num_start == 4
+                && i + 6 <= bytes.len()
                 && bytes[i] == b'-'
-                && bytes[i + 1].is_ascii_digit() && bytes[i + 2].is_ascii_digit()
+                && bytes[i + 1].is_ascii_digit()
+                && bytes[i + 2].is_ascii_digit()
                 && bytes[i + 3] == b'-'
-                && bytes[i + 4].is_ascii_digit() && bytes[i + 5].is_ascii_digit()
+                && bytes[i + 4].is_ascii_digit()
+                && bytes[i + 5].is_ascii_digit()
             {
                 i += 6; // consume -MM-DD
                 let text = &input[num_start..i];
@@ -334,7 +361,10 @@ pub fn tokenise(input: &str) -> Result<Vec<Token>, ParseError> {
         }
 
         return Err(ParseError {
-            message: format!("unexpected character '{}'", input[i..].chars().next().unwrap()),
+            message: format!(
+                "unexpected character '{}'",
+                input[i..].chars().next().unwrap()
+            ),
             position: i,
         });
     }
@@ -402,8 +432,8 @@ pub enum Expr {
     Or(Box<Expr>, Box<Expr>),
     Not(Box<Expr>),
     Compare(Field, Op, Value),
-    Has(Field, String),       // field has #tag
-    InRange(Field, String),   // field this_week / last_month / etc.
+    Has(Field, String),     // field has #tag
+    InRange(Field, String), // field this_week / last_month / etc.
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -420,10 +450,10 @@ pub enum Op {
 pub enum Value {
     String(String),
     Number(f64),
-    Date(String),    // ISO date or "today"/"yesterday"/"tomorrow"
+    Date(String), // ISO date or "today"/"yesterday"/"tomorrow"
     Bool(bool),
     None,
-    Var(String),     // "page", "today"
+    Var(String), // "page", "today"
 }
 
 // ---------------------------------------------------------------------------
@@ -631,11 +661,17 @@ impl Parser {
 
         // Bare boolean field: `done` or `not done` (no operator following).
         // Treated as `field = true`.
-        let is_op = self.peek().is_some_and(|t| matches!(
-            t.kind,
-            TokenKind::Eq | TokenKind::Neq | TokenKind::Lt | TokenKind::Gt
-                | TokenKind::Lte | TokenKind::Gte
-        ));
+        let is_op = self.peek().is_some_and(|t| {
+            matches!(
+                t.kind,
+                TokenKind::Eq
+                    | TokenKind::Neq
+                    | TokenKind::Lt
+                    | TokenKind::Gt
+                    | TokenKind::Lte
+                    | TokenKind::Gte
+            )
+        });
         if !is_op {
             return Ok(Expr::Compare(field, Op::Eq, Value::Bool(true)));
         }
@@ -668,8 +704,12 @@ impl Parser {
             position: self.current_position(),
         })?;
         match tok.kind {
-            TokenKind::Ident | TokenKind::Source | TokenKind::Count
-            | TokenKind::Date | TokenKind::True | TokenKind::False => {
+            TokenKind::Ident
+            | TokenKind::Source
+            | TokenKind::Count
+            | TokenKind::Date
+            | TokenKind::True
+            | TokenKind::False => {
                 let text = tok.text.clone();
                 self.advance();
                 Ok(text)
@@ -796,9 +836,15 @@ mod tests {
         assert_eq!(
             kinds,
             vec![
-                &TokenKind::Source, &TokenKind::Pipe, &TokenKind::Where,
-                &TokenKind::Not, &TokenKind::Ident, &TokenKind::Pipe,
-                &TokenKind::Sort, &TokenKind::Ident, &TokenKind::Desc,
+                &TokenKind::Source,
+                &TokenKind::Pipe,
+                &TokenKind::Where,
+                &TokenKind::Not,
+                &TokenKind::Ident,
+                &TokenKind::Pipe,
+                &TokenKind::Sort,
+                &TokenKind::Ident,
+                &TokenKind::Desc,
             ]
         );
     }
@@ -882,7 +928,13 @@ mod tests {
         // `count` tokenises as Count keyword; the parser accepts it as a field name.
         assert_eq!(
             kinds,
-            vec![&TokenKind::Ident, &TokenKind::Dot, &TokenKind::Count, &TokenKind::Eq, &TokenKind::Number]
+            vec![
+                &TokenKind::Ident,
+                &TokenKind::Dot,
+                &TokenKind::Count,
+                &TokenKind::Eq,
+                &TokenKind::Number
+            ]
         );
     }
 
@@ -907,14 +959,12 @@ mod tests {
         assert_eq!(q.source, Source::Tasks);
         assert_eq!(q.clauses.len(), 1);
         match &q.clauses[0] {
-            Clause::Where(Expr::Not(inner)) => {
-                match inner.as_ref() {
-                    Expr::Compare(f, Op::Eq, Value::Bool(true)) => {
-                        assert_eq!(f.segments, vec!["done"]);
-                    }
-                    _ => panic!("expected bare field 'done' parsed as compare with true"),
+            Clause::Where(Expr::Not(inner)) => match inner.as_ref() {
+                Expr::Compare(f, Op::Eq, Value::Bool(true)) => {
+                    assert_eq!(f.segments, vec!["done"]);
                 }
-            }
+                _ => panic!("expected bare field 'done' parsed as compare with true"),
+            },
             _ => panic!("expected Where(Not(...))"),
         }
     }
@@ -925,7 +975,10 @@ mod tests {
         match &q.clauses[0] {
             Clause::Where(Expr::And(left, right)) => {
                 assert!(matches!(left.as_ref(), Expr::Not(_)));
-                assert!(matches!(right.as_ref(), Expr::Compare(_, Op::Lt, Value::Date(_))));
+                assert!(matches!(
+                    right.as_ref(),
+                    Expr::Compare(_, Op::Lt, Value::Date(_))
+                ));
             }
             other => panic!("expected And, got {other:?}"),
         }
@@ -1056,8 +1109,9 @@ mod tests {
     #[test]
     fn parse_complex_query() {
         let q = parse(
-            "tasks | where not done and due this week and tags has #work | sort due | limit 10"
-        ).unwrap();
+            "tasks | where not done and due this week and tags has #work | sort due | limit 10",
+        )
+        .unwrap();
         assert_eq!(q.source, Source::Tasks);
         assert_eq!(q.clauses.len(), 3);
         assert!(matches!(q.clauses[0], Clause::Where(_)));
@@ -1088,7 +1142,10 @@ mod tests {
         match &q.clauses[0] {
             Clause::Where(Expr::Or(left, right)) => {
                 // left = done (bare field)
-                assert!(matches!(left.as_ref(), Expr::Compare(_, Op::Eq, Value::Bool(true))));
+                assert!(matches!(
+                    left.as_ref(),
+                    Expr::Compare(_, Op::Eq, Value::Bool(true))
+                ));
                 // right = tags has #work and due < today
                 assert!(matches!(right.as_ref(), Expr::And(_, _)));
             }

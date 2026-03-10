@@ -2,18 +2,20 @@
 //!
 //! See `docs/lab/LIVE_VIEWS.md` for the full design.
 
+mod cache;
 mod compile;
 mod execute;
 mod parse;
 pub mod schema;
 mod validate;
-mod cache;
 
 pub use cache::QueryCache;
-pub use compile::{CompiledQuery, CompileError, SqlParam, compile};
-pub use execute::{CellValue, QueryContext, QueryResult, QueryResultKind, Row, RowResult, execute, run_query};
-pub use parse::{
-    Clause, Expr, Field, Op, ParseError, Query, SortField, Source, Token, TokenKind, Value,
-    parse, tokenise,
+pub use compile::{compile, CompileError, CompiledQuery, SqlParam};
+pub use execute::{
+    execute, run_query, CellValue, QueryContext, QueryResult, QueryResultKind, Row, RowResult,
 };
-pub use validate::{ValidateError, ValidatedQuery, validate};
+pub use parse::{
+    parse, tokenise, Clause, Expr, Field, Op, ParseError, Query, SortField, Source, Token,
+    TokenKind, Value,
+};
+pub use validate::{validate, ValidateError, ValidatedQuery};

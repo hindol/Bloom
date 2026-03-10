@@ -322,7 +322,9 @@ mod tests {
         assert_eq!(restored.current(), 2);
 
         // Verify content at current node.
-        let snapshot = restored.nodes[restored.current() as usize].snapshot.to_string();
+        let snapshot = restored.nodes[restored.current() as usize]
+            .snapshot
+            .to_string();
         assert_eq!(snapshot, "after edit 2");
     }
 

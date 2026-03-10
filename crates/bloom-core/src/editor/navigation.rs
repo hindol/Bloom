@@ -153,6 +153,8 @@ impl BloomEditor {
         }
     }
 
+    // Will be used by named views jump-to-source
+    #[allow(dead_code)]
     pub(crate) fn navigate_to_page_by_id(&mut self, page_id: &types::PageId) {
         if let Some(idx) = &self.index {
             if let Some(meta) = idx.find_page_by_id(page_id) {

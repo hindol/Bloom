@@ -32,7 +32,8 @@ const ALPHABET: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
 /// counter, avoiding the need for `rand` as a dependency. Retries on
 /// collision — at typical vault densities (<10%), this averages ~1.1 attempts.
 pub fn next_block_id(existing: &HashSet<String>) -> String {
-    let mut seed: u64 = 0xcafe_f00d_dead_beef ^ (existing.len() as u64).wrapping_mul(6364136223846793005);
+    let mut seed: u64 =
+        0xcafe_f00d_dead_beef ^ (existing.len() as u64).wrapping_mul(6364136223846793005);
     // Mix in a counter so repeated calls with the same set size produce different IDs.
     // The counter is derived from a thread-local to avoid needing external state.
     seed ^= thread_counter();
@@ -86,8 +87,7 @@ fn thread_counter() -> u64 {
 /// that don't already have a `^block-id`. Returns an empty vec if all
 /// blocks already have IDs.
 pub fn compute_block_id_assignments(doc: &Document) -> Vec<BlockIdInsertion> {
-    let mut existing: HashSet<String> =
-        doc.block_ids.iter().map(|b| b.id.0.clone()).collect();
+    let mut existing: HashSet<String> = doc.block_ids.iter().map(|b| b.id.0.clone()).collect();
 
     let mut insertions = Vec::new();
     for block in &doc.blocks {
@@ -156,7 +156,8 @@ mod tests {
         let id = next_block_id(&HashSet::new());
         assert_eq!(id.len(), 5, "ID should be exactly 5 chars: {id}");
         assert!(
-            id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
+            id.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
             "ID should be base36: {id}"
         );
     }
@@ -395,7 +396,11 @@ Another paragraph.
 
         // Every block should now have an ID.
         for (i, block) in doc2.blocks.iter().enumerate() {
-            assert!(block.has_id, "block {i} (lines {}–{}) missing ID after round-trip", block.first_line, block.last_line);
+            assert!(
+                block.has_id,
+                "block {i} (lines {}–{}) missing ID after round-trip",
+                block.first_line, block.last_line
+            );
         }
 
         // The parser's block_ids should match the blocks count.

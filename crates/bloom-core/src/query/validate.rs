@@ -6,8 +6,8 @@
 
 use std::fmt;
 
-use super::parse::{Clause, Expr, Field, Op, Query, SortField, Source, Value};
-use super::schema::{self, FieldDef, FieldSql, FieldType, SourceSchema};
+use super::parse::{Clause, Expr, Field, Op, Query, Source, Value};
+use super::schema::{self, FieldSql, FieldType, SourceSchema};
 
 // ---------------------------------------------------------------------------
 // Validated AST types
@@ -324,13 +324,17 @@ mod tests {
     #[test]
     fn validate_has_on_non_tag() {
         let err = validate_str("tasks | where due has #work").unwrap_err();
-        assert!(err.message.contains("'has' can only be used with tag fields"));
+        assert!(err
+            .message
+            .contains("'has' can only be used with tag fields"));
     }
 
     #[test]
     fn validate_range_on_non_date() {
         let err = validate_str("tasks | where text this week").unwrap_err();
-        assert!(err.message.contains("date ranges only apply to date fields"));
+        assert!(err
+            .message
+            .contains("date ranges only apply to date fields"));
     }
 
     #[test]

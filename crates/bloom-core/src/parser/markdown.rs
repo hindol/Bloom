@@ -46,16 +46,16 @@ impl DocumentParser for BloomMarkdownParser {
         let mut block_start: Option<(usize, usize, bool)> = None;
 
         // Flush the current block into `blocks`.
-        let flush_block =
-            |block_start: &mut Option<(usize, usize, bool)>, blocks: &mut Vec<super::traits::ParsedBlock>| {
-                if let Some((first, last, has_id)) = block_start.take() {
-                    blocks.push(super::traits::ParsedBlock {
-                        first_line: first,
-                        last_line: last,
-                        has_id,
-                    });
-                }
-            };
+        let flush_block = |block_start: &mut Option<(usize, usize, bool)>,
+                           blocks: &mut Vec<super::traits::ParsedBlock>| {
+            if let Some((first, last, has_id)) = block_start.take() {
+                blocks.push(super::traits::ParsedBlock {
+                    first_line: first,
+                    last_line: last,
+                    has_id,
+                });
+            }
+        };
 
         let mut line_idx = body_start;
         while line_idx < lines.len() {
@@ -300,16 +300,13 @@ fn is_horizontal_rule(trimmed: &str) -> bool {
 }
 
 fn is_blockquote_line(lines: &[&str], idx: usize) -> bool {
-    lines.get(idx).map_or(false, |l| l.trim().starts_with('>'))
+    lines.get(idx).is_some_and(|l| l.trim().starts_with('>'))
 }
 
-fn is_blockquote_block(
-    block_start: &Option<(usize, usize, bool)>,
-    lines: &[&str],
-) -> bool {
+fn is_blockquote_block(block_start: &Option<(usize, usize, bool)>, lines: &[&str]) -> bool {
     block_start
         .as_ref()
-        .map_or(false, |(first, _, _)| is_blockquote_line(lines, *first))
+        .is_some_and(|(first, _, _)| is_blockquote_line(lines, *first))
 }
 
 #[cfg(test)]
@@ -470,5 +467,4 @@ mod tests {
         assert!(doc.links.is_empty());
         assert!(doc.tags.is_empty());
     }
-
 }

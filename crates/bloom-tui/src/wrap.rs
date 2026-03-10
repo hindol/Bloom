@@ -58,7 +58,9 @@ impl ScreenMap {
     /// Find the index in visible_lines for a given buffer line number.
     /// Returns None if the buffer line is not present in visible_lines.
     pub fn find_buffer_line(lines: &[RenderedLine], buffer_line: usize) -> Option<usize> {
-        lines.iter().position(|l| l.source.buffer_line() == Some(buffer_line))
+        lines
+            .iter()
+            .position(|l| l.source.buffer_line() == Some(buffer_line))
     }
 
     /// Map a buffer (line_idx, column) to an absolute screen row.

@@ -183,4 +183,3 @@ mod tests {
         assert!(!lock_path.exists());
     }
 }
-

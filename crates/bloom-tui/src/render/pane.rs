@@ -138,8 +138,8 @@ fn draw_editor_content_unified(
     let screen_map = ScreenMap::new(&pane.visible_lines, content_width, &measure);
 
     // Find the cursor's position in visible_lines by scanning for its buffer line.
-    let cursor_entry_idx = ScreenMap::find_buffer_line(&pane.visible_lines, pane.cursor.line)
-        .unwrap_or(0);
+    let cursor_entry_idx =
+        ScreenMap::find_buffer_line(&pane.visible_lines, pane.cursor.line).unwrap_or(0);
     let cursor_screen_row = screen_map.cursor_screen_row(
         cursor_entry_idx,
         pane.cursor.column,
@@ -181,14 +181,13 @@ fn draw_editor_content_unified(
         let rendered_line = &pane.visible_lines[line_idx];
         let text = rendered_line.text.trim_end_matches(['\n', '\r']);
 
-        let is_cursor_line = pane.is_active
-            && rendered_line.source.buffer_line() == Some(pane.cursor.line);
+        let is_cursor_line =
+            pane.is_active && rendered_line.source.buffer_line() == Some(pane.cursor.line);
         let base_style = if is_cursor_line {
             theme.current_line_style()
         } else {
             base_normal
         };
-
 
         let mut spans: Vec<Span> = Vec::new();
 

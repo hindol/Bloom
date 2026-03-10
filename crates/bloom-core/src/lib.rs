@@ -777,7 +777,7 @@ impl BloomEditor {
             let id = fm
                 .as_ref()
                 .and_then(|f| f.id.clone())
-                .unwrap_or_else(|| crate::uuid::generate_hex_id());
+                .unwrap_or_else(crate::uuid::generate_hex_id);
 
             // Switch to the target pane and open buffer there
             let pane_id = types::PaneId(buf_state.pane);
@@ -1245,7 +1245,10 @@ mod tests {
         let on_disk = std::fs::read_to_string(&file_path).unwrap();
         // Should have two block IDs.
         let id_count = on_disk.matches(" ^").count();
-        assert_eq!(id_count, 2, "expected 2 block IDs, got {id_count}. Content:\n{on_disk}");
+        assert_eq!(
+            id_count, 2,
+            "expected 2 block IDs, got {id_count}. Content:\n{on_disk}"
+        );
     }
 
     // Startup: Journal mode opens today's journal
@@ -1724,7 +1727,9 @@ mod tests {
         use std::time::Instant;
 
         // Generate a page with ~200 blocks (headings, paragraphs, lists, tasks).
-        let mut content = String::from("---\nid: abcdef01\ntitle: \"Large Page\"\ncreated: 2026-01-01\ntags: [test]\n---\n\n");
+        let mut content = String::from(
+            "---\nid: abcdef01\ntitle: \"Large Page\"\ncreated: 2026-01-01\ntags: [test]\n---\n\n",
+        );
         for i in 0..50 {
             content.push_str(&format!("## Section {i}\n\n"));
             content.push_str(&format!("Paragraph about topic {i}. This has some content\nthat spans multiple lines for realism.\n\n"));
@@ -1752,7 +1757,10 @@ mod tests {
         );
 
         assert!(ids_assigned, "should have assigned IDs");
-        assert!(block_count >= 200, "expected ~200+ blocks, got {block_count}");
+        assert!(
+            block_count >= 200,
+            "expected ~200+ blocks, got {block_count}"
+        );
         // Performance gate: parse + assign should be under 5ms in release.
         assert!(
             parse_ms + assign_ms < 5.0,
@@ -1805,10 +1813,7 @@ mod tests {
 
         assert_eq!(total_assigned, 1000, "all pages should get IDs");
         // Performance gate: 1000 pages should complete under 200ms in release.
-        assert!(
-            total_ms < 200.0,
-            "too slow: {total_ms:.0}ms for 1000 pages"
-        );
+        assert!(total_ms < 200.0, "too slow: {total_ms:.0}ms for 1000 pages");
     }
 
     /// Profile idempotency — re-parsing pages that already have IDs.
@@ -1851,9 +1856,6 @@ mod tests {
 
         assert!(!any_changed, "no pages should need changes");
         // Idempotent check should be fast in release.
-        assert!(
-            total_ms < 100.0,
-            "too slow for no-op: {total_ms:.0}ms"
-        );
+        assert!(total_ms < 100.0, "too slow for no-op: {total_ms:.0}ms");
     }
 }

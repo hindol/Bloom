@@ -78,38 +78,136 @@ pub struct SourceSchema {
 // ---------------------------------------------------------------------------
 
 pub static PAGES_FIELDS: &[FieldDef] = &[
-    FieldDef { name: "title",           sql: FieldSql::Column("p.title"),   field_type: FieldType::Text },
-    FieldDef { name: "created",         sql: FieldSql::Column("p.created"), field_type: FieldType::Date },
-    FieldDef { name: "path",            sql: FieldSql::Column("p.path"),    field_type: FieldType::Text },
-    FieldDef { name: "tags",            sql: FieldSql::ListSubquery { table: "tags", match_col: "tag", fk_col: "page_id", id_col: "p.id" }, field_type: FieldType::TagList },
-    FieldDef { name: "backlinks.count", sql: FieldSql::Subquery { template: "(SELECT COUNT(*) FROM links WHERE to_page = {})", id_col: "p.id" }, field_type: FieldType::Int },
+    FieldDef {
+        name: "title",
+        sql: FieldSql::Column("p.title"),
+        field_type: FieldType::Text,
+    },
+    FieldDef {
+        name: "created",
+        sql: FieldSql::Column("p.created"),
+        field_type: FieldType::Date,
+    },
+    FieldDef {
+        name: "path",
+        sql: FieldSql::Column("p.path"),
+        field_type: FieldType::Text,
+    },
+    FieldDef {
+        name: "tags",
+        sql: FieldSql::ListSubquery {
+            table: "tags",
+            match_col: "tag",
+            fk_col: "page_id",
+            id_col: "p.id",
+        },
+        field_type: FieldType::TagList,
+    },
+    FieldDef {
+        name: "backlinks.count",
+        sql: FieldSql::Subquery {
+            template: "(SELECT COUNT(*) FROM links WHERE to_page = {})",
+            id_col: "p.id",
+        },
+        field_type: FieldType::Int,
+    },
 ];
 
 pub static TASKS_FIELDS: &[FieldDef] = &[
-    FieldDef { name: "text",  sql: FieldSql::Column("t.text"),       field_type: FieldType::Text },
-    FieldDef { name: "done",  sql: FieldSql::Column("t.done"),       field_type: FieldType::Bool },
-    FieldDef { name: "due",   sql: FieldSql::Column("t.due_date"),   field_type: FieldType::Date },
-    FieldDef { name: "start", sql: FieldSql::Column("t.start_date"), field_type: FieldType::Date },
-    FieldDef { name: "page",  sql: FieldSql::Column("p.title"),      field_type: FieldType::Text },
-    FieldDef { name: "tags",  sql: FieldSql::ListSubquery { table: "tags", match_col: "tag", fk_col: "page_id", id_col: "t.page_id" }, field_type: FieldType::TagList },
-    FieldDef { name: "line",  sql: FieldSql::Column("t.line"),       field_type: FieldType::Int },
+    FieldDef {
+        name: "text",
+        sql: FieldSql::Column("t.text"),
+        field_type: FieldType::Text,
+    },
+    FieldDef {
+        name: "done",
+        sql: FieldSql::Column("t.done"),
+        field_type: FieldType::Bool,
+    },
+    FieldDef {
+        name: "due",
+        sql: FieldSql::Column("t.due_date"),
+        field_type: FieldType::Date,
+    },
+    FieldDef {
+        name: "start",
+        sql: FieldSql::Column("t.start_date"),
+        field_type: FieldType::Date,
+    },
+    FieldDef {
+        name: "page",
+        sql: FieldSql::Column("p.title"),
+        field_type: FieldType::Text,
+    },
+    FieldDef {
+        name: "tags",
+        sql: FieldSql::ListSubquery {
+            table: "tags",
+            match_col: "tag",
+            fk_col: "page_id",
+            id_col: "t.page_id",
+        },
+        field_type: FieldType::TagList,
+    },
+    FieldDef {
+        name: "line",
+        sql: FieldSql::Column("t.line"),
+        field_type: FieldType::Int,
+    },
 ];
 
 pub static TAGS_FIELDS: &[FieldDef] = &[
-    FieldDef { name: "name",  sql: FieldSql::Column("tag"),           field_type: FieldType::Text },
-    FieldDef { name: "count", sql: FieldSql::Aggregate("cnt"),        field_type: FieldType::Int },
+    FieldDef {
+        name: "name",
+        sql: FieldSql::Column("tag"),
+        field_type: FieldType::Text,
+    },
+    FieldDef {
+        name: "count",
+        sql: FieldSql::Aggregate("cnt"),
+        field_type: FieldType::Int,
+    },
 ];
 
 pub static LINKS_FIELDS: &[FieldDef] = &[
-    FieldDef { name: "from",    sql: FieldSql::Column("l.from_page"),    field_type: FieldType::Text },
-    FieldDef { name: "to",      sql: FieldSql::Column("l.to_page"),      field_type: FieldType::Text },
-    FieldDef { name: "display", sql: FieldSql::Column("l.display_hint"), field_type: FieldType::Text },
+    FieldDef {
+        name: "from",
+        sql: FieldSql::Column("l.from_page"),
+        field_type: FieldType::Text,
+    },
+    FieldDef {
+        name: "to",
+        sql: FieldSql::Column("l.to_page"),
+        field_type: FieldType::Text,
+    },
+    FieldDef {
+        name: "display",
+        sql: FieldSql::Column("l.display_hint"),
+        field_type: FieldType::Text,
+    },
 ];
 
 pub static JOURNAL_FIELDS: &[FieldDef] = &[
-    FieldDef { name: "date",  sql: FieldSql::Column("p.created"), field_type: FieldType::Date },
-    FieldDef { name: "title", sql: FieldSql::Column("p.title"),   field_type: FieldType::Text },
-    FieldDef { name: "tags",  sql: FieldSql::ListSubquery { table: "tags", match_col: "tag", fk_col: "page_id", id_col: "p.id" }, field_type: FieldType::TagList },
+    FieldDef {
+        name: "date",
+        sql: FieldSql::Column("p.created"),
+        field_type: FieldType::Date,
+    },
+    FieldDef {
+        name: "title",
+        sql: FieldSql::Column("p.title"),
+        field_type: FieldType::Text,
+    },
+    FieldDef {
+        name: "tags",
+        sql: FieldSql::ListSubquery {
+            table: "tags",
+            match_col: "tag",
+            fk_col: "page_id",
+            id_col: "p.id",
+        },
+        field_type: FieldType::TagList,
+    },
 ];
 
 pub static BLOCKS_FIELDS: &[FieldDef] = &[];
@@ -179,12 +277,12 @@ static BLOCKS_SCHEMA: SourceSchema = SourceSchema {
 /// Look up the schema for a BQL source.
 pub fn schema_for(source: &Source) -> &'static SourceSchema {
     match source {
-        Source::Pages   => &PAGES_SCHEMA,
-        Source::Tasks   => &TASKS_SCHEMA,
-        Source::Tags    => &TAGS_SCHEMA,
-        Source::Links   => &LINKS_SCHEMA,
+        Source::Pages => &PAGES_SCHEMA,
+        Source::Tasks => &TASKS_SCHEMA,
+        Source::Tags => &TAGS_SCHEMA,
+        Source::Links => &LINKS_SCHEMA,
         Source::Journal => &JOURNAL_SCHEMA,
-        Source::Blocks  => &BLOCKS_SCHEMA,
+        Source::Blocks => &BLOCKS_SCHEMA,
     }
 }
 

@@ -112,8 +112,7 @@ impl Index {
     /// fail immediately. The indexer thread owns the single write connection.
     pub fn open_readonly(path: &Path) -> Result<Self, BloomError> {
         use rusqlite::OpenFlags;
-        let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
-            | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
         let conn = Connection::open_with_flags(path, flags)
             .map_err(|e| BloomError::IndexError(e.to_string()))?;
         conn.execute_batch("PRAGMA foreign_keys=ON;")

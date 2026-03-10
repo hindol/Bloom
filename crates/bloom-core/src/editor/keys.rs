@@ -779,15 +779,12 @@ impl BloomEditor {
             }
             self.open_page_with_content(&id, "Agenda", &path, &content);
         } else {
-            self.open_page_with_content(
-                &id,
-                "Agenda",
-                std::path::Path::new("[agenda]"),
-                &content,
-            );
+            self.open_page_with_content(&id, "Agenda", std::path::Path::new("[agenda]"), &content);
         }
     }
 
+    // Will be used by named views task toggle
+    #[allow(dead_code)]
     pub(crate) fn toggle_task_in_page(&mut self, page_id: &types::PageId, line: usize) {
         // Ensure the page is loaded in a buffer
         let needs_load = self.buffer_mgr.get(page_id).is_none();

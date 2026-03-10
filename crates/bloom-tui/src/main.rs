@@ -93,9 +93,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
                         bloom_core::render::CursorShape::Block => {
                             cursor::SetCursorStyle::SteadyBlock
                         }
-                        bloom_core::render::CursorShape::Bar => {
-                            cursor::SetCursorStyle::SteadyBar
-                        }
+                        bloom_core::render::CursorShape::Bar => cursor::SetCursorStyle::SteadyBar,
                         bloom_core::render::CursorShape::Underline => {
                             cursor::SetCursorStyle::SteadyUnderScore
                         }

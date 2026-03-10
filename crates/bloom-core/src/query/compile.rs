@@ -6,7 +6,7 @@
 
 use super::parse::{Op, Source};
 use super::schema::{FieldSql, FieldType};
-use super::validate::{ResolvedField, ResolvedValue, ValidatedClause, ValidatedExpr, ValidatedQuery};
+use super::validate::{ResolvedValue, ValidatedClause, ValidatedExpr, ValidatedQuery};
 
 // ---------------------------------------------------------------------------
 // Compiled output
@@ -56,7 +56,10 @@ pub fn compile(validated: &ValidatedQuery) -> CompiledQuery {
     let schema = validated.schema;
 
     // Determine structural query shape.
-    let has_count = validated.clauses.iter().any(|c| matches!(c, ValidatedClause::Count));
+    let has_count = validated
+        .clauses
+        .iter()
+        .any(|c| matches!(c, ValidatedClause::Count));
     let group_clause = validated.clauses.iter().find_map(|c| match c {
         ValidatedClause::Group(f) => Some(f),
         _ => None,
@@ -68,17 +71,31 @@ pub fn compile(validated: &ValidatedQuery) -> CompiledQuery {
     // Build the base query (SELECT ... FROM ... JOIN ... WHERE ...).
     let base_sql = build_base_query(validated, &mut params);
 
-    if has_count && group_clause.is_some() {
-        // Shape: SELECT group_col, COUNT(*) FROM (...base...) GROUP BY group_col
-        let group_col = field_sql_expr(&group_clause.unwrap().sql);
-        let sql = format!(
-            "SELECT {group_col} as group_key, COUNT(*) as cnt FROM ({base_sql}) GROUP BY {group_col}"
-        );
-        CompiledQuery { sql, params, source: validated.source.clone(), has_count, group_field }
-    } else if has_count {
-        // Shape: SELECT COUNT(*) FROM (...base...)
-        let sql = format!("SELECT COUNT(*) as cnt FROM ({base_sql})");
-        CompiledQuery { sql, params, source: validated.source.clone(), has_count, group_field }
+    if has_count {
+        if let Some(gc) = group_clause {
+            // Shape: SELECT group_col, COUNT(*) FROM (...base...) GROUP BY group_col
+            let group_col = field_sql_expr(gc.sql);
+            let sql = format!(
+                "SELECT {group_col} as group_key, COUNT(*) as cnt FROM ({base_sql}) GROUP BY {group_col}"
+            );
+            CompiledQuery {
+                sql,
+                params,
+                source: validated.source.clone(),
+                has_count,
+                group_field,
+            }
+        } else {
+            // Shape: SELECT COUNT(*) FROM (...base...)
+            let sql = format!("SELECT COUNT(*) as cnt FROM ({base_sql})");
+            CompiledQuery {
+                sql,
+                params,
+                source: validated.source.clone(),
+                has_count,
+                group_field,
+            }
+        }
     } else {
         // Shape: base query + GROUP BY + ORDER BY + LIMIT
         let mut sql = base_sql;
@@ -86,7 +103,7 @@ pub fn compile(validated: &ValidatedQuery) -> CompiledQuery {
         // GROUP BY (non-tags sources — tags already have GROUP BY in base)
         if let Some(gf) = group_clause {
             if schema.base_group_by.is_none() {
-                let col = field_sql_expr(&gf.sql);
+                let col = field_sql_expr(gf.sql);
                 sql.push_str(&format!(" GROUP BY {col}"));
             }
         }
@@ -94,11 +111,14 @@ pub fn compile(validated: &ValidatedQuery) -> CompiledQuery {
         // ORDER BY
         for clause in &validated.clauses {
             if let ValidatedClause::Sort(fields) = clause {
-                let parts: Vec<String> = fields.iter().map(|sf| {
-                    let col = field_sql_expr(&sf.field.sql);
-                    let dir = if sf.desc { "DESC" } else { "ASC" };
-                    format!("{col} {dir}")
-                }).collect();
+                let parts: Vec<String> = fields
+                    .iter()
+                    .map(|sf| {
+                        let col = field_sql_expr(sf.field.sql);
+                        let dir = if sf.desc { "DESC" } else { "ASC" };
+                        format!("{col} {dir}")
+                    })
+                    .collect();
                 sql.push_str(" ORDER BY ");
                 sql.push_str(&parts.join(", "));
             }
@@ -111,7 +131,13 @@ pub fn compile(validated: &ValidatedQuery) -> CompiledQuery {
             }
         }
 
-        CompiledQuery { sql, params, source: validated.source.clone(), has_count, group_field }
+        CompiledQuery {
+            sql,
+            params,
+            source: validated.source.clone(),
+            has_count,
+            group_field,
+        }
     }
 }
 
@@ -215,7 +241,7 @@ fn compile_expr(expr: &ValidatedExpr, params: &mut Vec<SqlParam>) -> String {
         ValidatedExpr::Compare(field, op, value) => {
             // NULL handling
             if matches!(value, ResolvedValue::Null) {
-                let col = field_sql_expr(&field.sql);
+                let col = field_sql_expr(field.sql);
                 return match op {
                     Op::Eq => format!("{col} IS NULL"),
                     Op::Neq => format!("{col} IS NOT NULL"),
@@ -225,7 +251,7 @@ fn compile_expr(expr: &ValidatedExpr, params: &mut Vec<SqlParam>) -> String {
 
             // Bool field: done = true → done = 1
             if field.field_type == FieldType::Bool {
-                let col = field_sql_expr(&field.sql);
+                let col = field_sql_expr(field.sql);
                 let sql_op = op_to_sql(op);
                 let val = match value {
                     ResolvedValue::Bool(true) => "1".to_string(),
@@ -243,14 +269,20 @@ fn compile_expr(expr: &ValidatedExpr, params: &mut Vec<SqlParam>) -> String {
                 return format!("{subquery} {sql_op} {val}");
             }
 
-            let col = field_sql_expr(&field.sql);
+            let col = field_sql_expr(field.sql);
             let sql_op = op_to_sql(op);
             let val = push_param(value, params);
             format!("{col} {sql_op} {val}")
         }
         ValidatedExpr::Has(field, tag) => {
             // Tags via IN-subquery — no JOIN, no cardinality change.
-            if let FieldSql::ListSubquery { table, match_col, fk_col, id_col } = &field.sql {
+            if let FieldSql::ListSubquery {
+                table,
+                match_col,
+                fk_col,
+                id_col,
+            } = &field.sql
+            {
                 params.push(SqlParam::Text(tag.clone()));
                 let idx = params.len();
                 format!("{id_col} IN (SELECT {fk_col} FROM {table} WHERE {match_col} = ?{idx})")
@@ -259,7 +291,7 @@ fn compile_expr(expr: &ValidatedExpr, params: &mut Vec<SqlParam>) -> String {
             }
         }
         ValidatedExpr::InRange(field, range) => {
-            let col = field_sql_expr(&field.sql);
+            let col = field_sql_expr(field.sql);
             let (start, end) = compute_range(range);
             params.push(SqlParam::Text(start));
             let start_idx = params.len();
@@ -274,7 +306,10 @@ fn field_sql_expr(sql: &FieldSql) -> &str {
     match sql {
         FieldSql::Column(col) => col,
         FieldSql::Aggregate(col) => col,
-        FieldSql::Subquery { template, id_col } => {
+        FieldSql::Subquery {
+            template: _,
+            id_col,
+        } => {
             // For ORDER BY / GROUP BY usage, we use the id_col as placeholder.
             // Subquery fields shouldn't appear in ORDER BY normally.
             id_col
@@ -313,7 +348,11 @@ fn push_param(value: &ResolvedValue, params: &mut Vec<SqlParam>) -> String {
             format!("?{}", params.len())
         }
         ResolvedValue::Bool(b) => {
-            if *b { "1".to_string() } else { "0".to_string() }
+            if *b {
+                "1".to_string()
+            } else {
+                "0".to_string()
+            }
         }
         ResolvedValue::Null => "NULL".to_string(),
         ResolvedValue::PageRef => {
@@ -335,7 +374,7 @@ fn compute_range(range: &str) -> (String, String) {
     // 1. The validator already resolved date *values* (today/yesterday/tomorrow)
     // 2. Range boundaries are computed at compile time, same as before
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    compute_range_from(&range, &today)
+    compute_range_from(range, &today)
 }
 
 fn compute_range_from(range: &str, today: &str) -> (String, String) {
@@ -482,7 +521,9 @@ mod tests {
     #[test]
     fn compile_pages_backlinks_count() {
         let c = compile_str("pages | where backlinks.count = 0").unwrap();
-        assert!(c.sql.contains("SELECT COUNT(*) FROM links WHERE to_page = p.id"));
+        assert!(c
+            .sql
+            .contains("SELECT COUNT(*) FROM links WHERE to_page = p.id"));
     }
 
     #[test]
@@ -514,8 +555,9 @@ mod tests {
     #[test]
     fn compile_complex() {
         let c = compile_str(
-            "tasks | where not done and due this week and tags has #work | sort due | limit 10"
-        ).unwrap();
+            "tasks | where not done and due this week and tags has #work | sort due | limit 10",
+        )
+        .unwrap();
         assert!(c.sql.contains("NOT (t.done = 1)"));
         assert!(c.sql.contains("t.due_date >="));
         assert!(c.sql.contains("tags WHERE tag ="));

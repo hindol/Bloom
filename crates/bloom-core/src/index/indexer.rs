@@ -571,4 +571,3 @@ fn parse_paths(
         })
         .collect()
 }
-
