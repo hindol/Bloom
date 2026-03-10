@@ -823,6 +823,12 @@ impl BloomEditor {
     /// Close the active buffer. Opens journal or scratch if it was the last buffer.
     pub(crate) fn close_active_buffer(&mut self) {
         if let Some(page_id) = self.active_page().cloned() {
+            // Prune this page's persisted undo tree.
+            if let Some(tx) = &self.indexer_tx {
+                let _ = tx.send(index::indexer::IndexRequest::PruneUndoPages(vec![
+                    page_id.to_hex(),
+                ]));
+            }
             self.set_active_page(None);
             self.buffer_mgr.close(&page_id);
             if let Some(next) = self.buffer_mgr.open_buffers().first() {

@@ -74,6 +74,17 @@ impl BloomEditor {
             index::indexer::spawn_indexer(vault_root.to_path_buf(), index_path, idx_completion_tx);
         self.indexer_tx = Some(indexer_tx);
 
+        // Prune undo trees older than 24 hours on startup.
+        if let Some(tx) = &self.indexer_tx {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let cutoff_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64
+                - 24 * 60 * 60 * 1000;
+            let _ = tx.send(index::indexer::IndexRequest::PruneUndoBefore(cutoff_ms));
+        }
+
         Ok(())
     }
 
