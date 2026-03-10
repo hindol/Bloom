@@ -46,6 +46,11 @@ impl UndoTree {
         self.current
     }
 
+    /// Get the content of the current node as a string (for comparison).
+    pub fn current_snapshot_string(&self) -> String {
+        self.nodes[self.current as usize].snapshot.to_string()
+    }
+
     pub fn parent(&self, node: UndoNodeId) -> Option<UndoNodeId> {
         self.nodes[node as usize].parent
     }

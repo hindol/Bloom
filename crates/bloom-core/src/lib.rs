@@ -763,10 +763,13 @@ impl BloomEditor {
             let Ok(content) = std::fs::read_to_string(&buf_state.page_path) else {
                 continue;
             };
-            let title = self
-                .parser
-                .parse_frontmatter(&content)
-                .and_then(|fm| fm.title)
+
+            // Extract the real page ID from frontmatter, not a random one.
+            // This is essential for undo tree restoration (keyed by page UUID).
+            let fm = self.parser.parse_frontmatter(&content);
+            let title = fm
+                .as_ref()
+                .and_then(|f| f.title.clone())
                 .unwrap_or_else(|| {
                     buf_state
                         .page_path
@@ -775,12 +778,42 @@ impl BloomEditor {
                         .to_string_lossy()
                         .to_string()
                 });
-            let id = crate::uuid::generate_hex_id();
+            let id = fm
+                .as_ref()
+                .and_then(|f| f.id.clone())
+                .unwrap_or_else(|| crate::uuid::generate_hex_id());
 
             // Switch to the target pane and open buffer there
             let pane_id = types::PaneId(buf_state.pane);
             self.window_mgr.set_active(pane_id);
             self.open_page_with_content(&id, &title, &buf_state.page_path, &content);
+
+            // Restore persisted undo tree before allowing edits.
+            if let Some(idx) = &self.index {
+                let page_hex = id.to_hex();
+                match buffer::undo::UndoTree::load_from_db(idx.connection(), &page_hex) {
+                    Ok(Some(mut tree)) => {
+                        // If the file changed externally since last session, extend
+                        // the persisted tree with the current disk content so the
+                        // user can undo past the external change.
+                        if tree.current_snapshot_string() != content {
+                            tree.push(
+                                ropey::Rope::from_str(&content),
+                                "external change".to_string(),
+                            );
+                            tracing::info!(page = %page_hex, "undo tree extended with external change");
+                        }
+                        if let Some(buf) = self.buffer_mgr.get_mut(&id) {
+                            buf.set_undo_tree(tree);
+                            tracing::debug!(page = %page_hex, "undo tree restored");
+                        }
+                    }
+                    Ok(None) => {} // no persisted tree — use the fresh one
+                    Err(e) => {
+                        tracing::warn!(page = %page_hex, error = %e, "failed to restore undo tree");
+                    }
+                }
+            }
 
             // Restore cursor position and scroll offset
             if let Some(buf) = self.buffer_mgr.get(&id) {
@@ -791,23 +824,6 @@ impl BloomEditor {
                     self.set_cursor(
                         line_start + buf_state.cursor_column.min(line_len.saturating_sub(1)),
                     );
-                }
-            }
-
-            // Restore persisted undo tree.
-            if let Some(idx) = &self.index {
-                let page_hex = id.to_hex();
-                match buffer::undo::UndoTree::load_from_db(idx.connection(), &page_hex) {
-                    Ok(Some(tree)) => {
-                        if let Some(buf) = self.buffer_mgr.get_mut(&id) {
-                            buf.set_undo_tree(tree);
-                            tracing::debug!(page = %page_hex, "undo tree restored");
-                        }
-                    }
-                    Ok(None) => {} // no persisted tree — use the fresh one
-                    Err(e) => {
-                        tracing::warn!(page = %page_hex, error = %e, "failed to restore undo tree");
-                    }
                 }
             }
             if let Some(ps) = self.window_mgr.pane_state_mut(pane_id) {
