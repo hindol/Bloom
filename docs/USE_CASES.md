@@ -909,7 +909,7 @@ Verifies: G23 (Session Restore)
 2. User quits Bloom.
 3. User relaunches Bloom.
 4. The session is restored: same 3 buffers, same 2-pane layout, same cursor and scroll positions.
-5. Undo trees are NOT restored (G9 — RAM-only).
+5. Undo trees ARE restored from SQLite (G9 — persistent, pruned after 24h).
 
 ### UC-78: Startup mode — journal
 

@@ -12,7 +12,7 @@
 | Rename strategy | UUIDs permanent; display hints eagerly updated in background | Lazy update on open, alias registry, rename journal |
 | Source of truth | Frontmatter title; filename derived + sanitized | Filename as source, two-way sync |
 | Text buffer | Rope (`ropey`) | Piece table, gap buffer, CRDT (automerge, diamond-types) |
-| Undo model | Undo tree (branching), RAM-only | Linear undo/redo, persisted undo |
+| Undo model | Undo tree (branching), persisted to SQLite | Linear undo/redo, RAM-only |
 | Link discovery | Explicit `[[links]]` + unlinked mentions (FTS5-backed) | Fully implicit linking, naive O(N×M) scan |
 | Link creation UX | `[[` triggers inline fuzzy picker | Manual UUID entry |
 | Transclusion | Deferred to post-v1; links + timeline + backlinks provide sufficient navigability | Inline expansion, collapsed by default, hover preview |

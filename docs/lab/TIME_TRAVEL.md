@@ -18,7 +18,24 @@ Today's tools give you two options: full-text search (requires remembering keywo
 
 Bloom maintains a complete, automatic history of every change to your vault. Not as a backup feature — as a **thinking tool.** Time becomes a first-class dimension you can navigate — per-file version history, per-block evolution, and vault-wide daily activity summaries.
 
+**Fearless editing.** Every version of every thought is recoverable. Split pages, merge pages, delete sections — knowing you can always get back to any previous state. The undo tree handles per-keystroke recovery within a session; git handles everything beyond that.
+
 This document covers the **infrastructure layer**: git as the time-series store, auto-commit strategy, file and block history, and the threading model. The [Day View](DAY_VIEW.md) document covers the vault-wide daily activity summary built on top of this infrastructure.
+
+---
+
+## Two Layers of History
+
+| Layer | Granularity | Persistence | Branching | Purpose |
+|-------|-------------|-------------|-----------|---------|
+| **Undo tree** (SQLite) | Per-edit | Survives restarts, pruned on buffer close or after 24h | Full branching | "Undo what I just did" |
+| **Git history** | 5-minute snapshots | Permanent (in `.index/.git/`) | Linear | "What did this look like last month?" |
+
+The undo tree is the fine-grained, branching history — same as VS Code's persistent undo model. It's serialized to SQLite on quit and restored on next launch.
+
+Git provides the coarse-grained, permanent record. Linear (no git branches), automatic, invisible. Every 5 minutes of inactivity, Bloom commits the current vault state. These commits are the substrate for page history, day view, and block-level time travel.
+
+The two layers are complementary, not competing. `u` in Vim walks the undo tree. `SPC H h` browses git history.
 
 ---
 
@@ -41,6 +58,29 @@ Bloom silently maintains a git repository in the vault. The user never interacts
 - Same cross-platform story as the rest of Bloom (especially Windows)
 - Commit, revwalk, tree diff, and blame are all supported
 
+### UUID-Based Git Tree
+
+Files are stored in git under their **page UUID**, not their filesystem path. This eliminates rename tracking entirely:
+
+```
+.index/.git/ tree:
+├── 8f3a1b2c.md    ← "Text Editor Theory"
+├── deadbeef.md    ← "Rust Programming"
+├── a1b2c3d4.md    ← "Meeting Notes"
+└── ...
+```
+
+The UUID is permanent (G3). The file can be renamed a hundred times on disk — `git log -- 8f3a1b2c.md` always gives the complete history. No rename detection, no heuristics, no following.
+
+The SQLite index provides the bidirectional mapping:
+
+```sql
+SELECT path FROM pages WHERE id = '8f3a1b2c';   -- UUID → disk path
+SELECT id FROM pages WHERE path = 'pages/Rust Programming.md';  -- disk path → UUID
+```
+
+When `commit_all()` stages files, it reads each vault file, looks up its UUID in the index, and writes the content to the git tree under `{uuid}.md`. The git tree never uses filesystem paths. Human-readable titles go in the commit message.
+
 ### Auto-Commit Strategy
 
 Bloom commits automatically. The user never thinks about it.
@@ -52,6 +92,7 @@ Bloom commits automatically. The user never thinks about it.
 | On quit | Capture the final state of the session |
 | After 5 minutes of inactivity | Natural pause boundary — you've context-switched |
 | On journal rotation (start of new day) | Close out the day cleanly before rotating |
+| After 1 hour regardless of activity | Safety net for long uninterrupted sessions |
 
 **Not** on every auto-save. The 300ms auto-save debounce writes to disk for crash safety, but committing every 300ms would create hundreds of commits per day. The 5-minute idle window batches edits into meaningful chunks — typically 3–10 commits per active day.
 
@@ -64,7 +105,30 @@ Message: "2026-03-08 14:32 — edited Text Editor Theory, journal"
 
 - Machine-authored (filterable if the user also commits manually)
 - Timestamp + summary of what changed (auto-generated from the staged diff)
-- All files staged with `git add -A` before each commit
+- Staged by UUID: index lookup maps each changed vault file to its UUID
+
+### Single-Instance Lock
+
+Only one Bloom process may access a vault at a time (TUI or GUI, not both). On startup, Bloom creates `.index/bloom.lock` exclusively. The lock file contains the PID. On shutdown, deleted. If Bloom crashes, the stale lock's PID is checked — if the process isn't running, the lock is taken.
+
+This prevents concurrent writes to both the SQLite index and the git repo.
+
+### Persistent Undo Tree
+
+The in-memory undo tree (G9) is serialized to SQLite on quit and restored on next launch:
+
+```sql
+CREATE TABLE undo_tree (
+    page_id    TEXT NOT NULL,
+    node_id    INTEGER NOT NULL,
+    parent_id  INTEGER,           -- NULL for root
+    content    BLOB NOT NULL,     -- rope snapshot or delta
+    timestamp  TEXT NOT NULL,
+    PRIMARY KEY (page_id, node_id)
+);
+```
+
+On restart, the undo tree is deserialized. `u` and `Ctrl-R` work across sessions. The undo tree is pruned when the buffer is closed or after 24 hours — beyond that, git history provides recovery.
 
 ---
 
@@ -92,7 +156,7 @@ While viewing any page, `SPC H h` opens its **commit history** — a list of eve
   3 versions · created Mar 1
 ```
 
-Each entry is a commit that touched this file. The summary is auto-generated from the diff (`+N / -M` lines, first changed line as a description hint).
+Each entry is a commit that touched this page's UUID. The summary is auto-generated from the diff (`+N / -M` lines, first changed line as a description hint). Rename-proof — the UUID never changes.
 
 **Navigation:**
 
@@ -107,7 +171,7 @@ Each entry is a commit that touched this file. The summary is auto-generated fro
 
 ### Viewing a Past Version
 
-When you press `Enter` on a history entry, Bloom retrieves the file content at that commit via `gix` (a single blob lookup — instant) and opens it in a **read-only buffer**. The status bar shows:
+When you press `Enter` on a history entry, Bloom retrieves the file content at that commit via `gix` (a single blob lookup by UUID — instant) and opens it in a **read-only buffer**. The status bar shows:
 
 ```
  HISTORY  Text Editor Theory  Mar 6, 09:15  (read-only)
@@ -148,7 +212,7 @@ Pressing `r` on a history entry copies that version's full content into the curr
 With universal block IDs (see [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md)), file time travel extends to individual blocks. Place your cursor on any block and `SPC H H` (block history) shows every version of *that specific block* across time:
 
 ```
-═══ ^a3 — Block History ═══════════════════════════════════════════
+═══ ^k7m2x — Block History ════════════════════════════════════════
 
   ◆ Mar 8    - [ ] Review the ropey API @due(2026-03-10)
   ◆ Mar 6    - [ ] Review the ropey API @due(2026-03-08)
@@ -157,7 +221,9 @@ With universal block IDs (see [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md)), file time
   3 versions · first appeared Mar 1
 ```
 
-This uses `gix` blame to trace the block ID through commits — finding every commit that changed the line containing `^a3`. The block ID is the stable anchor that makes this possible even when lines shift around it.
+This uses pickaxe search (`-S "^k7m2x"`) scoped to the page's UUID file (`-- 8f3a1b2c.md`). Because the git tree uses UUIDs, the search is scoped to one file's history, not the entire tree. Estimated: <10ms for a typical page.
+
+For cross-page block moves, an unscoped pickaxe search finds the block ID across all UUID files — revealing which page it lived in at each point in time.
 
 ---
 
@@ -191,10 +257,10 @@ The target: **every user-initiated operation completes in < 10 ms,** or the resu
 | **Commit** (auto, 5-min idle) | ~10-20 ms | Background thread, user never waits | 0 ms (invisible) |
 | **Day view (cache hit)** | < 1 ms | LRU cache in SQLite | < 1 ms ✓ |
 | **Day view (cache miss)** | ~100-200 ms | Predictive prefetch on `[d`/`]d` and calendar hover | < 1 ms (prefetched) |
-| **Page history list** | ~50-100 ms | Prefetch on `SPC l` keypress (which-key delay = free compute time) | < 10 ms ✓ |
+| **Page history list** | ~50-100 ms | Prefetch on `SPC H` keypress (which-key delay = free compute time) | < 10 ms ✓ |
 | **View past version** | < 5 ms | Prefetch adjacent entries while browsing history list | < 5 ms ✓ |
 | **Diff two versions** | < 10 ms | Prefetch on history list navigation | < 10 ms ✓ |
-| **Block history (blame)** | ~200-500 ms | Prefetch on `SPC H` keypress; which-key delay = free compute time | < 10 ms (prefetched) |
+| **Block history (pickaxe)** | ~10-50 ms | Scoped to one UUID file, not full tree | < 10 ms ✓ |
 | **Calendar markers** | < 1 ms | Read from day view cache | < 1 ms ✓ |
 
 ### Prefetch Strategy
@@ -205,11 +271,11 @@ The principle: **never compute on demand — compute before the user asks.** Two
 
 | Prefix | Prefetches |
 |--------|-----------|
-| `SPC H` | Page history for current page + block blame for cursor line |
+| `SPC H` | Page history for current page + block pickaxe for cursor line |
 | `SPC j` | Today's journal content + yesterday's day view |
 | `SPC a` | Agenda task query results |
 
-The which-key popup appears after 300ms. The user reads it and decides for 300-800ms. Total free compute time: 600-1100ms — enough for page history and block blame.
+The which-key popup appears after 300ms. The user reads it and decides for 300-800ms. Total free compute time: 600-1100ms — enough for page history and block pickaxe.
 
 **2. Adjacency prefetch inside temporal views.** Once inside a browsing context (day view, history list, calendar), prefetch the adjacent entries in the direction of navigation.
 
@@ -220,22 +286,23 @@ The which-key popup appears after 300ms. The user reads it and decides for 300-8
 | Calendar (arrow keys) | Hovered day N | Day view for N |
 | Calendar (month change) | Entered new month | Day views for days with `◆` markers |
 
-**What we don't prefetch:** anything outside an active temporal context. Opening a page does not prefetch its history. Moving the cursor does not prefetch block blame. These operations are infrequent enough that a one-time spinner (< 500ms) on first access is acceptable. Prefetch only kicks in once the user has entered a temporal browsing mode.
+**What we don't prefetch:** anything outside an active temporal context. Opening a page does not prefetch its history. Moving the cursor does not prefetch block history. These operations are infrequent enough that a one-time spinner (< 500ms) on first access is acceptable. Prefetch only kicks in once the user has entered a temporal browsing mode.
 
 ### Storage Budget
 
-All history data lives in `.index/` (rebuildable, gitignored):
+All history data lives in `.index/` (git history is non-rebuildable; SQLite is rebuildable):
 
 | Component | Size (10-year reference vault) |
 |-----------|-------------------------------|
 | Git repo (`.index/.git/`) | ~8-10 MB |
+| Undo tree (SQLite) | ~1-5 MB (pruned after 24h per buffer) |
 | Day view LRU cache (50 entries) | ~250 KB |
 | SQLite index (FTS5 + metadata) | ~15-20 MB |
-| **Total `.index/`** | **~25-30 MB** |
+| **Total `.index/`** | **~25-35 MB** |
 
 Periodic `git gc` runs on the history thread during idle time (no more than once per day) to repack loose objects. This keeps the git repo compact.
 
-If `.index/` is deleted, Bloom rebuilds everything: SQLite index from files on disk, git repo from current file state (historical day views are lost but future ones accumulate again).
+**If `.index/` is deleted:** SQLite index rebuilds from files on disk. Undo tree is lost (same as clearing VS Code's undo history). Git history is lost — Bloom reinitializes with the current vault state as the first commit. The vault files themselves are always intact. This is documented: `.index/` contains non-rebuildable history data.
 
 ---
 
@@ -244,20 +311,21 @@ If `.index/` is deleted, Bloom rebuilds everything: SQLite index from files on d
 ```text
 UI Thread
     │
-    │  requests (page history, day view, block blame, etc.)
+    │  requests (page history, day view, block pickaxe, etc.)
     │  prefix hints (SPC H pressed → prefetch)
     │
     ▼
 History Thread (new)
     │
-    │  Owns: gix::Repository handle (GIT_DIR=.index/.git/)
-    │  Owns: day_view_cache + prefetch_cache (SQLite)
+    │  Owns: gix::Repository handle (GIT_DIR=.index/.git/, work tree = vault root)
+    │  Owns: day_view_cache (SQLite)
     │
-    ├── Read queries: revwalk, blob lookup, diff, blame
+    ├── Read queries: revwalk, blob lookup, diff, pickaxe
     │
     ├── Prefetch: triggered by prefix keys and navigation
     │
     ├── Auto-commits: debounced from disk writer signals
+    │   (UUID lookup via index for staging)
     │
     └── Periodic git gc (idle, max once/day)
     │
@@ -275,33 +343,30 @@ Bloom's git repo lives inside `.index/` — separate from any user-managed `.git
 
 ```
 ~/bloom/
-├── journal.md              ← today's journal (always this name)
-├── pages/                  ← named pages
+├── pages/                  ← named pages (human-readable filenames)
 │   ├── Text Editor Theory.md
 │   └── Rust Programming.md
-├── .journal/               ← hidden archive (auto-rotated daily journals)
-│   ├── 2026-03-07.md
-│   ├── 2026-03-06.md
-│   └── ...
+├── journal/                ← daily journal pages
+│   └── 2026-03-09.md
 ├── .git/                   ← user's own repo (optional, theirs entirely)
-├── .index/                 ← Bloom internals (gitignored, rebuildable)
-│   ├── bloom.db            ← SQLite index
-│   └── .git/               ← Bloom's history repo (separate from user's)
+├── .index/                 ← Bloom internals
+│   ├── bloom.db            ← SQLite index (rebuildable from files)
+│   ├── bloom.lock          ← single-instance lock (PID)
+│   └── .git/               ← Bloom's history repo (UUID-based tree, non-rebuildable)
+│       └── objects/        ← git object store (packed)
 ├── templates/
 ├── images/
-├── .gitignore              ← excludes .index/ (so user's git ignores Bloom internals)
+├── .gitignore              ← excludes .index/
 └── config.toml
 ```
 
 Bloom opens its repo with `GIT_DIR=.index/.git/` and working tree at the vault root. The user's `.git/` (if present) is completely independent — different objects, different history, different commits. `git log` in the vault shows the user's commits, not Bloom's.
 
-`.index/` is already excluded by the auto-generated `.gitignore` (from G21), so no additional gitignore entries are needed.
-
 ---
 
 ## Integration with Other Lab Ideas
 
-### BQL (Live Views)
+### BQL (Named Views)
 
 File history extends the query surface:
 
@@ -330,11 +395,20 @@ Git history is the backstop that makes block ID self-healing possible. See [BLOC
 ```toml
 [history]
 auto_commit_idle_minutes = 5    # commit after N minutes of inactivity
+max_commit_interval_minutes = 60  # safety net for long uninterrupted sessions
 ```
 
 Git history is always on — it powers self-healing block IDs, time travel, and the day view. Bloom's internal repo (`.index/.git/`) is separate from any user-managed `.git/`, so there is no conflict with the user's own git workflow.
 
 ---
+
+## Decisions
+
+1. **UUID-based git tree.** Files stored under their page UUID, not filesystem path. Eliminates rename tracking. The index provides bidirectional UUID↔path mapping, rebuildable from frontmatter.
+2. **Linear git, branching undo tree.** Git history is linear (no git branches). Branching is the undo tree's job — persisted to SQLite, VS Code model. Two layers, clean separation.
+3. **Single-instance lock.** `.index/bloom.lock` with PID. Only one Bloom process per vault. TUI + GUI simultaneously is not supported.
+4. **Block history via pickaxe.** `git log -S "^block_id" -- {uuid}.md` — scoped to one UUID file, fast. No blame needed.
+5. **`.index/` contains non-rebuildable data.** Git history and undo tree are lost if `.index/` is deleted. Documented, acceptable — vault files are always the source of truth.
 
 ## Open Questions
 
@@ -342,9 +416,7 @@ Git history is always on — it powers self-healing block IDs, time travel, and 
 
 2. **Day boundary.** What defines "a day"? Local timezone midnight? Configurable? If you work past midnight, do those edits belong to yesterday or today? Leaning towards: the day boundary is when journal rotation happens (first launch of the new calendar day), not strict midnight.
 
-3. **Prefetch cancellation.** When `SPC H` triggers a prefetch but the user presses `Esc` (abandons the prefix), should the history thread cancel in-flight work? Or let it finish and cache anyway? Leaning towards: let it finish — the work is cheap and the cache may be useful next time.
-
-4. **Cold start.** A brand new vault has no git history. Time travel features show empty results gracefully. After the first day of use, the first day view is computed on journal rotation. No special cold-start logic needed beyond graceful empty states.
+3. **Undo tree pruning strategy.** Prune on buffer close? After 24 hours? After N nodes? VS Code prunes on file close + restart. Leaning towards: persist until buffer is closed, then prune.
 
 ---
 
@@ -358,10 +430,10 @@ Time travel features need realistic historical data for both automated tests and
 
 ```rust
 /// Create a commit with a backdated timestamp.
-/// Writes files, stages them, and commits with the given date.
+/// Writes files to the UUID-based tree and commits with the given date.
 pub fn commit_at(
     repo: &gix::Repository,
-    files: &[(&str, &str)],  // (path, content) pairs
+    files: &[(&str, &str)],  // (uuid, content) pairs
     date: NaiveDateTime,
     message: &str,
 )
@@ -385,10 +457,11 @@ This gives new users an instant feel for time travel features without needing we
 Integration tests use `commit_at` to set up controlled histories:
 
 - Day view: create commits across 3 days, verify correct grouping
-- Page history: create 5 versions of one file, verify revwalk
-- Block history: edit a line across commits, verify blame chain
+- Page history: create 5 versions of one file (by UUID), verify revwalk
+- Block history: edit a line across commits, verify pickaxe results
 - Calendar markers: verify `◆` appears only on days with activity
 - Cache: verify LRU eviction and predictive prefetch behaviour
+- Rename survival: rename a page, verify history follows the UUID
 
 ---
 
@@ -396,7 +469,7 @@ Integration tests use `commit_at` to set up controlled histories:
 
 | Crate | Purpose | Size impact |
 |-------|---------|-------------|
-| `gix` | Pure Rust git: init, commit, revwalk, tree diff, blame | ~2-3 MB binary size |
+| `gix` | Pure Rust git: init, commit, revwalk, tree diff, pickaxe | ~2-3 MB binary size |
 
 No external runtime dependencies. No `git` binary required. Works on macOS and Windows identically.
 

@@ -99,7 +99,7 @@ When viewing a page, `SPC l t` opens a timeline panel showing a chronological li
 - Full branching undo history, not linear undo/redo.
 - Every edit creates a node in the tree. Undoing and making a new edit creates a branch.
 - Navigate the full tree of document states within a session.
-- **RAM-only** — undo tree is lost when Bloom closes, same as most editors. For cross-session history, use git.
+- **Persistent** — the undo tree is serialized to SQLite on quit and restored on next launch (same model as VS Code). Pruned when the buffer is closed or after 24 hours. For long-term history beyond the undo tree, Bloom's git-based time travel provides session-level snapshots (see `docs/lab/TIME_TRAVEL.md`).
 
 ### G10: Cross-Platform — macOS and Windows
 
@@ -341,7 +341,7 @@ On quit, Bloom persists the session state: open buffers, window layout, cursor p
 mode = "restore"  # "restore" (default), "journal" (open today's journal), "blank"
 ```
 
-Undo tree is NOT persisted (G9) — only the workspace layout.
+Undo tree IS persisted to SQLite (G9) — restored alongside workspace layout.
 
 ### G24: Full Unicode Support
 
