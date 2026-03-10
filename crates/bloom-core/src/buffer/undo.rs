@@ -135,6 +135,26 @@ impl UndoTree {
 
     // -- Persistence --
 
+    /// Serialize the undo tree to channel-friendly data for the indexer to write.
+    pub fn to_persist_data(&self, page_id: &str) -> crate::index::indexer::UndoPersistData {
+        let nodes = self
+            .nodes
+            .iter()
+            .map(|n| crate::index::indexer::UndoNodeData {
+                node_id: n.id as i64,
+                parent_id: n.parent.map(|p| p as i64),
+                content: n.snapshot.to_string(),
+                timestamp_ms: n.epoch_ms,
+                description: n.description.clone(),
+            })
+            .collect();
+        crate::index::indexer::UndoPersistData {
+            page_id: page_id.to_string(),
+            nodes,
+            current_node_id: self.current as i64,
+        }
+    }
+
     /// Save the undo tree to SQLite. Creates/replaces all rows for this page.
     pub fn save_to_db(
         &self,

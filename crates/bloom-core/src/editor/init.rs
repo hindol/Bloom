@@ -28,12 +28,16 @@ impl BloomEditor {
         self.vault_lock = Some(lock);
 
         let index_path = vault_root.join(".index.db");
-        self.index = Some(index::Index::open(&index_path)?);
-
-        // Create undo persistence tables in the same database.
-        if let Some(idx) = &self.index {
-            let _ = buffer::undo::create_undo_tables(idx.connection());
+        // Ensure the database file exists with schema before opening read-only.
+        // The indexer thread will own the read-write connection for all mutations.
+        {
+            let rw = index::Index::open(&index_path)?;
+            drop(rw); // close the read-write connection immediately
         }
+        // UI thread gets a read-only connection. The indexer thread owns the
+        // read-write connection and handles all writes (index, undo trees).
+        self.index = Some(index::Index::open_readonly(&index_path)?);
+
         self.journal = Some(journal::Journal::new(vault_root));
         let file_store = store::local::LocalFileStore::new(vault_root.to_path_buf())?;
         // Grab the watcher receiver once — must not call watch() repeatedly

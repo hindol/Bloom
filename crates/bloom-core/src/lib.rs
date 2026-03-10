@@ -561,7 +561,7 @@ impl BloomEditor {
         // Reload the index connection to pick up changes from the indexer thread
         if let Some(vault_root) = &self.vault_root {
             let index_path = vault_root.join(".index.db");
-            if let Ok(idx) = index::Index::open(&index_path) {
+            if let Ok(idx) = index::Index::open_readonly(&index_path) {
                 self.index = Some(idx);
             }
         }
@@ -725,16 +725,17 @@ impl BloomEditor {
         };
         state.save(&session_path)?;
 
-        // Persist undo trees for all open buffers.
-        if let Some(idx) = &self.index {
-            let conn = idx.connection();
+        // Persist undo trees via the indexer thread (which owns the write connection).
+        if let Some(indexer_tx) = &self.indexer_tx {
+            let mut undo_data = Vec::new();
             for info in self.buffer_mgr.open_buffers() {
                 if let Some(buf) = self.buffer_mgr.get(&info.page_id) {
                     let page_hex = info.page_id.to_hex();
-                    if let Err(e) = buf.undo_tree().save_to_db(conn, &page_hex) {
-                        tracing::warn!(page = %page_hex, error = %e, "failed to persist undo tree");
-                    }
+                    undo_data.push(buf.undo_tree().to_persist_data(&page_hex));
                 }
+            }
+            if !undo_data.is_empty() {
+                let _ = indexer_tx.send(index::indexer::IndexRequest::PersistUndo(undo_data));
             }
         }
 

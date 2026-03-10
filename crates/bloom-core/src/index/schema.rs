@@ -65,6 +65,23 @@ pub(crate) fn create_tables(conn: &Connection) -> Result<(), BloomError> {
             last_accessed_ms INTEGER NOT NULL DEFAULT 0,
             frecency_score REAL NOT NULL DEFAULT 0.0
         );
+
+        -- Persistent undo tree. Serialized on session save, restored on launch.
+        -- Pruned when a buffer is closed or after 24 hours.
+        CREATE TABLE IF NOT EXISTS undo_tree (
+            page_id      TEXT NOT NULL,
+            node_id      INTEGER NOT NULL,
+            parent_id    INTEGER,
+            content      TEXT NOT NULL,
+            timestamp_ms INTEGER NOT NULL,
+            description  TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (page_id, node_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS undo_tree_state (
+            page_id         TEXT PRIMARY KEY,
+            current_node_id INTEGER NOT NULL
+        );
         ",
     )
     .map_err(|e| BloomError::IndexError(e.to_string()))

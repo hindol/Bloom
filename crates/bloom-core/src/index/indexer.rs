@@ -24,8 +24,27 @@ pub enum IndexRequest {
     FullRebuild,
     /// Re-index specific files (from file watcher, debounced).
     IncrementalBatch(Vec<PathBuf>),
+    /// Persist undo trees for the given pages. The indexer writes to SQLite.
+    PersistUndo(Vec<UndoPersistData>),
     /// Shut down the indexer thread.
     Shutdown,
+}
+
+/// Serialized undo tree data, ready for writing to SQLite.
+/// Produced on the UI thread, consumed by the indexer thread.
+pub struct UndoPersistData {
+    pub page_id: String,
+    pub nodes: Vec<UndoNodeData>,
+    pub current_node_id: i64,
+}
+
+/// One node of a serialized undo tree.
+pub struct UndoNodeData {
+    pub node_id: i64,
+    pub parent_id: Option<i64>,
+    pub content: String,
+    pub timestamp_ms: i64,
+    pub description: String,
 }
 
 /// Result sent from the indexer thread to the UI thread on completion.
@@ -135,10 +154,56 @@ fn indexer_main(
                     }
                 }
             }
+            IndexRequest::PersistUndo(undo_data) => {
+                if let Err(e) = persist_undo_trees(index.connection(), &undo_data) {
+                    tracing::error!(error = %e, "failed to persist undo trees");
+                } else {
+                    tracing::debug!(pages = undo_data.len(), "undo trees persisted");
+                }
+            }
             IndexRequest::Shutdown => break,
         }
     }
     tracing::info!("indexer thread stopped");
+}
+
+/// Write serialized undo trees to SQLite in a single transaction.
+fn persist_undo_trees(
+    conn: &rusqlite::Connection,
+    data: &[UndoPersistData],
+) -> Result<(), rusqlite::Error> {
+    let tx = conn.unchecked_transaction()?;
+
+    for page in data {
+        tx.execute("DELETE FROM undo_tree WHERE page_id = ?1", [&page.page_id])?;
+        tx.execute(
+            "DELETE FROM undo_tree_state WHERE page_id = ?1",
+            [&page.page_id],
+        )?;
+
+        let mut stmt = tx.prepare_cached(
+            "INSERT INTO undo_tree (page_id, node_id, parent_id, content, timestamp_ms, description)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )?;
+        for node in &page.nodes {
+            stmt.execute(rusqlite::params![
+                page.page_id,
+                node.node_id,
+                node.parent_id,
+                node.content,
+                node.timestamp_ms,
+                node.description,
+            ])?;
+        }
+
+        tx.execute(
+            "INSERT INTO undo_tree_state (page_id, current_node_id) VALUES (?1, ?2)",
+            rusqlite::params![page.page_id, page.current_node_id],
+        )?;
+    }
+
+    tx.commit()?;
+    Ok(())
 }
 
 fn send_error_completion(tx: &Sender<IndexComplete>, error: String) {

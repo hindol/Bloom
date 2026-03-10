@@ -97,11 +97,27 @@ pub struct FileFingerprint {
 }
 
 impl Index {
+    /// Open the index with full read-write access. Used by the indexer thread.
+    /// Creates tables if they don't exist.
     pub fn open(path: &Path) -> Result<Self, BloomError> {
         let conn = Connection::open(path).map_err(|e| BloomError::IndexError(e.to_string()))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
             .map_err(|e| BloomError::IndexError(e.to_string()))?;
         schema::create_tables(&conn)?;
+        Ok(Index { conn })
+    }
+
+    /// Open the index as read-only. Used by the UI thread for BQL queries,
+    /// backlink lookups, etc. Enforced at the SQLite level — write attempts
+    /// fail immediately. The indexer thread owns the single write connection.
+    pub fn open_readonly(path: &Path) -> Result<Self, BloomError> {
+        use rusqlite::OpenFlags;
+        let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let conn = Connection::open_with_flags(path, flags)
+            .map_err(|e| BloomError::IndexError(e.to_string()))?;
+        conn.execute_batch("PRAGMA foreign_keys=ON;")
+            .map_err(|e| BloomError::IndexError(e.to_string()))?;
         Ok(Index { conn })
     }
 
