@@ -64,60 +64,55 @@ crates/
 
 ## Text Rendering Strategy
 
-### Canvas, Not DOM
+### DOM, Not Canvas
 
-Editor content renders on a `<canvas>` element. Reasons:
+Editor content renders as styled DOM elements — `<div>` per line, `<span>` per styled segment. This matches every production web-based editor (VS Code/Monaco, Atom, CodeMirror).
 
-- **Pixel-precise cursor placement.** The cursor must land exactly on character boundaries. DOM layout is async and imprecise for this.
-- **Monospace grid control.** Even with variable heading sizes, each line is a monospace row. Canvas gives exact control over glyph positioning.
-- **Performance.** A 50-line viewport is 50 `fillText` calls. DOM would be 50 `<div>`s × N `<span>`s with style recalc on every frame.
-- **Consistent with terminal model.** The TUI paints cells; the GUI paints pixels. Same mental model, different resolution.
+**Why DOM:**
 
-### What Uses DOM
+- **Font quality.** DOM text uses the full system font rendering pipeline — subpixel antialiasing (ClearType on Windows), font hinting, OS-specific optimizations. Canvas uses grayscale-only antialiasing, producing blurrier, lighter text. For a note-taking app where you stare at text for hours, this is a dealbreaker.
+- **Accessibility.** Screen readers, focus management, and ARIA attributes work natively with DOM text. Canvas would require a parallel hidden DOM structure.
+- **Native text features.** Browser text selection, IME composition (CJK input, accent marks), right-click context menus, spellcheck integration — all free with DOM. All manual with canvas.
+- **Proportional font support.** If we ever use proportional fonts for prose, DOM handles variable-width layout natively. Canvas requires manual glyph measurement and positioning.
 
-- **Picker overlay** — `<div>` with `<input>` for the query field. Needs native text input, IME, clipboard.
-- **Status bar** — simple `<div>`, updates infrequently.
-- **Which-key popup** — `<div>` positioned at bottom of viewport.
-- **Dialogs / notifications** — `<div>` overlays.
-- **Setup wizard** — full-page DOM, no canvas.
+**Why not canvas:** No production editor uses canvas for primary text rendering. VS Code, Atom, CodeMirror — all DOM. Zed and Lapce skip the webview entirely and use native GPU rendering. Canvas text is strictly for minimap/decorative overlays, not reading surfaces.
 
-The rule: **canvas for editor content, DOM for UI chrome and input fields.**
+### What Uses Canvas (if anything)
 
-### Canvas Rendering Loop
+- **Minimap** — zoomed-out document overview, if we add one. Tiny colored blocks, not readable text.
+- **Custom decorations** — wavy error underlines, indent guides, diff gutter markers. Layered behind or in front of the DOM text.
 
-```typescript
-function renderFrame(frame: RenderFrame) {
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    for (const pane of frame.panes) {
-        renderPane(ctx, pane);
-    }
-    renderCursor(ctx, frame);
-}
+These are optional future additions, not launch requirements.
 
-function renderPane(ctx: CanvasRenderingContext2D, pane: PaneFrame) {
-    const { x, y, width, content_height } = pane.rect;
-    
-    for (let row = 0; row < pane.visible_lines.length; row++) {
-        const line = pane.visible_lines[row];
-        const lineY = y + row * lineHeight;
-        
-        // Gutter
-        renderGutter(ctx, line, lineY, x);
-        
-        // Styled spans
-        let cursorX = x + gutterWidth;
-        for (const span of line.spans) {
-            const text = line.text.substring(span.range.start, span.range.end);
-            const style = resolveStyle(span.style);
-            ctx.font = style.font;
-            ctx.fillStyle = style.color;
-            ctx.fillText(text, cursorX, lineY + baseline);
-            cursorX += ctx.measureText(text).width;
-        }
-    }
-}
+### DOM Structure
+
+```html
+<div class="editor-pane" style="--pane-x; --pane-y; --pane-w; --pane-h;">
+  <div class="gutter">
+    <div class="line-number">  1</div>
+    <div class="line-number">  2</div>
+    ...
+  </div>
+  <div class="content">
+    <div class="line current-line">
+      <span class="heading-1 bold">Design Decisions</span>
+    </div>
+    <div class="line">
+      <span class="normal">I chose </span>
+      <span class="noise">**</span>
+      <span class="bold">Rust</span>
+      <span class="noise">**</span>
+      <span class="normal"> for its </span>
+      <span class="noise">*</span>
+      <span class="italic">memory safety</span>
+      <span class="noise">*</span>
+    </div>
+    ...
+  </div>
+</div>
+```
+
+Each `StyledSpan` from `RenderedLine` maps to a `<span>` with a CSS class derived from the `Style` enum. Theme colours are applied via CSS custom properties (`--color-foreground`, `--color-salient`, etc.).
 ```
 
 ---
@@ -180,18 +175,18 @@ Default `line_height = 1.6` — generous spacing for readable prose (inspired by
 
 | Mode | Shape | Rendering |
 |------|-------|-----------|
-| Normal | Block | Filled rectangle over one character cell, `foreground` colour at ~50% opacity |
-| Insert | Bar | 2px vertical line at left edge of character cell |
+| Normal | Block | `<div>` overlay, one character cell wide, `foreground` colour at ~50% opacity |
+| Insert | Bar | `<div>` overlay, 2px wide, left edge of character cell |
 | Visual | Block | Same as Normal, selection highlight covers the range |
 | Command | Bar | Same as Insert |
 
 ### Blink
 
-Cursor blinks in Insert mode: 530ms on, 530ms off (macOS default). No blink in Normal mode — the block cursor is always visible. Blink resets on any keypress.
+Cursor blinks in Insert mode: 530ms on, 530ms off (macOS default). No blink in Normal mode — the block cursor is always visible. Blink resets on any keypress. Implemented with CSS animation on the cursor `<div>`.
 
 ### IME Composition
 
-When an IME is active (CJK input, accent composition), the canvas renders the composition string inline at the cursor position with an underline. The IME candidate window is positioned by Tauri's native IME support — the frontend reports the cursor pixel position via `window.inputMethodEditor.setCandidateWindowRect()`.
+When an IME is active (CJK input, accent composition), the browser handles composition natively within the DOM. A hidden `<textarea>` at the cursor position receives IME events — the composition string renders inline. The IME candidate window is positioned automatically by the browser using the textarea's bounding rect.
 
 ---
 
@@ -238,16 +233,18 @@ Scrolling updates `viewport.first_visible_line`. The core re-renders with the ne
 
 ### Split Panes
 
-Core computes `PaneRectFrame` with `(x, y, width, content_height)` in cell units. The GUI converts to pixels:
+Core computes `PaneRectFrame` with `(x, y, width, content_height)` in cell units. The GUI converts to pixels and positions each pane as an absolutely-positioned `<div>`:
 
 ```typescript
-const paneX = pane.rect.x * charWidth;
-const paneY = pane.rect.y * lineHeight;
-const paneW = pane.rect.width * charWidth;
-const paneH = pane.rect.total_height * lineHeight;
+const paneDiv = document.createElement('div');
+paneDiv.className = 'editor-pane';
+paneDiv.style.left = `${pane.rect.x * charWidth}px`;
+paneDiv.style.top = `${pane.rect.y * lineHeight}px`;
+paneDiv.style.width = `${pane.rect.width * charWidth}px`;
+paneDiv.style.height = `${pane.rect.total_height * lineHeight}px`;
 ```
 
-Each pane is a clipped region on the canvas. Borders are drawn as 1px lines at pane boundaries in `faded` colour.
+Each pane is an independent DOM subtree with its own line divs, gutter, and cursor. Borders are CSS borders on the pane `<div>` in `faded` colour.
 
 ### Resize Handles
 
@@ -304,9 +301,11 @@ Target: **16ms per frame** (60fps). The critical path:
 ```
 RenderFrame serialization (Rust → JSON): < 1ms
 JSON parse (JS): < 1ms  
-Canvas paint: < 5ms (50 lines × styled spans)
+DOM diff + update: < 5ms (50 lines, incremental updates)
 Total: < 7ms — well within budget
 ```
+
+DOM updates are incremental — on a typical keystroke, only the edited line and the cursor position change. The frontend diffs the previous frame against the new frame and updates only the changed lines. Full re-renders (scroll, mode change) are still under 5ms for 50 lines.
 
 ### Virtual Scrolling
 
