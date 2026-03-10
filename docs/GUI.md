@@ -62,6 +62,172 @@ crates/
 
 ---
 
+## Visual Mockups
+
+### Single Pane — Normal Mode
+
+<div style="font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 14px; line-height: 1.6; background: #141414; color: #EBE9E7; border-radius: 8px; overflow: hidden; max-width: 720px; margin: 16px 0;">
+  <!-- Title bar -->
+  <div style="background: #1A1919; padding: 8px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #37373E;">
+    <div style="display: flex; gap: 8px;">
+      <span style="width: 12px; height: 12px; border-radius: 50%; background: #EC6A5E; display: inline-block;"></span>
+      <span style="width: 12px; height: 12px; border-radius: 50%; background: #F2DA61; display: inline-block;"></span>
+      <span style="width: 12px; height: 12px; border-radius: 50%; background: #62C554; display: inline-block;"></span>
+    </div>
+    <span style="color: #A3A3A3; font-size: 12px;">Text Editor Theory — Bloom</span>
+    <span style="width: 60px;"></span>
+  </div>
+  <!-- Editor content -->
+  <div style="padding: 0; display: flex;">
+    <!-- Gutter -->
+    <div style="padding: 12px 8px 12px 12px; text-align: right; color: #A3A3A3; user-select: none; min-width: 40px; border-right: 1px solid #212228;">
+      <div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div><div>9</div><div>10</div><div>11</div><div style="color: #EBE9E7;">12</div><div>13</div><div>14</div>
+    </div>
+    <!-- Content -->
+    <div style="padding: 12px 16px; flex: 1; overflow: hidden;">
+      <div><span style="color: #A3A3A3; opacity: 0.5;">---</span></div>
+      <div><span style="color: #A3A3A3; font-style: italic;">id:</span> <span style="color: #A3A3A3; font-style: italic; opacity: 0.6;">8f3a1b2c</span></div>
+      <div><span style="color: #A3A3A3; font-style: italic;">title:</span> <span style="color: #EBE9E7; font-weight: bold; font-style: italic;">"Text Editor Theory"</span></div>
+      <div><span style="color: #A3A3A3; font-style: italic;">tags:</span> <span style="color: #A3A3A3;">[rust, editors]</span></div>
+      <div><span style="color: #A3A3A3; opacity: 0.5;">---</span></div>
+      <div>&nbsp;</div>
+      <div><span style="color: #A3A3A3; opacity: 0.5;">##</span> <span style="color: #F4BF4F; font-weight: bold; font-size: 18px;">Rope Data Structure</span></div>
+      <div>&nbsp;</div>
+      <div>Ropes are O(log n) for inserts. They use balanced</div>
+      <div>binary trees to represent text.</div>
+      <div>&nbsp;</div>
+      <div style="background: #212228; border-radius: 2px;"><span style="color: #EBE9E7;">- </span><span style="color: #F2DA61;">[ ]</span> Review the ropey crate API <span style="color: #A3A3A3;">@due</span><span style="color: #A3A3A3; opacity: 0.5;">(</span><span style="color: #EBE9E7;">2026-03-10</span><span style="color: #A3A3A3; opacity: 0.5;">)</span></div>
+      <div><span style="color: #EBE9E7;">- </span><span style="color: #62C554; text-decoration: line-through;">[x]</span><span style="color: #A3A3A3; text-decoration: line-through;"> Read Xi Editor source</span></div>
+      <div>&nbsp;</div>
+    </div>
+  </div>
+  <!-- Status bar -->
+  <div style="background: #212228; padding: 4px 16px; display: flex; justify-content: space-between; font-size: 12px; border-top: 1px solid #37373E;">
+    <div>
+      <span style="color: #EBE9E7; font-weight: bold;">NORMAL</span>
+      <span style="color: #37373E;"> │ </span>
+      <span style="color: #EBE9E7;">Text Editor Theory</span>
+      <span style="color: #F4BF4F;"> [+]</span>
+    </div>
+    <div style="color: #A3A3A3;">12:1</div>
+  </div>
+</div>
+
+### Split Panes — Editor + Journal
+
+<div style="font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.6; background: #141414; color: #EBE9E7; border-radius: 8px; overflow: hidden; max-width: 720px; margin: 16px 0;">
+  <!-- Title bar -->
+  <div style="background: #1A1919; padding: 8px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #37373E;">
+    <div style="display: flex; gap: 8px;">
+      <span style="width: 12px; height: 12px; border-radius: 50%; background: #EC6A5E; display: inline-block;"></span>
+      <span style="width: 12px; height: 12px; border-radius: 50%; background: #F2DA61; display: inline-block;"></span>
+      <span style="width: 12px; height: 12px; border-radius: 50%; background: #62C554; display: inline-block;"></span>
+    </div>
+    <span style="color: #A3A3A3; font-size: 12px;">Bloom</span>
+    <span style="width: 60px;"></span>
+  </div>
+  <!-- Split panes -->
+  <div style="display: flex;">
+    <!-- Left pane -->
+    <div style="flex: 1; border-right: 1px solid #37373E;">
+      <div style="padding: 4px 12px; color: #A3A3A3; font-size: 11px; border-bottom: 1px solid #212228;">Text Editor Theory</div>
+      <div style="padding: 8px 12px;">
+        <div><span style="color: #A3A3A3; opacity: 0.5;">##</span> <span style="color: #F4BF4F; font-weight: bold;">Rope Data Structure</span></div>
+        <div>&nbsp;</div>
+        <div>Ropes are O(log n) for</div>
+        <div>inserts. They use balanced</div>
+        <div>binary trees to represent</div>
+        <div>text.</div>
+        <div>&nbsp;</div>
+        <div>See <span style="color: #F5F2F0; text-decoration: underline; background: #1A1919;">Xi Editor</span> for</div>
+        <div>a real-world implementation.</div>
+      </div>
+      <div style="background: #212228; padding: 4px 12px; font-size: 11px; display: flex; justify-content: space-between; border-top: 1px solid #37373E;">
+        <div><span style="font-weight: bold;">NORMAL</span><span style="color: #37373E;"> │ </span>Text Editor Theory</div>
+        <div style="color: #A3A3A3;">5:1</div>
+      </div>
+    </div>
+    <!-- Right pane -->
+    <div style="flex: 1;">
+      <div style="padding: 4px 12px; color: #A3A3A3; font-size: 11px; border-bottom: 1px solid #212228;">2026-03-09</div>
+      <div style="padding: 8px 12px;">
+        <div><span style="color: #EBE9E7;">- </span>Explored ropey crate for</div>
+        <div>&nbsp; Bloom's buffer model</div>
+        <div><span style="color: #EBE9E7;">- </span><span style="color: #F2DA61;">[ ]</span> Review PR for auth</div>
+        <div>&nbsp; module <span style="color: #A3A3A3;">@due</span><span style="color: #A3A3A3; opacity: 0.5;">(</span>03-10<span style="color: #A3A3A3; opacity: 0.5;">)</span></div>
+        <div><span style="color: #EBE9E7;">- </span>The borrow checker</div>
+        <div>&nbsp; finally clicked for me</div>
+        <div>&nbsp;</div>
+        <div><span style="color: #A3A3A3;">#rust #editors</span></div>
+      </div>
+      <div style="background: #37373E; padding: 4px 12px; font-size: 11px; color: #A3A3A3; border-top: 1px solid #37373E;">
+        2026-03-09
+      </div>
+    </div>
+  </div>
+</div>
+
+### Picker — Find Page
+
+<div style="font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.6; background: #141414; color: #EBE9E7; border-radius: 8px; overflow: hidden; max-width: 520px; margin: 16px auto;">
+  <!-- Picker frame -->
+  <div style="background: #37373E; border-radius: 8px; border: 1px solid #A3A3A3; margin: 12px; overflow: hidden;">
+    <!-- Title + input -->
+    <div style="padding: 12px 16px; border-bottom: 1px solid #474648;">
+      <div style="color: #A3A3A3; font-size: 11px; margin-bottom: 8px;">Find Page</div>
+      <div style="background: #212228; border-radius: 4px; padding: 6px 10px;">
+        <span style="color: #A3A3A3;">❯ </span><span style="color: #EBE9E7;">edt thry</span><span style="border-left: 2px solid #F4BF4F; animation: blink 1s step-end infinite;">&nbsp;</span>
+      </div>
+    </div>
+    <!-- Results -->
+    <div style="padding: 4px 0;">
+      <div style="padding: 6px 16px; background: #474648; display: flex; justify-content: space-between;">
+        <div><span style="color: #F4BF4F;">▸ </span><span style="color: #EBE9E7;">Text Editor Theory</span></div>
+        <div><span style="color: #A3A3A3;">#rust #editors</span> &nbsp; <span style="color: #A3A3A3;">Feb 28</span></div>
+      </div>
+      <div style="padding: 6px 16px; display: flex; justify-content: space-between;">
+        <div><span style="color: #474648;">▸ </span>Threading Models</div>
+        <div><span style="color: #A3A3A3;">#architecture</span> &nbsp; <span style="color: #A3A3A3;">Feb 25</span></div>
+      </div>
+      <div style="padding: 6px 16px; display: flex; justify-content: space-between;">
+        <div><span style="color: #474648;">▸ </span>Editor Architecture Notes</div>
+        <div><span style="color: #A3A3A3;">#design</span> &nbsp; <span style="color: #A3A3A3;">Feb 20</span></div>
+      </div>
+    </div>
+    <div style="padding: 4px 16px 8px; color: #A3A3A3; font-size: 11px;">3 of 147 pages</div>
+    <!-- Preview -->
+    <div style="border-top: 1px solid #474648; padding: 12px 16px; background: #212228;">
+      <div style="color: #F4BF4F; font-weight: bold; margin-bottom: 4px;">Rope Data Structure</div>
+      <div style="color: #A3A3A3;">Ropes are O(log n) for inserts. They use</div>
+      <div style="color: #A3A3A3;">balanced binary trees to represent text...</div>
+    </div>
+  </div>
+</div>
+
+### Insert Mode — Typing
+
+<div style="font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 14px; line-height: 1.6; background: #141414; color: #EBE9E7; border-radius: 8px; overflow: hidden; max-width: 720px; margin: 16px 0;">
+  <div style="padding: 12px 16px;">
+    <div><span style="color: #A3A3A3; opacity: 0.5;">##</span> <span style="color: #F4BF4F; font-weight: bold; font-size: 18px;">Notes</span></div>
+    <div>&nbsp;</div>
+    <div>The ropey crate handles Unicode correctly via</div>
+    <div style="background: #212228;">grapheme cluster boundaries.<span style="border-left: 2px solid #62C554;">&nbsp;</span></div>
+    <div>&nbsp;</div>
+    <div>See <span style="color: #A3A3A3; opacity: 0.5;">[[</span><span style="color: #F5F2F0; text-decoration: underline; background: #1A1919;">Text Editor Theory</span><span style="color: #A3A3A3; opacity: 0.5;">]]</span> for background.</div>
+  </div>
+  <!-- Status bar -->
+  <div style="background: #62C554; padding: 4px 16px; display: flex; justify-content: space-between; font-size: 12px;">
+    <div>
+      <span style="color: #141414; font-weight: bold;">INSERT</span>
+      <span style="color: #141414; opacity: 0.3;"> │ </span>
+      <span style="color: #141414;">Rust Programming</span>
+    </div>
+    <div style="color: #141414;">4:32</div>
+  </div>
+</div>
+
+---
+
 ## Text Rendering Strategy
 
 ### DOM, Not Canvas
