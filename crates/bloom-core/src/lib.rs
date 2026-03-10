@@ -723,7 +723,22 @@ impl BloomEditor {
             layout,
             active_pane: self.window_mgr.active_pane().0,
         };
-        state.save(&session_path)
+        state.save(&session_path)?;
+
+        // Persist undo trees for all open buffers.
+        if let Some(idx) = &self.index {
+            let conn = idx.connection();
+            for info in self.buffer_mgr.open_buffers() {
+                if let Some(buf) = self.buffer_mgr.get(&info.page_id) {
+                    let page_hex = info.page_id.to_hex();
+                    if let Err(e) = buf.undo_tree().save_to_db(conn, &page_hex) {
+                        tracing::warn!(page = %page_hex, error = %e, "failed to persist undo tree");
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub fn restore_session(&mut self) -> Result<(), error::BloomError> {
@@ -775,6 +790,23 @@ impl BloomEditor {
                     self.set_cursor(
                         line_start + buf_state.cursor_column.min(line_len.saturating_sub(1)),
                     );
+                }
+            }
+
+            // Restore persisted undo tree.
+            if let Some(idx) = &self.index {
+                let page_hex = id.to_hex();
+                match buffer::undo::UndoTree::load_from_db(idx.connection(), &page_hex) {
+                    Ok(Some(tree)) => {
+                        if let Some(buf) = self.buffer_mgr.get_mut(&id) {
+                            buf.set_undo_tree(tree);
+                            tracing::debug!(page = %page_hex, "undo tree restored");
+                        }
+                    }
+                    Ok(None) => {} // no persisted tree — use the fresh one
+                    Err(e) => {
+                        tracing::warn!(page = %page_hex, error = %e, "failed to restore undo tree");
+                    }
                 }
             }
             if let Some(ps) = self.window_mgr.pane_state_mut(pane_id) {

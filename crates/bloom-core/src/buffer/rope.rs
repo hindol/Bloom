@@ -146,6 +146,11 @@ impl Buffer {
         &self.undo_tree
     }
 
+    /// Replace the undo tree (used when restoring from persistent storage).
+    pub fn set_undo_tree(&mut self, tree: UndoTree) {
+        self.undo_tree = tree;
+    }
+
     pub fn restore_state(&mut self, node_id: UndoNodeId) {
         self.rope = self.undo_tree.restore(node_id);
         self.bump_version();

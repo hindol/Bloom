@@ -29,6 +29,11 @@ impl BloomEditor {
 
         let index_path = vault_root.join(".index.db");
         self.index = Some(index::Index::open(&index_path)?);
+
+        // Create undo persistence tables in the same database.
+        if let Some(idx) = &self.index {
+            let _ = buffer::undo::create_undo_tables(idx.connection());
+        }
         self.journal = Some(journal::Journal::new(vault_root));
         let file_store = store::local::LocalFileStore::new(vault_root.to_path_buf())?;
         // Grab the watcher receiver once — must not call watch() repeatedly
