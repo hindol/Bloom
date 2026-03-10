@@ -1179,7 +1179,10 @@ mod tests {
 
         // Verify file on disk has the new content (with auto-assigned block ID)
         let on_disk = std::fs::read_to_string(&file_path).unwrap();
-        assert_eq!(on_disk, "Xhello ^a");
+        assert!(on_disk.starts_with("Xhello ^"), "expected block ID, got: {on_disk}");
+        // Block ID is 5-char base36 after the ^
+        let id_part = on_disk.trim().strip_prefix("Xhello ^").unwrap();
+        assert_eq!(id_part.len(), 5, "block ID should be 5 chars, got: {id_part}");
     }
 
     #[test]
@@ -1203,12 +1206,21 @@ mod tests {
         editor.save_current().unwrap();
 
         let on_disk = std::fs::read_to_string(&file_path).unwrap();
-        // Paragraph 1 (lines 0-1): ID on last line (line 1)
-        // Paragraph 2 (line 3): ID on its own line
-        assert!(on_disk.contains("Line two ^a\n"), "got: {on_disk}");
-        assert!(on_disk.contains("Line three ^b\n"), "got: {on_disk}");
+        // Paragraph 1 (lines 0-1): ID on last line (line 1) — "Line two ^xxxxx"
+        assert!(
+            on_disk.lines().any(|l| l.starts_with("Line two ^") && l.len() == "Line two ^xxxxx".len()),
+            "expected block ID on 'Line two', got:\n{on_disk}"
+        );
+        // Paragraph 2 (line 3): ID on its own line — "Line three ^xxxxx"
+        assert!(
+            on_disk.lines().any(|l| l.starts_with("Line three ^") && l.len() == "Line three ^xxxxx".len()),
+            "expected block ID on 'Line three', got:\n{on_disk}"
+        );
         // Line one should NOT have an ID (it's not the last line of the block)
-        assert!(!on_disk.contains("Line one ^"), "got: {on_disk}");
+        assert!(
+            !on_disk.lines().any(|l| l.starts_with("XLine one ^") || l.starts_with("Line one ^")),
+            "Line one should not have block ID, got:\n{on_disk}"
+        );
     }
 
     #[test]
@@ -1762,6 +1774,8 @@ mod tests {
             "expected ~200+ blocks, got {block_count}"
         );
         // Performance gate: parse + assign should be under 5ms in release.
+        // In debug builds, skip the timing check (debug is 10-50x slower).
+        #[cfg(not(debug_assertions))]
         assert!(
             parse_ms + assign_ms < 5.0,
             "too slow: parse={parse_ms:.2}ms + assign={assign_ms:.2}ms"
@@ -1813,6 +1827,7 @@ mod tests {
 
         assert_eq!(total_assigned, 1000, "all pages should get IDs");
         // Performance gate: 1000 pages should complete under 200ms in release.
+        #[cfg(not(debug_assertions))]
         assert!(total_ms < 200.0, "too slow: {total_ms:.0}ms for 1000 pages");
     }
 
@@ -1856,6 +1871,8 @@ mod tests {
 
         assert!(!any_changed, "no pages should need changes");
         // Idempotent check should be fast in release.
+        // Performance gate: idempotent re-parse should be under 100ms in release.
+        #[cfg(not(debug_assertions))]
         assert!(total_ms < 100.0, "too slow for no-op: {total_ms:.0}ms");
     }
 }
