@@ -10,6 +10,7 @@ impl BloomEditor {
     /// Handle a single DiskWriter completion ack.
     /// Returns true if the visual state changed (dirty indicator flipped).
     pub fn handle_write_complete(&mut self, wc: store::disk_writer::WriteComplete) -> bool {
+        tracing::debug!(path = %wc.path.display(), "write complete received");
         self.last_write_fingerprints
             .insert(wc.path.clone(), (wc.mtime, wc.size));
         if let Some(page_id) = self.buffer_mgr.find_by_path(&wc.path).cloned() {
@@ -32,6 +33,7 @@ impl BloomEditor {
             | store::traits::FileEvent::Deleted(p) => p.clone(),
             store::traits::FileEvent::Renamed { to, .. } => to.clone(),
         };
+        tracing::debug!(path = %path.display(), event = ?std::mem::discriminant(&event), "file event received");
         if path.extension().and_then(|e| e.to_str()) != Some("md") {
             return false;
         }
@@ -63,6 +65,7 @@ impl BloomEditor {
 
             if is_own_write {
                 // Fingerprint matched — already marked clean in handle_write_complete
+                tracing::debug!(path = %path.display(), "self-write detected, skipping reload");
             } else if let Ok(disk_content) = std::fs::read_to_string(&path) {
                 let buf_content = self.buffer_mgr.get(&page_id).map(|b| b.text().to_string());
                 if buf_content.as_deref() == Some(disk_content.as_str()) {
@@ -105,6 +108,7 @@ impl BloomEditor {
                 let paths: Vec<std::path::PathBuf> = self.pending_file_events.drain().collect();
                 self.file_event_deadline = None;
                 if let Some(tx) = &self.indexer_tx {
+                    tracing::info!(file_count = paths.len(), files = ?paths, "flushing file events to indexer");
                     let _ = tx.send(index::indexer::IndexRequest::IncrementalBatch(paths));
                     self.indexing = true;
                     return true;
@@ -124,6 +128,7 @@ impl BloomEditor {
     /// 2. Assigns block IDs to blocks that don't have them
     /// 3. Extracts content and writes via DiskWriter (or inline in tests)
     pub(crate) fn save_page(&mut self, page_id: &types::PageId) {
+        tracing::debug!(page = %page_id.to_hex(), "save_page called");
         // Skip pseudo-paths like [scratch].
         let is_pseudo = self
             .buffer_mgr
@@ -221,6 +226,7 @@ impl BloomEditor {
     /// generates IDs for blocks without them, and writes back via DiskWriter.
     /// Files that already have IDs on all blocks are skipped (no write).
     pub fn assign_block_ids_bulk(&mut self) {
+        tracing::info!("assign_block_ids_bulk: starting bulk assignment on UI thread");
         let Some(vault_root) = self.vault_root.clone() else {
             return;
         };
@@ -251,6 +257,7 @@ impl BloomEditor {
         }
 
         if assigned_count > 0 {
+            tracing::info!(assigned_count, "assign_block_ids_bulk: wrote files via DiskWriter");
             self.push_notification(
                 format!("Assigned block IDs to {assigned_count} files"),
                 render::NotificationLevel::Info,

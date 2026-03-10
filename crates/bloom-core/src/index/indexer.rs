@@ -249,7 +249,7 @@ fn run_full_rebuild(
 
     // Phase 2: Read + Parse ALL files (no fingerprint check)
     let t_read = Instant::now();
-    let entries = parse_paths(vault_root, &rel_paths, parser);
+    let entries = parse_paths(vault_root, &rel_paths, parser, true);
     let read_parse_ms = t_read.elapsed().as_millis() as u64;
 
     // Phase 3: Wipe all index tables and reinsert
@@ -359,7 +359,7 @@ fn run_incremental(
 
     // Phase 2: Read + Parse
     let t_read = Instant::now();
-    let entries = parse_paths(vault_root, &changed_paths, parser);
+    let entries = parse_paths(vault_root, &changed_paths, parser, true);
     let read_parse_ms = t_read.elapsed().as_millis() as u64;
 
     // Phase 3: Write
@@ -438,7 +438,7 @@ fn run_batch(
     }
 
     let t_read = Instant::now();
-    let entries = parse_paths(vault_root, &existing, parser);
+    let entries = parse_paths(vault_root, &existing, parser, true);
     let read_parse_ms = t_read.elapsed().as_millis() as u64;
 
     let t_write = Instant::now();
@@ -484,10 +484,13 @@ fn run_batch(
 }
 
 /// Read and parse a set of relative paths into IndexEntry objects.
+/// If `assign_ids` is true, files with blocks missing IDs get IDs assigned
+/// and are written back to disk (atomic write, on the indexer thread).
 fn parse_paths(
     vault_root: &Path,
     rel_paths: &[PathBuf],
     parser: &parser::BloomMarkdownParser,
+    assign_ids: bool,
 ) -> Vec<IndexEntry> {
     rel_paths
         .par_iter()
@@ -495,6 +498,29 @@ fn parse_paths(
             let full = vault_root.join(rel_path);
             let content = std::fs::read_to_string(&full).ok()?;
             let doc = parser.parse(&content);
+
+            // Assign block IDs on the indexer thread if needed.
+            let content = if assign_ids {
+                if let Some(new_content) = crate::block_id_gen::assign_block_ids(&content, &doc) {
+                    if crate::store::disk_writer::atomic_write(&full, &new_content).is_ok() {
+                        tracing::debug!(path = %rel_path.display(), "block IDs assigned by indexer");
+                        new_content
+                    } else {
+                        content
+                    }
+                } else {
+                    content
+                }
+            } else {
+                content
+            };
+
+            // Re-parse if content changed (block IDs were added).
+            let doc = if assign_ids {
+                parser.parse(&content)
+            } else {
+                doc
+            };
             let fm = doc.frontmatter.as_ref();
             let page_id = fm.and_then(|f| f.id.clone())?;
             let title = fm.and_then(|f| f.title.clone()).unwrap_or_default();
@@ -545,3 +571,4 @@ fn parse_paths(
         })
         .collect()
 }
+

@@ -538,6 +538,13 @@ impl BloomEditor {
     /// Handle a single indexer completion event.
     pub fn handle_index_complete(&mut self, complete: index::indexer::IndexComplete) {
         self.indexing = false;
+        tracing::info!(
+            files_scanned = complete.timing.files_scanned,
+            files_changed = complete.timing.files_changed,
+            total_ms = complete.timing.total_ms,
+            bulk_done = self.block_ids_bulk_done,
+            "index complete received",
+        );
 
         if let Some(error) = &complete.error {
             self.push_notification(
@@ -569,11 +576,10 @@ impl BloomEditor {
         // Invalidate the BQL query cache so visible queries re-execute.
         self.query_cache.borrow_mut().invalidate();
 
-        // On first indexing (files_changed == files_scanned means everything was new),
-        // assign block IDs to all pages that need them.
-        if t.files_changed > 0 && !self.block_ids_bulk_done {
+        // Block IDs are now assigned by the indexer thread during parse_paths.
+        // Mark bulk done unconditionally after first index complete.
+        if !self.block_ids_bulk_done {
             self.block_ids_bulk_done = true;
-            self.assign_block_ids_bulk();
         }
     }
 
