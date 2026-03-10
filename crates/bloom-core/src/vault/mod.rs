@@ -1,5 +1,6 @@
 pub mod adopt;
 pub mod conflict;
+pub mod lock;
 pub mod setup;
 
 use crate::error::BloomError;

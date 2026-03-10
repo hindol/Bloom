@@ -21,6 +21,12 @@ impl BloomEditor {
     /// Spawns the background indexer thread (non-blocking).
     pub fn init_vault(&mut self, vault_root: &std::path::Path) -> Result<(), error::BloomError> {
         tracing::info!(vault = %vault_root.display(), "vault initializing");
+
+        // Acquire single-instance lock before touching any vault state.
+        let lock = vault::lock::VaultLock::acquire(vault_root)
+            .map_err(|e| error::BloomError::VaultError(e.to_string()))?;
+        self.vault_lock = Some(lock);
+
         let index_path = vault_root.join(".index.db");
         self.index = Some(index::Index::open(&index_path)?);
         self.journal = Some(journal::Journal::new(vault_root));

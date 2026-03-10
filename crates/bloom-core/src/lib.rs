@@ -211,6 +211,8 @@ pub struct BloomEditor {
     pub(crate) block_ids_bulk_done: bool,
     // BQL query cache (invalidated on IndexComplete)
     pub(crate) query_cache: std::cell::RefCell<query::QueryCache>,
+    // Single-instance vault lock (held for the lifetime of the editor)
+    pub(crate) vault_lock: Option<vault::lock::VaultLock>,
 }
 
 pub(crate) struct InlineCompletion {
@@ -439,6 +441,7 @@ impl BloomEditor {
             inline_completion: None,
             block_ids_bulk_done: false,
             query_cache: std::cell::RefCell::new(query::QueryCache::new()),
+            vault_lock: None,
             config,
         })
     }

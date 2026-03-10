@@ -47,4 +47,7 @@ pub enum BloomError {
 
     #[error("watcher error: {0}")]
     WatcherError(#[from] notify::Error),
+
+    #[error("vault error: {0}")]
+    VaultError(String),
 }
