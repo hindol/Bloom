@@ -3,6 +3,8 @@ use std::ops::Range;
 
 use chrono::NaiveDate;
 
+use serde::Serialize;
+
 use crate::types::{BlockId, PageId, TagName, Timestamp};
 
 // --- Document types ---
@@ -88,13 +90,13 @@ pub struct ParsedBlock {
 
 // --- Highlighting types ---
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct StyledSpan {
     pub range: Range<usize>,
     pub style: Style,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Style {
     Normal,
     Heading { level: u8 },

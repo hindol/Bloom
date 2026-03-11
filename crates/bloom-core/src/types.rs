@@ -1,4 +1,5 @@
 use chrono::{NaiveDate, NaiveDateTime};
+use serde::Serialize;
 use std::fmt;
 use std::path::PathBuf;
 
@@ -40,7 +41,7 @@ pub struct TagName(pub String);
 
 pub type Version = u64;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy, Serialize)]
 pub struct PaneId(pub u64);
 
 pub type UndoNodeId = u64;

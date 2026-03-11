@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bloom 🌱</title>
+  <style>
+    :root {
+      --bg: #141414;
+      --fg: #EBE9E7;
+      --faded: #A3A3A3;
+      --salient: #F4BF4F;
+      --strong: #F5F2F0;
+      --subtle: #37373E;
+      --modeline: #1A1919;
+      --highlight: #212228;
+      --accent-green: #62C554;
+      --accent-red: #CF6752;
+      --accent-blue: #81A1C1;
+      --accent-yellow: #F2DA61;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: var(--bg);
+      color: var(--fg);
+      font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+      font-size: 14px;
+      line-height: 1.6;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #editor {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .pane {
+      position: absolute;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .pane-content {
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .line {
+      white-space: pre;
+      height: 1.6em;
+    }
+
+    .gutter {
+      display: inline-block;
+      width: 4em;
+      text-align: right;
+      padding-right: 0.5em;
+      color: var(--faded);
+      user-select: none;
+    }
+
+    .status-bar {
+      height: 1.6em;
+      padding: 0 1em;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+    }
+
+    .status-bar.active {
+      background: var(--highlight);
+    }
+
+    .status-bar.inactive {
+      background: var(--subtle);
+      color: var(--faded);
+    }
+
+    .mode-badge {
+      font-weight: bold;
+      margin-right: 0.5em;
+    }
+
+    .mode-normal { color: var(--fg); }
+    .mode-insert { color: var(--bg); background: var(--accent-green); padding: 0 4px; }
+    .mode-visual { color: var(--bg); background: var(--accent-blue); padding: 0 4px; }
+
+    /* Syntax styles */
+    .s-heading-1 { color: var(--strong); font-weight: bold; font-size: 1.5em; }
+    .s-heading-2 { color: var(--salient); font-weight: bold; font-size: 1.3em; }
+    .s-bold { font-weight: bold; }
+    .s-italic { font-style: italic; }
+    .s-tag { color: var(--faded); }
+    .s-noise { color: var(--faded); opacity: 0.5; }
+    .s-link { color: var(--strong); text-decoration: underline; }
+    .s-checkbox-unchecked { color: var(--accent-yellow); }
+    .s-checkbox-checked { color: var(--accent-green); text-decoration: line-through; }
+    .s-frontmatter { color: var(--faded); font-style: italic; }
+
+    .current-line { background: var(--highlight); }
+
+    #loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      color: var(--faded);
+      font-size: 18px;
+    }
+  </style>
+</head>
+<body>
+  <div id="loading">Bloom 🌱</div>
+  <div id="editor" style="display: none;"></div>
+
+  <script>
+    const { invoke } = window.__TAURI__.core;
+    const { listen } = window.__TAURI__.event;
+
+    const editorEl = document.getElementById('editor');
+    const loadingEl = document.getElementById('loading');
+
+    // Style class mapping from Bloom's Style enum
+    const STYLE_MAP = {
+      'Normal': '',
+      'Heading': 's-heading-1',
+      'Bold': 's-bold',
+      'Italic': 's-italic',
+      'Tag': 's-tag',
+      'SyntaxNoise': 's-noise',
+      'LinkText': 's-link',
+      'LinkChrome': 's-noise',
+      'CheckboxUnchecked': 's-checkbox-unchecked',
+      'CheckboxChecked': 's-checkbox-checked',
+      'Frontmatter': 's-frontmatter',
+      'FrontmatterTitle': 's-bold s-italic',
+    };
+
+    function renderFrame(frame) {
+      loadingEl.style.display = 'none';
+      editorEl.style.display = 'block';
+      editorEl.innerHTML = '';
+
+      for (const pane of frame.panes) {
+        const paneEl = document.createElement('div');
+        paneEl.className = 'pane';
+
+        const contentEl = document.createElement('div');
+        contentEl.className = 'pane-content';
+
+        for (let i = 0; i < pane.visible_lines.length; i++) {
+          const line = pane.visible_lines[i];
+          const lineEl = document.createElement('div');
+          lineEl.className = 'line';
+
+          // Check if this is the cursor line
+          const bufferLine = line.source.Buffer;
+          if (pane.is_active && bufferLine !== undefined && bufferLine === pane.cursor.line) {
+            lineEl.classList.add('current-line');
+          }
+
+          // Gutter
+          const gutterEl = document.createElement('span');
+          gutterEl.className = 'gutter';
+          gutterEl.textContent = bufferLine !== undefined ? String(bufferLine + 1) : '';
+          lineEl.appendChild(gutterEl);
+
+          // Content with styled spans
+          const text = line.text.replace(/[\r\n]+$/, '');
+          if (line.spans.length === 0) {
+            lineEl.appendChild(document.createTextNode(text));
+          } else {
+            let lastEnd = 0;
+            for (const span of line.spans) {
+              const start = Math.min(span.range.start, text.length);
+              const end = Math.min(span.range.end, text.length);
+              if (lastEnd < start) {
+                lineEl.appendChild(document.createTextNode(text.slice(lastEnd, start)));
+              }
+              const spanEl = document.createElement('span');
+              const styleClass = resolveStyleClass(span.style);
+              if (styleClass) spanEl.className = styleClass;
+              spanEl.textContent = text.slice(start, end);
+              lineEl.appendChild(spanEl);
+              lastEnd = end;
+            }
+            if (lastEnd < text.length) {
+              lineEl.appendChild(document.createTextNode(text.slice(lastEnd)));
+            }
+          }
+
+          contentEl.appendChild(lineEl);
+        }
+
+        paneEl.appendChild(contentEl);
+
+        // Status bar
+        const statusEl = document.createElement('div');
+        statusEl.className = `status-bar ${pane.is_active ? 'active' : 'inactive'}`;
+        if (pane.is_active) {
+          statusEl.innerHTML = `
+            <div>
+              <span class="mode-badge mode-${pane.status_bar.mode.toLowerCase()}">${pane.status_bar.mode}</span>
+              ${pane.title}${pane.dirty ? ' <span style="color:var(--salient)">[+]</span>' : ''}
+            </div>
+            <div style="color:var(--faded)">${pane.cursor.line + 1}:${pane.cursor.column + 1}</div>
+          `;
+        } else {
+          statusEl.textContent = pane.title;
+        }
+        paneEl.appendChild(statusEl);
+
+        editorEl.appendChild(paneEl);
+      }
+    }
+
+    function resolveStyleClass(style) {
+      if (typeof style === 'string') return STYLE_MAP[style] || '';
+      if (style.Heading) {
+        const level = style.Heading.level || 1;
+        return level <= 2 ? `s-heading-${level}` : 's-bold';
+      }
+      return '';
+    }
+
+    // Listen for render events from the Rust backend
+    listen('render', (event) => {
+      renderFrame(event.payload);
+    });
+
+    // Forward key events to Rust
+    document.addEventListener('keydown', async (e) => {
+      // Don't forward if an input element is focused
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      const key = {
+        code: e.key,
+        ctrl: e.ctrlKey,
+        alt: e.altKey,
+        shift: e.shiftKey,
+        meta: e.metaKey,
+      };
+
+      e.preventDefault();
+      await invoke('key_event', { key });
+    });
+
+    // Request initial render
+    invoke('initial_render');
+  </script>
+</body>
+</html>

@@ -1,5 +1,6 @@
 use crate::types::{PaneId, UndoNodeId};
 use chrono::NaiveDate;
+use serde::Serialize;
 use std::time::Instant;
 
 // Re-exported from parser::traits (shared between parser and render layers).
@@ -14,6 +15,7 @@ pub use crate::parser::traits::{Style, StyledSpan};
 /// Produced by [`BloomEditor::render`](crate::BloomEditor::render) each tick.
 /// Contains pane layout, cursor state, modal overlays (picker, agenda,
 /// which-key drawer), and the current notification stack.
+#[derive(Serialize)]
 pub struct RenderFrame {
     pub panes: Vec<PaneFrame>,
     pub maximized: bool,
@@ -35,6 +37,7 @@ pub struct RenderFrame {
 ///
 /// Contains the visible lines, cursor state, scroll offset, status bar, and
 /// layout rect. Frontends iterate over panes to render the editor area.
+#[derive(Serialize)]
 pub struct PaneFrame {
     pub id: PaneId,
     pub kind: PaneKind,
@@ -50,7 +53,7 @@ pub struct PaneFrame {
 }
 
 /// Pane positioning info for the TUI renderer.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Serialize)]
 pub struct PaneRectFrame {
     pub x: u16,
     pub y: u16,
@@ -59,6 +62,7 @@ pub struct PaneRectFrame {
     pub total_height: u16,
 }
 
+#[derive(Serialize)]
 pub enum PaneKind {
     Editor,
     UndoTree(UndoTreeFrame),
@@ -70,12 +74,14 @@ pub enum PaneKind {
 // Undo tree
 // ---------------------------------------------------------------------------
 
+#[derive(Serialize)]
 pub struct UndoTreeFrame {
     pub nodes: Vec<UndoTreeNode>,
     pub selected: UndoNodeId,
     pub preview: Option<String>,
 }
 
+#[derive(Serialize)]
 pub struct UndoTreeNode {
     pub id: UndoNodeId,
     pub depth: usize,
@@ -88,12 +94,14 @@ pub struct UndoTreeNode {
 // Timeline
 // ---------------------------------------------------------------------------
 
+#[derive(Serialize)]
 pub struct TimelineFrame {
     pub target_title: String,
     pub entries: Vec<TimelineEntryFrame>,
     pub selected_index: usize,
 }
 
+#[derive(Serialize)]
 pub struct TimelineEntryFrame {
     pub source_title: String,
     pub date: NaiveDate,
@@ -105,6 +113,7 @@ pub struct TimelineEntryFrame {
 // Inline menu (shared: command completion, link picker, tag completion)
 // ---------------------------------------------------------------------------
 
+#[derive(Serialize)]
 pub struct InlineMenuFrame {
     pub items: Vec<InlineMenuItem>,
     pub selected: usize,
@@ -112,13 +121,14 @@ pub struct InlineMenuFrame {
     pub hint: Option<String>,
 }
 
+#[derive(Serialize)]
 pub struct InlineMenuItem {
     pub id: Option<String>,
     pub label: String,
     pub right: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub enum InlineMenuAnchor {
     /// Above the status bar (command completion, tag add/remove)
     CommandLine,
@@ -130,6 +140,7 @@ pub enum InlineMenuAnchor {
 // Setup wizard
 // ---------------------------------------------------------------------------
 
+#[derive(Serialize)]
 pub struct SetupWizardFrame {
     pub step: SetupStep,
     pub vault_path: String,
@@ -142,6 +153,7 @@ pub struct SetupWizardFrame {
     pub error: Option<String>,
 }
 
+#[derive(Serialize)]
 pub enum SetupStep {
     Welcome,
     ChooseVaultLocation,
@@ -151,12 +163,13 @@ pub enum SetupStep {
     Complete,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ImportChoice {
     No,
     Yes,
 }
 
+#[derive(Serialize)]
 pub struct ImportProgress {
     pub done: usize,
     pub total: usize,
@@ -168,6 +181,7 @@ pub struct ImportProgress {
     pub finished: bool,
 }
 
+#[derive(Serialize)]
 pub struct WizardStats {
     pub pages: usize,
     pub journals: usize,
@@ -177,6 +191,7 @@ pub struct WizardStats {
 // Date picker
 // ---------------------------------------------------------------------------
 
+#[derive(Serialize)]
 pub struct DatePickerFrame {
     pub selected_date: NaiveDate,
     pub month_view: Vec<Vec<Option<u32>>>,
@@ -187,6 +202,7 @@ pub struct DatePickerFrame {
 // Dialog
 // ---------------------------------------------------------------------------
 
+#[derive(Serialize)]
 pub struct DialogFrame {
     pub message: String,
     pub choices: Vec<String>,
@@ -197,6 +213,7 @@ pub struct DialogFrame {
 // Lines & cursor
 // ---------------------------------------------------------------------------
 
+#[derive(Serialize)]
 pub struct RenderedLine {
     pub source: LineSource,
     pub text: String,
@@ -204,7 +221,7 @@ pub struct RenderedLine {
 }
 
 /// Where a rendered line originated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum LineSource {
     /// A line from the text buffer at the given line index (0-based).
     Buffer(usize),
@@ -222,6 +239,7 @@ impl LineSource {
     }
 }
 
+#[derive(Serialize)]
 pub struct CursorState {
     pub line: usize,
     pub column: usize,
@@ -238,6 +256,7 @@ impl Default for CursorState {
     }
 }
 
+#[derive(Serialize)]
 pub enum CursorShape {
     Block,
     Bar,
@@ -250,11 +269,13 @@ pub enum CursorShape {
 
 /// Global status bar — exactly one line at the bottom of the screen.
 /// Different modes populate different slots; rendering is centralized.
+#[derive(Serialize)]
 pub struct StatusBarFrame {
     pub content: StatusBarContent,
     pub mode: String,
 }
 
+#[derive(Serialize)]
 pub enum StatusBarContent {
     /// Default: mode, title, dirty flag, cursor position, etc.
     Normal(NormalStatus),
@@ -264,6 +285,7 @@ pub enum StatusBarContent {
     QuickCapture(QuickCaptureSlot),
 }
 
+#[derive(Serialize)]
 pub struct NormalStatus {
     pub title: String,
     pub dirty: bool,
@@ -275,19 +297,21 @@ pub struct NormalStatus {
     pub indexing: bool,
 }
 
+#[derive(Serialize)]
 pub struct CommandLineSlot {
     pub input: String,
     pub cursor_pos: usize,
     pub error: Option<String>,
 }
 
+#[derive(Serialize)]
 pub struct QuickCaptureSlot {
     pub prompt: String,
     pub input: String,
     pub cursor_pos: usize,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Serialize)]
 pub enum McpIndicator {
     #[default]
     Off,
@@ -322,17 +346,19 @@ impl Default for StatusBarFrame {
 /// A transient notification shown to the user.
 ///
 /// Info (4 s) and Warning (8 s) auto-expire; Errors persist until dismissed.
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub struct Notification {
     pub message: String,
     pub level: NotificationLevel,
     /// None means the notification persists until dismissed (used for errors).
+    #[serde(skip)]
     pub expires_at: Option<Instant>,
+    #[serde(skip)]
     pub created_at: Instant,
 }
 
 /// Severity level for notifications — determines color coding and expiry.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Serialize)]
 pub enum NotificationLevel {
     Info,
     Warning,
@@ -343,6 +369,7 @@ pub enum NotificationLevel {
 // Picker
 // ---------------------------------------------------------------------------
 
+#[derive(Serialize)]
 pub struct PickerFrame {
     pub title: String,
     pub query: String,
@@ -361,6 +388,7 @@ pub struct PickerFrame {
     pub wide: bool,
 }
 
+#[derive(Serialize)]
 pub struct PickerRow {
     pub label: String,
     pub middle: Option<String>,
@@ -371,18 +399,21 @@ pub struct PickerRow {
 // Which-key
 // ---------------------------------------------------------------------------
 
+#[derive(Serialize)]
 pub struct WhichKeyFrame {
     pub entries: Vec<WhichKeyEntry>,
     pub prefix: String,
     pub context: WhichKeyContext,
 }
 
+#[derive(Serialize)]
 pub struct WhichKeyEntry {
     pub key: String,
     pub label: String,
     pub is_group: bool,
 }
 
+#[derive(Serialize)]
 pub enum WhichKeyContext {
     Leader,
     VimOperator { operator: String },
@@ -393,6 +424,7 @@ pub enum WhichKeyContext {
 // Completion (shared by command line and pickers)
 // ---------------------------------------------------------------------------
 
+#[derive(Serialize)]
 pub struct Completion {
     pub text: String,
     pub description: String,

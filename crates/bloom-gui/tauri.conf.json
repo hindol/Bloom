@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
+  "productName": "Bloom",
+  "identifier": "com.bloom.app",
+  "version": "0.1.0",
+  "build": {
+    "frontendDist": "frontend"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Bloom 🌱",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 600,
+        "minHeight": 400,
+        "resizable": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": []
+  }
+}
