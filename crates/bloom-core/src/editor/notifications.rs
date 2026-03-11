@@ -167,8 +167,12 @@ fn format_log_line(line: &str) -> String {
 
     let ts = v["timestamp"]
         .as_str()
-        .and_then(|s| s.get(11..19)) // extract HH:MM:SS
-        .unwrap_or("??:??:??");
+        .and_then(|s| {
+            chrono::DateTime::parse_from_rfc3339(s)
+                .ok()
+                .map(|dt| dt.with_timezone(&chrono::Local).format("%H:%M:%S").to_string())
+        })
+        .unwrap_or_else(|| "??:??:??".to_string());
     let level = v["level"].as_str().unwrap_or("?");
     let target = v["target"]
         .as_str()
