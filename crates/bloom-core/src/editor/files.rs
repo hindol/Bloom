@@ -13,6 +13,12 @@ impl BloomEditor {
         tracing::debug!(path = %wc.path.display(), "write complete received");
         self.last_write_fingerprints
             .insert(wc.path.clone(), (wc.mtime, wc.size));
+
+        // Signal history thread that a file was written.
+        if let Some(tx) = &self.history_tx {
+            let _ = tx.send(history::HistoryRequest::FileDirty);
+        }
+
         if let Some(page_id) = self.buffer_mgr.find_by_path(&wc.path).cloned() {
             if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                 if buf.is_dirty() {

@@ -325,3 +325,31 @@ impl<'a> AssertFrame<'a> {
         self
     }
 }
+
+// ---------------------------------------------------------------------------
+// History test helpers
+// ---------------------------------------------------------------------------
+
+/// Create a commit with a backdated timestamp in a [`bloom_history::HistoryRepo`].
+///
+/// Useful for testing temporal features (page history, day view) that need
+/// commits spanning multiple days. **Dev-dependency only** — never shipped
+/// in the release binary.
+///
+/// # Arguments
+/// * `repo` — an open [`bloom_history::HistoryRepo`]
+/// * `files` — `(uuid_hex, content)` pairs to stage
+/// * `timestamp` — Unix timestamp (seconds) for the commit
+/// * `message` — commit message
+///
+/// # Returns
+/// The commit OID, or `None` if there were no changes.
+pub fn commit_at(
+    repo: &bloom_history::HistoryRepo,
+    files: &[(&str, &str)],
+    timestamp: i64,
+    message: &str,
+) -> Option<String> {
+    repo.commit_all(files, message, Some(timestamp))
+        .expect("commit_at failed")
+}

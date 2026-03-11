@@ -29,6 +29,8 @@ pub struct Config {
     pub theme: ThemeConfig,
     #[serde(default)]
     pub mcp: McpConfig,
+    #[serde(default)]
+    pub history: HistoryConfig,
     #[serde(default = "default_autosave_debounce")]
     pub autosave_debounce_ms: u64,
     #[serde(default = "default_which_key_timeout")]
@@ -100,6 +102,30 @@ pub struct ThemeConfig {
     pub overrides: HashMap<String, String>,
 }
 
+fn default_auto_commit_idle_minutes() -> u64 {
+    5
+}
+fn default_max_commit_interval_minutes() -> u64 {
+    60
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct HistoryConfig {
+    #[serde(default = "default_auto_commit_idle_minutes")]
+    pub auto_commit_idle_minutes: u64,
+    #[serde(default = "default_max_commit_interval_minutes")]
+    pub max_commit_interval_minutes: u64,
+}
+
+impl Default for HistoryConfig {
+    fn default() -> Self {
+        Self {
+            auto_commit_idle_minutes: default_auto_commit_idle_minutes(),
+            max_commit_interval_minutes: default_max_commit_interval_minutes(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct McpConfig {
     #[serde(default)]
@@ -133,6 +159,7 @@ impl Config {
             font: FontConfig::default(),
             theme: ThemeConfig::default(),
             mcp: McpConfig::default(),
+            history: HistoryConfig::default(),
             autosave_debounce_ms: default_autosave_debounce(),
             which_key_timeout_ms: default_which_key_timeout(),
             auto_align: AutoAlignMode::default(),

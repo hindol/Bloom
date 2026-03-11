@@ -176,6 +176,11 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
                     needs_render = true;
                 }
             }
+            recv(channels.history_rx.as_ref().unwrap_or(&channel::never())) -> msg => {
+                if let Ok(complete) = msg {
+                    editor.handle_history_complete(complete);
+                }
+            }
             default(timeout) => {
                 // Timer fired — tick handles notification expiry, which-key popup
             }

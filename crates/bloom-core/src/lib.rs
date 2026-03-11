@@ -6,6 +6,7 @@ pub mod block_id_gen;
 pub mod buffer;
 pub mod config;
 pub mod error;
+pub mod history;
 pub mod index;
 pub mod journal;
 pub mod keymap;
@@ -144,6 +145,7 @@ pub struct EditorChannels {
     pub write_complete_rx: Option<crossbeam::channel::Receiver<store::disk_writer::WriteComplete>>,
     pub watcher_rx: Option<crossbeam::channel::Receiver<store::traits::FileEvent>>,
     pub indexer_rx: Option<crossbeam::channel::Receiver<index::indexer::IndexComplete>>,
+    pub history_rx: Option<crossbeam::channel::Receiver<history::HistoryComplete>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -212,6 +214,9 @@ pub struct BloomEditor {
     pub(crate) query_cache: std::cell::RefCell<query::QueryCache>,
     // Single-instance vault lock (held for the lifetime of the editor)
     pub(crate) vault_lock: Option<vault::lock::VaultLock>,
+    // Git-backed history
+    pub(crate) history_tx: Option<crossbeam::channel::Sender<history::HistoryRequest>>,
+    pub(crate) history_rx: Option<crossbeam::channel::Receiver<history::HistoryComplete>>,
 }
 
 pub(crate) struct InlineCompletion {
@@ -440,6 +445,8 @@ impl BloomEditor {
             inline_completion: None,
             query_cache: std::cell::RefCell::new(query::QueryCache::new()),
             vault_lock: None,
+            history_tx: None,
+            history_rx: None,
             config,
         })
     }
@@ -530,6 +537,7 @@ impl BloomEditor {
             write_complete_rx: self.write_complete_rx.clone(),
             watcher_rx: self.watcher_rx.clone(),
             indexer_rx: self.indexer_rx.clone(),
+            history_rx: self.history_rx.clone(),
         }
     }
 
@@ -564,7 +572,7 @@ impl BloomEditor {
         self.push_notification(message, render::NotificationLevel::Info);
         // Reload the index connection to pick up changes from the indexer thread
         if let Some(vault_root) = &self.vault_root {
-            let index_path = vault_root.join(".index.db");
+            let index_path = vault::paths::index_db(vault_root);
             if let Ok(idx) = index::Index::open_readonly(&index_path) {
                 self.index = Some(idx);
             }
@@ -572,6 +580,28 @@ impl BloomEditor {
 
         // Invalidate the BQL query cache so visible queries re-execute.
         self.query_cache.borrow_mut().invalidate();
+    }
+
+    /// Handle a single history thread completion event.
+    pub fn handle_history_complete(&mut self, complete: history::HistoryComplete) {
+        match complete {
+            history::HistoryComplete::CommitDone { oid: Some(id) } => {
+                tracing::debug!(oid = %id, "history commit acknowledged");
+            }
+            history::HistoryComplete::CommitDone { oid: None } => {
+                tracing::debug!("history commit skipped (no changes)");
+            }
+            history::HistoryComplete::Error { message } => {
+                tracing::error!(error = %message, "history thread error");
+                self.push_notification(
+                    format!("History error: {message}"),
+                    render::NotificationLevel::Error,
+                );
+            }
+            history::HistoryComplete::ShutDown => {
+                tracing::info!("history thread shut down");
+            }
+        }
     }
 
     /// Compute the next deadline the event loop should wake for.
@@ -736,7 +766,39 @@ impl BloomEditor {
             }
         }
 
+        // Commit current vault state to history and shut down the history thread.
+        if let Some(tx) = &self.history_tx {
+            let files = self.collect_vault_files_for_history();
+            if !files.is_empty() {
+                let _ = tx.send(history::HistoryRequest::CommitNow {
+                    files,
+                    message: "session save".into(),
+                });
+            }
+            let _ = tx.send(history::HistoryRequest::Shutdown);
+        }
+
         Ok(())
+    }
+
+    /// Collect all vault pages as `(uuid_hex, content)` pairs for history commits.
+    /// Reads from the index (UUID ↔ path mapping) and from disk.
+    fn collect_vault_files_for_history(&self) -> Vec<(String, String)> {
+        let Some(index) = &self.index else {
+            return vec![];
+        };
+        let Some(vault_root) = &self.vault_root else {
+            return vec![];
+        };
+
+        let mut files = Vec::new();
+        for page in index.list_pages(None) {
+            let path = vault_root.join(&page.path);
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                files.push((page.id.to_hex(), content));
+            }
+        }
+        files
     }
 
     pub fn restore_session(&mut self) -> Result<(), error::BloomError> {

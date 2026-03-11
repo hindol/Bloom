@@ -1,6 +1,8 @@
 pub mod adopt;
 pub mod conflict;
 pub mod lock;
+pub(crate) mod migrate;
+pub mod paths;
 pub mod setup;
 
 use crate::error::BloomError;
@@ -139,7 +141,7 @@ mod tests {
     #[test]
     fn test_gitignore_content() {
         let content = Vault::gitignore_content();
-        assert!(content.contains(".index.db"));
+        assert!(content.contains(".index/"));
     }
 }
 

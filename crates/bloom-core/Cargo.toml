@@ -38,6 +38,8 @@ libc = "0.2"
 unicode-width = "0.2"
 # Data-parallel iteration for the background indexer
 rayon = "1"
+# Git-backed vault history
+bloom-history = { path = "../bloom-history" }
 
 [dev-dependencies]
 # Snapshot testing for parser and render output

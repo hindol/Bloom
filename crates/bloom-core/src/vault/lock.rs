@@ -1,13 +1,14 @@
 //! Single-instance vault lock.
 //!
 //! Prevents two Bloom processes from opening the same vault simultaneously.
-//! Creates a `.bloom.lock` file in the vault root containing the current PID.
-//! On startup, if the lock file exists and the PID is still alive, the lock
-//! is considered held and initialization fails. If the PID is stale (process
-//! no longer running), the lock is taken over.
+//! Creates `.index/bloom.lock` containing the current PID. On startup, if the
+//! lock file exists and the PID is still alive, the lock is considered held and
+//! initialization fails. If the PID is stale, the lock is taken over.
 
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use super::paths;
 
 /// A held vault lock. Dropping this releases the lock file.
 pub struct VaultLock {
@@ -18,7 +19,11 @@ impl VaultLock {
     /// Acquire the vault lock. Returns an error if another Bloom instance
     /// holds the lock.
     pub fn acquire(vault_root: &Path) -> Result<Self, LockError> {
-        let path = vault_root.join(".bloom.lock");
+        // Ensure .index/ directory exists before writing the lock file.
+        let index_dir = paths::index_dir(vault_root);
+        fs::create_dir_all(&index_dir).map_err(LockError::Io)?;
+
+        let path = paths::lock_file(vault_root);
 
         if path.exists() {
             // Check if the existing lock is stale.
@@ -80,7 +85,7 @@ impl std::fmt::Display for LockError {
                     f,
                     "Another Bloom instance is already using this vault (PID {pid}).\n\
                      Close the other instance first, or if it crashed, delete the \
-                     .bloom.lock file in your vault root."
+                     .index/bloom.lock file in your vault."
                 )
             }
             LockError::Io(e) => write!(
@@ -142,7 +147,7 @@ mod tests {
     fn acquire_and_release() {
         let dir = TempDir::new().unwrap();
         let lock = VaultLock::acquire(dir.path()).unwrap();
-        let lock_path = dir.path().join(".bloom.lock");
+        let lock_path = paths::lock_file(dir.path());
         assert!(lock_path.exists());
 
         // Lock file contains our PID.
@@ -167,8 +172,10 @@ mod tests {
     #[test]
     fn acquire_succeeds_with_stale_lock() {
         let dir = TempDir::new().unwrap();
-        let lock_path = dir.path().join(".bloom.lock");
+        let lock_path = paths::lock_file(dir.path());
 
+        // Ensure the .index/ directory exists for the stale lock file.
+        fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
         // Write a PID that almost certainly doesn't exist.
         fs::write(&lock_path, "4294967290").unwrap();
 
@@ -182,7 +189,7 @@ mod tests {
     #[test]
     fn drop_releases_lock() {
         let dir = TempDir::new().unwrap();
-        let lock_path = dir.path().join(".bloom.lock");
+        let lock_path = paths::lock_file(dir.path());
 
         {
             let _lock = VaultLock::acquire(dir.path()).unwrap();

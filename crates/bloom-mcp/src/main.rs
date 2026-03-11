@@ -20,7 +20,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    let index_path = root.join(".index.db");
+    let index_path = root.join(".index").join("bloom.db");
     let index = Index::open(&index_path).expect("Failed to open index");
     let parser = BloomMarkdownParser::new();
     let read_only = matches!(config.mcp.mode, bloom_core::config::McpMode::ReadOnly);

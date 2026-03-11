@@ -1,0 +1,25 @@
+[package]
+name = "bloom-history"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+# Pure Rust git: init, commit, revwalk, tree diff, blob lookup
+gix = { version = "0.80", default-features = false, features = [
+    "basic",
+    "extras",
+] }
+# Structured logging
+tracing = "0.1"
+# Error handling
+thiserror = "2"
+# Date/time for commit timestamps
+chrono = "0.4"
+# Used by gix commit objects for parent lists
+smallvec = "1"
+# Byte string handling (gix uses BStr)
+bstr = "1"
+
+[dev-dependencies]
+tempfile = "3"

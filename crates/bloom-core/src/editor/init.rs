@@ -22,12 +22,15 @@ impl BloomEditor {
     pub fn init_vault(&mut self, vault_root: &std::path::Path) -> Result<(), error::BloomError> {
         tracing::info!(vault = %vault_root.display(), "vault initializing");
 
+        // Auto-migrate legacy vault layout before acquiring the lock.
+        vault::migrate::migrate_if_needed(vault_root);
+
         // Acquire single-instance lock before touching any vault state.
         let lock = vault::lock::VaultLock::acquire(vault_root)
             .map_err(|e| error::BloomError::VaultError(e.to_string()))?;
         self.vault_lock = Some(lock);
 
-        let index_path = vault_root.join(".index.db");
+        let index_path = vault::paths::index_db(vault_root);
         // Ensure the database file exists with schema before opening read-only.
         // The indexer thread will own the read-write connection for all mutations.
         {
@@ -60,10 +63,10 @@ impl BloomEditor {
             .spawn(move || writer.start())
             .ok();
 
-        // Mark index file as hidden on Windows
+        // Mark .index directory as hidden on Windows
         #[cfg(windows)]
         {
-            let _ = set_hidden_attribute(&index_path);
+            let _ = set_hidden_attribute(&vault::paths::index_dir(vault_root));
         }
 
         // Spawn long-lived background indexer thread
@@ -84,6 +87,17 @@ impl BloomEditor {
                 - 24 * 60 * 60 * 1000;
             let _ = tx.send(index::indexer::IndexRequest::PruneUndoBefore(cutoff_ms));
         }
+
+        // Spawn long-lived history thread (git-backed time travel)
+        let (hist_completion_tx, hist_completion_rx) = crossbeam::channel::bounded(4);
+        self.history_rx = Some(hist_completion_rx);
+        let history_tx = history::spawn_history_thread(
+            vault::paths::index_dir(vault_root),
+            self.config.history.auto_commit_idle_minutes,
+            self.config.history.max_commit_interval_minutes,
+            hist_completion_tx,
+        );
+        self.history_tx = Some(history_tx);
 
         Ok(())
     }

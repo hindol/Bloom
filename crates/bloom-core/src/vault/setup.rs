@@ -10,6 +10,7 @@ pub(crate) fn create_vault(root: &Path) -> Result<Vault, BloomError> {
     fs::create_dir_all(root.join("journal"))?;
     fs::create_dir_all(root.join("templates"))?;
     fs::create_dir_all(root.join("images"))?;
+    fs::create_dir_all(super::paths::index_dir(root))?;
 
     // Write default .gitignore.
     let gitignore_path = root.join(".gitignore");

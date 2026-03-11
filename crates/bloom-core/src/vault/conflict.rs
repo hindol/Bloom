@@ -9,7 +9,7 @@ pub(crate) fn has_merge_conflicts(content: &str) -> bool {
 /// Generate .gitignore content for a Bloom vault.
 pub(crate) fn gitignore_content() -> &'static str {
     "\
-.index.db
+.index/
 *.tmp
 "
 }
