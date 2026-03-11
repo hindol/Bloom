@@ -967,16 +967,58 @@ impl BloomEditor {
     }
 
     pub(crate) fn handle_vim_command(&mut self, cmd: &str) -> Vec<keymap::dispatch::Action> {
-        match cmd {
+        // Resolve partial commands: if the typed text is a prefix of exactly
+        // one command (or the first matching command), use the full command.
+        let resolved = resolve_command(cmd);
+        match resolved.as_str() {
             "undo" => vec![keymap::dispatch::Action::Undo],
             "redo" => vec![keymap::dispatch::Action::Redo],
-            _ => self.translate_ex_command(cmd),
+            _ => self.translate_ex_command(&resolved),
         }
     }
+}
 
-    // -----------------------------------------------------------------------
-    // Inline completion (link picker / tag completion)
-    // -----------------------------------------------------------------------
+/// Resolve a partial command to its full form. If the input matches
+/// a known ex-command prefix uniquely (or is the first match), return
+/// the full command. Also handles "theme <partial>" argument completion.
+fn resolve_command(cmd: &str) -> String {
+    let trimmed = cmd.trim();
+
+    // Handle :theme <partial_name>
+    if let Some(arg) = trimmed.strip_prefix("theme ") {
+        let arg = arg.trim();
+        if let Some(name) = crate::theme::THEME_NAMES
+            .iter()
+            .find(|n| n.starts_with(arg))
+        {
+            return format!("theme {name}");
+        }
+        return trimmed.to_string();
+    }
+
+    // Exact match — no resolution needed
+    if EX_COMMANDS.iter().any(|(c, _)| *c == trimmed)
+        || matches!(trimmed, "q" | "q!" | "quit" | "quit!" | "w" | "write"
+            | "wq" | "wq!" | "x" | "x!" | "e" | "edit" | "bd" | "bdelete"
+            | "sp" | "split" | "vs" | "vsplit" | "undo" | "redo")
+    {
+        return trimmed.to_string();
+    }
+
+    // Prefix match against EX_COMMANDS
+    let matches: Vec<&str> = EX_COMMANDS
+        .iter()
+        .filter(|(c, _)| c.starts_with(trimmed))
+        .map(|(c, _)| *c)
+        .collect();
+    if matches.len() == 1 {
+        return matches[0].to_string();
+    }
+
+    trimmed.to_string()
+}
+
+impl BloomEditor {
 
     fn check_inline_triggers(&mut self) {
         let cursor = self.cursor();
