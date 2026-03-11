@@ -7,8 +7,6 @@ pub struct SessionState {
     pub buffers: Vec<SessionBuffer>,
     pub layout: SessionLayout,
     pub active_pane: u64,
-    #[serde(default)]
-    pub theme_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,7 +69,6 @@ mod tests {
             }],
             layout: SessionLayout::Leaf(0),
             active_pane: 0,
-            theme_name: Some("bloom-dark".to_string()),
         };
         state.save(&path).unwrap();
         let loaded = SessionState::load(&path).unwrap();

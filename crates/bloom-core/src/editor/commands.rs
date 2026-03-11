@@ -278,12 +278,13 @@ impl BloomEditor {
         // Handle :theme with optional argument
         if trimmed == "theme" {
             self.cycle_theme();
+            self.persist_theme_to_config();
             return vec![keymap::dispatch::Action::Noop];
         }
         if let Some(name) = trimmed.strip_prefix("theme ") {
             let name = name.trim();
-            if !self.set_theme(name) {
-                // Unknown theme name — could show notification
+            if self.set_theme(name) {
+                self.persist_theme_to_config();
             }
             return vec![keymap::dispatch::Action::Noop];
         }

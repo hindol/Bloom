@@ -659,30 +659,7 @@ impl BloomEditor {
             if let Some(selected) = ap.picker.selected() {
                 let name = selected.id.clone();
                 self.set_theme(&name);
-                // Persist to config.toml
-                if let Some(root) = &self.vault_root {
-                    let config_path = root.join("config.toml");
-                    if config_path.exists() {
-                        if let Ok(content) = std::fs::read_to_string(&config_path) {
-                            let new_content = if content.contains("name = ") {
-                                content
-                                    .lines()
-                                    .map(|l| {
-                                        if l.trim().starts_with("name = ") && !l.contains("mode") {
-                                            format!("name = \"{}\"", name)
-                                        } else {
-                                            l.to_string()
-                                        }
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join("\n")
-                            } else {
-                                format!("{content}\n[theme]\nname = \"{name}\"\n")
-                            };
-                            let _ = std::fs::write(&config_path, new_content);
-                        }
-                    }
-                }
+                self.persist_theme_to_config();
             }
         }
     }

@@ -529,6 +529,30 @@ impl BloomEditor {
         self.set_theme(next);
     }
 
+    /// Write the current theme name to config.toml.
+    pub(crate) fn persist_theme_to_config(&self) {
+        let Some(root) = &self.vault_root else { return };
+        let config_path = root.join("config.toml");
+        let Ok(content) = std::fs::read_to_string(&config_path) else { return };
+        let name = self.active_theme.name;
+        let new_content = if content.contains("name = ") {
+            content
+                .lines()
+                .map(|l| {
+                    if l.trim().starts_with("name = ") && !l.contains("mode") {
+                        format!("name = \"{}\"", name)
+                    } else {
+                        l.to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            format!("{content}\n[theme]\nname = \"{name}\"\n")
+        };
+        let _ = std::fs::write(&config_path, new_content);
+    }
+
     /// Whether background indexing is in progress.
     pub fn is_indexing(&self) -> bool {
         self.indexing
@@ -782,7 +806,6 @@ impl BloomEditor {
             buffers,
             layout,
             active_pane: self.window_mgr.active_pane().0,
-            theme_name: Some(self.active_theme.name.to_string()),
         };
         state.save(&session_path)?;
 
@@ -847,11 +870,6 @@ impl BloomEditor {
 
         // Restore layout tree and create empty pane states
         self.window_mgr.restore_layout(&state.layout);
-
-        // Restore theme if saved
-        if let Some(name) = &state.theme_name {
-            self.set_theme(name);
-        }
 
         // Open each buffer in its assigned pane
         for buf_state in &state.buffers {

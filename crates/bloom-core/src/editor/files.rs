@@ -188,6 +188,21 @@ impl BloomEditor {
             return false;
         }
 
+        // Only assign block IDs to Markdown files.
+        let is_md = self
+            .buffer_mgr
+            .open_buffers()
+            .iter()
+            .find(|b| b.page_id == *page_id)
+            .is_some_and(|info| {
+                info.path
+                    .extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+            });
+        if !is_md {
+            return false;
+        }
+
         let Some(buf) = self.buffer_mgr.get(page_id) else {
             return false;
         };
