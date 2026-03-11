@@ -119,10 +119,38 @@ impl BloomEditor {
             return vec![keymap::dispatch::Action::Noop];
         }
 
-        // Vim processing
+        // Vim processing — check cursor adjustment first, then borrow buffer.
+        let adjust_cursor = if let Some(buf) = self.active_page().and_then(|id| self.buffer_mgr.get(id)) {
+            let mode = self.vim_state.mode();
+            if matches!(mode, vim::Mode::Insert) {
+                let rope = buf.text();
+                let len = rope.len_chars();
+                let cursor = self.cursor();
+                if cursor < len && rope.char(cursor) == '\n' {
+                    let line = rope.char_to_line(cursor);
+                    if line + 1 < rope.len_lines() {
+                        let next_start = rope.line_to_char(line + 1);
+                        let next_len = rope.line(line + 1).len_chars();
+                        if next_len == 0 && next_start == len {
+                            Some(len)
+                        } else { None }
+                    } else { None }
+                } else { None }
+            } else { None }
+        } else { None };
+
+        // In Insert mode, if the cursor is on a trailing \n before ropey's
+        // implicit empty last line, advance it past the \n so that edits
+        // land on the visual line the cursor is rendered on.
+        if let Some(new_cursor) = adjust_cursor {
+            self.set_cursor(new_cursor);
+        }
+
         if let Some(buf) = self.active_page().and_then(|id| self.buffer_mgr.get(id)) {
             let mode_before_key = self.vim_state.mode();
-            let action = self.vim_state.process_key(key.clone(), buf, self.cursor());
+            let cursor = self.cursor();
+
+            let action = self.vim_state.process_key(key.clone(), buf, cursor);
 
             // Esc in Normal mode with no overlays: dismiss persistent notifications
             if key.code == types::KeyCode::Esc && matches!(mode_before_key, vim::Mode::Normal) {

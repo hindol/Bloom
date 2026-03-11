@@ -225,7 +225,7 @@ impl BloomEditor {
             let insertion_text = format!(" ^{}", ins.id);
             let insertion_len = insertion_text.len();
             buf.insert(insert_at, &insertion_text);
-            if insert_at <= cursor_before {
+            if insert_at < cursor_before {
                 cursor_shift += insertion_len;
             }
         }
