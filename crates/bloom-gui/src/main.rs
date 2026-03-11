@@ -95,7 +95,13 @@ fn initial_render(state: tauri::State<EditorState>, app: AppHandle) {
 fn emit_render(editor: &mut BloomEditor, app: &AppHandle) {
     // Use a reasonable default size — the frontend will send resize events later
     let frame = editor.render(120, 40);
-    let _ = app.emit("render", &frame);
+    match app.emit("render", &frame) {
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!(error = %e, "failed to emit render frame");
+            eprintln!("emit error: {e}");
+        }
+    }
 }
 
 /// Convert a frontend KeyInput to a bloom-core KeyEvent.

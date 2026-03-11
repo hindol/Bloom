@@ -13,3 +13,4 @@ Each document captures a direction, not a commitment. Critique, contradiction, a
 | [DAY_VIEW.md](DAY_VIEW.md) | Draft | Daily activity summary with predictive LRU cache, calendar navigation, BQL-customisable sections |
 | [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md) | Draft | Universal short block IDs with git-powered self-healing — stable identity for everything |
 | [MIRRORING.md](MIRRORING.md) | Parked | Same block in multiple files, last-write-wins sync via git — feasible but links + views serve the use case better |
+| [AUTO_MERGE.md](AUTO_MERGE.md) | Draft | Three-way merge for concurrent edits — eliminate the "reload or keep?" prompt |

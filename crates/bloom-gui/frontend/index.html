@@ -382,6 +382,7 @@
 
     // Listen for render events from the Rust backend
     listen('render', (event) => {
+      console.log('render event received, picker:', event.payload.picker ? 'YES' : 'no', 'panes:', event.payload.panes?.length);
       renderFrame(event.payload);
     });
 
@@ -398,8 +399,13 @@
         meta: e.metaKey,
       };
 
+      console.log('key event:', e.key, key);
       e.preventDefault();
-      await invoke('key_event', { key });
+      try {
+        await invoke('key_event', { key });
+      } catch (err) {
+        console.error('key_event invoke error:', err);
+      }
     });
 
     // Request initial render
