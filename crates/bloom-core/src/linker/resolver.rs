@@ -9,7 +9,6 @@ pub struct Linker {}
 pub enum LinkResolution {
     Resolved {
         page: PageMeta,
-        section: Option<Section>,
     },
     Orphaned {
         display_hint: String,
@@ -42,15 +41,7 @@ impl Linker {
     /// Resolve a parsed link against the index.
     pub fn resolve(&self, link: &ParsedLink, index: &Index) -> LinkResolution {
         match index.find_page_by_id(&link.target) {
-            Some(page) => {
-                let section = link.section.as_ref().and_then(|block_id| {
-                    // If a section block ID is specified, try to find matching section
-                    // For now we return None; full implementation would query the index
-                    let _ = block_id;
-                    None
-                });
-                LinkResolution::Resolved { page, section }
-            }
+            Some(page) => LinkResolution::Resolved { page },
             None => LinkResolution::Orphaned {
                 display_hint: link.display_hint.clone(),
             },

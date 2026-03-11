@@ -58,7 +58,6 @@ pub struct PageMeta {
 #[derive(Debug, Clone)]
 pub struct LinkTarget {
     pub page: PageId,
-    pub section: Option<BlockId>,
     pub display_hint: String,
 }
 

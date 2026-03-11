@@ -106,7 +106,10 @@ pub static PAGES_FIELDS: &[FieldDef] = &[
     FieldDef {
         name: "backlinks.count",
         sql: FieldSql::Subquery {
-            template: "(SELECT COUNT(*) FROM links WHERE to_page = {})",
+            template: "((SELECT COUNT(*) FROM links WHERE to_page = {}) + \
+                        (SELECT COUNT(*) FROM block_links bl \
+                         JOIN block_ids bi ON bi.block_id = bl.to_block_id \
+                         WHERE bi.page_id = {}))",
             id_col: "p.id",
         },
         field_type: FieldType::Int,

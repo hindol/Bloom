@@ -23,7 +23,14 @@ pub(crate) fn create_tables(conn: &Connection) -> Result<(), BloomError> {
             from_page TEXT NOT NULL,
             to_page TEXT NOT NULL,
             display_hint TEXT,
-            section TEXT,
+            line INTEGER,
+            FOREIGN KEY (from_page) REFERENCES pages(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS block_links (
+            from_page TEXT NOT NULL,
+            to_block_id TEXT NOT NULL,
+            display_hint TEXT,
             line INTEGER,
             FOREIGN KEY (from_page) REFERENCES pages(id)
         );
@@ -39,11 +46,17 @@ pub(crate) fn create_tables(conn: &Connection) -> Result<(), BloomError> {
         );
 
         CREATE TABLE IF NOT EXISTS block_ids (
+            block_id TEXT PRIMARY KEY,
             page_id TEXT NOT NULL,
-            block_id TEXT NOT NULL,
             line INTEGER NOT NULL,
-            PRIMARY KEY (page_id, block_id),
             FOREIGN KEY (page_id) REFERENCES pages(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_block_ids_page ON block_ids(page_id);
+
+        -- Retired block IDs are never reused. Survives index rebuilds.
+        CREATE TABLE IF NOT EXISTS retired_block_ids (
+            block_id TEXT PRIMARY KEY,
+            retired_at TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS file_fingerprints (

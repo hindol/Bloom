@@ -223,14 +223,18 @@ mod tests {
                 from_page TEXT NOT NULL,
                 to_page TEXT NOT NULL,
                 display_hint TEXT,
-                section TEXT,
+                line INTEGER
+            );
+            CREATE TABLE block_links (
+                from_page TEXT NOT NULL,
+                to_block_id TEXT NOT NULL,
+                display_hint TEXT,
                 line INTEGER
             );
             CREATE TABLE block_ids (
+                block_id TEXT PRIMARY KEY,
                 page_id TEXT NOT NULL,
-                block_id TEXT NOT NULL,
-                line INTEGER NOT NULL,
-                PRIMARY KEY (page_id, block_id)
+                line INTEGER NOT NULL
             );
 
             -- Test data
@@ -248,8 +252,8 @@ mod tests {
             INSERT INTO tasks VALUES ('p2', 20, 'Read Xi source', 1, '2026-03-01', NULL);
             INSERT INTO tasks VALUES ('p3', 5, 'Follow up', 0, NULL, NULL);
 
-            INSERT INTO links VALUES ('p1', 'p2', 'Text Editor Theory', NULL, 5);
-            INSERT INTO links VALUES ('p3', 'p1', 'Rust Programming', NULL, 3);
+            INSERT INTO links VALUES ('p1', 'p2', 'Text Editor Theory', 5);
+            INSERT INTO links VALUES ('p3', 'p1', 'Rust Programming', 3);
             ",
         )
         .unwrap();

@@ -100,6 +100,28 @@ impl Index {
             .ok()
     }
 
+    /// Look up a block ID → (page, line). Uses the block_ids PK for O(log N).
+    pub fn find_page_by_block_id(&self, block_id: &BlockId) -> Option<(PageMeta, usize)> {
+        self.conn
+            .prepare(
+                "SELECT p.id, p.title, p.created, p.path, b.line \
+                 FROM block_ids b JOIN pages p ON p.id = b.page_id \
+                 WHERE b.block_id = ?1",
+            )
+            .ok()?
+            .query_row(rusqlite::params![block_id.0], |row| {
+                let meta = self.row_to_page_meta(
+                    &row.get::<_, String>(0)?,
+                    &row.get::<_, String>(1)?,
+                    &row.get::<_, String>(2)?,
+                    &row.get::<_, String>(3)?,
+                );
+                let line: i64 = row.get(4)?;
+                Ok((meta, line as usize))
+            })
+            .ok()
+    }
+
     pub fn find_page_fuzzy(&self, query: &str) -> Vec<PageMeta> {
         let mut stmt = match self
             .conn
@@ -232,7 +254,7 @@ impl Index {
         let hex = page.to_hex();
         let mut stmt = match self
             .conn
-            .prepare("SELECT to_page, display_hint, section FROM links WHERE from_page = ?1")
+            .prepare("SELECT to_page, display_hint FROM links WHERE from_page = ?1")
         {
             Ok(s) => s,
             Err(_) => return Vec::new(),
@@ -242,7 +264,6 @@ impl Index {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?,
-                row.get::<_, Option<String>>(2)?,
             ))
         }) {
             Ok(r) => r,
@@ -250,9 +271,8 @@ impl Index {
         };
 
         rows.filter_map(|r| r.ok())
-            .map(|(to_page, hint, section)| LinkTarget {
+            .map(|(to_page, hint)| LinkTarget {
                 page: PageId::from_hex(&to_page).unwrap_or(PageId([0; 4])),
-                section: section.map(BlockId),
                 display_hint: hint.unwrap_or_default(),
             })
             .collect()

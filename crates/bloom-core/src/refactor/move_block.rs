@@ -10,7 +10,8 @@ use super::{MoveResult, TextEdit};
 /// - Finds the block in the source page by scanning for `^block-id`.
 /// - Removes it from the source.
 /// - Appends it to the target page.
-/// - Updates any links that reference the block.
+/// - No link updates needed: block-only links `[[^id|text]]` resolve via the
+///   index, which is updated on re-index after the move.
 pub(crate) fn move_block(
     block_id: &BlockId,
     from_page: &PageId,
@@ -69,26 +70,9 @@ pub(crate) fn move_block(
         new_text: format!("\n{}", block_text),
     }];
 
-    // Update links from other pages that reference this block.
-    let mut link_updates = Vec::new();
-    let backlinks = index.backlinks_to(from_page);
-    for bl in &backlinks {
-        let bl_content = fs::read_to_string(&bl.source_page.path).unwrap_or_default();
-        // Look for links like [[PageTitle#^block-id]]
-        let old_ref = format!("[[{}#^{}]]", from_meta.title, block_id.0);
-        let new_ref = format!("[[{}#^{}]]", to_meta.title, block_id.0);
-        if let Some(pos) = bl_content.find(&old_ref) {
-            link_updates.push(TextEdit {
-                file_path: bl.source_page.path.clone(),
-                range: pos..pos + old_ref.len(),
-                new_text: new_ref,
-            });
-        }
-    }
-
     Ok(MoveResult {
         source_edits,
         target_edits,
-        link_updates,
+        link_updates: vec![],
     })
 }

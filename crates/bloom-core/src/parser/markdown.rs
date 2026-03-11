@@ -34,6 +34,7 @@ impl DocumentParser for BloomMarkdownParser {
         let lines: Vec<&str> = text.lines().collect();
         let mut sections = Vec::new();
         let mut links = Vec::new();
+        let mut block_links = Vec::new();
         let mut tags = Vec::new();
         let mut tasks = Vec::new();
         let mut timestamps = Vec::new();
@@ -122,7 +123,9 @@ impl DocumentParser for BloomMarkdownParser {
             }
 
             // Parse extensions (always, for any non-heading body line).
-            links.extend(parse_links(line, line_idx));
+            let (page_links, blk_links) = parse_links(line, line_idx);
+            links.extend(page_links);
+            block_links.extend(blk_links);
             tags.extend(parse_tags(line, line_idx));
             timestamps.extend(parse_timestamps(line, line_idx));
             if let Some(task) = parse_task(line, line_idx) {
@@ -176,7 +179,9 @@ impl DocumentParser for BloomMarkdownParser {
                     let next_indent = next.len() - next.trim_start().len();
                     if next_indent >= content_indent && !is_list_item(next_trimmed) {
                         // Continuation: parse extensions for this line too.
-                        links.extend(parse_links(next, j));
+                        let (pl, bl) = parse_links(next, j);
+                        links.extend(pl);
+                        block_links.extend(bl);
                         tags.extend(parse_tags(next, j));
                         timestamps.extend(parse_timestamps(next, j));
                         let next_bid = parse_block_id(next, j);
@@ -231,6 +236,7 @@ impl DocumentParser for BloomMarkdownParser {
             frontmatter: fm,
             sections,
             links,
+            block_links,
             tags,
             tasks,
             timestamps,
@@ -393,12 +399,24 @@ mod tests {
     }
 
     #[test]
-    fn test_document_links_with_sections() {
+    fn test_page_caret_block_link_is_parse_error() {
+        // [[page^block|text]] is no longer supported
         let text = "---\nid: 8f3a1b2c\ntitle: \"T\"\n---\n\nSee [[abcd1234^intro|Page]]\n";
         let parser = BloomMarkdownParser::new();
         let doc = parser.parse(text);
-        assert_eq!(doc.links.len(), 1);
-        assert_eq!(doc.links[0].section, Some(BlockId("intro".to_string())));
+        assert_eq!(doc.links.len(), 0);
+        assert_eq!(doc.block_links.len(), 0);
+    }
+
+    #[test]
+    fn test_block_only_link_in_document() {
+        let text = "---\nid: 8f3a1b2c\ntitle: \"T\"\n---\n\nSee [[^k7m2x|the analysis]]\n";
+        let parser = BloomMarkdownParser::new();
+        let doc = parser.parse(text);
+        assert_eq!(doc.links.len(), 0);
+        assert_eq!(doc.block_links.len(), 1);
+        assert_eq!(doc.block_links[0].block_id, BlockId("k7m2x".to_string()));
+        assert_eq!(doc.block_links[0].display_hint, "the analysis");
     }
 
     #[test]

@@ -39,9 +39,11 @@ impl Index {
 
         // Clear all index-derived tables. Do NOT clear page_access —
         // it contains user-accumulated frecency data that must survive rebuilds.
+        // Do NOT clear retired_block_ids — it's an append-only log.
         tx.execute_batch(
             "DELETE FROM pages_fts;
              DELETE FROM block_ids;
+             DELETE FROM block_links;
              DELETE FROM tasks;
              DELETE FROM links;
              DELETE FROM tags;
@@ -248,12 +250,11 @@ fn insert_page_data_no_fts(
 
     for link in &entry.links {
         conn.execute(
-            "INSERT INTO links (from_page, to_page, display_hint, section) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO links (from_page, to_page, display_hint) VALUES (?1, ?2, ?3)",
             rusqlite::params![
                 page_id,
                 link.page.to_hex(),
                 link.display_hint,
-                link.section.as_ref().map(|s| &s.0),
             ],
         )
         .map_err(|e| BloomError::IndexError(e.to_string()))?;
@@ -278,8 +279,16 @@ fn insert_page_data_no_fts(
 
     for (block_id, line) in &entry.block_ids {
         conn.execute(
-            "INSERT INTO block_ids (page_id, block_id, line) VALUES (?1, ?2, ?3)",
-            rusqlite::params![page_id, block_id.0, *line as i64],
+            "INSERT OR REPLACE INTO block_ids (block_id, page_id, line) VALUES (?1, ?2, ?3)",
+            rusqlite::params![block_id.0, page_id, *line as i64],
+        )
+        .map_err(|e| BloomError::IndexError(e.to_string()))?;
+    }
+
+    for (block_id, display_hint) in &entry.block_links {
+        conn.execute(
+            "INSERT INTO block_links (from_page, to_block_id, display_hint) VALUES (?1, ?2, ?3)",
+            rusqlite::params![page_id, block_id.0, display_hint],
         )
         .map_err(|e| BloomError::IndexError(e.to_string()))?;
     }
@@ -311,12 +320,11 @@ fn insert_page_data(
 
     for link in &entry.links {
         conn.execute(
-            "INSERT INTO links (from_page, to_page, display_hint, section) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO links (from_page, to_page, display_hint) VALUES (?1, ?2, ?3)",
             rusqlite::params![
                 page_id,
                 link.page.to_hex(),
                 link.display_hint,
-                link.section.as_ref().map(|s| &s.0),
             ],
         )
         .map_err(|e| BloomError::IndexError(e.to_string()))?;
@@ -341,8 +349,16 @@ fn insert_page_data(
 
     for (block_id, line) in &entry.block_ids {
         conn.execute(
-            "INSERT INTO block_ids (page_id, block_id, line) VALUES (?1, ?2, ?3)",
-            rusqlite::params![page_id, block_id.0, *line as i64],
+            "INSERT OR REPLACE INTO block_ids (block_id, page_id, line) VALUES (?1, ?2, ?3)",
+            rusqlite::params![block_id.0, page_id, *line as i64],
+        )
+        .map_err(|e| BloomError::IndexError(e.to_string()))?;
+    }
+
+    for (block_id, display_hint) in &entry.block_links {
+        conn.execute(
+            "INSERT INTO block_links (from_page, to_block_id, display_hint) VALUES (?1, ?2, ?3)",
+            rusqlite::params![page_id, block_id.0, display_hint],
         )
         .map_err(|e| BloomError::IndexError(e.to_string()))?;
     }
@@ -360,6 +376,7 @@ fn remove_page_data(conn: &rusqlite::Connection, page_id: &str) -> Result<(), Bl
     for sql in &[
         "DELETE FROM pages_fts WHERE page_id = ?1",
         "DELETE FROM block_ids WHERE page_id = ?1",
+        "DELETE FROM block_links WHERE from_page = ?1",
         "DELETE FROM tasks WHERE page_id = ?1",
         "DELETE FROM links WHERE from_page = ?1",
         "DELETE FROM tags WHERE page_id = ?1",

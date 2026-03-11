@@ -14,6 +14,7 @@ pub struct Document {
     pub frontmatter: Option<Frontmatter>,
     pub sections: Vec<Section>,
     pub links: Vec<ParsedLink>,
+    pub block_links: Vec<ParsedBlockLink>,
     pub tags: Vec<ParsedTag>,
     pub tasks: Vec<ParsedTask>,
     pub timestamps: Vec<ParsedTimestamp>,
@@ -43,7 +44,15 @@ pub struct Section {
 #[derive(Debug, Clone)]
 pub struct ParsedLink {
     pub target: PageId,
-    pub section: Option<BlockId>,
+    pub display_hint: String,
+    pub line: usize,
+    pub byte_range: Range<usize>,
+}
+
+/// A block-only link: `[[^block_id|user hint]]`. Resolves via the block_ids index.
+#[derive(Debug, Clone)]
+pub struct ParsedBlockLink {
+    pub block_id: BlockId,
     pub display_hint: String,
     pub line: usize,
     pub byte_range: Range<usize>,

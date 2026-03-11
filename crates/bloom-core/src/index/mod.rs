@@ -81,6 +81,7 @@ pub struct IndexEntry {
     pub tags: Vec<TagName>,
     pub tasks: Vec<Task>,
     pub block_ids: Vec<(BlockId, usize)>,
+    pub block_links: Vec<(BlockId, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -155,6 +156,7 @@ mod tests {
             tags: tags.iter().map(|t| TagName(t.to_string())).collect(),
             tasks: vec![],
             block_ids: vec![],
+            block_links: vec![],
         }
     }
 
@@ -283,7 +285,6 @@ mod tests {
         let mut entry = make_entry("11223344", "Source", "links to target", &[]);
         entry.links.push(LinkTarget {
             page: target_id.clone(),
-            section: None,
             display_hint: "Target".into(),
         });
         idx.index_page(&make_entry("aabbccdd", "Target", "content", &[]))
@@ -310,5 +311,68 @@ mod tests {
         let tasks = idx.all_open_tasks();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].text, "Do thing");
+    }
+
+    // Block ID lookup
+    #[test]
+    fn test_find_page_by_block_id() {
+        let mut idx = Index::open_in_memory().unwrap();
+        let mut entry = make_entry("aabbccdd", "Test Page", "content", &[]);
+        entry.block_ids = vec![
+            (BlockId("k7m2x".into()), 5),
+            (BlockId("p3a9f".into()), 10),
+        ];
+        idx.index_page(&entry).unwrap();
+
+        let result = idx.find_page_by_block_id(&BlockId("k7m2x".into()));
+        assert!(result.is_some());
+        let (meta, line) = result.unwrap();
+        assert_eq!(meta.title, "Test Page");
+        assert_eq!(line, 5);
+
+        let result2 = idx.find_page_by_block_id(&BlockId("p3a9f".into()));
+        assert!(result2.is_some());
+        assert_eq!(result2.unwrap().1, 10);
+
+        // Nonexistent block
+        assert!(idx.find_page_by_block_id(&BlockId("zzzzz".into())).is_none());
+    }
+
+    // Block links indexed
+    #[test]
+    fn test_block_links_stored() {
+        let mut idx = Index::open_in_memory().unwrap();
+        // Page with a block
+        let mut target = make_entry("aabbccdd", "Target", "content", &[]);
+        target.block_ids = vec![(BlockId("k7m2x".into()), 3)];
+        idx.index_page(&target).unwrap();
+
+        // Page that links to the block
+        let mut source = make_entry("11223344", "Source", "links to block", &[]);
+        source.block_links = vec![(BlockId("k7m2x".into()), "the analysis".into())];
+        idx.index_page(&source).unwrap();
+
+        // Block lookup works
+        let (meta, line) = idx.find_page_by_block_id(&BlockId("k7m2x".into())).unwrap();
+        assert_eq!(meta.title, "Target");
+        assert_eq!(line, 3);
+    }
+
+    // Retired block IDs table exists
+    #[test]
+    fn test_retired_block_ids_table() {
+        let idx = Index::open_in_memory().unwrap();
+        // Just verify the table exists by inserting
+        idx.conn
+            .execute(
+                "INSERT INTO retired_block_ids (block_id, retired_at) VALUES ('old1', '2026-03-01')",
+                [],
+            )
+            .unwrap();
+        let count: i64 = idx
+            .conn
+            .query_row("SELECT COUNT(*) FROM retired_block_ids", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
     }
 }

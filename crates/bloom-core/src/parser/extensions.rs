@@ -4,11 +4,17 @@ use chrono::{NaiveDate, NaiveDateTime};
 
 use crate::types::{BlockId, PageId, TagName, Timestamp};
 
-use super::traits::{ParsedBlockId, ParsedLink, ParsedTag, ParsedTask, ParsedTimestamp};
+use super::traits::{ParsedBlockId, ParsedBlockLink, ParsedLink, ParsedTag, ParsedTask, ParsedTimestamp};
+
+enum ParsedLinkKind {
+    Page(ParsedLink),
+    Block(ParsedBlockLink),
+}
 
 /// Parse all `[[target|display]]` links from a line (not inside code spans).
-pub fn parse_links(line: &str, line_number: usize) -> Vec<ParsedLink> {
+pub fn parse_links(line: &str, line_number: usize) -> (Vec<ParsedLink>, Vec<ParsedBlockLink>) {
     let mut links = Vec::new();
+    let mut block_links = Vec::new();
     let bytes = line.as_bytes();
     let len = bytes.len();
     let mut i = 0;
@@ -39,44 +45,52 @@ pub fn parse_links(line: &str, line_number: usize) -> Vec<ParsedLink> {
                 let end = i + 2;
                 i = end;
 
-                if let Some(link) = parse_link_content(content, line_number, start..end) {
-                    links.push(link);
+                match parse_link_content(content, line_number, start..end) {
+                    Some(ParsedLinkKind::Page(link)) => links.push(link),
+                    Some(ParsedLinkKind::Block(bl)) => block_links.push(bl),
+                    None => {}
                 }
             }
             continue;
         }
         i += 1;
     }
-    links
+    (links, block_links)
 }
 
-fn parse_link_content(content: &str, line: usize, byte_range: Range<usize>) -> Option<ParsedLink> {
-    // Format: target or target|display or target#section|display
+fn parse_link_content(content: &str, line: usize, byte_range: Range<usize>) -> Option<ParsedLinkKind> {
     let (target_part, display) = if let Some(pipe_pos) = content.find('|') {
         (&content[..pipe_pos], content[pipe_pos + 1..].to_string())
     } else {
         (content, content.to_string())
     };
 
-    let (id_str, section) = if let Some(caret_pos) = target_part.find('^') {
-        let section_str = &target_part[caret_pos + 1..];
-        (
-            &target_part[..caret_pos],
-            Some(BlockId(section_str.to_string())),
-        )
-    } else {
-        (target_part, None)
-    };
+    // Block-only link: [[^block_id|text]]
+    if let Some(block_id_str) = target_part.strip_prefix('^') {
+        if block_id_str.is_empty() {
+            return None;
+        }
+        return Some(ParsedLinkKind::Block(ParsedBlockLink {
+            block_id: BlockId(block_id_str.to_string()),
+            display_hint: display,
+            line,
+            byte_range,
+        }));
+    }
 
-    let target = PageId::from_hex(id_str)?;
+    // Page link: [[page_id|text]] — reject [[page^block|text]] (parse error)
+    if target_part.contains('^') {
+        return None;
+    }
 
-    Some(ParsedLink {
+    let target = PageId::from_hex(target_part)?;
+
+    Some(ParsedLinkKind::Page(ParsedLink {
         target,
-        section,
         display_hint: display,
         line,
         byte_range,
-    })
+    }))
 }
 
 /// Parse `^block-id` at the end of a line.
@@ -314,26 +328,45 @@ mod tests {
     #[test]
     fn test_parse_link_with_display() {
         let line = "See [[8f3a1b2c|Text Editor]] for details";
-        let links = parse_links(line, 0);
+        let (links, block_links) = parse_links(line, 0);
         assert_eq!(links.len(), 1);
+        assert_eq!(block_links.len(), 0);
         assert_eq!(links[0].target, PageId::from_hex("8f3a1b2c").unwrap());
         assert_eq!(links[0].display_hint, "Text Editor");
-        assert!(links[0].section.is_none());
     }
 
     #[test]
-    fn test_parse_link_with_section() {
+    fn test_parse_link_with_section_is_parse_error() {
+        // [[page^block|text]] form is no longer supported — parse error
         let line = "[[8f3a1b2c^intro|Text Editor]]";
-        let links = parse_links(line, 0);
-        assert_eq!(links.len(), 1);
-        assert_eq!(links[0].section, Some(BlockId("intro".to_string())));
-        assert_eq!(links[0].display_hint, "Text Editor");
+        let (links, block_links) = parse_links(line, 0);
+        assert_eq!(links.len(), 0);
+        assert_eq!(block_links.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_block_only_link() {
+        let line = "See [[^k7m2x|the rope analysis]] for details";
+        let (links, block_links) = parse_links(line, 0);
+        assert_eq!(links.len(), 0);
+        assert_eq!(block_links.len(), 1);
+        assert_eq!(block_links[0].block_id, BlockId("k7m2x".to_string()));
+        assert_eq!(block_links[0].display_hint, "the rope analysis");
+    }
+
+    #[test]
+    fn test_parse_block_link_without_display() {
+        let line = "[[^k7m2x]]";
+        let (_, block_links) = parse_links(line, 0);
+        assert_eq!(block_links.len(), 1);
+        assert_eq!(block_links[0].block_id, BlockId("k7m2x".to_string()));
+        assert_eq!(block_links[0].display_hint, "^k7m2x");
     }
 
     #[test]
     fn test_parse_multiple_links_on_one_line() {
         let line = "[[aabbccdd|A]] and [[11223344|B]]";
-        let links = parse_links(line, 0);
+        let (links, _) = parse_links(line, 0);
         assert_eq!(links.len(), 2);
         assert_eq!(links[0].display_hint, "A");
         assert_eq!(links[1].display_hint, "B");
@@ -342,7 +375,7 @@ mod tests {
     #[test]
     fn test_parse_link_without_display() {
         let line = "[[8f3a1b2c]]";
-        let links = parse_links(line, 0);
+        let (links, _) = parse_links(line, 0);
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].display_hint, "8f3a1b2c");
     }
@@ -350,15 +383,17 @@ mod tests {
     #[test]
     fn test_parse_link_invalid_id() {
         let line = "[[short|Bad]]";
-        let links = parse_links(line, 0);
+        let (links, block_links) = parse_links(line, 0);
         assert_eq!(links.len(), 0);
+        assert_eq!(block_links.len(), 0);
     }
 
     #[test]
     fn test_links_not_parsed_in_code_span() {
         let line = "Before `[[8f3a1b2c|Link]]` after";
-        let links = parse_links(line, 0);
+        let (links, block_links) = parse_links(line, 0);
         assert_eq!(links.len(), 0);
+        assert_eq!(block_links.len(), 0);
     }
 
     // --- Tag tests (UC-35) ---

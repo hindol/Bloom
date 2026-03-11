@@ -7,7 +7,8 @@
 use crate::parser::traits::DocumentParser;
 use crate::*;
 
-/// Extract the link ID from a `[[id|text]]` pattern at the given column in a line.
+/// Extract the link target from a `[[...]]` pattern at the given column.
+/// Returns either a page ID hex string or `^block_id` for block links.
 pub(crate) fn extract_link_at_col(line: &str, col: usize) -> Option<String> {
     let byte_col = line
         .char_indices()
@@ -41,10 +42,10 @@ pub(crate) fn extract_link_at_col(line: &str, col: usize) -> Option<String> {
     while j + 1 < len {
         if bytes[j] == b']' && bytes[j + 1] == b']' {
             let content = &line[content_start..j];
-            // Extract the ID (before | or ^ if present)
-            let id = content.split('|').next().unwrap_or(content);
-            let id = id.split('^').next().unwrap_or(id);
-            return Some(id.to_string());
+            let target = content.split('|').next().unwrap_or(content);
+            // Block-only link: [[^block_id|text]] → return "^block_id"
+            // Page link: [[page_id|text]] → return "page_id"
+            return Some(target.to_string());
         }
         j += 1;
     }
@@ -174,7 +175,7 @@ impl BloomEditor {
         Some(format!("[[{}|{}]]", page_id.to_hex(), info.title))
     }
 
-    /// Yank a `[[id#block-id|title]]` link to the block at the cursor.
+    /// Yank a `[[^block_id|]]` block link for the block at the cursor.
     pub(crate) fn yank_link_to_current_block(&self) -> Option<String> {
         let page_id = self.active_page()?;
         let buf = self.buffer_mgr.get(page_id)?;
@@ -194,14 +195,7 @@ impl BloomEditor {
                     .chars()
                     .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
             {
-                let buffers = self.buffer_mgr.open_buffers();
-                let info = buffers.iter().find(|b| b.page_id == *page_id)?;
-                return Some(format!(
-                    "[[{}#{}|{}]]",
-                    page_id.to_hex(),
-                    block_id,
-                    info.title
-                ));
+                return Some(format!("[[^{}|]]", block_id));
             }
         }
         // Fallback: page link without block

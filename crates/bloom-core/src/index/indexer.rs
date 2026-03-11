@@ -562,7 +562,6 @@ fn parse_paths(
                 .iter()
                 .map(|l| LinkTarget {
                     page: l.target.clone(),
-                    section: l.section.clone(),
                     display_hint: l.display_hint.clone(),
                 })
                 .collect();
@@ -582,6 +581,11 @@ fn parse_paths(
                 .iter()
                 .map(|b| (b.id.clone(), b.line))
                 .collect();
+            let block_links: Vec<(BlockId, String)> = doc
+                .block_links
+                .iter()
+                .map(|bl| (bl.block_id.clone(), bl.display_hint.clone()))
+                .collect();
 
             Some(IndexEntry {
                 meta: PageMeta {
@@ -596,6 +600,7 @@ fn parse_paths(
                 tags,
                 tasks,
                 block_ids,
+                block_links,
             })
         })
         .collect()

@@ -222,11 +222,15 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
             }
             let content_end = i;
 
-            // Parse link content: uuid|display or uuid^block|display
+            // Parse link content: page_id|display or ^block_id|display
             let content = &line[content_start..content_end];
             let target_str = content.split('|').next().unwrap_or(content);
-            let target_str = target_str.split('^').next().unwrap_or(target_str);
-            let is_valid = crate::types::PageId::from_hex(target_str).is_some();
+            let is_block_link = target_str.starts_with('^');
+            let is_valid = if is_block_link {
+                target_str.len() > 1 // ^id must have at least one char after ^
+            } else {
+                crate::types::PageId::from_hex(target_str).is_some()
+            };
 
             // Split into uuid (chrome) and display text
             if let Some(pipe_pos) = content.find('|') {

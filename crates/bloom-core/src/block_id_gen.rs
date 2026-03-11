@@ -8,6 +8,8 @@
 
 use std::collections::HashSet;
 
+use rusqlite::Connection;
+
 use crate::parser::traits::Document;
 
 /// A computed block ID insertion: append ` ^{id}` to the end of the given line.
@@ -75,6 +77,33 @@ fn thread_counter() -> u64 {
         c.set(v);
         v
     })
+}
+
+// ---------------------------------------------------------------------------
+// Vault-wide ID loading (for collision avoidance)
+// ---------------------------------------------------------------------------
+
+/// Load all known block IDs (live + retired) from the index.
+///
+/// Used to seed the collision-check set during bulk assignment so that
+/// generated IDs never collide with any ID ever used in the vault.
+pub fn load_all_known_ids(conn: &Connection) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    if let Ok(mut stmt) = conn.prepare("SELECT block_id FROM block_ids") {
+        if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+            for id in rows.flatten() {
+                ids.insert(id);
+            }
+        }
+    }
+    if let Ok(mut stmt) = conn.prepare("SELECT block_id FROM retired_block_ids") {
+        if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+            for id in rows.flatten() {
+                ids.insert(id);
+            }
+        }
+    }
+    ids
 }
 
 // ---------------------------------------------------------------------------

@@ -92,6 +92,7 @@ mod tests {
             content: "tasks".into(),
             links: vec![],
             tags: vec![],
+            block_links: vec![],
             tasks: vec![
                 Task {
                     text: "Overdue".into(),
