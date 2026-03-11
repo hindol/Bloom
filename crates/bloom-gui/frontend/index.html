@@ -378,6 +378,13 @@
         const prev = prevFrame?.panes?.[p];
         const el = paneEls[p];
 
+        // Apply pane rect positioning (cell units → pixels)
+        const r = pane.rect;
+        el.container.style.left = `${r.x * charMetrics.charWidth}px`;
+        el.container.style.top = `${r.y * charMetrics.lineHeight}px`;
+        el.container.style.width = `${r.width * charMetrics.charWidth}px`;
+        el.container.style.height = `${r.total_height * charMetrics.lineHeight}px`;
+
         ensureLineEls(el, pane.visible_lines.length);
 
         for (let i = 0; i < pane.visible_lines.length; i++) {
@@ -543,6 +550,8 @@
 
     // --- Dimension measurement ---
 
+    let charMetrics = { charWidth: 8, lineHeight: 22.4 };
+
     function measureCharSize() {
       const probe = document.createElement('span');
       probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font:inherit;';
@@ -550,13 +559,14 @@
       document.body.appendChild(probe);
       const rect = probe.getBoundingClientRect();
       document.body.removeChild(probe);
-      return { charWidth: rect.width, lineHeight: rect.height || 22.4 };
+      charMetrics = { charWidth: rect.width || 8, lineHeight: rect.height || 22.4 };
+      return charMetrics;
     }
 
     function computeGridSize() {
-      const { charWidth, lineHeight } = measureCharSize();
-      const cols = Math.floor(window.innerWidth / charWidth);
-      const rows = Math.floor(window.innerHeight / lineHeight);
+      measureCharSize();
+      const cols = Math.floor(window.innerWidth / charMetrics.charWidth);
+      const rows = Math.floor(window.innerHeight / charMetrics.lineHeight);
       return { cols: Math.max(cols, 20), rows: Math.max(rows, 5) };
     }
 
