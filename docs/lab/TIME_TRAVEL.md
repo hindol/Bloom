@@ -136,76 +136,60 @@ On restart, the undo tree is deserialized. `u` and `Ctrl-R` work across sessions
 
 The history of a single page over time.
 
-### Page History (`SPC H h`)
+### Temporal Bar
 
-While viewing any page, `SPC H h` opens its **commit history** — a list of every version of that file, newest first.
+Bloom uses a **temporal bar** — a reusable bottom-center overlay for navigating through ordered items (history versions, calendar days). The same component powers page history (`SPC H h`) and future day view (`SPC H c`).
 
 ```
-═══ Text Editor Theory — History ══════════════════════════════════
-
-  ◆ Mar 8, 14:32                                    +12 / -0
-    Added section on rope data structures
-
-  ◆ Mar 6, 09:15                                     +3 / -1
-    Updated Xi Editor reference
-
-  ◆ Mar 1, 20:48                                    +45 / -0
-    Initial creation
-
-══════════════════════════════════════════════════════════════════
-  3 versions · created Mar 1
+┌── Editor pane (live preview of selected version) ───────────────┐
+│                                                                  │
+│  ## Rope Data Structure                                          │
+│                                                                  │
+│+ Ropes are O(log n) for inserts.    ← green (added vs current)  │
+│+ They use balanced binary trees                                  │
+│                                                                  │
+│  See Xi Editor for details.                                      │
+├──────────────────────────────────────────────────────────────────┤
+│ HISTORY  Text Editor Theory                                      │
+├──────────────────────────────────────────────────────────────────┤
+│      ◄  Mar 8, 14:32 — "Added rope section"  (3 of 12)  ►      │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-Each entry is a commit that touched this page's UUID. The summary is auto-generated from the diff (`+N / -M` lines, first changed line as a description hint). Rename-proof — the UUID never changes.
+The bar is a single line anchored at the bottom center of the screen, drawn above the status bar. Arrows (`◄` / `►`) indicate navigation direction; they fade when at the boundary (oldest / newest).
 
-**Navigation:**
+**Interaction model:**
 
 | Key | Action |
 |-----|--------|
-| `j` / `k` | Move between versions |
-| `Enter` | Open that version read-only (full page at that point in time) |
-| `d` | Show diff between selected version and current (or between two selected versions) |
-| `r` | Restore — copy this version's content into the current buffer (undo-able) |
-| `e` | Toggle between compact and expanded diff view |
-| `q` | Close history |
+| `←` / `h` | Older version (live preview updates) |
+| `→` / `l` | Newer version |
+| `d` | Toggle inline diff highlights (green = added, red = removed vs current) |
+| `Enter` / `↓` | Expand into full picker list of all versions |
+| `r` | Restore — apply selected version to buffer (undo-able), close bar |
+| `Esc` / `q` | Dismiss bar, return to current version |
 
-### Viewing a Past Version
+**Live preview:** While scrubbing, the editor pane displays the historical content read-only. The actual buffer is never modified — the preview is display-only. On `Esc`, the original content reappears instantly. On `r`, the preview content replaces the buffer (one undo step).
 
-When you press `Enter` on a history entry, Bloom retrieves the file content at that commit via `gix` (a single blob lookup by UUID — instant) and opens it in a **read-only buffer**. The status bar shows:
+**Inline diff:** Pressing `d` toggles line-level diff highlights on the live preview. Added lines are tinted `accent_green`, removed lines `accent_red`. The diff is computed against the current (saved) version. Pressing `d` again turns highlights off.
 
-```
- HISTORY  Text Editor Theory  Mar 6, 09:15  (read-only)
-```
+**Expanded picker:** Pressing `Enter` or `↓` expands the bar into a scrollable list of all versions, resembling the standard picker. `Esc` collapses back to the single-line bar.
 
-You can scroll, search, even yank text — but not edit. This is a snapshot, not a live document. `q` returns to the current version.
+**Reusable design:** The temporal bar is generic over its item type. Page history uses `PageHistoryEntry` (commit oid, date, message). Day view will use `NaiveDate`. The component provides:
+- `←` / `→` navigation with wrapping or boundary clamping
+- Position display: "(N of M)"
+- Expand/collapse to picker
+- Label formatting via a pluggable function
 
-### Side-by-Side Diff (`SPC H d`)
+### Page History (`SPC H h`)
 
-From the history view, pressing `d` opens a **split diff** between the selected version and the current page:
+While viewing any page, `SPC H h` opens the temporal bar with the page's **commit history** — every version of that file, newest first. The bar shows the date, auto-generated description (from commit message), and diff stat.
 
-```
-┌─ Text Editor Theory (Mar 6) ──────┬─ Text Editor Theory (current) ─────┐
-│  ## Rope Data Structure            │  ## Rope Data Structure             │
-│                                    │                                     │
-│                                    │+ Ropes are O(log n) for inserts.   │
-│                                    │+ They use balanced binary trees     │
-│                                    │+ to represent text.                 │
-│                                    │+                                    │
-│  See Xi Editor for details.        │  See Xi Editor for a real-world     │
-│                                    │  implementation.                    │
-│                                    │                                     │
-├────────────────────────────────────┼─────────────────────────────────────┤
-│ HISTORY  Mar 6, 09:15             │ NORMAL  Text Editor Theory          │
-└────────────────────────────────────┴─────────────────────────────────────┘
-```
-
-Added lines highlighted in `accent_green`, removed in `accent_red`. The diff is computed by `gix` (blob diff between two commits) and rendered using Bloom's existing split pane infrastructure.
-
-With two versions selected in the history list (mark with `Tab`), `d` diffs those two versions against each other — not against current.
+Each entry is a commit that touched this page's UUID. Rename-proof — the UUID never changes, so history follows the page regardless of title changes.
 
 ### Restore
 
-Pressing `r` on a history entry copies that version's full content into the current buffer. This is a normal edit — it goes through the rope, it's undo-able, it triggers auto-save. You can restore a past version and then `u` to undo if you change your mind. The git history gains a new commit showing the restore.
+Pressing `r` on the temporal bar copies the selected version's full content into the current buffer. This is a normal edit — it goes through the rope, it's undo-able, it triggers auto-save. You can restore a past version and then `u` to undo if you change your mind. The git history gains a new commit showing the restore.
 
 ### Block-Level History
 
