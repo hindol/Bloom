@@ -803,11 +803,16 @@ impl BloomEditor {
         if len == 0 {
             return (0, 0);
         }
-        let clamped = if matches!(vim_state.mode(), vim::Mode::Insert) {
-            cursor.min(len)
+        // In Insert mode, cursor can be at len (past the last char).
+        // In Normal mode, cursor can be at len only on the implicit empty
+        // trailing line (file ends with \n). Otherwise clamp to len-1.
+        let has_trailing_empty_line = len > 0 && rope.char(len - 1) == '\n';
+        let max_pos = if matches!(vim_state.mode(), vim::Mode::Insert) || has_trailing_empty_line {
+            len
         } else {
-            cursor.min(len.saturating_sub(1))
+            len.saturating_sub(1)
         };
+        let clamped = cursor.min(max_pos);
         if clamped == len {
             let last_line = rope.len_lines().saturating_sub(1);
             let line_start = rope.line_to_char(last_line);
@@ -817,13 +822,6 @@ impl BloomEditor {
         let line = rope.char_to_line(clamped);
         let line_start = rope.line_to_char(line);
         let col = clamped - line_start;
-        if rope.char(clamped) == '\n' && line + 1 < rope.len_lines() {
-            let next_line_start = rope.line_to_char(line + 1);
-            let next_line_len = rope.line(line + 1).len_chars();
-            if next_line_len == 0 && next_line_start == len {
-                return (line + 1, 0);
-            }
-        }
         (line, col)
     }
 
