@@ -382,8 +382,13 @@
 
     // Listen for render events from the Rust backend
     listen('render', (event) => {
+      const t0 = performance.now();
       console.log('render event received, picker:', event.payload.picker ? 'YES' : 'no', 'panes:', event.payload.panes?.length);
       renderFrame(event.payload);
+      const elapsed = performance.now() - t0;
+      if (elapsed > 5) {
+        console.warn(`slow DOM render: ${elapsed.toFixed(1)}ms, lines: ${event.payload.panes?.[0]?.visible_lines?.length}`);
+      }
     });
 
     // Forward key events to Rust

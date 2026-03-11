@@ -61,12 +61,19 @@ fn main() {
 /// a fresh RenderFrame back to the frontend.
 #[tauri::command]
 fn key_event(key: KeyInput, state: tauri::State<EditorState>, app: AppHandle) {
+    let t_total = std::time::Instant::now();
+
     let Some(bloom_key) = convert_key(&key) else {
         return;
     };
 
+    let t_lock = std::time::Instant::now();
     let mut editor = state.editor.lock().unwrap();
+    let lock_ms = t_lock.elapsed().as_secs_f64() * 1000.0;
+
+    let t_handle = std::time::Instant::now();
     let actions = editor.handle_key(bloom_key);
+    let handle_ms = t_handle.elapsed().as_secs_f64() * 1000.0;
 
     for action in &actions {
         match action {
@@ -81,27 +88,52 @@ fn key_event(key: KeyInput, state: tauri::State<EditorState>, app: AppHandle) {
         }
     }
 
-    emit_render(&mut editor, &app);
+    let t_render = std::time::Instant::now();
+    let frame = editor.render(120, 40);
+    let render_ms = t_render.elapsed().as_secs_f64() * 1000.0;
+
+    let t_serialize = std::time::Instant::now();
+    match app.emit("render", &frame) {
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("emit error: {e}");
+        }
+    }
+    let serialize_ms = t_serialize.elapsed().as_secs_f64() * 1000.0;
+
+    let total_ms = t_total.elapsed().as_secs_f64() * 1000.0;
+
+    // Log if any stage is slow (> 2ms) or total > 5ms
+    if total_ms > 5.0 || lock_ms > 2.0 || handle_ms > 2.0 || render_ms > 2.0 || serialize_ms > 2.0 {
+        tracing::warn!(
+            key = %key.code,
+            lock_ms = format!("{lock_ms:.1}"),
+            handle_ms = format!("{handle_ms:.1}"),
+            render_ms = format!("{render_ms:.1}"),
+            serialize_ms = format!("{serialize_ms:.1}"),
+            total_ms = format!("{total_ms:.1}"),
+            "slow key_event",
+        );
+    }
 }
 
 /// Initial render — called once when the frontend loads.
 #[tauri::command]
 fn initial_render(state: tauri::State<EditorState>, app: AppHandle) {
     let mut editor = state.editor.lock().unwrap();
-    emit_render(&mut editor, &app);
+    let t = std::time::Instant::now();
+    let frame = editor.render(120, 40);
+    let render_ms = t.elapsed().as_secs_f64() * 1000.0;
+    let t2 = std::time::Instant::now();
+    let _ = app.emit("render", &frame);
+    let emit_ms = t2.elapsed().as_secs_f64() * 1000.0;
+    tracing::info!(render_ms = format!("{render_ms:.1}"), emit_ms = format!("{emit_ms:.1}"), "initial render");
 }
 
 /// Render the current editor state and emit it to the frontend.
 fn emit_render(editor: &mut BloomEditor, app: &AppHandle) {
-    // Use a reasonable default size — the frontend will send resize events later
     let frame = editor.render(120, 40);
-    match app.emit("render", &frame) {
-        Ok(_) => {}
-        Err(e) => {
-            tracing::error!(error = %e, "failed to emit render frame");
-            eprintln!("emit error: {e}");
-        }
-    }
+    let _ = app.emit("render", &frame);
 }
 
 /// Convert a frontend KeyInput to a bloom-core KeyEvent.
