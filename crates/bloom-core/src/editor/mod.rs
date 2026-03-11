@@ -5,6 +5,7 @@
 //! navigation, pickers, notifications, and render-frame construction.
 
 mod commands;
+pub mod event_loop;
 mod files;
 mod init;
 mod keys;

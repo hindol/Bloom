@@ -28,6 +28,7 @@ pub mod which_key;
 pub mod window;
 
 mod editor;
+pub use editor::event_loop;
 
 // ---------------------------------------------------------------------------
 // BufferManager

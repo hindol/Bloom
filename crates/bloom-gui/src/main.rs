@@ -1,17 +1,16 @@
 //! Bloom GUI — Tauri frontend over bloom-core.
 //!
-//! The Rust backend owns BloomEditor and all state. The TypeScript frontend
-//! is a pure render target — it receives RenderFrame as JSON and sends
-//! key events back via Tauri commands.
+//! The editor runs on a dedicated thread using the shared event loop.
+//! Tauri commands send events via channels — no Mutex on the editor.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use bloom_core::config::Config;
 use bloom_core::default_vault_path;
-use bloom_core::keymap::dispatch::Action;
-use bloom_core::types::KeyEvent as BloomKey;
+use bloom_core::event_loop::{FrontendEvent, LoopAction};
 use bloom_core::BloomEditor;
-use serde::{Deserialize, Serialize};
+use crossbeam::channel::Sender;
+use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 /// Key event from the frontend.
@@ -24,11 +23,8 @@ struct KeyInput {
     meta: bool,
 }
 
-/// Shared editor state, protected by a Mutex for Tauri's thread model.
-struct EditorState {
-    editor: Mutex<BloomEditor>,
-    viewport: Mutex<ViewportSize>,
-}
+/// Channel sender for frontend events, shared via Tauri state.
+struct FrontendTx(Sender<FrontendEvent>);
 
 fn main() {
     let config_path_str = default_vault_path();
@@ -49,77 +45,64 @@ fn main() {
         editor.startup();
     }
 
-    tauri::Builder::default()
-        .manage(EditorState {
-            editor: Mutex::new(editor),
-            viewport: Mutex::new(ViewportSize { cols: 120, rows: 40 }),
+    let (frontend_tx, frontend_rx) = crossbeam::channel::unbounded();
+    let app_handle: Arc<Mutex<Option<AppHandle>>> = Arc::new(Mutex::new(None));
+    let app_handle_for_loop = app_handle.clone();
+
+    // Editor loop runs on a dedicated thread — no Mutex on editor
+    std::thread::Builder::new()
+        .name("bloom-editor".into())
+        .spawn(move || {
+            bloom_core::event_loop::run_event_loop(&mut editor, &frontend_rx, |action| {
+                match action {
+                    LoopAction::Render(frame) => {
+                        if let Some(app) = app_handle_for_loop.lock().unwrap().as_ref() {
+                            let _ = app.emit("render", &frame);
+                        }
+                        true
+                    }
+                    LoopAction::Quit => {
+                        if let Some(app) = app_handle_for_loop.lock().unwrap().as_ref() {
+                            let _ = app.emit("quit", ());
+                        }
+                        false
+                    }
+                }
+            });
         })
-        .invoke_handler(tauri::generate_handler![key_event, initial_render, resize])
+        .expect("failed to spawn editor thread");
+
+    let tx_for_state = frontend_tx.clone();
+
+    tauri::Builder::default()
+        .manage(FrontendTx(tx_for_state))
+        .setup(move |app| {
+            *app_handle.lock().unwrap() = Some(app.handle().clone());
+            // Trigger initial render by sending a resize
+            let _ = frontend_tx.send(FrontendEvent::Resize { cols: 120, rows: 40 });
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![key_event, resize])
         .run(tauri::generate_context!())
         .expect("failed to run Bloom GUI");
 }
 
-/// Handle a key event from the frontend. Processes the key, then emits
-/// a fresh RenderFrame back to the frontend.
+/// Handle a key event from the frontend — sends to the editor loop channel.
 #[tauri::command]
-fn key_event(key: KeyInput, state: tauri::State<EditorState>, app: AppHandle) {
-    let Some(bloom_key) = convert_key(&key) else {
-        return;
-    };
-
-    let mut editor = state.editor.lock().unwrap();
-    let actions = editor.handle_key(bloom_key);
-
-    for action in &actions {
-        match action {
-            Action::Quit => {
-                let _ = editor.save_session();
-                std::process::exit(0);
-            }
-            Action::Save => {
-                let _ = editor.save_current();
-            }
-            _ => {}
-        }
+fn key_event(key: KeyInput, state: tauri::State<FrontendTx>) {
+    if let Some(bloom_key) = convert_key(&key) {
+        let _ = state.0.send(FrontendEvent::Key(bloom_key));
     }
-
-    emit_render(&mut editor, &app, &state.viewport.lock().unwrap());
-}
-
-/// Stored viewport dimensions from the frontend.
-struct ViewportSize {
-    cols: u16,
-    rows: u16,
-}
-
-/// Initial render — called once when the frontend loads, with measured dimensions.
-#[tauri::command]
-fn initial_render(cols: u16, rows: u16, state: tauri::State<EditorState>, app: AppHandle) {
-    let mut editor = state.editor.lock().unwrap();
-    editor.resize(rows as usize, cols as usize);
-    *state.viewport.lock().unwrap() = ViewportSize { cols, rows };
-    let frame = editor.render(cols, rows);
-    let _ = app.emit("render", &frame);
 }
 
 /// Handle window resize from the frontend.
 #[tauri::command]
-fn resize(cols: u16, rows: u16, state: tauri::State<EditorState>, app: AppHandle) {
-    let mut editor = state.editor.lock().unwrap();
-    editor.resize(rows as usize, cols as usize);
-    *state.viewport.lock().unwrap() = ViewportSize { cols, rows };
-    let frame = editor.render(cols, rows);
-    let _ = app.emit("render", &frame);
-}
-
-/// Render with the stored viewport dimensions.
-fn emit_render(editor: &mut BloomEditor, app: &AppHandle, viewport: &ViewportSize) {
-    let frame = editor.render(viewport.cols, viewport.rows);
-    let _ = app.emit("render", &frame);
+fn resize(cols: u16, rows: u16, state: tauri::State<FrontendTx>) {
+    let _ = state.0.send(FrontendEvent::Resize { cols, rows });
 }
 
 /// Convert a frontend KeyInput to a bloom-core KeyEvent.
-fn convert_key(key: &KeyInput) -> Option<BloomKey> {
+fn convert_key(key: &KeyInput) -> Option<bloom_core::types::KeyEvent> {
     use bloom_core::types::{KeyCode, Modifiers};
 
     let code = match key.code.as_str() {
@@ -151,5 +134,5 @@ fn convert_key(key: &KeyInput) -> Option<BloomKey> {
         meta: key.meta,
     };
 
-    Some(BloomKey { code, modifiers })
+    Some(bloom_core::types::KeyEvent { code, modifiers })
 }
