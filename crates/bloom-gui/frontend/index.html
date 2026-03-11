@@ -14,8 +14,12 @@
       --subtle: #37373E;
       --modeline: #1A1919;
       --highlight: #212228;
+      --mild: #474648;
+      --ultralight: #2C2C34;
+      --critical: #CF6752;
+      --popout: #7A9EFF;
       --accent-green: #62C554;
-      --accent-red: #CF6752;
+      --accent-red: #EC6A5E;
       --accent-blue: #81A1C1;
       --accent-yellow: #F2DA61;
     }
@@ -53,18 +57,31 @@
     }
 
     .line {
-      white-space: pre;
-      height: 1.6em;
+      white-space: pre-wrap;     /* Word wrap at pane width */
+      word-break: break-all;     /* Break long words if needed */
+      min-height: 1.6em;
+      display: flex;
     }
 
     .gutter {
       display: inline-block;
+      min-width: 4em;
       width: 4em;
+      flex-shrink: 0;
       text-align: right;
       padding-right: 0.5em;
       color: var(--faded);
       user-select: none;
     }
+
+    .line-content {
+      flex: 1;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-wrap: break-word;
+    }
+
+    /* --- Status bar --- */
 
     .status-bar {
       height: 1.6em;
@@ -73,38 +90,88 @@
       justify-content: space-between;
       align-items: center;
       font-size: 12px;
+      flex-shrink: 0;
     }
 
-    .status-bar.active {
-      background: var(--highlight);
-    }
+    .status-bar.active { background: var(--highlight); }
+    .status-bar.active-insert { background: var(--accent-green); color: var(--bg); }
+    .status-bar.active-visual { background: var(--popout); color: var(--bg); }
+    .status-bar.active-command { background: var(--accent-blue); color: var(--bg); }
+    .status-bar.inactive { background: var(--subtle); color: var(--faded); }
 
-    .status-bar.inactive {
-      background: var(--subtle);
-      color: var(--faded);
-    }
+    .mode-badge { font-weight: bold; margin-right: 0.5em; }
 
-    .mode-badge {
-      font-weight: bold;
-      margin-right: 0.5em;
-    }
+    /* --- Semantic syntax styles (from THEMING.md) --- */
 
-    .mode-normal { color: var(--fg); }
-    .mode-insert { color: var(--bg); background: var(--accent-green); padding: 0 4px; }
-    .mode-visual { color: var(--bg); background: var(--accent-blue); padding: 0 4px; }
+    /* Normal — default text, no special styling */
+    .s-normal { }
 
-    /* Syntax styles */
+    /* Headings — structural accent */
     .s-heading-1 { color: var(--strong); font-weight: bold; font-size: 1.5em; }
     .s-heading-2 { color: var(--salient); font-weight: bold; font-size: 1.3em; }
+    .s-heading-3 { font-weight: bold; font-size: 1.1em; }
+    .s-heading { font-weight: bold; } /* H4–H6 */
+
+    /* Typographic */
     .s-bold { font-weight: bold; }
     .s-italic { font-style: italic; }
+
+    /* Code — faint background wash */
+    .s-code { background: var(--subtle); padding: 1px 3px; border-radius: 2px; }
+    .s-codeblock { background: var(--subtle); }
+
+    /* Links */
+    .s-link { color: var(--strong); text-decoration: underline; background: var(--modeline); }
+    .s-linkchrome { color: var(--faded); opacity: 0.5; }
+
+    /* Tags — quiet metadata */
     .s-tag { color: var(--faded); }
-    .s-noise { color: var(--faded); opacity: 0.5; }
-    .s-link { color: var(--strong); text-decoration: underline; }
+
+    /* Timestamps */
+    .s-timestamp-keyword { color: var(--faded); }
+    .s-timestamp-date { color: var(--fg); }
+    .s-timestamp-overdue { color: var(--accent-red); }
+    .s-timestamp-parens { color: var(--faded); opacity: 0.5; }
+
+    /* Block IDs */
+    .s-blockid { color: var(--faded); opacity: 0.5; }
+    .s-blockid-caret { color: var(--faded); opacity: 0.5; }
+
+    /* List markers — structural, full visibility */
+    .s-listmarker { color: var(--fg); }
+
+    /* Checkboxes — status IS the meaning */
     .s-checkbox-unchecked { color: var(--accent-yellow); }
     .s-checkbox-checked { color: var(--accent-green); text-decoration: line-through; }
-    .s-frontmatter { color: var(--faded); font-style: italic; }
+    .s-checkedtext { color: var(--faded); text-decoration: line-through; }
 
+    /* Blockquotes */
+    .s-blockquote { font-style: italic; }
+    .s-blockquote-marker { color: var(--faded); }
+
+    /* Tables */
+    .s-table-pipe { color: var(--faded); }
+    .s-table-alignment { color: var(--faded); opacity: 0.5; }
+
+    /* Frontmatter */
+    .s-frontmatter { color: var(--faded); font-style: italic; }
+    .s-frontmatter-key { color: var(--faded); font-style: italic; }
+    .s-frontmatter-title { color: var(--fg); font-weight: bold; font-style: italic; }
+    .s-frontmatter-id { color: var(--faded); font-style: italic; opacity: 0.5; }
+    .s-frontmatter-date { color: var(--faded); font-style: italic; }
+    .s-frontmatter-tags { color: var(--faded); }
+
+    /* Broken links */
+    .s-brokenlink { color: var(--critical); text-decoration: line-through; }
+
+    /* Syntax noise — Tier 3 markers */
+    .s-noise { color: var(--faded); opacity: 0.5; }
+
+    /* Search matches */
+    .s-searchmatch { background: var(--ultralight); }
+    .s-searchmatch-current { background: var(--popout); }
+
+    /* Current line highlight */
     .current-line { background: var(--highlight); }
 
     /* Picker overlay */
@@ -214,20 +281,40 @@
     const editorEl = document.getElementById('editor');
     const loadingEl = document.getElementById('loading');
 
-    // Style class mapping from Bloom's Style enum
+    // Complete style mapping from bloom-core Style enum → CSS classes
     const STYLE_MAP = {
       'Normal': '',
-      'Heading': 's-heading-1',
       'Bold': 's-bold',
       'Italic': 's-italic',
-      'Tag': 's-tag',
-      'SyntaxNoise': 's-noise',
+      'Code': 's-code',
+      'CodeBlock': 's-codeblock',
       'LinkText': 's-link',
-      'LinkChrome': 's-noise',
+      'LinkChrome': 's-linkchrome',
+      'Tag': 's-tag',
+      'TimestampKeyword': 's-timestamp-keyword',
+      'TimestampDate': 's-timestamp-date',
+      'TimestampOverdue': 's-timestamp-overdue',
+      'TimestampParens': 's-timestamp-parens',
+      'BlockId': 's-blockid',
+      'BlockIdCaret': 's-blockid-caret',
+      'ListMarker': 's-listmarker',
       'CheckboxUnchecked': 's-checkbox-unchecked',
       'CheckboxChecked': 's-checkbox-checked',
+      'CheckedTaskText': 's-checkedtext',
+      'Blockquote': 's-blockquote',
+      'BlockquoteMarker': 's-blockquote-marker',
+      'TablePipe': 's-table-pipe',
+      'TableAlignmentRow': 's-table-alignment',
       'Frontmatter': 's-frontmatter',
-      'FrontmatterTitle': 's-bold s-italic',
+      'FrontmatterKey': 's-frontmatter-key',
+      'FrontmatterTitle': 's-frontmatter-title',
+      'FrontmatterId': 's-frontmatter-id',
+      'FrontmatterDate': 's-frontmatter-date',
+      'FrontmatterTags': 's-frontmatter-tags',
+      'BrokenLink': 's-brokenlink',
+      'SyntaxNoise': 's-noise',
+      'SearchMatch': 's-searchmatch',
+      'SearchMatchCurrent': 's-searchmatch-current',
     };
 
     // -----------------------------------------------------------------------
@@ -429,7 +516,16 @@
 
         if (statusChanged) {
           el.statusBar.innerHTML = renderStatusBarHtml(pane);
-          el.statusBar.className = `status-bar ${pane.is_active ? 'active' : 'inactive'}`;
+          const mode = pane.status_bar.mode.toLowerCase();
+          if (pane.is_active) {
+            const modeClass = mode === 'insert' ? 'active-insert'
+              : mode === 'visual' ? 'active-visual'
+              : mode === 'command' ? 'active-command'
+              : 'active';
+            el.statusBar.className = `status-bar ${modeClass}`;
+          } else {
+            el.statusBar.className = 'status-bar inactive';
+          }
         }
       }
 
@@ -510,7 +606,10 @@
       if (typeof style === 'string') return STYLE_MAP[style] || '';
       if (style.Heading) {
         const level = style.Heading.level || 1;
-        return level <= 2 ? `s-heading-${level}` : 's-bold';
+        if (level === 1) return 's-heading-1';
+        if (level === 2) return 's-heading-2';
+        if (level === 3) return 's-heading-3';
+        return 's-heading';
       }
       return '';
     }
