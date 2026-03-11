@@ -233,6 +233,7 @@ impl BloomEditor {
                     ap.picker
                         .results()
                         .into_iter()
+                        .take(50) // Cap results sent to frontend — only ~10 visible
                         .map(|item| render::PickerRow {
                             label: item.label.clone(),
                             middle: item.middle.clone(),
