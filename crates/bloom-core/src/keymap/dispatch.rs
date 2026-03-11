@@ -53,6 +53,7 @@ pub enum Action {
     OpenTimeline(PageId),
     OpenAgenda,
     OpenUndoTree,
+    OpenPageHistory,
     OpenDatePicker(DatePickerPurpose),
     DialogResponse(usize),
 

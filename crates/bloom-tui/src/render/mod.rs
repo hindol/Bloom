@@ -1,6 +1,7 @@
 mod dialog;
 mod inline_menu;
 mod notifications;
+mod page_history;
 mod pane;
 mod picker;
 mod status_bar;

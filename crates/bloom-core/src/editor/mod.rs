@@ -11,5 +11,6 @@ mod init;
 mod keys;
 mod navigation;
 mod notifications;
+mod page_history;
 mod pickers;
 mod render;

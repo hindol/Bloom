@@ -23,6 +23,11 @@ impl BloomEditor {
             return self.handle_dialog_key(&key);
         }
 
+        // If page history pane is active, handle history navigation
+        if self.is_page_history_active() {
+            return self.handle_page_history_key(&key);
+        }
+
         // Check platform shortcuts first
         if let Some(action) = keymap::platform_shortcut(&key) {
             self.leader_keys.clear();
@@ -200,6 +205,9 @@ impl BloomEditor {
                 keymap::dispatch::Action::OpenUndoTree => {
                     // TODO: open undo tree in split pane
                     result.push(action);
+                }
+                keymap::dispatch::Action::OpenPageHistory => {
+                    self.open_page_history();
                 }
                 keymap::dispatch::Action::OpenPicker(ref kind) => {
                     if matches!(kind, keymap::dispatch::PickerKind::Theme) {

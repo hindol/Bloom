@@ -36,6 +36,7 @@ pub enum PaneKind {
     UndoTree,
     Agenda,
     Timeline,
+    PageHistory,
     SetupWizard,
 }
 

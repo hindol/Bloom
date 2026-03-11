@@ -272,6 +272,9 @@ pub fn default_tree() -> WhichKeyTree {
     // Undo
     tree.register("u u", "Undo tree", "undo_tree".into());
 
+    // History (time travel)
+    tree.register("H h", "Page history", "page_history".into());
+
     // New from template (single key, no sub-key)
     tree.register("n", "New from template", "new_from_template".into());
 
@@ -289,6 +292,7 @@ pub fn default_tree() -> WhichKeyTree {
     tree.set_group_label("w", "windows");
     tree.set_group_label("r", "refactor");
     tree.set_group_label("u", "undo");
+    tree.set_group_label("H", "history");
     tree.set_group_label("T", "toggles");
     tree.set_group_label("i", "insert");
     tree.set_group_label("t", "tags");

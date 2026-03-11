@@ -79,6 +79,7 @@ impl BloomEditor {
             "close_window" => vec![keymap::dispatch::Action::CloseWindow],
             "agenda" => vec![keymap::dispatch::Action::OpenAgenda],
             "undo_tree" => vec![keymap::dispatch::Action::OpenUndoTree],
+            "page_history" => vec![keymap::dispatch::Action::OpenPageHistory],
             "new_from_template" => vec![keymap::dispatch::Action::OpenPicker(
                 keymap::dispatch::PickerKind::Templates,
             )],

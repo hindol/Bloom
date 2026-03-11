@@ -73,6 +73,10 @@ pub(super) fn draw_pane(
             super::undo_tree::draw_undo_tree(f, content_area, ut, theme);
             None
         }
+        PaneKind::PageHistory(ph) => {
+            super::page_history::draw_page_history(f, content_area, ph, theme);
+            None
+        }
         PaneKind::SetupWizard(sw) => {
             super::wizard::draw_setup_wizard(f, content_area, sw, theme);
             None

@@ -67,6 +67,7 @@ pub enum PaneKind {
     Editor,
     UndoTree(UndoTreeFrame),
     Timeline(TimelineFrame),
+    PageHistory(PageHistoryFrame),
     SetupWizard(SetupWizardFrame),
 }
 
@@ -88,6 +89,28 @@ pub struct UndoTreeNode {
     pub branch: usize,
     pub description: String,
     pub is_current: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Page history (git time travel)
+// ---------------------------------------------------------------------------
+
+/// Render data for the page history split pane (`SPC H h`).
+#[derive(Serialize)]
+pub struct PageHistoryFrame {
+    pub page_title: String,
+    pub entries: Vec<PageHistoryEntryFrame>,
+    pub selected_index: usize,
+    pub total_versions: usize,
+}
+
+/// One entry in the page history list.
+#[derive(Serialize)]
+pub struct PageHistoryEntryFrame {
+    pub oid: String,
+    pub date: String,
+    pub diff_stat: String,
+    pub description: String,
 }
 
 // ---------------------------------------------------------------------------

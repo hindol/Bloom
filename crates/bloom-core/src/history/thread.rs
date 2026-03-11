@@ -22,22 +22,50 @@ pub enum HistoryRequest {
         files: Vec<(String, String)>,
         message: String,
     },
+    /// Retrieve commit history for a specific page (by UUID).
+    PageHistory {
+        uuid: String,
+        limit: usize,
+    },
+    /// Retrieve file content at a specific commit.
+    BlobAt {
+        oid: String,
+        uuid: String,
+    },
     /// Shut down the history thread.
     Shutdown,
 }
 
 /// Results sent from the history thread back to the UI thread.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum HistoryComplete {
     /// A commit was created (or skipped if no changes).
     CommitDone {
-        /// The commit OID, or None if no changes.
         oid: Option<String>,
+    },
+    /// Page history results.
+    PageHistory {
+        entries: Vec<PageHistoryEntry>,
+    },
+    /// File content at a specific commit.
+    BlobAt {
+        oid: String,
+        uuid: String,
+        content: Option<String>,
     },
     /// An error occurred.
     Error { message: String },
     /// The thread has shut down.
     ShutDown,
+}
+
+/// A single entry in a page's commit history.
+#[derive(Debug, Clone)]
+pub struct PageHistoryEntry {
+    pub oid: String,
+    pub message: String,
+    pub timestamp: i64,
+    pub changed_files: Vec<String>,
 }
 
 /// Spawn the long-lived history thread. Returns the request sender.
@@ -127,6 +155,45 @@ fn history_main(
                 pending_files = files;
                 pending_message = Some(message);
                 // Commit immediately below.
+            }
+            Ok(HistoryRequest::PageHistory { uuid, limit }) => {
+                match repo.page_history(Some(&uuid), limit) {
+                    Ok(entries) => {
+                        let entries = entries
+                            .into_iter()
+                            .map(|c| PageHistoryEntry {
+                                oid: c.oid,
+                                message: c.message,
+                                timestamp: c.timestamp,
+                                changed_files: c.changed_files,
+                            })
+                            .collect();
+                        let _ = completion_tx.send(HistoryComplete::PageHistory { entries });
+                    }
+                    Err(e) => {
+                        let _ = completion_tx.send(HistoryComplete::Error {
+                            message: e.to_string(),
+                        });
+                    }
+                }
+                continue;
+            }
+            Ok(HistoryRequest::BlobAt { oid, uuid }) => {
+                match repo.blob_at(&oid, &uuid) {
+                    Ok(content) => {
+                        let _ = completion_tx.send(HistoryComplete::BlobAt {
+                            oid,
+                            uuid,
+                            content,
+                        });
+                    }
+                    Err(e) => {
+                        let _ = completion_tx.send(HistoryComplete::Error {
+                            message: e.to_string(),
+                        });
+                    }
+                }
+                continue;
             }
             Ok(HistoryRequest::Shutdown) => {
                 // Final commit if dirty, then exit.

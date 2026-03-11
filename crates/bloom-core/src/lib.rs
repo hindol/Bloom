@@ -217,6 +217,8 @@ pub struct BloomEditor {
     // Git-backed history
     pub(crate) history_tx: Option<crossbeam::channel::Sender<history::HistoryRequest>>,
     pub(crate) history_rx: Option<crossbeam::channel::Receiver<history::HistoryComplete>>,
+    pub(crate) page_history_entries: Option<Vec<history::PageHistoryEntry>>,
+    pub(crate) page_history_selected: usize,
 }
 
 pub(crate) struct InlineCompletion {
@@ -447,6 +449,8 @@ impl BloomEditor {
             vault_lock: None,
             history_tx: None,
             history_rx: None,
+            page_history_entries: None,
+            page_history_selected: 0,
             config,
         })
     }
@@ -591,6 +595,12 @@ impl BloomEditor {
             history::HistoryComplete::CommitDone { oid: None } => {
                 tracing::debug!("history commit skipped (no changes)");
             }
+            history::HistoryComplete::PageHistory { entries } => {
+                self.receive_page_history(entries);
+            }
+            history::HistoryComplete::BlobAt { oid, uuid, content } => {
+                self.receive_blob_at(&oid, &uuid, content);
+            }
             history::HistoryComplete::Error { message } => {
                 tracing::error!(error = %message, "history thread error");
                 self.push_notification(
@@ -600,6 +610,29 @@ impl BloomEditor {
             }
             history::HistoryComplete::ShutDown => {
                 tracing::info!("history thread shut down");
+            }
+        }
+    }
+
+    /// Called when page history results arrive from the history thread.
+    fn receive_page_history(&mut self, entries: Vec<history::PageHistoryEntry>) {
+        self.page_history_entries = Some(entries);
+        self.page_history_selected = 0;
+    }
+
+    /// Called when a blob-at-commit result arrives from the history thread.
+    fn receive_blob_at(&mut self, _oid: &str, _uuid: &str, content: Option<String>) {
+        let Some(content) = content else { return };
+
+        // Restore the content into the active buffer (undo-able).
+        if let Some(page_id) = self.active_page().cloned() {
+            if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                let len = buf.len_chars();
+                buf.replace(0..len, &content);
+                self.push_notification(
+                    "Restored from history (undo with u)".into(),
+                    render::NotificationLevel::Info,
+                );
             }
         }
     }

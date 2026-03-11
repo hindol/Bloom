@@ -93,6 +93,13 @@ impl BloomEditor {
             let is_active = rect.pane_id == self.window_mgr.active_pane();
             let pane_state = self.window_mgr.pane_state(rect.pane_id);
 
+            // Special pane kinds get their own render frames.
+            let win_kind = self.window_mgr.pane_kind(rect.pane_id);
+            if matches!(win_kind, Some(window::PaneKind::PageHistory)) {
+                panes.push(self.build_page_history_pane_frame(rect, is_active, mode_str));
+                continue;
+            }
+
             let (title, dirty, visible_lines, pane_cursor_line, pane_cursor_col, scroll_offset) =
                 if let Some(ps) = pane_state {
                     if let Some(page_id) = &ps.page_id {
@@ -605,6 +612,94 @@ impl BloomEditor {
                 .cloned()
                 .collect(),
             scrolloff: self.config.scrolloff,
+        }
+    }
+
+    fn build_page_history_pane_frame(
+        &self,
+        rect: &window::CellRect,
+        is_active: bool,
+        mode_str: &str,
+    ) -> render::PaneFrame {
+        let title = "History".to_string();
+
+        // Build entries from stored history data.
+        let entries: Vec<render::PageHistoryEntryFrame> = self
+            .page_history_entries
+            .as_ref()
+            .map(|entries| {
+                entries
+                    .iter()
+                    .map(|e| {
+                        let dt = chrono::DateTime::from_timestamp(e.timestamp, 0)
+                            .unwrap_or_default();
+                        let date = dt.format("%b %d, %H:%M").to_string();
+                        let description = e.message.lines().next().unwrap_or("").to_string();
+                        render::PageHistoryEntryFrame {
+                            oid: e.oid.clone(),
+                            date,
+                            diff_stat: format!("{} file(s)", e.changed_files.len()),
+                            description,
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let total_versions = entries.len();
+        let page_title = self
+            .active_page()
+            .and_then(|id| {
+                self.buffer_mgr
+                    .open_buffers()
+                    .iter()
+                    .find(|b| b.page_id == *id)
+                    .map(|b| b.title.clone())
+            })
+            .unwrap_or_else(|| "Unknown".into());
+
+        let history_frame = render::PageHistoryFrame {
+            page_title,
+            entries,
+            selected_index: self.page_history_selected,
+            total_versions,
+        };
+
+        let status_bar = render::StatusBarFrame {
+            content: render::StatusBarContent::Normal(render::NormalStatus {
+                title: title.clone(),
+                dirty: false,
+                line: self.page_history_selected,
+                column: 0,
+                pending_keys: String::new(),
+                recording_macro: None,
+                mcp: render::McpIndicator::Off,
+                indexing: false,
+            }),
+            mode: if is_active {
+                "HISTORY".to_string()
+            } else {
+                mode_str.to_string()
+            },
+        };
+
+        render::PaneFrame {
+            id: rect.pane_id,
+            kind: render::PaneKind::PageHistory(history_frame),
+            visible_lines: vec![],
+            cursor: render::CursorState::default(),
+            scroll_offset: 0,
+            is_active,
+            title,
+            dirty: false,
+            status_bar,
+            rect: render::PaneRectFrame {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                content_height: rect.content_height,
+                total_height: rect.height,
+            },
         }
     }
 
