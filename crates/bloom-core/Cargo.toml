@@ -31,15 +31,16 @@ tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 # Date/time handling for journals, timestamps, and task scheduling
 chrono = { version = "0.4", features = ["serde"] }
-# POSIX process queries (macOS stale-lock detection via kill(pid, 0))
-[target.'cfg(target_os = "macos")'.dependencies]
-libc = "0.2"
 # Unicode display-width calculation for correct column alignment
 unicode-width = "0.2"
 # Data-parallel iteration for the background indexer
 rayon = "1"
 # Git-backed vault history
 bloom-history = { path = "../bloom-history" }
+
+# POSIX process queries (macOS stale-lock detection via kill(pid, 0))
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 # Snapshot testing for parser and render output
