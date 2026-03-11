@@ -82,6 +82,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
     loop {
         // Render immediately when state has changed
         if needs_render {
+            let t_render = Instant::now();
             let theme = TuiTheme::new(editor.theme());
 
             terminal.draw(|f| {
@@ -98,12 +99,16 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
                             cursor::SetCursorStyle::SteadyUnderScore
                         }
                     };
-                    // Cursor style change is best-effort; ignore errors inside draw
                     let _ = execute!(std::io::stdout(), cursor_style);
                 }
 
                 bloom_tui::render::draw(f, &frame, &theme, &editor.config);
             })?;
+
+            let render_ms = t_render.elapsed().as_secs_f64() * 1000.0;
+            if render_ms > 16.0 {
+                tracing::warn!(render_ms = format!("{render_ms:.1}"), "slow TUI render");
+            }
 
             needs_render = false;
         }

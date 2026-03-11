@@ -227,23 +227,33 @@ impl BloomEditor {
             hidden_pane_count: self.window_mgr.hidden_pane_count(),
             picker: if let Some(ap) = &self.picker_state {
                 let below_min = ap.query.len() < ap.min_query_len;
-                let results: Vec<render::PickerRow> = if below_min {
-                    Vec::new()
+
+                // Compute windowed view of results around selected index.
+                let picker_height = (height as usize * 70 / 100).max(5);
+                let max_visible = picker_height.saturating_sub(4);
+                let all_results = if below_min { Vec::new() } else { ap.picker.results() };
+                let total = all_results.len();
+                let selected = if total == 0 { 0 } else { ap.picker.selected_index().min(total - 1) };
+                let half = max_visible / 2;
+                let window_start = if total <= max_visible {
+                    0
+                } else if selected <= half {
+                    0
+                } else if selected + half >= total {
+                    total.saturating_sub(max_visible)
                 } else {
-                    // Derive visible result count from render height.
-                    let picker_height = (height as usize * 70 / 100).max(5);
-                    let max_results = picker_height.saturating_sub(4); // header, input, status, border
-                    ap.picker
-                        .results()
-                        .into_iter()
-                        .take(max_results)
-                        .map(|item| render::PickerRow {
-                            label: item.label.clone(),
-                            middle: item.middle.clone(),
-                            right: item.right.clone(),
-                        })
-                        .collect()
+                    selected - half
                 };
+                let window_end = (window_start + max_visible).min(total);
+
+                let results: Vec<render::PickerRow> = all_results[window_start..window_end]
+                    .iter()
+                    .map(|item| render::PickerRow {
+                        label: item.label.clone(),
+                        middle: item.middle.clone(),
+                        right: item.right.clone(),
+                    })
+                    .collect();
                 let preview = if below_min {
                     None
                 } else {
@@ -286,11 +296,7 @@ impl BloomEditor {
                     title: ap.title.clone(),
                     query: ap.query.clone(),
                     results,
-                    selected_index: if below_min {
-                        0
-                    } else {
-                        ap.picker.selected_index()
-                    },
+                    selected_index: selected.saturating_sub(window_start),
                     filters: Vec::new(),
                     preview,
                     total_count: ap.picker.total_count(),
