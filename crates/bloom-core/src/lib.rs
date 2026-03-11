@@ -782,6 +782,7 @@ impl BloomEditor {
             buffers,
             layout,
             active_pane: self.window_mgr.active_pane().0,
+            theme_name: Some(self.active_theme.name.to_string()),
         };
         state.save(&session_path)?;
 
@@ -846,6 +847,11 @@ impl BloomEditor {
 
         // Restore layout tree and create empty pane states
         self.window_mgr.restore_layout(&state.layout);
+
+        // Restore theme if saved
+        if let Some(name) = &state.theme_name {
+            self.set_theme(name);
+        }
 
         // Open each buffer in its assigned pane
         for buf_state in &state.buffers {
