@@ -230,10 +230,13 @@ impl BloomEditor {
                 let results: Vec<render::PickerRow> = if below_min {
                     Vec::new()
                 } else {
+                    // Derive visible result count from render height.
+                    let picker_height = (height as usize * 70 / 100).max(5);
+                    let max_results = picker_height.saturating_sub(4); // header, input, status, border
                     ap.picker
                         .results()
                         .into_iter()
-                        .take(50) // Cap results sent to frontend — only ~10 visible
+                        .take(max_results)
                         .map(|item| render::PickerRow {
                             label: item.label.clone(),
                             middle: item.middle.clone(),

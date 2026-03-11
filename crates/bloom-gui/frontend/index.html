@@ -541,8 +541,41 @@
       }
     });
 
-    // Request initial render
-    invoke('initial_render');
+    // --- Dimension measurement ---
+
+    function measureCharSize() {
+      const probe = document.createElement('span');
+      probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font:inherit;';
+      probe.textContent = 'M';
+      document.body.appendChild(probe);
+      const rect = probe.getBoundingClientRect();
+      document.body.removeChild(probe);
+      return { charWidth: rect.width, lineHeight: rect.height || 22.4 };
+    }
+
+    function computeGridSize() {
+      const { charWidth, lineHeight } = measureCharSize();
+      const cols = Math.floor(window.innerWidth / charWidth);
+      const rows = Math.floor(window.innerHeight / lineHeight);
+      return { cols: Math.max(cols, 20), rows: Math.max(rows, 5) };
+    }
+
+    // --- Startup ---
+
+    let resizeTimer = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(async () => {
+        const { cols, rows } = computeGridSize();
+        await invoke('resize', { cols, rows });
+      }, 50);
+    });
+
+    // Initial render with measured dimensions
+    (async () => {
+      const { cols, rows } = computeGridSize();
+      await invoke('initial_render', { cols, rows });
+    })();
   </script>
 </body>
 </html>
