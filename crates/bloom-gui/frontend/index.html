@@ -230,113 +230,273 @@
       'FrontmatterTitle': 's-bold s-italic',
     };
 
-    function renderFrame(frame) {
-      loadingEl.style.display = 'none';
-      editorEl.style.display = 'block';
+    // -----------------------------------------------------------------------
+    // Incremental DOM renderer — persistent elements, patch on diff
+    // -----------------------------------------------------------------------
 
-      // Build all HTML as a single string — one DOM mutation instead of 100+
-      let html = '';
-
-      for (const pane of frame.panes) {
-        html += '<div class="pane"><div class="pane-content">';
-
-        for (let i = 0; i < pane.visible_lines.length; i++) {
-          const line = pane.visible_lines[i];
-          const bufferLine = line.source.Buffer;
-          const isCursor = pane.is_active && bufferLine !== undefined && bufferLine === pane.cursor.line;
-          
-          html += `<div class="line${isCursor ? ' current-line' : ''}">`;
-          html += `<span class="gutter">${bufferLine !== undefined ? bufferLine + 1 : ''}</span>`;
-
-          const text = line.text.replace(/[\r\n]+$/, '');
-          if (line.spans.length === 0) {
-            html += escapeHtml(text);
-          } else {
-            let lastEnd = 0;
-            for (const span of line.spans) {
-              const start = Math.min(span.range.start, text.length);
-              const end = Math.min(span.range.end, text.length);
-              if (lastEnd < start) {
-                html += escapeHtml(text.slice(lastEnd, start));
-              }
-              const cls = resolveStyleClass(span.style);
-              if (cls) {
-                html += `<span class="${cls}">${escapeHtml(text.slice(start, end))}</span>`;
-              } else {
-                html += escapeHtml(text.slice(start, end));
-              }
-              lastEnd = end;
-            }
-            if (lastEnd < text.length) {
-              html += escapeHtml(text.slice(lastEnd));
-            }
-          }
-
-          html += '</div>';
-        }
-
-        html += '</div>'; // pane-content
-
-        // Status bar
-        if (pane.is_active) {
-          const mode = pane.status_bar.mode.toLowerCase();
-          html += `<div class="status-bar active">
-            <div>
-              <span class="mode-badge mode-${mode}">${escapeHtml(pane.status_bar.mode)}</span>
-              ${escapeHtml(pane.title)}${pane.dirty ? ' <span style="color:var(--salient)">[+]</span>' : ''}
-            </div>
-            <div style="color:var(--faded)">${pane.cursor.line + 1}:${pane.cursor.column + 1}</div>
-          </div>`;
-        } else {
-          html += `<div class="status-bar inactive">${escapeHtml(pane.title)}</div>`;
-        }
-
-        html += '</div>'; // pane
-      }
-
-      // Picker overlay
-      if (frame.picker) {
-        const p = frame.picker;
-        html += '<div class="picker-overlay"><div class="picker">';
-        html += `<div class="picker-header">
-          <div class="picker-title">${escapeHtml(p.title)}</div>
-          <div class="picker-input">
-            <span class="prompt">❯ </span>
-            <span class="query">${escapeHtml(p.query)}</span>
-            <span class="cursor">&nbsp;</span>
-          </div>
-        </div>`;
-
-        html += '<div class="picker-results">';
-        for (let i = 0; i < p.results.length; i++) {
-          const row = p.results[i];
-          const sel = i === p.selected_index;
-          html += `<div class="picker-row${sel ? ' selected' : ''}">`;
-          html += `<span class="marker">${sel ? '▸' : ' '}</span>`;
-          html += `<span class="label">${escapeHtml(row.label)}</span>`;
-          if (row.middle) html += `<span class="middle">${escapeHtml(row.middle)}</span>`;
-          if (row.right) html += `<span class="right">${escapeHtml(row.right)}</span>`;
-          html += '</div>';
-        }
-        html += '</div>';
-
-        html += `<div class="picker-status">${p.filtered_count} of ${p.total_count} ${escapeHtml(p.status_noun)}</div>`;
-
-        if (p.preview) {
-          html += `<div class="picker-preview">${escapeHtml(p.preview)}</div>`;
-        }
-
-        html += '</div></div>'; // picker + overlay
-      }
-
-      editorEl.innerHTML = html;
-    }
+    let prevFrame = null;
+    let paneEls = [];   // [{ container, content, lines[], gutters[], statusBar }]
+    let pickerEl = null; // { container, header, results, resultRows[], status, preview }
 
     // Pre-create a reusable element for escapeHtml
     const _escapeEl = document.createElement('div');
     function escapeHtml(text) {
+      if (!text) return '';
       _escapeEl.textContent = text;
       return _escapeEl.innerHTML;
+    }
+
+    function isCursorLine(pane, line) {
+      return pane.is_active && line.source.Buffer !== undefined
+          && line.source.Buffer === pane.cursor.line;
+    }
+
+    function renderLineSpans(line) {
+      const text = line.text.replace(/[\r\n]+$/, '');
+      if (line.spans.length === 0) return escapeHtml(text);
+      let html = '';
+      let lastEnd = 0;
+      for (const span of line.spans) {
+        const start = Math.min(span.range.start, text.length);
+        const end = Math.min(span.range.end, text.length);
+        if (lastEnd < start) html += escapeHtml(text.slice(lastEnd, start));
+        const cls = resolveStyleClass(span.style);
+        const slice = escapeHtml(text.slice(start, end));
+        html += cls ? `<span class="${cls}">${slice}</span>` : slice;
+        lastEnd = end;
+      }
+      if (lastEnd < text.length) html += escapeHtml(text.slice(lastEnd));
+      return html;
+    }
+
+    function renderStatusBarHtml(pane) {
+      if (pane.is_active) {
+        const mode = pane.status_bar.mode.toLowerCase();
+        return `<div>
+          <span class="mode-badge mode-${mode}">${escapeHtml(pane.status_bar.mode)}</span>
+          ${escapeHtml(pane.title)}${pane.dirty ? ' <span style="color:var(--salient)">[+]</span>' : ''}
+        </div>
+        <div style="color:var(--faded)">${pane.cursor.line + 1}:${pane.cursor.column + 1}</div>`;
+      }
+      return escapeHtml(pane.title);
+    }
+
+    // --- Pane DOM management ---
+
+    function createPaneEl() {
+      const container = document.createElement('div');
+      container.className = 'pane';
+      const content = document.createElement('div');
+      content.className = 'pane-content';
+      container.appendChild(content);
+      const statusBar = document.createElement('div');
+      statusBar.className = 'status-bar';
+      container.appendChild(statusBar);
+      return { container, content, lines: [], gutters: [], statusBar };
+    }
+
+    function ensureLineEls(el, count) {
+      while (el.lines.length < count) {
+        const lineEl = document.createElement('div');
+        lineEl.className = 'line';
+        const gutterEl = document.createElement('span');
+        gutterEl.className = 'gutter';
+        lineEl.appendChild(gutterEl);
+        // Content span — holds everything after gutter
+        const contentSpan = document.createElement('span');
+        contentSpan.className = 'line-content';
+        lineEl.appendChild(contentSpan);
+        el.content.appendChild(lineEl);
+        el.lines.push(lineEl);
+        el.gutters.push(gutterEl);
+      }
+      while (el.lines.length > count) {
+        el.lines.pop().remove();
+        el.gutters.pop();
+      }
+    }
+
+    // --- Picker DOM management ---
+
+    function createPickerEl() {
+      const container = document.createElement('div');
+      container.className = 'picker-overlay';
+      const picker = document.createElement('div');
+      picker.className = 'picker';
+
+      const header = document.createElement('div');
+      header.className = 'picker-header';
+      picker.appendChild(header);
+
+      const results = document.createElement('div');
+      results.className = 'picker-results';
+      picker.appendChild(results);
+
+      const status = document.createElement('div');
+      status.className = 'picker-status';
+      picker.appendChild(status);
+
+      const preview = document.createElement('div');
+      preview.className = 'picker-preview';
+      preview.style.display = 'none';
+      picker.appendChild(preview);
+
+      container.appendChild(picker);
+      return { container, header, results, resultRows: [], status, preview };
+    }
+
+    function ensurePickerRows(el, count) {
+      while (el.resultRows.length < count) {
+        const row = document.createElement('div');
+        row.className = 'picker-row';
+        el.results.appendChild(row);
+        el.resultRows.push(row);
+      }
+      while (el.resultRows.length > count) {
+        el.resultRows.pop().remove();
+      }
+    }
+
+    // --- Main render function ---
+
+    function renderFrame(frame) {
+      loadingEl.style.display = 'none';
+      editorEl.style.display = 'block';
+
+      // --- Panes ---
+      while (paneEls.length < frame.panes.length) {
+        const el = createPaneEl();
+        editorEl.appendChild(el.container);
+        paneEls.push(el);
+      }
+      while (paneEls.length > frame.panes.length) {
+        paneEls.pop().container.remove();
+      }
+
+      for (let p = 0; p < frame.panes.length; p++) {
+        const pane = frame.panes[p];
+        const prev = prevFrame?.panes?.[p];
+        const el = paneEls[p];
+
+        ensureLineEls(el, pane.visible_lines.length);
+
+        for (let i = 0; i < pane.visible_lines.length; i++) {
+          const line = pane.visible_lines[i];
+          const prevLine = prev?.visible_lines?.[i];
+          const lineEl = el.lines[i];
+          const gutterEl = el.gutters[i];
+          const contentEl = lineEl.querySelector('.line-content');
+
+          const cursorNow = isCursorLine(pane, line);
+          const cursorBefore = prev && prevLine && isCursorLine(prev, prevLine);
+
+          // Fast path: if only cursor highlight changed, toggle class only
+          const textChanged = !prevLine || prevLine.text !== line.text;
+          const sourceChanged = !prevLine ||
+            (prevLine.source.Buffer !== line.source.Buffer);
+
+          if (!textChanged && !sourceChanged) {
+            // Content identical — just update cursor highlight if needed
+            if (cursorNow !== cursorBefore) {
+              lineEl.classList.toggle('current-line', cursorNow);
+            }
+            continue;
+          }
+
+          // Content changed — update this line
+          contentEl.innerHTML = renderLineSpans(line);
+          lineEl.className = 'line' + (cursorNow ? ' current-line' : '');
+
+          const bufLine = line.source.Buffer;
+          gutterEl.textContent = bufLine !== undefined ? String(bufLine + 1) : '';
+        }
+
+        // Status bar — update if anything visible changed
+        const statusChanged = !prev
+          || prev.cursor.line !== pane.cursor.line
+          || prev.cursor.column !== pane.cursor.column
+          || prev.dirty !== pane.dirty
+          || prev.title !== pane.title
+          || prev.is_active !== pane.is_active
+          || prev.status_bar.mode !== pane.status_bar.mode;
+
+        if (statusChanged) {
+          el.statusBar.innerHTML = renderStatusBarHtml(pane);
+          el.statusBar.className = `status-bar ${pane.is_active ? 'active' : 'inactive'}`;
+        }
+      }
+
+      // --- Picker overlay ---
+      if (frame.picker && !pickerEl) {
+        pickerEl = createPickerEl();
+        editorEl.appendChild(pickerEl.container);
+      }
+      if (!frame.picker && pickerEl) {
+        pickerEl.container.remove();
+        pickerEl = null;
+      }
+      if (frame.picker && pickerEl) {
+        const pk = frame.picker;
+        const prevPk = prevFrame?.picker;
+
+        // Header — update if query changed
+        if (!prevPk || prevPk.query !== pk.query || prevPk.title !== pk.title) {
+          pickerEl.header.innerHTML = `
+            <div class="picker-title">${escapeHtml(pk.title)}</div>
+            <div class="picker-input">
+              <span class="prompt">❯ </span>
+              <span class="query">${escapeHtml(pk.query)}</span>
+              <span class="cursor">&nbsp;</span>
+            </div>`;
+        }
+
+        // Results — patch rows
+        ensurePickerRows(pickerEl, pk.results.length);
+        for (let i = 0; i < pk.results.length; i++) {
+          const row = pk.results[i];
+          const prevRow = prevPk?.results?.[i];
+          const rowEl = pickerEl.resultRows[i];
+          const sel = i === pk.selected_index;
+          const wasSel = prevPk && i === prevPk.selected_index;
+
+          // Fast path: selection change only
+          if (prevRow && prevRow.label === row.label
+              && prevRow.middle === row.middle
+              && prevRow.right === row.right) {
+            if (sel !== wasSel) {
+              rowEl.className = `picker-row${sel ? ' selected' : ''}`;
+              rowEl.firstChild.textContent = sel ? '▸' : ' ';
+            }
+            continue;
+          }
+
+          // Content changed — rebuild row
+          rowEl.className = `picker-row${sel ? ' selected' : ''}`;
+          let rhtml = `<span class="marker">${sel ? '▸' : ' '}</span>`;
+          rhtml += `<span class="label">${escapeHtml(row.label)}</span>`;
+          if (row.middle) rhtml += `<span class="middle">${escapeHtml(row.middle)}</span>`;
+          if (row.right) rhtml += `<span class="right">${escapeHtml(row.right)}</span>`;
+          rowEl.innerHTML = rhtml;
+        }
+
+        // Status
+        const statusText = `${pk.filtered_count} of ${pk.total_count} ${pk.status_noun}`;
+        if (pickerEl.status.textContent !== statusText) {
+          pickerEl.status.textContent = statusText;
+        }
+
+        // Preview
+        if (pk.preview) {
+          if (pickerEl.preview.textContent !== pk.preview) {
+            pickerEl.preview.textContent = pk.preview;
+          }
+          pickerEl.preview.style.display = '';
+        } else {
+          pickerEl.preview.style.display = 'none';
+        }
+      }
+
+      prevFrame = frame;
     }
 
     function resolveStyleClass(style) {
