@@ -76,9 +76,18 @@ impl std::fmt::Display for LockError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LockError::AlreadyLocked { pid } => {
-                write!(f, "another Bloom instance is running (PID {pid})")
+                write!(
+                    f,
+                    "Another Bloom instance is already using this vault (PID {pid}).\n\
+                     Close the other instance first, or if it crashed, delete the \
+                     .bloom.lock file in your vault root."
+                )
             }
-            LockError::Io(e) => write!(f, "lock file error: {e}"),
+            LockError::Io(e) => write!(
+                f,
+                "Could not create lock file in your vault: {e}.\n\
+                 Check that the vault directory exists and is writable."
+            ),
         }
     }
 }

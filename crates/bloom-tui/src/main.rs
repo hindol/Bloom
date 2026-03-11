@@ -54,7 +54,10 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
     } else {
         // Existing vault — initialize and spawn background indexer
         let vault_path = default_vault_path();
-        let _ = editor.init_vault(std::path::Path::new(&vault_path));
+        if let Err(e) = editor.init_vault(std::path::Path::new(&vault_path)) {
+            // Teardown happens in the caller; print the friendly error to stderr.
+            return Err(io::Error::other(format!("{e}")));
+        }
         editor.startup();
     }
 
