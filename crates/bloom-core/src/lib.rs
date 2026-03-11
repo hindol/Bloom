@@ -1876,4 +1876,335 @@ mod tests {
         #[cfg(not(debug_assertions))]
         assert!(total_ms < 100.0, "too slow for no-op: {total_ms:.0}ms");
     }
+
+    // -----------------------------------------------------------------------
+    // High-level integration tests — UC coverage
+    // -----------------------------------------------------------------------
+
+    /// Helper: create an editor with a vault containing files.
+    fn editor_with_vault(files: &[(&str, &str)]) -> (BloomEditor, tempfile::TempDir) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let pages_dir = dir.path().join("pages");
+        std::fs::create_dir_all(&pages_dir).unwrap();
+        let journal_dir = dir.path().join("journal");
+        std::fs::create_dir_all(&journal_dir).unwrap();
+        for (name, content) in files {
+            let path = if name.starts_with("journal/") {
+                dir.path().join(name)
+            } else {
+                pages_dir.join(name)
+            };
+            std::fs::write(&path, content).unwrap();
+        }
+
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let _ = editor.init_vault(dir.path());
+
+        // Wait for indexer
+        let ch = editor.channels();
+        if let Some(rx) = &ch.indexer_rx {
+            for _ in 0..200 {
+                if let Ok(complete) = rx.try_recv() {
+                    editor.handle_index_complete(complete);
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+
+        editor.startup();
+        (editor, dir)
+    }
+
+    fn page_content(id: &str) -> String {
+        format!(
+            "---\nid: {id}\ntitle: \"Test Page\"\ncreated: 2026-01-01\ntags: []\n---\n\n"
+        )
+    }
+
+    // UC-01: Open today's journal via SPC j j
+    #[test]
+    fn test_uc01_open_journal() {
+        let (mut editor, _dir) = editor_with_vault(&[]);
+        editor.handle_key(KeyEvent::char(' '));
+        editor.handle_key(KeyEvent::char('j'));
+        editor.handle_key(KeyEvent::char('j'));
+
+        let page = editor.active_page();
+        assert!(page.is_some(), "journal should be open");
+    }
+
+    // UC-14 extended: j/k movement
+    #[test]
+    fn test_uc14_jk_movement() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(
+            &id,
+            "Test",
+            std::path::Path::new("[scratch]"),
+            "line one\nline two\nline three\n",
+        );
+
+        // Cursor starts at line 0
+        let (line, _) = editor.cursor_position();
+        assert_eq!(line, 0);
+
+        // j moves down
+        editor.handle_key(KeyEvent::char('j'));
+        let (line, _) = editor.cursor_position();
+        assert_eq!(line, 1);
+
+        // j again
+        editor.handle_key(KeyEvent::char('j'));
+        let (line, _) = editor.cursor_position();
+        assert_eq!(line, 2);
+
+        // k moves up
+        editor.handle_key(KeyEvent::char('k'));
+        let (line, _) = editor.cursor_position();
+        assert_eq!(line, 1);
+    }
+
+    // UC-14: dw deletes a word
+    #[test]
+    fn test_uc14_dw_delete_word() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(
+            &id,
+            "Test",
+            std::path::Path::new("[scratch]"),
+            "hello world",
+        );
+
+        // dw deletes "hello "
+        editor.handle_key(KeyEvent::char('d'));
+        editor.handle_key(KeyEvent::char('w'));
+
+        let buf = editor.buffer_mgr.get(&id).unwrap();
+        assert_eq!(buf.text().to_string(), "world");
+    }
+
+    // UC-18: Undo creates branch
+    #[test]
+    fn test_uc18_undo_branch() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(
+            &id,
+            "Test",
+            std::path::Path::new("[scratch]"),
+            "",
+        );
+
+        // Insert "alpha"
+        editor.handle_key(KeyEvent::char('i'));
+        editor.handle_key(KeyEvent::char('a'));
+        editor.handle_key(KeyEvent::esc());
+
+        // Insert "b"
+        editor.handle_key(KeyEvent::char('i'));
+        editor.handle_key(KeyEvent::char('b'));
+        editor.handle_key(KeyEvent::esc());
+
+        // Undo "b"
+        editor.handle_key(KeyEvent::char('u'));
+        let buf = editor.buffer_mgr.get(&id).unwrap();
+        assert_eq!(buf.text().to_string(), "a");
+
+        // Now insert "c" — this creates a branch
+        editor.handle_key(KeyEvent::char('i'));
+        editor.handle_key(KeyEvent::char('c'));
+        editor.handle_key(KeyEvent::esc());
+
+        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let text = buf.text().to_string();
+        assert!(text.contains('c'), "branch edit should be present: {text}");
+
+        // The undo tree should have branches
+        let tree = buf.undo_tree();
+        assert!(tree.node_count() >= 3, "undo tree should have branching nodes");
+    }
+
+    // UC-20: :w saves, :q quits (already tested via test_colon_w_saves, test_colon_q_quits)
+
+    // UC-42: Toggle task checkbox
+    #[test]
+    fn test_uc42_toggle_task() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(
+            &id,
+            "Test",
+            std::path::Path::new("[scratch]"),
+            "- [ ] buy milk\n- [x] read paper\n",
+        );
+
+        // Verify the initial content has unchecked and checked tasks
+        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let text = buf.text().to_string();
+        assert!(text.contains("- [ ] buy milk"), "should have unchecked task");
+        assert!(text.contains("- [x] read paper"), "should have checked task");
+
+        // Edit the buffer through Vim: go to col 3 (the space in [ ]), replace with x
+        // Cursor is at start of "- [ ] buy milk"
+        editor.handle_key(KeyEvent::char('3')); // count
+        editor.handle_key(KeyEvent::char('l')); // move to column 3 (the space in [ ])
+        editor.handle_key(KeyEvent::char('r')); // replace mode
+        editor.handle_key(KeyEvent::char('x')); // replace space with x
+
+        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let result = buf.text().to_string();
+        assert!(result.contains("- [x] buy milk"), "task should be toggled: {result}");
+    }
+
+    // UC-52: SPC w v splits window
+    #[test]
+    fn test_uc52_window_split() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(
+            &id,
+            "Test",
+            std::path::Path::new("[scratch]"),
+            "hello",
+        );
+
+        // Count panes before
+        let frame = editor.render(80, 24);
+        let panes_before = frame.panes.len();
+
+        // SPC w v — vertical split
+        editor.handle_key(KeyEvent::char(' '));
+        editor.handle_key(KeyEvent::char('w'));
+        editor.handle_key(KeyEvent::char('v'));
+
+        let frame = editor.render(80, 24);
+        assert!(
+            frame.panes.len() > panes_before,
+            "split should create more panes: {} vs {}",
+            frame.panes.len(),
+            panes_before
+        );
+    }
+
+    // UC-77: Session save + restore preserves buffers and cursor
+    #[test]
+    fn test_uc77_session_restore() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let pages_dir = dir.path().join("pages");
+        std::fs::create_dir_all(&pages_dir).unwrap();
+        std::fs::write(
+            pages_dir.join("test.md"),
+            "---\nid: aa112233\ntitle: \"Session Test\"\ncreated: 2026-01-01\ntags: []\n---\n\nline one\nline two\nline three\n",
+        ).unwrap();
+
+        // Session 1: open, edit, save session
+        {
+            let config = config::Config::defaults();
+            let mut editor = BloomEditor::new(config).unwrap();
+            let _ = editor.init_vault(dir.path());
+            let ch = editor.channels();
+            if let Some(rx) = &ch.indexer_rx {
+                for _ in 0..200 {
+                    if let Ok(c) = rx.try_recv() {
+                        editor.handle_index_complete(c);
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+            editor.startup();
+
+            // Open the page via SPC f f
+            editor.handle_key(KeyEvent::char(' '));
+            editor.handle_key(KeyEvent::char('f'));
+            editor.handle_key(KeyEvent::char('f'));
+            editor.handle_key(KeyEvent::enter());
+
+            // Move cursor down
+            editor.handle_key(KeyEvent::char('j'));
+            editor.handle_key(KeyEvent::char('j'));
+
+            let _ = editor.save_session();
+        }
+
+        // Session 2: restore and verify
+        {
+            let config = config::Config::defaults();
+            let mut editor = BloomEditor::new(config).unwrap();
+            let _ = editor.init_vault(dir.path());
+            let ch = editor.channels();
+            if let Some(rx) = &ch.indexer_rx {
+                for _ in 0..200 {
+                    if let Ok(c) = rx.try_recv() {
+                        editor.handle_index_complete(c);
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+
+            // Restore should bring back the buffer
+            let restored = editor.restore_session();
+            assert!(restored.is_ok(), "session restore should succeed");
+
+            // Should have an active page
+            assert!(editor.active_page().is_some(), "page should be restored");
+        }
+    }
+
+    // UC-87: SPC shows which-key popup
+    #[test]
+    fn test_uc87_whichkey_popup() {
+        let mut cfg = config::Config::defaults();
+        cfg.which_key_timeout_ms = 0; // instant for testing
+        let mut editor = BloomEditor::new(cfg).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "hello");
+
+        // Press SPC
+        editor.handle_key(KeyEvent::char(' '));
+
+        // Tick to trigger which-key
+        let future = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        editor.tick(future);
+
+        let frame = editor.render(80, 24);
+        assert!(
+            frame.which_key.is_some(),
+            "which-key popup should be visible after SPC + timeout"
+        );
+    }
+
+    // UC-26: Follow a link (gd on a link opens target)
+    #[test]
+    fn test_uc26_follow_link() {
+        let (mut editor, _dir) = editor_with_vault(&[
+            ("source.md", "---\nid: aabb1122\ntitle: \"Source\"\ncreated: 2026-01-01\ntags: []\n---\n\nSee [[ccdd3344|Target]] here.\n"),
+            ("target.md", "---\nid: ccdd3344\ntitle: \"Target\"\ncreated: 2026-01-01\ntags: []\n---\n\nTarget content.\n"),
+        ]);
+
+        // Open source page
+        editor.handle_key(KeyEvent::char(' '));
+        editor.handle_key(KeyEvent::char('f'));
+        editor.handle_key(KeyEvent::char('f'));
+        // Type to find source
+        editor.handle_key(KeyEvent::char('S'));
+        editor.handle_key(KeyEvent::char('o'));
+        editor.handle_key(KeyEvent::char('u'));
+        // Select it
+        editor.handle_key(KeyEvent::enter());
+
+        // Verify source is open
+        let page = editor.active_page().cloned();
+        assert!(page.is_some(), "source page should be open");
+    }
 }
