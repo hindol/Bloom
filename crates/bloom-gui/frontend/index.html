@@ -81,25 +81,71 @@
       overflow-wrap: break-word;
     }
 
-    /* --- Status bar --- */
+    /* --- Status bar (GUI-specific: taller, more prominent than TUI) --- */
 
     .status-bar {
-      height: 1.6em;
-      padding: 0 1em;
+      height: 32px;
+      padding: 0 16px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      font-size: 12px;
+      font-size: 13px;
       flex-shrink: 0;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
     }
 
-    .status-bar.active { background: var(--highlight); }
-    .status-bar.active-insert { background: var(--accent-green); color: var(--bg); }
-    .status-bar.active-visual { background: var(--popout); color: var(--bg); }
-    .status-bar.active-command { background: var(--accent-blue); color: var(--bg); }
+    .status-bar .left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .status-bar .right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--faded);
+    }
+
+    .status-bar.active { background: var(--modeline); }
+    .status-bar.active-insert { background: var(--modeline); }
+    .status-bar.active-visual { background: var(--modeline); }
+    .status-bar.active-command { background: var(--modeline); }
     .status-bar.inactive { background: var(--subtle); color: var(--faded); }
 
-    .mode-badge { font-weight: bold; margin-right: 0.5em; }
+    .mode-badge {
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+      padding: 2px 8px;
+      border-radius: 3px;
+      text-transform: uppercase;
+    }
+
+    .mode-normal { background: var(--highlight); color: var(--fg); }
+    .mode-insert { background: var(--accent-green); color: var(--bg); }
+    .mode-visual { background: var(--popout); color: var(--bg); }
+    .mode-command { background: var(--accent-blue); color: var(--bg); }
+
+    .status-separator {
+      width: 1px;
+      height: 14px;
+      background: var(--subtle);
+    }
+
+    .status-title {
+      font-weight: 500;
+    }
+
+    .status-dirty {
+      color: var(--salient);
+      font-size: 12px;
+    }
+
+    .status-pos {
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
 
     /* --- Semantic syntax styles (from THEMING.md) --- */
 
@@ -359,13 +405,18 @@
     function renderStatusBarHtml(pane) {
       if (pane.is_active) {
         const mode = pane.status_bar.mode.toLowerCase();
-        return `<div>
+        const dirty = pane.dirty ? '<span class="status-dirty">[+]</span>' : '';
+        return `<div class="left">
           <span class="mode-badge mode-${mode}">${escapeHtml(pane.status_bar.mode)}</span>
-          ${escapeHtml(pane.title)}${pane.dirty ? ' <span style="color:var(--salient)">[+]</span>' : ''}
+          <span class="status-separator"></span>
+          <span class="status-title">${escapeHtml(pane.title)}</span>
+          ${dirty}
         </div>
-        <div style="color:var(--faded)">${pane.cursor.line + 1}:${pane.cursor.column + 1}</div>`;
+        <div class="right">
+          <span class="status-pos">Ln ${pane.cursor.line + 1}, Col ${pane.cursor.column + 1}</span>
+        </div>`;
       }
-      return escapeHtml(pane.title);
+      return `<div class="left"><span class="status-title">${escapeHtml(pane.title)}</span></div>`;
     }
 
     // --- Pane DOM management ---
