@@ -28,6 +28,7 @@ pub(crate) const EX_COMMANDS: &[(&str, &str)] = &[
     ("stats", "show vault and index stats"),
     ("messages", "show notification history"),
     ("log", "open log file"),
+    ("config", "open config file"),
 ];
 
 impl BloomEditor {
@@ -319,6 +320,10 @@ impl BloomEditor {
             }
             "log" => {
                 self.open_log_buffer();
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "config" => {
+                self.open_config_buffer();
                 vec![keymap::dispatch::Action::Noop]
             }
             _ => {

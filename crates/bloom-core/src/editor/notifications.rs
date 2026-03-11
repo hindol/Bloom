@@ -118,9 +118,20 @@ impl BloomEditor {
             .as_ref()
             .map(|r| r.join(".bloom").join("logs").join("bloom.log"));
         if let Some(path) = log_path {
-            if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(raw) = std::fs::read_to_string(&path) {
+                let content = format_log_lines(&raw);
                 let id = crate::uuid::generate_hex_id();
-                self.open_page_with_content(&id, "[log]", std::path::Path::new("[log]"), &content);
+                self.open_page_with_content(
+                    &id,
+                    "[log]",
+                    std::path::Path::new("[log]"),
+                    &content,
+                );
+                // Scroll to the last line
+                if let Some(buf) = self.buffer_mgr.get(&id) {
+                    let len = buf.len_chars();
+                    self.set_cursor(len);
+                }
             } else {
                 self.push_notification(
                     "No log file found".to_string(),
@@ -128,5 +139,75 @@ impl BloomEditor {
                 );
             }
         }
+    }
+
+    pub(crate) fn open_config_buffer(&mut self) {
+        let config_path = self.vault_root.as_ref().map(|r| r.join("config.toml"));
+        if let Some(path) = config_path {
+            let content = std::fs::read_to_string(&path).unwrap_or_default();
+            let id = crate::uuid::generate_hex_id();
+            self.open_page_with_content(&id, "[config]", &path, &content);
+        }
+    }
+}
+
+/// Parse JSON log lines into a human-readable format.
+fn format_log_lines(raw: &str) -> String {
+    let mut lines = Vec::new();
+    for line in raw.lines() {
+        lines.push(format_log_line(line));
+    }
+    lines.join("\n")
+}
+
+fn format_log_line(line: &str) -> String {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+        return line.to_string();
+    };
+
+    let ts = v["timestamp"]
+        .as_str()
+        .and_then(|s| s.get(11..19)) // extract HH:MM:SS
+        .unwrap_or("??:??:??");
+    let level = v["level"].as_str().unwrap_or("?");
+    let target = v["target"]
+        .as_str()
+        .unwrap_or("")
+        .rsplit("::")
+        .next()
+        .unwrap_or("");
+    let msg = v["fields"]["message"].as_str().unwrap_or("");
+
+    // Collect extra fields (not "message")
+    let extras: Vec<String> = v["fields"]
+        .as_object()
+        .map(|obj| {
+            obj.iter()
+                .filter(|(k, _)| *k != "message")
+                .map(|(k, v)| {
+                    let val = if let Some(s) = v.as_str() {
+                        s.to_string()
+                    } else {
+                        v.to_string()
+                    };
+                    format!("{k}={val}")
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let level_icon = match level {
+        "TRACE" => "·",
+        "DEBUG" => "⊙",
+        "INFO" => "✓",
+        "WARN" => "⚠",
+        "ERROR" => "✗",
+        _ => "?",
+    };
+
+    if extras.is_empty() {
+        format!("{ts} {level_icon} {target}: {msg}")
+    } else {
+        format!("{ts} {level_icon} {target}: {msg}  {}", extras.join(" "))
     }
 }
