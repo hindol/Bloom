@@ -5,6 +5,8 @@ edition = "2021"
 license = "AGPL-3.0-or-later"
 
 [dependencies]
+# Buffer with cursor-owning architecture
+bloom-buffer = { path = "../bloom-buffer" }
 # Rope data structure for O(log n) text editing on large documents
 ropey = "1"
 # SQLite database engine (bundled) for the search/backlinks/tags index

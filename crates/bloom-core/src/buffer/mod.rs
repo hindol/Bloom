@@ -1,13 +1,15 @@
-//! Rope-based text buffer with branching undo/redo.
+//! Re-exports from the `bloom-buffer` crate.
 //!
-//! Built on the [`ropey`] crate for O(log n) edits on large documents.
-//! Tracks version numbers and dirty state; groups related edits (e.g. an
-//! entire insert-mode session) into single undo nodes via edit groups.
+//! bloom-core's `buffer` module is a thin re-export layer. The actual
+//! implementation lives in the standalone `bloom-buffer` crate, which
+//! owns the Buffer, cursors, undo tree, and block ID generation.
 
-pub mod edit;
-pub mod rope;
-pub mod undo;
-
-pub use edit::EditOp;
-pub use rope::Buffer;
-pub use undo::{UndoNodeInfo, UndoTree};
+pub use bloom_buffer::edit;
+pub use bloom_buffer::edit::EditOp;
+pub use bloom_buffer::rope;
+pub use bloom_buffer::rope::Buffer;
+pub use bloom_buffer::undo;
+pub use bloom_buffer::undo::{UndoNodeInfo, UndoTree};
+pub use bloom_buffer::{
+    BlockIdInsertion, BlockNeedingId, Cursor, UndoNodeData, UndoNodeId, UndoPersistData, Version,
+};

@@ -249,6 +249,18 @@ impl Buffer {
             }
         }
     }
+
+    /// Restore the edit group checkpoint (Ctrl+U in Insert mode).
+    /// Reverts to the state when the edit group began, but keeps the group open.
+    pub fn restore_edit_group_checkpoint(&mut self) -> bool {
+        if let Some(checkpoint) = &self.edit_group_checkpoint {
+            self.rope = checkpoint.clone();
+            self.bump_version();
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[cfg(test)]

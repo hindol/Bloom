@@ -25,7 +25,7 @@ pub enum IndexRequest {
     /// Re-index specific files (from file watcher, debounced).
     IncrementalBatch(Vec<PathBuf>),
     /// Persist undo trees for the given pages. The indexer writes to SQLite.
-    PersistUndo(Vec<UndoPersistData>),
+    PersistUndo(Vec<bloom_buffer::UndoPersistData>),
     /// Delete undo data for specific pages (on buffer close).
     PruneUndoPages(Vec<String>),
     /// Delete undo data older than the given epoch milliseconds.
@@ -34,22 +34,8 @@ pub enum IndexRequest {
     Shutdown,
 }
 
-/// Serialized undo tree data, ready for writing to SQLite.
-/// Produced on the UI thread, consumed by the indexer thread.
-pub struct UndoPersistData {
-    pub page_id: String,
-    pub nodes: Vec<UndoNodeData>,
-    pub current_node_id: i64,
-}
-
-/// One node of a serialized undo tree.
-pub struct UndoNodeData {
-    pub node_id: i64,
-    pub parent_id: Option<i64>,
-    pub content: String,
-    pub timestamp_ms: i64,
-    pub description: String,
-}
+/// Re-export from bloom-buffer for convenience.
+pub use bloom_buffer::{UndoNodeData, UndoPersistData};
 
 /// Result sent from the indexer thread to the UI thread on completion.
 #[derive(Debug)]
