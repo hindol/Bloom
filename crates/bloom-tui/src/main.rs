@@ -93,7 +93,10 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
 
             terminal.draw(|f| {
                 let size = f.area();
+
+                let t0 = Instant::now();
                 let frame = editor.render(size.width, size.height);
+                let core_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
                 if let Some(pane) = frame.panes.iter().find(|p| p.is_active) {
                     let cursor_style = match pane.cursor.shape {
@@ -108,13 +111,20 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
                     let _ = execute!(std::io::stdout(), cursor_style);
                 }
 
+                let t1 = Instant::now();
                 bloom_tui::render::draw(f, &frame, &theme, &editor.config);
-            })?;
+                let draw_ms = t1.elapsed().as_secs_f64() * 1000.0;
 
-            let render_ms = t_render.elapsed().as_secs_f64() * 1000.0;
-            if render_ms > 16.0 {
-                tracing::warn!(render_ms = format!("{render_ms:.1}"), "slow TUI render");
-            }
+                let total_ms = t_render.elapsed().as_secs_f64() * 1000.0;
+                if total_ms > 16.0 {
+                    tracing::warn!(
+                        core_ms = format!("{core_ms:.1}"),
+                        draw_ms = format!("{draw_ms:.1}"),
+                        total_ms = format!("{total_ms:.1}"),
+                        "slow TUI render"
+                    );
+                }
+            })?;
 
             needs_render = false;
         }
