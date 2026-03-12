@@ -1,0 +1,11 @@
+[package]
+name = "bloom-buffer"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+# Rope data structure for O(log n) text editing
+ropey = "1"
+# SQLite for undo tree persistence
+rusqlite = { version = "0.31", features = ["bundled"] }
