@@ -133,14 +133,15 @@ piece tables, and [[id|Rope Data Structure]]s.
 ",
         );
 
-    let vault_root = vault.build();
+    let vault = vault.build();
+    let vault_root = vault.root();
 
     // ---------------------------------------------------------------
     // 2. Create editor, initialise vault, open the first page.
     // ---------------------------------------------------------------
     let config = Config::defaults();
     let mut editor = BloomEditor::new(config).unwrap();
-    let _ = editor.init_vault(&vault_root);
+    let _ = editor.init_vault(vault_root);
     drain_indexer(&mut editor);
 
     // Open a page with rich content so the screenshot is interesting.

@@ -1,95 +1,30 @@
-// Bloom test harness utilities
-//
-//! Test utilities for Bloom: `TestVault`, `SimInput`, `SnapshotHelpers`,
-//! `PageBuilder`, and `AssertFrame`.
+//! Bloom test harness — SimInput, TestScreen, TestVault, and assertion helpers.
+//!
+//! Provides end-to-end testing infrastructure that drives `BloomEditor` through
+//! key sequences and asserts on the visual output (RenderFrame), without any
+//! terminal or GUI dependency.
 
+use bloom_core::config::Config;
 use bloom_core::render::RenderFrame;
-use bloom_core::types::{KeyEvent, PageId};
-use std::path::{Path, PathBuf};
+use bloom_core::types::KeyEvent;
+use bloom_core::BloomEditor;
+use std::path::Path;
 use tempfile::TempDir;
 
 // ---------------------------------------------------------------------------
-// TestVault
+// TestVault — creates a temporary vault with pages
 // ---------------------------------------------------------------------------
 
 /// Creates a temporary vault with pre-populated pages. Auto-cleanup on drop.
 pub struct TestVault {
     dir: TempDir,
-    pages: Vec<TestPage>,
-}
-
-struct TestPage {
-    _id: PageId,
-    #[allow(dead_code)]
-    title: String,
-    content: String,
-    tags: Vec<String>,
 }
 
 impl TestVault {
-    pub fn new() -> Self {
-        Self {
-            dir: TempDir::new().expect("failed to create temp dir"),
+    pub fn new() -> TestVaultBuilder {
+        TestVaultBuilder {
             pages: Vec::new(),
         }
-    }
-
-    pub fn page(mut self, title: &str) -> Self {
-        let id = bloom_core::uuid::generate_hex_id();
-        let content = format!(
-            "---\nid: {}\ntitle: \"{}\"\ncreated: 2026-01-01\ntags: []\n---\n\n",
-            id.to_hex(),
-            title
-        );
-        self.pages.push(TestPage {
-            _id: id,
-            title: title.to_string(),
-            content,
-            tags: Vec::new(),
-        });
-        self
-    }
-
-    pub fn with_content(mut self, content: &str) -> Self {
-        if let Some(last) = self.pages.last_mut() {
-            last.content.push_str(content);
-        }
-        self
-    }
-
-    pub fn tags(mut self, tags: &[&str]) -> Self {
-        if let Some(last) = self.pages.last_mut() {
-            last.tags = tags.iter().map(|s| s.to_string()).collect();
-            let tag_str = last
-                .tags
-                .iter()
-                .map(|t| t.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            last.content = last
-                .content
-                .replace("tags: []", &format!("tags: [{}]", tag_str));
-        }
-        self
-    }
-
-    /// Build the vault — writes all pages to disk and returns the root path.
-    pub fn build(&self) -> PathBuf {
-        let root = self.dir.path().to_path_buf();
-        let pages_dir = root.join("pages");
-        let journal_dir = root.join("journal");
-        let bloom_dir = root.join(".bloom");
-        std::fs::create_dir_all(&pages_dir).unwrap();
-        std::fs::create_dir_all(&journal_dir).unwrap();
-        std::fs::create_dir_all(&bloom_dir).unwrap();
-
-        for page in &self.pages {
-            let filename = format!("{}.md", page.title.to_lowercase().replace(' ', "-"));
-            let path = pages_dir.join(&filename);
-            std::fs::write(&path, &page.content).unwrap();
-        }
-
-        root
     }
 
     pub fn root(&self) -> &Path {
@@ -97,39 +32,306 @@ impl TestVault {
     }
 }
 
-impl Default for TestVault {
+pub struct TestVaultBuilder {
+    pages: Vec<(String, String)>, // (filename, content)
+}
+
+impl TestVaultBuilder {
+    /// Add a page with auto-generated frontmatter.
+    pub fn page(mut self, title: &str) -> Self {
+        let id = bloom_core::uuid::generate_hex_id();
+        let filename = format!("{}.md", title.to_lowercase().replace(' ', "-"));
+        let content = format!(
+            "---\nid: {}\ntitle: \"{}\"\ncreated: 2026-01-01\ntags: []\n---\n\n",
+            id.to_hex(),
+            title,
+        );
+        self.pages.push((filename, content));
+        self
+    }
+
+    /// Append content to the last added page.
+    pub fn with_content(mut self, extra: &str) -> Self {
+        if let Some(last) = self.pages.last_mut() {
+            last.1.push_str(extra);
+        }
+        self
+    }
+
+    /// Add tags to the last added page (modifies frontmatter).
+    pub fn tags(mut self, tags: &[&str]) -> Self {
+        if let Some(last) = self.pages.last_mut() {
+            let tag_str = tags.join(", ");
+            last.1 = last.1.replace("tags: []", &format!("tags: [{}]", tag_str));
+        }
+        self
+    }
+
+    /// Add a raw file (filename + full content, no auto-frontmatter).
+    pub fn raw_file(mut self, filename: &str, content: &str) -> Self {
+        self.pages.push((filename.to_string(), content.to_string()));
+        self
+    }
+
+    /// Build the vault on disk and return a TestVault handle.
+    pub fn build(self) -> TestVault {
+        let dir = TempDir::new().expect("failed to create temp dir");
+        let pages_dir = dir.path().join("pages");
+        let journal_dir = dir.path().join("journal");
+        std::fs::create_dir_all(&pages_dir).unwrap();
+        std::fs::create_dir_all(&journal_dir).unwrap();
+
+        for (filename, content) in &self.pages {
+            let path = if filename.starts_with("journal/") {
+                dir.path().join(filename)
+            } else {
+                pages_dir.join(filename)
+            };
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(&path, content).unwrap();
+        }
+
+        TestVault { dir }
+    }
+}
+
+impl Default for TestVaultBuilder {
+    fn default() -> Self {
+        Self { pages: Vec::new() }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SimInput — drives BloomEditor with key sequences
+// ---------------------------------------------------------------------------
+
+/// Drives a `BloomEditor` with simulated key sequences.
+/// Owns the editor and provides methods to send keys and inspect state.
+pub struct SimInput {
+    pub editor: BloomEditor,
+    _vault: Option<TestVault>,
+}
+
+impl SimInput {
+    /// Create a SimInput with an empty scratch buffer (no vault).
+    pub fn new() -> Self {
+        let config = Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = bloom_core::uuid::generate_hex_id();
+        editor.open_page_with_content(
+            &id,
+            "Scratch",
+            std::path::Path::new("[scratch]"),
+            "",
+        );
+        Self {
+            editor,
+            _vault: None,
+        }
+    }
+
+    /// Create a SimInput with content in a scratch buffer (no vault).
+    pub fn with_content(content: &str) -> Self {
+        let config = Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = bloom_core::uuid::generate_hex_id();
+        editor.open_page_with_content(
+            &id,
+            "Scratch",
+            std::path::Path::new("[scratch]"),
+            content,
+        );
+        Self {
+            editor,
+            _vault: None,
+        }
+    }
+
+    /// Create a SimInput backed by a TestVault (vault initialized, indexed).
+    pub fn with_vault(vault: TestVault) -> Self {
+        let config = Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let _ = editor.init_vault(vault.root());
+
+        // Wait for indexer to complete
+        let ch = editor.channels();
+        if let Some(rx) = &ch.indexer_rx {
+            for _ in 0..300 {
+                if let Ok(complete) = rx.try_recv() {
+                    editor.handle_index_complete(complete);
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+
+        editor.startup();
+
+        Self {
+            editor,
+            _vault: Some(vault),
+        }
+    }
+
+    /// Send a key sequence. Supports: `"dw"`, `"SPC f f"`, `"<Esc>"`,
+    /// `"<CR>"`, `"C-r"`, etc.
+    pub fn keys(&mut self, sequence: &str) -> &mut Self {
+        let keys = parse_key_sequence(sequence);
+        for key in keys {
+            self.editor.handle_key(key);
+        }
+        self
+    }
+
+    /// Type literal text (each char sent as an Insert-mode key event).
+    pub fn type_text(&mut self, text: &str) -> &mut Self {
+        for c in text.chars() {
+            self.editor.handle_key(KeyEvent::char(c));
+        }
+        self
+    }
+
+    /// Advance time (triggers notification expiry, which-key popup, etc.).
+    pub fn tick(&mut self, millis: u64) -> &mut Self {
+        let future = std::time::Instant::now() + std::time::Duration::from_millis(millis);
+        self.editor.tick(future);
+        self
+    }
+
+    /// Render and return a TestScreen for assertions.
+    pub fn screen(&mut self, width: u16, height: u16) -> TestScreen {
+        let frame = self.editor.render(width, height);
+        TestScreen::from_frame(frame, width, height)
+    }
+
+    /// Get the active page's content as text.
+    pub fn buffer_text(&self) -> String {
+        self.editor.active_buffer_text().unwrap_or_default()
+    }
+}
+
+impl Default for SimInput {
     fn default() -> Self {
         Self::new()
     }
 }
 
 // ---------------------------------------------------------------------------
-// SimInput
+// TestScreen — visual assertions on a RenderFrame
 // ---------------------------------------------------------------------------
 
-/// Simulates keystrokes, returns `RenderFrame`.
-///
-/// NOTE: Full functionality requires `BloomEditor` which is not yet
-/// implemented in `bloom-core`. The struct is provided so that downstream
-/// test code can be written now; the body will be filled in once
-/// `BloomEditor` lands.
-pub struct SimInput {
-    _private: (),
+/// A rendered screen extracted from a RenderFrame.
+/// Provides assertion methods on the visual output.
+pub struct TestScreen {
+    pub frame: RenderFrame,
+    pub width: u16,
+    pub height: u16,
 }
 
-impl SimInput {
-    /// Send a key sequence like `"diw"`, `"SPC f f"`, `":wq <CR>"`.
-    pub fn keys(&mut self, sequence: &str) -> &mut Self {
-        let _keys = parse_key_sequence(sequence);
-        // Will forward to BloomEditor::handle_key once available.
-        self
+impl TestScreen {
+    pub fn from_frame(frame: RenderFrame, width: u16, height: u16) -> Self {
+        Self { frame, width, height }
     }
 
-    /// Type literal text (each char sent as a key event).
-    pub fn type_text(&mut self, text: &str) -> &mut Self {
-        let _keys: Vec<KeyEvent> = text.chars().map(KeyEvent::char).collect();
-        // Will forward to BloomEditor::handle_key once available.
-        self
+    /// Get the text content of a visible line (0-indexed) in the active pane.
+    pub fn line_text(&self, row: usize) -> String {
+        self.active_pane()
+            .and_then(|p| p.visible_lines.get(row))
+            .map(|l| l.text.trim_end_matches(['\n', '\r']).to_string())
+            .unwrap_or_default()
+    }
+
+    /// Get the number of visible lines in the active pane.
+    pub fn line_count(&self) -> usize {
+        self.active_pane()
+            .map(|p| p.visible_lines.len())
+            .unwrap_or(0)
+    }
+
+    /// Get all visible line texts joined by newline.
+    pub fn all_lines(&self) -> String {
+        self.active_pane()
+            .map(|p| {
+                p.visible_lines
+                    .iter()
+                    .map(|l| l.text.trim_end_matches(['\n', '\r']))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default()
+    }
+
+    /// Get the page title shown in the active pane.
+    pub fn title(&self) -> &str {
+        self.active_pane()
+            .map(|p| p.title.as_str())
+            .unwrap_or("")
+    }
+
+    /// Get the mode string (NORMAL, INSERT, VISUAL, COMMAND).
+    pub fn mode(&self) -> &str {
+        self.active_pane()
+            .map(|p| p.status_bar.mode.as_str())
+            .unwrap_or("")
+    }
+
+    /// Get cursor position (line, column).
+    pub fn cursor(&self) -> (usize, usize) {
+        self.active_pane()
+            .map(|p| (p.cursor.line, p.cursor.column))
+            .unwrap_or((0, 0))
+    }
+
+    /// Whether the active buffer is dirty.
+    pub fn is_dirty(&self) -> bool {
+        self.active_pane().map(|p| p.dirty).unwrap_or(false)
+    }
+
+    /// Whether a picker overlay is visible.
+    pub fn has_picker(&self) -> bool {
+        self.frame.picker.is_some()
+    }
+
+    /// Get picker query text.
+    pub fn picker_query(&self) -> &str {
+        self.frame.picker.as_ref().map(|p| p.query.as_str()).unwrap_or("")
+    }
+
+    /// Get picker result labels.
+    pub fn picker_results(&self) -> Vec<&str> {
+        self.frame
+            .picker
+            .as_ref()
+            .map(|p| p.results.iter().map(|r| r.label.as_str()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Get the selected picker result label.
+    pub fn picker_selected(&self) -> Option<&str> {
+        self.frame.picker.as_ref().and_then(|p| {
+            p.results.get(p.selected_index).map(|r| r.label.as_str())
+        })
+    }
+
+    /// Whether a which-key popup is visible.
+    pub fn has_which_key(&self) -> bool {
+        self.frame.which_key.is_some()
+    }
+
+    /// Whether a dialog is visible.
+    pub fn has_dialog(&self) -> bool {
+        self.frame.dialog.is_some()
+    }
+
+    /// Number of panes.
+    pub fn pane_count(&self) -> usize {
+        self.frame.panes.len()
+    }
+
+    fn active_pane(&self) -> Option<&bloom_core::render::PaneFrame> {
+        self.frame.panes.iter().find(|p| p.is_active)
     }
 }
 
@@ -167,183 +369,10 @@ pub fn parse_key_sequence(sequence: &str) -> Vec<KeyEvent> {
 }
 
 // ---------------------------------------------------------------------------
-// SnapshotHelpers
-// ---------------------------------------------------------------------------
-
-/// Formats `RenderFrame` into deterministic strings for `insta` snapshots.
-pub struct SnapshotHelpers;
-
-impl SnapshotHelpers {
-    /// Format visible lines as a string.
-    pub fn format_lines(frame: &RenderFrame) -> String {
-        let mut output = String::new();
-        for pane in &frame.panes {
-            for line in &pane.visible_lines {
-                let lnum = match line.source.buffer_line() {
-                    Some(n) => format!("{:>3}| ", n + 1),
-                    None => "    | ".to_string(),
-                };
-                output.push_str(&lnum);
-                output.push('\n');
-            }
-        }
-        output
-    }
-
-    /// Format buffer content (cursor + mode).
-    pub fn format_buffer(frame: &RenderFrame) -> String {
-        let mut output = String::new();
-        if let Some(pane) = frame.panes.first() {
-            output.push_str(&format!(
-                "cursor: {}:{}\n",
-                pane.cursor.line, pane.cursor.column
-            ));
-            output.push_str(&format!("mode: {}\n", pane.status_bar.mode));
-        }
-        output
-    }
-
-    /// Format picker state.
-    pub fn format_picker(frame: &RenderFrame) -> String {
-        let mut output = String::new();
-        if let Some(picker) = &frame.picker {
-            output.push_str(&format!("query: {}\n", picker.query));
-            output.push_str(&format!(
-                "results ({}/{}):\n",
-                picker.filtered_count, picker.total_count
-            ));
-            for (i, row) in picker.results.iter().enumerate() {
-                let marker = if i == picker.selected_index {
-                    "▸"
-                } else {
-                    " "
-                };
-                output.push_str(&format!("{} {}\n", marker, row.label));
-            }
-        }
-        output
-    }
-}
-
-// ---------------------------------------------------------------------------
-// PageBuilder
-// ---------------------------------------------------------------------------
-
-/// Builder pattern for creating test pages with links, tags, and content.
-pub struct PageBuilder {
-    title: String,
-    content: String,
-    tags: Vec<String>,
-    links: Vec<String>,
-}
-
-impl PageBuilder {
-    pub fn new(title: &str) -> Self {
-        Self {
-            title: title.to_string(),
-            content: String::new(),
-            tags: Vec::new(),
-            links: Vec::new(),
-        }
-    }
-
-    pub fn content(mut self, content: &str) -> Self {
-        self.content = content.to_string();
-        self
-    }
-
-    pub fn tag(mut self, tag: &str) -> Self {
-        self.tags.push(tag.to_string());
-        self
-    }
-
-    pub fn link(mut self, link: &str) -> Self {
-        self.links.push(link.to_string());
-        self
-    }
-
-    pub fn build(&self) -> String {
-        let id = bloom_core::uuid::generate_hex_id();
-        let tags = if self.tags.is_empty() {
-            "[]".to_string()
-        } else {
-            format!("[{}]", self.tags.join(", "))
-        };
-        format!(
-            "---\nid: {}\ntitle: \"{}\"\ncreated: 2026-01-01\ntags: {}\n---\n\n{}",
-            id.to_hex(),
-            self.title,
-            tags,
-            self.content
-        )
-    }
-}
-
-// ---------------------------------------------------------------------------
-// AssertFrame
-// ---------------------------------------------------------------------------
-
-/// Fluent assertions on `RenderFrame` fields.
-pub struct AssertFrame<'a> {
-    frame: &'a RenderFrame,
-}
-
-impl<'a> AssertFrame<'a> {
-    pub fn new(frame: &'a RenderFrame) -> Self {
-        Self { frame }
-    }
-
-    pub fn cursor_at(self, line: usize, column: usize) -> Self {
-        if let Some(pane) = self.frame.panes.first() {
-            assert_eq!(pane.cursor.line, line, "cursor line mismatch");
-            assert_eq!(pane.cursor.column, column, "cursor column mismatch");
-        }
-        self
-    }
-
-    pub fn mode(self, expected: &str) -> Self {
-        if let Some(pane) = self.frame.panes.first() {
-            assert_eq!(pane.status_bar.mode, expected, "mode mismatch");
-        }
-        self
-    }
-
-    pub fn dirty(self, expected: bool) -> Self {
-        if let Some(pane) = self.frame.panes.first() {
-            assert_eq!(pane.dirty, expected, "dirty flag mismatch");
-        }
-        self
-    }
-
-    pub fn has_picker(self) -> Self {
-        assert!(self.frame.picker.is_some(), "expected picker to be open");
-        self
-    }
-
-    pub fn no_picker(self) -> Self {
-        assert!(self.frame.picker.is_none(), "expected picker to be closed");
-        self
-    }
-}
-
-// ---------------------------------------------------------------------------
 // History test helpers
 // ---------------------------------------------------------------------------
 
 /// Create a commit with a backdated timestamp in a [`bloom_history::HistoryRepo`].
-///
-/// Useful for testing temporal features (page history, day view) that need
-/// commits spanning multiple days. **Dev-dependency only** — never shipped
-/// in the release binary.
-///
-/// # Arguments
-/// * `repo` — an open [`bloom_history::HistoryRepo`]
-/// * `files` — `(uuid_hex, content)` pairs to stage
-/// * `timestamp` — Unix timestamp (seconds) for the commit
-/// * `message` — commit message
-///
-/// # Returns
-/// The commit OID, or `None` if there were no changes.
 pub fn commit_at(
     repo: &bloom_history::HistoryRepo,
     files: &[(&str, &str)],

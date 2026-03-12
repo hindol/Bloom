@@ -531,6 +531,13 @@ impl BloomEditor {
         self.set_theme(next);
     }
 
+    /// Get the text content of the active buffer (for testing).
+    pub fn active_buffer_text(&self) -> Option<String> {
+        let page_id = self.active_page()?;
+        let buf = self.buffer_mgr.get(page_id)?;
+        Some(buf.text().to_string())
+    }
+
     /// Write the current theme name to config.toml.
     pub(crate) fn persist_theme_to_config(&self) {
         let Some(root) = &self.vault_root else { return };
