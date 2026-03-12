@@ -466,6 +466,7 @@ impl BloomEditor {
                 return buf.cursor(0);
             }
         }
+        tracing::warn!("cursor() called with no active page/buffer — returning 0");
         0
     }
 
@@ -473,7 +474,11 @@ impl BloomEditor {
         if let Some(page_id) = self.active_page().cloned() {
             if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                 buf.set_cursor(0, pos);
+            } else {
+                tracing::error!(page = %page_id.to_hex(), pos, "set_cursor: buffer not found!");
             }
+        } else {
+            tracing::error!(pos, "set_cursor: no active page!");
         }
     }
 

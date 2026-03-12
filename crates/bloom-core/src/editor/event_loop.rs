@@ -49,6 +49,9 @@ pub fn run_event_loop(
     loop {
         // Render if state changed
         if needs_render {
+            // Keep pane viewport geometry and scroll state in sync before
+            // producing the read-only render frame.
+            editor.update_layout(viewport.0, viewport.1);
             let frame = editor.render(viewport.0, viewport.1);
             if !on_action(LoopAction::Render(Box::new(frame))) {
                 return;
@@ -139,5 +142,78 @@ pub fn run_event_loop(
         if editor.tick(Instant::now()) {
             needs_render = true;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossbeam::channel;
+    use std::path::Path;
+
+    fn render_long_file(height: usize, keys: &[crate::types::KeyEvent]) -> Box<RenderFrame> {
+        let mut editor = crate::BloomEditor::new(crate::config::Config::defaults()).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        let content = (1..=40)
+            .map(|n| format!("line {n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        editor.open_page_with_content(&id, "Long", Path::new("[scratch]"), &content);
+        editor.resize(height, 80);
+
+        let (tx, rx) = channel::unbounded();
+        for key in keys {
+            tx.send(FrontendEvent::Key(key.clone())).unwrap();
+        }
+        tx.send(FrontendEvent::Quit).unwrap();
+
+        let mut last_frame: Option<Box<RenderFrame>> = None;
+        run_event_loop(&mut editor, &rx, |action| {
+            match action {
+                LoopAction::Render(frame) => last_frame = Some(frame),
+                LoopAction::Quit => {}
+            }
+            true
+        });
+
+        last_frame.expect("expected at least one rendered frame")
+    }
+
+    #[test]
+    fn event_loop_uses_current_pane_height_for_visible_lines() {
+        let frame = render_long_file(40, &[]);
+        let pane = frame
+            .panes
+            .iter()
+            .find(|pane| pane.is_active)
+            .expect("expected an active pane");
+
+        assert_eq!(pane.rect.content_height, 39);
+        assert_eq!(pane.visible_lines.len(), 39);
+    }
+
+    #[test]
+    fn event_loop_keeps_cursor_in_visible_range() {
+        let frame = render_long_file(24, &vec![crate::types::KeyEvent::char('j'); 30]);
+        let pane = frame
+            .panes
+            .iter()
+            .find(|pane| pane.is_active)
+            .expect("expected an active pane");
+        let visible_start = pane.scroll_offset;
+        let visible_end = visible_start + pane.visible_lines.len();
+
+        assert!(
+            visible_start > 0,
+            "expected the viewport to scroll once the cursor moved below the first screenful"
+        );
+        assert_eq!(pane.cursor.line, 30);
+        assert!(
+            pane.cursor.line >= visible_start && pane.cursor.line < visible_end,
+            "cursor line {} should stay within visible range {}..{}",
+            pane.cursor.line,
+            visible_start,
+            visible_end
+        );
     }
 }

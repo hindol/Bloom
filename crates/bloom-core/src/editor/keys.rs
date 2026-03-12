@@ -889,6 +889,25 @@ impl BloomEditor {
                 self.pending_since = None;
                 self.which_key_visible = false;
                 self.inline_completion = None;
+
+                // Debug: log cursor movement for diagnosing past-EOF bug
+                if let Some(page_id) = self.active_page() {
+                    if let Some(buf) = self.buffer_mgr.get(page_id) {
+                        let len = buf.text().len_chars();
+                        let lines = buf.text().len_lines();
+                        let old_cur = buf.cursor(0);
+                        if motion.new_position > len || old_cur > len {
+                            tracing::error!(
+                                old_cursor = old_cur,
+                                new_position = motion.new_position,
+                                len_chars = len,
+                                len_lines = lines,
+                                "cursor past EOF detected!"
+                            );
+                        }
+                    }
+                }
+
                 self.set_cursor(motion.new_position);
                 vec![keymap::dispatch::Action::Motion(
                     keymap::dispatch::MotionResult {

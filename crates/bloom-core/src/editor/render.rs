@@ -821,9 +821,6 @@ impl BloomEditor {
         if len == 0 {
             return (0, 0);
         }
-        // In Insert mode, cursor can be at len (past the last char).
-        // In Normal mode, cursor can be at len only on the implicit empty
-        // trailing line (file ends with \n). Otherwise clamp to len-1.
         let has_trailing_empty_line = len > 0 && rope.char(len - 1) == '\n';
         let max_pos =
             if matches!(vim_state.mode(), bloom_vim::Mode::Insert) || has_trailing_empty_line {
@@ -841,6 +838,16 @@ impl BloomEditor {
         let line = rope.char_to_line(clamped);
         let line_start = rope.line_to_char(line);
         let col = clamped - line_start;
+
+        // Debug: detect line past actual content
+        let total_lines = rope.len_lines();
+        if line >= total_lines {
+            tracing::error!(
+                cursor, clamped, len, line, total_lines,
+                "cursor_position_for: line >= total_lines!"
+            );
+        }
+
         (line, col)
     }
 

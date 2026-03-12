@@ -141,24 +141,29 @@ fn draw_editor_content_unified(
     let measure = MonospaceWidth;
     let screen_map = ScreenMap::new(&pane.visible_lines, content_width, &measure);
 
-    // Find the cursor's position in visible_lines by scanning for its buffer line.
-    let cursor_entry_idx =
-        ScreenMap::find_buffer_line(&pane.visible_lines, pane.cursor.line).unwrap_or(0);
-    let cursor_screen_row = screen_map.cursor_screen_row(
-        cursor_entry_idx,
-        pane.cursor.column,
-        &measure,
-        &pane.visible_lines,
-    );
-    let cursor_col_in_row = screen_map.cursor_col_in_row(
-        cursor_entry_idx,
-        pane.cursor.column,
-        &measure,
-        &pane.visible_lines,
+    let cursor_screen_pos = ScreenMap::find_buffer_line(&pane.visible_lines, pane.cursor.line).map(
+        |cursor_entry_idx| {
+            (
+                screen_map.cursor_screen_row(
+                    cursor_entry_idx,
+                    pane.cursor.column,
+                    &measure,
+                    &pane.visible_lines,
+                ),
+                screen_map.cursor_col_in_row(
+                    cursor_entry_idx,
+                    pane.cursor.column,
+                    &measure,
+                    &pane.visible_lines,
+                ),
+            )
+        },
     );
 
     let mut scroll = ScreenScroll::new();
-    scroll.ensure_visible(cursor_screen_row, height, config.scrolloff);
+    if let Some((cursor_screen_row, _)) = cursor_screen_pos {
+        scroll.ensure_visible(cursor_screen_row, height, config.scrolloff);
+    }
     let first_screen_row = scroll.first_screen_row;
 
     let wrap_indicator = &config.wrap_indicator;
@@ -288,12 +293,14 @@ fn draw_editor_content_unified(
         );
 
         // Track cursor position
-        if pane.is_active && screen_row == cursor_screen_row {
-            let cy = y;
-            let cx = area.x + line_number_width + cursor_col_in_row as u16;
-            let frame_area = f.area();
-            if cy < area.bottom() && cx < frame_area.width {
-                cursor_pos = Some((cx, cy));
+        if let Some((cursor_screen_row, cursor_col_in_row)) = cursor_screen_pos {
+            if pane.is_active && screen_row == cursor_screen_row {
+                let cy = y;
+                let cx = area.x + line_number_width + cursor_col_in_row as u16;
+                let frame_area = f.area();
+                if cy < area.bottom() && cx < frame_area.width {
+                    cursor_pos = Some((cx, cy));
+                }
             }
         }
     }
