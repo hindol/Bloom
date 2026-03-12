@@ -19,7 +19,7 @@ Starting from a single pane, each split divides one pane into two. This produces
 
 **Rules:**
 - Only editor panes can be split. Special panes (timeline, agenda, undo tree) are leaf panes that can be opened, closed, or replaced, but not subdivided.
-- Navigation uses **nearest spatial neighbor** — `SPC w l` (right) targets the pane whose vertical center is closest to the cursor's position in the current pane.
+- Navigation currently uses a **nearest spatial neighbor** heuristic — `SPC w l` (right) filters to panes on the right and picks the pane whose vertical center is closest to the active pane center. The current implementation does not yet use the exact cursor position within the pane.
 - Minimum pane size: 20 columns wide, 5 lines tall. Splits that would violate this are rejected.
 
 ---
@@ -334,7 +334,7 @@ Minimum status bar: `│ NOR  12:1 │` (~12 chars). Below that, the pane is too
 
 ## Navigation Semantics (Nearest Spatial Neighbor)
 
-Navigation (`SPC w h/j/k/l`) targets the pane whose center is closest to the cursor's position in the current pane.
+Navigation (`SPC w h/j/k/l`) currently uses pane-center heuristics. The implementation accepts `cursor_line`, but today it approximates the cursor's position with the active pane center.
 
 ### Example: 3-pane layout
 
@@ -346,12 +346,9 @@ Navigation (`SPC w h/j/k/l`) targets the pane whose center is closest to the cur
 └──────────────────┴──────────────────┘
 ```
 
-**From A, cursor near the top:**
-- `SPC w l` (right) → **B** (B's center is closer to A's cursor)
+**From A:**
+- `SPC w l` (right) → whichever of **B** or **C** has its center closest to A's vertical midpoint. In the symmetric split above, they are equally close.
 - `SPC w j` (down) → no pane below A → no-op
-
-**From A, cursor near the bottom:**
-- `SPC w l` (right) → **C** (C's center is closer to A's cursor)
 
 **From B:**
 - `SPC w h` (left) → **A** (only pane to the left)
@@ -365,11 +362,13 @@ Navigation (`SPC w h/j/k/l`) targets the pane whose center is closest to the cur
 
 ```
 1. Compute the center point of each pane (mid-x, mid-y).
-2. From the active pane's cursor position, cast a ray in the requested direction.
+2. Use the active pane center as the navigation origin.
 3. Filter to panes that are in the correct direction (e.g., "right" = pane center x > active pane right edge).
-4. Of those, pick the pane with the minimum perpendicular distance to the cursor.
+4. Of those, pick the pane with the minimum perpendicular distance to the active pane center.
 5. If no pane exists in that direction, do nothing (no wrapping).
 ```
+
+This is an approximation of the intended cursor-aware behavior; the current code prefers a simple pane-center heuristic.
 
 ---
 

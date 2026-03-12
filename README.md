@@ -157,7 +157,7 @@ crates/
 | [THEMING.md](docs/THEMING.md) | Colour philosophy and palette structure |
 | [FILE_FORMAT.md](docs/FILE_FORMAT.md) | Bloom Markdown extensions |
 | [WORD_WRAP.md](docs/WORD_WRAP.md) | Frontend-owned wrapping with MeasureWidth trait |
-| [DEBUGGABILITY.md](docs/DEBUGGABILITY.md) | Logging, notifications, diagnostics |
+| [DEBUGGABILITY.md](docs/test/DEBUGGABILITY.md) | Logging, notifications, diagnostics |
 | [PICKER_SURFACES.md](docs/PICKER_SURFACES.md) | Picker UI specifications |
 | [ADAPTIVE_LAYOUT.md](docs/ADAPTIVE_LAYOUT.md) | Responsive layout breakpoints |
 

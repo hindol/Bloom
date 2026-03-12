@@ -391,7 +391,7 @@ Mouse selection enters Visual mode in core — same state as pressing `v` and mo
 | Trackpad | Smooth pixel-level scroll with momentum |
 | Scroll bar | Thin, auto-hiding, right edge. Click-and-drag or click-to-jump. |
 
-Scrolling updates `viewport.first_visible_line`. The core re-renders with the new viewport.
+Scroll input updates the core-owned `viewport.first_visible_line`. The frontend then re-renders from the new `visible_lines` / `scroll_offset`.
 
 ---
 

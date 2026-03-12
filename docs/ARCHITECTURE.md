@@ -104,10 +104,12 @@ A `RenderFrame` contains:
 | `maximized` | `bool` | Whether a pane is maximized (hides others) |
 | `hidden_pane_count` | `usize` | Number of hidden panes when maximized |
 | `picker` | `Option<PickerFrame>` | Active picker: query, results, selected index, preview |
-| `agenda` | `Option<AgendaFrame>` | Agenda overlay: tasks grouped by overdue/today/upcoming |
+| `inline_menu` | `Option<InlineMenuFrame>` | Cursor-anchored inline suggestions and completions |
 | `which_key` | `Option<WhichKeyFrame>` | Popup: available key bindings in current prefix |
+| `date_picker` | `Option<DatePickerFrame>` | Date picker overlay |
 | `dialog` | `Option<DialogFrame>` | Confirmation dialog |
-| `notification` | `Option<Notification>` | Transient status message |
+| `notifications` | `Vec<Notification>` | Active transient notifications |
+| `scrolloff` | `usize` | Scroll margin forwarded to the frontend renderer |
 
 Each `PaneFrame` includes a `PaneRectFrame` with `x, y, width, content_height, total_height` — concrete cell positions computed by the core's `WindowManager::compute_pane_rects()`. The TUI reads these directly instead of computing its own layout.
 
@@ -148,29 +150,30 @@ Each frame follows a three-layer painting strategy:
 ```text
 Layer 1: Clear + Background    ← writes ' ' with bg to every cell (clean slate)
 Layer 2: Pane content          ← editor lines, status bars, written into pane rects
-Layer 3: Overlays              ← picker, agenda, dialog, notification (drawn last, wins)
+Layer 3: Overlays              ← picker, inline menu, date picker, dialog, notifications
 ```
 
 **Layer 1** ensures no stale content from previous frames bleeds through. `Clear` writes space characters (content reset), then `Block::default().style(bg)` sets the background colour. Both operate on the in-memory buffer — the terminal only receives the final diff.
 
 **Layer 2** renders each pane into its core-computed rect. The pane content (editor lines, syntax-highlighted spans) overwrites the background layer. Each pane includes its own status bar at the bottom of its rect.
 
-**Layer 3** renders overlays on top of panes. Overlays draw last, so their `set_cursor_position()` calls override the pane cursor — each overlay owns its cursor (picker query input, agenda selected row, dialog choice).
+**Layer 3** renders overlays on top of panes. Overlays draw last, so their `set_cursor_position()` calls override the pane cursor — each overlay owns its cursor (picker query input, inline selection, date picker choice, dialog choice).
 
 ### Viewport and Scrolling
 
-The viewport tracks which lines of the buffer are visible. On each `render()` call:
+The viewport tracks which lines of the buffer are visible. On each render cycle:
 
-1. `compute_pane_rects(w, h)` → active pane's `content_height`
-2. `viewport.height = content_height` (always matches the real screen area)
-3. `viewport.ensure_visible(cursor_line)` (scrolls if cursor moved past the edge)
-4. `render_buffer_lines()` produces `RenderedLine`s for the visible range
+1. `update_layout(w, h)` computes pane rects from the real terminal/window size.
+2. Each pane viewport is refreshed from its `content_height` and `width`.
+3. The active pane's `viewport.ensure_visible(cursor_line)` updates buffer-line scroll state.
+4. `render()` consumes that state and `render_buffer_lines()` produces `RenderedLine`s for the visible range.
+5. Frontends may add display-specific refinement (for example TUI `ScreenScroll` for wrapped screen rows) without mutating the core viewport.
 
-The viewport height is never guessed or stored separately — it's derived from the layout computation on every frame, using the actual terminal dimensions.
+The viewport height is never guessed or stored separately — it's refreshed from layout computation using the actual terminal dimensions before `render()` consumes it.
 
 ### Semantic Highlighting Pipeline
 
-All content — editor, picker preview, agenda tasks — uses the same highlighting path:
+All content — editor text, picker preview, and other highlighted text surfaces — uses the same highlighting path:
 
 ```text
                         ┌─────────────────────┐
@@ -220,9 +223,10 @@ Search match highlighting overlays on top via `render::search_highlight::highlig
 │  │  4. Poll MCP edit channel (if enabled)        │    │
 │  │  5. Dispatch key → BloomEditor::handle_key() │    │
 │  │  6. Process Vim grammar, apply edits to rope  │    │
-│  │  7. Call editor.render(w, h) → RenderFrame    │    │
-│  │  8. TUI draws RenderFrame into ratatui buffer │    │
-│  │  9. ratatui diffs and flushes to terminal     │    │
+│  │  7. Call editor.update_layout(w, h)           │    │
+│  │  8. Call editor.render(w, h) → RenderFrame    │    │
+│  │  9. TUI draws RenderFrame into ratatui buffer │    │
+│  │ 10. ratatui diffs and flushes to terminal     │    │
 │  └──────────────────────────────────────────────┘    │
 │                                                      │
 │  Rule: NEVER blocks. All I/O dispatched via channels.│

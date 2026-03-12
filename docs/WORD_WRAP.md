@@ -43,7 +43,7 @@ RenderedLine[]
     │                                 • cursor: placed at screen (row, col)
     │                               
 CursorState { line, column }        
-Viewport { first_visible_line }     ── hint to frontend ("cursor is here")
+Viewport { first_visible_line }     ── core-owned buffer-line viewport
 ```
 
 ---
