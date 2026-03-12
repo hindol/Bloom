@@ -26,46 +26,73 @@
 └──────────────────────┬──────────────────────────────┘
                        │ RenderFrame (UI-agnostic snapshot)
 ┌──────────────────────▼──────────────────────────────┐
-│                   Core Library                       │
-│            (pure Rust crate, no UI deps)             │
+│               bloom-core (orchestrator)               │
 │                                                      │
-│  • Editor engine (rope + undo tree)                  │
-│  • Vim modal editing state machine                   │
+│  • Editor engine (key dispatch, save, session)       │
 │  • RenderFrame producer (visible lines, cursor,      │
 │    status bar, picker state, diagnostics)             │
 │  • Which-key discoverability                         │
-│  • Theme engine (palettes, style resolution)         │
 │  • Link resolver + backlink tracker                  │
-│  • Bloom Markdown parser                             │
-│  • Search / query engine                             │
+│  • Search / query engine (BQL)                       │
+│  • Index (SQLite FTS5, backlinks, tags)              │
 │  • Unlinked mentions scanner                         │
+│  • Window manager (splits, panes)                    │
 └──────────────────────┬──────────────────────────────┘
-                       │ traits
-┌──────────────────────▼──────────────────────────────┐
-│              Abstraction Traits                       │
-│                                                      │
-│  DocumentParser  — parse/serialize file format        │
-│  NoteStore       — read/write/list/watch storage      │
-│  KeyMapper       — platform-specific key mapping      │
-└──────────────────────┬──────────────────────────────┘
-                       │
-┌──────────────────────▼──────────────────────────────┐
-│           Concrete Implementations                    │
-│                                                      │
-│  BloomMarkdownParser + LocalFileStore + MacOS/Win    │
-│  (swap any independently)                            │
-└─────────────────────────────────────────────────────┘
+                       │ depends on
+  ┌────────────────────┼──────────────────────┐
+  │                    │                      │
+┌─▼──────────┐ ┌──────▼──────┐ ┌─────────────▼──┐
+│ bloom-vim   │ │  bloom-md   │ │  bloom-store   │
+│             │ │             │ │                │
+│ Vim state   │ │ Parser,     │ │ LocalFileStore,│
+│ machine,    │ │ highlighter,│ │ DiskWriter,    │
+│ motions,    │ │ frontmatter,│ │ FileWatcher    │
+│ operators,  │ │ 12 themes,  │ │                │
+│ text objects│ │ Markdown    │ │                │
+│ input types │ │ types       │ │                │
+└─────┬───────┘ └─────────────┘ └────────┬───────┘
+      │                                  │
+┌─────▼───────┐                 ┌────────▼───────┐
+│ bloom-buffer │                 │  bloom-error   │
+│              │                 │                │
+│ Rope,        │                 │ BloomError     │
+│ cursors,     │                 │ (shared across │
+│ undo tree,   │                 │  all crates)   │
+│ block IDs    │                 └────────────────┘
+└──────────────┘
 ```
+
+### Crate Responsibilities
+
+| Crate | Owns | Key invariant |
+|-------|------|---------------|
+| **bloom-error** | `BloomError` enum | Single error type shared across all crates |
+| **bloom-buffer** | Rope + cursors + undo tree + block ID generation | **Buffer owns cursors.** All mutations (insert/delete/replace) auto-adjust every tracked cursor. No manual cursor shifts. |
+| **bloom-md** | Markdown parser, highlighter, frontmatter, themes, `PageId`/`BlockId`/`TagName`/`Timestamp` | Pure parsing — no state, no I/O. Leaf crate. |
+| **bloom-vim** | Vim state machine, grammar, motions, operators, text objects, `KeyEvent`/`KeyCode` | Produces `EditOp` descriptors. Never mutates buffers — read-only access. |
+| **bloom-store** | `LocalFileStore`, `DiskWriter` (atomic writes), `FileWatcher` | File I/O abstraction. No editor knowledge. |
+| **bloom-core** | Editor orchestrator: key dispatch, save, session, pickers, notifications, window manager, index, BQL | Composes all other crates. Thin — delegates to specialized crates. |
+
+### Why This Structure
+
+The crate boundaries enforce three architectural invariants that prevent bugs:
+
+1. **Buffer-owned cursors** (bloom-buffer): `buf.insert()` adjusts all cursors atomically. Since bloom-buffer is a separate crate, no external code can reach into the rope and mutate it without going through the cursor-adjusting API.
+
+2. **Vim produces, editor applies** (bloom-vim): The Vim state machine produces `EditOp` descriptors but never mutates buffers. The editor applies them. This separation means Vim logic can't create buffer/cursor inconsistencies.
+
+3. **Save is read-only** (bloom-core): The save path reads buffer content and writes to disk. It never mutates the buffer. Block ID assignment happens on edit-group close (leaving Insert mode), not during save.
 
 ### RenderFrame Abstraction
 
-The core library produces a `RenderFrame` — a UI-agnostic snapshot of everything to draw. Frontends never query editor state directly; they consume frames. The core owns layout computation (Vim/Emacs model); the TUI reads positions from the frame.
+The core library produces a `RenderFrame` — a UI-agnostic snapshot of everything to draw. Frontends never query editor state directly; they consume frames. Layout is computed in `update_layout()` (state mutation); rendering in `render()` (read-only snapshot).
 
 ```rust,ignore
 terminal.draw(|f| {
     let (w, h) = f.area();
-    let frame = editor.render(w, h);    // core computes layout for this exact size
-    tui::draw(f, &frame, &theme);       // TUI reads rects, renders widgets
+    editor.update_layout(w, h);          // state: viewport dims, cursor scroll
+    let frame = editor.render(w, h);     // read-only: produces the snapshot
+    tui::draw(f, &frame, &theme);        // TUI reads rects, renders widgets
 });
 ```
 
@@ -101,15 +128,16 @@ The TUI render loop runs synchronously on the UI thread at ~60fps (or on input):
 ```rust,ignore
 loop {
     terminal.draw(|f| {
-        let area = f.area();                        // actual terminal dimensions
-        let frame = editor.render(area.w, area.h);  // core: layout + viewport + content
-        tui::draw(f, &frame, &theme);               // TUI: widgets into ratatui buffer
-    });                                              // ratatui diffs and flushes to terminal
+        let area = f.area();                            // actual terminal dimensions
+        editor.update_layout(area.w, area.h);           // state: viewport + scroll
+        let frame = editor.render(area.w, area.h);      // read-only: snapshot
+        tui::draw(f, &frame, &theme);                   // TUI: widgets into ratatui buffer
+    });                                                  // ratatui diffs and flushes to terminal
     wait_for_input_or_tick();
 }
 ```
 
-**Key property:** The terminal dimensions (`f.area()`) flow directly into `render()`, which uses them to compute pane rects. The same dimensions are used by the TUI to draw. No stored state to drift.
+**Key property:** The terminal dimensions (`f.area()`) flow into `update_layout()` which sets viewport dimensions, then into `render()` which uses them to compute pane rects. The same dimensions are used by the TUI to draw. No stored state to drift.
 
 ### Cell Painting Strategy
 
