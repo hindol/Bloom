@@ -8,6 +8,29 @@
 use crate::editor::commands::EX_COMMANDS;
 use crate::*;
 
+/// Compute ghost text (the untyped suffix) for command-line completion.
+fn command_ghost_text(input: &str) -> Option<String> {
+    if input.is_empty() {
+        return None;
+    }
+    // :theme <partial> → ghost is the rest of the theme name
+    if let Some(arg) = input.strip_prefix("theme ") {
+        let match_name = theme::THEME_NAMES.iter().find(|n| n.starts_with(arg))?;
+        let suffix = &match_name[arg.len()..];
+        if suffix.is_empty() {
+            return None;
+        }
+        return Some(suffix.to_string());
+    }
+    // Command prefix → ghost is the rest of the command name
+    let (cmd, _) = EX_COMMANDS.iter().find(|(c, _)| c.starts_with(input))?;
+    let suffix = &cmd[input.len()..];
+    if suffix.is_empty() {
+        return None;
+    }
+    Some(suffix.to_string())
+}
+
 impl BloomEditor {
     /// Produce the render frame. `width` and `height` are the actual terminal
     /// dimensions — used directly for layout computation so pane rects always
@@ -135,9 +158,12 @@ impl BloomEditor {
             let status_bar = if is_active {
                 // Active pane: priority CommandLine > QuickCapture > Normal
                 let content = if matches!(self.vim_state.mode(), vim::Mode::Command) {
+                    let input = self.vim_state.pending_keys().to_string();
+                    let ghost_text = command_ghost_text(&input);
                     render::StatusBarContent::CommandLine(render::CommandLineSlot {
-                        input: self.vim_state.pending_keys().to_string(),
+                        input,
                         cursor_pos: self.vim_state.pending_keys().len(),
+                        ghost_text,
                         error: None,
                     })
                 } else if let Some(qc) = &self.quick_capture {

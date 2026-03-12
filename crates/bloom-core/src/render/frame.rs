@@ -324,6 +324,7 @@ pub struct NormalStatus {
 pub struct CommandLineSlot {
     pub input: String,
     pub cursor_pos: usize,
+    pub ghost_text: Option<String>,
     pub error: Option<String>,
 }
 
