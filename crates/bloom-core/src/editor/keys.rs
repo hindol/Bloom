@@ -917,6 +917,8 @@ impl BloomEditor {
                         if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                             buf.end_edit_group();
                         }
+                        // Assign block IDs after edit group close (not in save path).
+                        self.ensure_block_ids(&page_id);
                     }
                     // Auto-align only on Insert→Normal transition
                     if was_insert {

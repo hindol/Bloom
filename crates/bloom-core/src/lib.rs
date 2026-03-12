@@ -711,8 +711,13 @@ impl BloomEditor {
         // Check if which-key drawer should appear (timeout elapsed)
         let wk_changed = if !self.which_key_visible && !self.leader_keys.is_empty() {
             let timeout = std::time::Duration::from_millis(self.config.which_key_timeout_ms);
-            self.pending_since
-                .is_some_and(|since| now.duration_since(since) >= timeout)
+            let should_show = self
+                .pending_since
+                .is_some_and(|since| now.duration_since(since) >= timeout);
+            if should_show {
+                self.which_key_visible = true;
+            }
+            should_show
         } else {
             false
         };

@@ -82,10 +82,6 @@ impl BloomEditor {
             .is_some_and(|since| since.elapsed() >= timeout);
         let show_wk = has_pending && (self.which_key_visible || timed_out);
 
-        if show_wk && !self.which_key_visible {
-            self.which_key_visible = true;
-        }
-
         let wk_h = if show_wk {
             let col_width = 24u16;
             let cols = (width.saturating_sub(4) / col_width).max(1);
@@ -98,7 +94,8 @@ impl BloomEditor {
         let pane_area_h = height.saturating_sub(wk_h);
         let pane_rects = self.window_mgr.compute_pane_rects(width, pane_area_h);
 
-        // Update each pane's viewport dimensions from its cell rect
+        // Derived state: sync each pane's viewport dimensions from layout rects.
+        // This is a cache, not user-visible state — derived from terminal size.
         for rect in &pane_rects {
             if let Some(ps) = self.window_mgr.pane_state_mut(rect.pane_id) {
                 ps.viewport.height = rect.content_height as usize;

@@ -146,9 +146,6 @@ impl BloomEditor {
             return;
         }
 
-        // Assign block IDs (no-op when vault not initialized or all blocks have IDs).
-        self.ensure_block_ids(page_id);
-
         // Extract content and path.
         let (content, path) = {
             let Some((buf, info)) = self.buffer_mgr.get_with_info(page_id) else {
@@ -183,7 +180,7 @@ impl BloomEditor {
 
     /// Assign block IDs to the buffer if any blocks are missing them.
     /// Modifies the rope in-place. Returns true if any IDs were added.
-    fn ensure_block_ids(&mut self, page_id: &types::PageId) -> bool {
+    pub(crate) fn ensure_block_ids(&mut self, page_id: &types::PageId) -> bool {
         if self.vault_root.is_none() {
             return false;
         }
