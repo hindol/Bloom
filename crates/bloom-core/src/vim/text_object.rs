@@ -4,7 +4,7 @@
 //! `it` for tags, `id` for timestamps, `ih` for headings) to character ranges
 //! in the buffer. Used by the Vim grammar for `operator + text-object` commands.
 
-use crate::buffer::Buffer;
+use bloom_buffer::Buffer;
 use std::ops::Range;
 
 /// The type of a text object (inner or around).

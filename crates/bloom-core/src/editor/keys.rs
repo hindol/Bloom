@@ -875,7 +875,7 @@ impl BloomEditor {
                 if matches!(self.vim_state.mode(), vim::Mode::Insert) {
                     self.check_inline_triggers();
                 }
-                vec![keymap::dispatch::Action::Edit(buffer::EditOp {
+                vec![keymap::dispatch::Action::Edit(bloom_buffer::EditOp {
                     range: edit.range,
                     replacement: edit.replacement,
                     cursor_after: edit.cursor_after,

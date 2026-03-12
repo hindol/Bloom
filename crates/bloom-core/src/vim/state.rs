@@ -6,7 +6,7 @@
 
 use std::ops::Range;
 
-use crate::buffer::{Buffer, EditOp};
+use bloom_buffer::{Buffer, EditOp};
 use crate::types::{KeyCode, KeyEvent};
 
 use super::grammar::{self, ModeSwitch, ParseResult, ParsedCommand, StandaloneCmd};
@@ -916,7 +916,7 @@ fn is_repeatable(action: &VimAction) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::Buffer;
+    use bloom_buffer::Buffer;
     use crate::types::{KeyCode, KeyEvent, Modifiers};
 
     fn key(c: char) -> KeyEvent {

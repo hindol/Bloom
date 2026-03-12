@@ -1,4 +1,4 @@
-use crate::buffer::Buffer;
+use bloom_buffer::Buffer;
 use unicode_width::UnicodeWidthStr;
 
 /// Align all blocks in the entire buffer.
@@ -384,7 +384,7 @@ fn align_frontmatter_block(buf: &mut Buffer, lines: &[String]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::Buffer;
+    use bloom_buffer::Buffer;
 
     #[test]
     fn test_timestamp_alignment() {

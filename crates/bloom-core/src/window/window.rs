@@ -42,7 +42,6 @@ pub enum PaneKind {
 
 pub struct PaneState {
     pub page_id: Option<PageId>,
-    pub cursor: usize,
     pub viewport: Viewport,
 }
 
@@ -50,7 +49,6 @@ impl Clone for PaneState {
     fn clone(&self) -> Self {
         Self {
             page_id: self.page_id.clone(),
-            cursor: self.cursor,
             viewport: Viewport::new(self.viewport.height, self.viewport.width),
         }
     }
@@ -315,7 +313,6 @@ impl WindowManager {
             first,
             PaneState {
                 page_id: None,
-                cursor: 0,
                 viewport: Viewport::new(24, 80),
             },
         );
@@ -388,7 +385,6 @@ impl WindowManager {
                 new_pane,
                 PaneState {
                     page_id: None,
-                    cursor: 0,
                     viewport: Viewport::new(24, 80),
                 },
             );
@@ -705,7 +701,6 @@ impl WindowManager {
                 id,
                 PaneState {
                     page_id: None,
-                    cursor: 0,
                     viewport: Viewport::new(24, 80),
                 },
             );

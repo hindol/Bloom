@@ -1,4 +1,4 @@
-use crate::buffer::EditOp;
+use bloom_buffer::EditOp;
 use crate::types::*;
 use crate::vim::state::Mode;
 use crate::window::{Direction, SplitDirection};
@@ -136,7 +136,7 @@ pub enum ResizeOp {
 
 pub struct EditorContext<'a> {
     pub mode: Mode,
-    pub buffer: &'a crate::buffer::Buffer,
+    pub buffer: &'a bloom_buffer::Buffer,
     pub cursor: usize,
     pub picker_open: bool,
     pub quick_capture_open: bool,
@@ -260,7 +260,7 @@ impl KeymapDispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::Buffer;
+    use bloom_buffer::Buffer;
 
     fn make_context(buf: &Buffer) -> EditorContext<'_> {
         EditorContext {

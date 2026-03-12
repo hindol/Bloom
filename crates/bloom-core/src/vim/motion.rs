@@ -7,7 +7,7 @@
 
 use std::ops::Range;
 
-use crate::buffer::Buffer;
+use bloom_buffer::Buffer;
 
 use super::operator::Operator;
 

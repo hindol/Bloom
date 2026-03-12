@@ -213,15 +213,11 @@ impl BloomEditor {
             return false;
         }
 
-        let cursor_before = self.cursor();
-
         let Some(buf) = self.buffer_mgr.get_mut(page_id) else {
             return false;
         };
 
-        // Track how many chars are inserted before the cursor so we can adjust it.
-        let mut cursor_shift: usize = 0;
-
+        // Buffer owns cursors — insert() auto-adjusts them.
         buf.begin_edit_group();
         for ins in insertions.iter().rev() {
             let line_idx = ins.line;
@@ -238,18 +234,9 @@ impl BloomEditor {
             }
             let insert_at = line_start + content_chars;
             let insertion_text = format!(" ^{}", ins.id);
-            let insertion_len = insertion_text.len();
             buf.insert(insert_at, &insertion_text);
-            if insert_at < cursor_before {
-                cursor_shift += insertion_len;
-            }
         }
         buf.end_edit_group();
-
-        // Adjust cursor to account for inserted block IDs.
-        if cursor_shift > 0 {
-            self.set_cursor(cursor_before + cursor_shift);
-        }
 
         true
     }

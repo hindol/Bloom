@@ -135,7 +135,7 @@ impl BloomEditor {
                                 .unwrap_or_default();
                             let lines = self.render_buffer_lines_with_viewport(buf, &ps.viewport);
                             let (cl, cc) =
-                                Self::cursor_position_for(ps.cursor, buf, &self.vim_state);
+                                Self::cursor_position_for(buf.cursor(0), buf, &self.vim_state);
                             (
                                 title,
                                 buf.is_dirty(),
@@ -731,7 +731,7 @@ impl BloomEditor {
 
     pub(crate) fn render_buffer_lines_with_viewport(
         &self,
-        buf: &buffer::Buffer,
+        buf: &bloom_buffer::Buffer,
         viewport: &render::Viewport,
     ) -> Vec<render::RenderedLine> {
         let range = viewport.visible_range();
@@ -821,7 +821,7 @@ impl BloomEditor {
     /// Compute cursor (line, col) for a given char offset in a buffer.
     fn cursor_position_for(
         cursor: usize,
-        buf: &buffer::Buffer,
+        buf: &bloom_buffer::Buffer,
         vim_state: &vim::VimState,
     ) -> (usize, usize) {
         let rope = buf.text();

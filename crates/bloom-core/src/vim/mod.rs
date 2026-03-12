@@ -21,4 +21,4 @@ pub use state::{Mode, MotionResult, RecordedCommand, VimAction, VimState};
 pub use text_object::{ObjectKind, TextObjectType};
 
 // Re-export EditOp from buffer so consumers can access it via vim module
-pub use crate::buffer::EditOp;
+pub use bloom_buffer::EditOp;

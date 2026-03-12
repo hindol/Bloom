@@ -3,7 +3,6 @@
 pub mod agenda;
 pub mod align;
 pub mod block_id_gen;
-pub mod buffer;
 pub mod config;
 pub mod error;
 pub mod history;
@@ -45,7 +44,7 @@ use parser::traits::DocumentParser;
 /// Each buffer is paired with [`BufferInfo`] metadata (title, path, dirty flag).
 /// The editor opens, closes, and reloads buffers through this manager.
 pub struct BufferManager {
-    buffers: HashMap<String, (buffer::Buffer, BufferInfo)>,
+    buffers: HashMap<String, (bloom_buffer::Buffer, BufferInfo)>,
 }
 
 /// Metadata for an open buffer: identity, display title, file path, and dirty state.
@@ -76,10 +75,10 @@ impl BufferManager {
         title: &str,
         path: &std::path::Path,
         content: &str,
-    ) -> &mut buffer::Buffer {
+    ) -> &mut bloom_buffer::Buffer {
         let key = page_id.to_hex();
         self.buffers.entry(key.clone()).or_insert_with(|| {
-            let buf = buffer::Buffer::from_text(content);
+            let buf = bloom_buffer::Buffer::from_text(content);
             let info = BufferInfo {
                 page_id: page_id.clone(),
                 title: title.to_string(),
@@ -92,15 +91,15 @@ impl BufferManager {
         &mut self.buffers.get_mut(&key).unwrap().0
     }
 
-    pub fn get(&self, page_id: &types::PageId) -> Option<&buffer::Buffer> {
+    pub fn get(&self, page_id: &types::PageId) -> Option<&bloom_buffer::Buffer> {
         self.buffers.get(&page_id.to_hex()).map(|(b, _)| b)
     }
 
-    pub fn get_with_info(&self, page_id: &types::PageId) -> Option<(&buffer::Buffer, &BufferInfo)> {
+    pub fn get_with_info(&self, page_id: &types::PageId) -> Option<(&bloom_buffer::Buffer, &BufferInfo)> {
         self.buffers.get(&page_id.to_hex()).map(|(b, i)| (b, i))
     }
 
-    pub fn get_mut(&mut self, page_id: &types::PageId) -> Option<&mut buffer::Buffer> {
+    pub fn get_mut(&mut self, page_id: &types::PageId) -> Option<&mut bloom_buffer::Buffer> {
         self.buffers.get_mut(&page_id.to_hex()).map(|(b, _)| b)
     }
 
@@ -127,7 +126,7 @@ impl BufferManager {
     /// Reload a buffer's content from a string (external file change).
     pub fn reload(&mut self, page_id: &types::PageId, content: &str) {
         if let Some((buf, _)) = self.buffers.get_mut(&page_id.to_hex()) {
-            *buf = buffer::Buffer::from_text(content);
+            *buf = bloom_buffer::Buffer::from_text(content);
         }
     }
 }
@@ -460,18 +459,19 @@ impl BloomEditor {
     // -----------------------------------------------------------------------
 
     pub(crate) fn cursor(&self) -> usize {
-        self.window_mgr
-            .pane_state(self.window_mgr.active_pane())
-            .map(|s| s.cursor)
-            .unwrap_or(0)
+        if let Some(page_id) = self.active_page() {
+            if let Some(buf) = self.buffer_mgr.get(page_id) {
+                return buf.cursor(0);
+            }
+        }
+        0
     }
 
     pub(crate) fn set_cursor(&mut self, pos: usize) {
-        if let Some(s) = self
-            .window_mgr
-            .pane_state_mut(self.window_mgr.active_pane())
-        {
-            s.cursor = pos;
+        if let Some(page_id) = self.active_page().cloned() {
+            if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                buf.set_cursor(0, pos);
+            }
         }
     }
 
@@ -781,7 +781,8 @@ impl BloomEditor {
                 let (cursor_line, cursor_col) = if let Some(buf) = self.buffer_mgr.get(page_id) {
                     let rope = buf.text();
                     let len = rope.len_chars();
-                    let clamped = state.cursor.min(len.saturating_sub(1));
+                    let cursor_pos = buf.cursor(0);
+                    let clamped = cursor_pos.min(len.saturating_sub(1));
                     if len == 0 {
                         (0, 0)
                     } else {
@@ -907,7 +908,7 @@ impl BloomEditor {
             // Restore persisted undo tree before allowing edits.
             if let Some(idx) = &self.index {
                 let page_hex = id.to_hex();
-                match buffer::undo::UndoTree::load_from_db(idx.connection(), &page_hex) {
+                match bloom_buffer::undo::UndoTree::load_from_db(idx.connection(), &page_hex) {
                     Ok(Some(mut tree)) => {
                         // If the file changed externally since last session, extend
                         // the persisted tree with the current disk content so the
