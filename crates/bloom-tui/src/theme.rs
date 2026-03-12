@@ -1,5 +1,5 @@
-use bloom_md::parser::traits::Style;
 use bloom_core::render::NotificationLevel;
+use bloom_md::parser::traits::Style;
 use bloom_md::theme::{self, Chrome, Rgb, StyleProps, ThemePalette};
 use ratatui::style::{Color, Modifier, Style as RStyle};
 

@@ -54,8 +54,7 @@ pub(super) fn draw_page_history(
         // Build the line: "▸ Mar 8, 14:32                          +12 / -0"
         let date_part = format!(" {marker} {}", entry.date);
         let stat_part = &entry.diff_stat;
-        let padding = (area.width as usize)
-            .saturating_sub(date_part.len() + stat_part.len() + 2);
+        let padding = (area.width as usize).saturating_sub(date_part.len() + stat_part.len() + 2);
         let pad_str = " ".repeat(padding);
 
         let line = Line::from(vec![

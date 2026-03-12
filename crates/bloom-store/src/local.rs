@@ -1,6 +1,6 @@
-use bloom_error::BloomError;
 use crate::traits::{FileEvent, NoteStore};
 use crate::watcher::start_watcher;
+use bloom_error::BloomError;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};

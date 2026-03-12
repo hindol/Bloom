@@ -251,11 +251,7 @@ fn insert_page_data_no_fts(
     for link in &entry.links {
         conn.execute(
             "INSERT INTO links (from_page, to_page, display_hint) VALUES (?1, ?2, ?3)",
-            rusqlite::params![
-                page_id,
-                link.page.to_hex(),
-                link.display_hint,
-            ],
+            rusqlite::params![page_id, link.page.to_hex(), link.display_hint,],
         )
         .map_err(|e| BloomError::IndexError(e.to_string()))?;
     }
@@ -321,11 +317,7 @@ fn insert_page_data(
     for link in &entry.links {
         conn.execute(
             "INSERT INTO links (from_page, to_page, display_hint) VALUES (?1, ?2, ?3)",
-            rusqlite::params![
-                page_id,
-                link.page.to_hex(),
-                link.display_hint,
-            ],
+            rusqlite::params![page_id, link.page.to_hex(), link.display_hint,],
         )
         .map_err(|e| BloomError::IndexError(e.to_string()))?;
     }

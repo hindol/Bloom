@@ -106,7 +106,10 @@ mod tests {
         assert!(paths::lock_file(root).exists());
 
         // Content preserved.
-        assert_eq!(fs::read_to_string(paths::index_db(root)).unwrap(), "sqlite data");
+        assert_eq!(
+            fs::read_to_string(paths::index_db(root)).unwrap(),
+            "sqlite data"
+        );
         assert_eq!(fs::read_to_string(paths::lock_file(root)).unwrap(), "12345");
     }
 

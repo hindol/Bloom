@@ -4,8 +4,8 @@ pub mod split;
 
 use crate::error::BloomError;
 use crate::index::Index;
-use bloom_md::parser::traits::*;
 use crate::types::*;
+use bloom_md::parser::traits::*;
 use std::ops::Range;
 use std::path::PathBuf;
 

@@ -121,12 +121,7 @@ impl BloomEditor {
             if let Ok(raw) = std::fs::read_to_string(&path) {
                 let content = format_log_lines(&raw);
                 let id = crate::uuid::generate_hex_id();
-                self.open_page_with_content(
-                    &id,
-                    "[log]",
-                    std::path::Path::new("[log]"),
-                    &content,
-                );
+                self.open_page_with_content(&id, "[log]", std::path::Path::new("[log]"), &content);
                 // Scroll to the last line
                 if let Some(buf) = self.buffer_mgr.get(&id) {
                     let len = buf.len_chars();
@@ -168,9 +163,11 @@ fn format_log_line(line: &str) -> String {
     let ts = v["timestamp"]
         .as_str()
         .and_then(|s| {
-            chrono::DateTime::parse_from_rfc3339(s)
-                .ok()
-                .map(|dt| dt.with_timezone(&chrono::Local).format("%H:%M:%S").to_string())
+            chrono::DateTime::parse_from_rfc3339(s).ok().map(|dt| {
+                dt.with_timezone(&chrono::Local)
+                    .format("%H:%M:%S")
+                    .to_string()
+            })
         })
         .unwrap_or_else(|| "??:??:??".to_string());
     let level = v["level"].as_str().unwrap_or("?");

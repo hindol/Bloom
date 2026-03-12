@@ -27,7 +27,7 @@ pub enum FrontendEvent {
 /// Actions the loop sends back to the frontend callback.
 pub enum LoopAction {
     /// A new frame to render.
-    Render(RenderFrame),
+    Render(Box<RenderFrame>),
     /// The editor is quitting.
     Quit,
 }
@@ -44,16 +44,13 @@ pub fn run_event_loop(
     mut on_action: impl FnMut(LoopAction) -> bool,
 ) {
     let mut needs_render = true;
-    let mut viewport: (u16, u16) = (
-        editor.terminal_width.max(1) as u16,
-        editor.terminal_height.max(1) as u16,
-    );
+    let mut viewport: (u16, u16) = (editor.terminal_width.max(1), editor.terminal_height.max(1));
 
     loop {
         // Render if state changed
         if needs_render {
             let frame = editor.render(viewport.0, viewport.1);
-            if !on_action(LoopAction::Render(frame)) {
+            if !on_action(LoopAction::Render(Box::new(frame))) {
                 return;
             }
             needs_render = false;
@@ -70,6 +67,7 @@ pub fn run_event_loop(
         let wc_never = crossbeam::channel::never();
         let watch_never = crossbeam::channel::never();
         let idx_never = crossbeam::channel::never();
+        let hist_never = crossbeam::channel::never();
 
         crossbeam::channel::select! {
             recv(frontend_rx) -> msg => {
@@ -120,6 +118,12 @@ pub fn run_event_loop(
             recv(channels.indexer_rx.as_ref().unwrap_or(&idx_never)) -> msg => {
                 if let Ok(complete) = msg {
                     editor.handle_index_complete(complete);
+                    needs_render = true;
+                }
+            }
+            recv(channels.history_rx.as_ref().unwrap_or(&hist_never)) -> msg => {
+                if let Ok(complete) = msg {
+                    editor.handle_history_complete(complete);
                     needs_render = true;
                 }
             }

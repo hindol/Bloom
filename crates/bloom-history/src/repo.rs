@@ -118,10 +118,8 @@ impl HistoryRepo {
                 .map_err(|e| HistoryError::Git(e.to_string()))?
                 .detach();
 
-            let parent_tree_id: Option<gix::ObjectId> = commit
-                .parent_ids()
-                .next()
-                .and_then(|pid| {
+            let parent_tree_id: Option<gix::ObjectId> =
+                commit.parent_ids().next().and_then(|pid| {
                     pid.object()
                         .ok()?
                         .into_commit()
@@ -142,7 +140,9 @@ impl HistoryRepo {
                 .message_raw()
                 .map(|m| m.to_string())
                 .unwrap_or_default();
-            let time = commit.time().map_err(|e| HistoryError::Git(e.to_string()))?;
+            let time = commit
+                .time()
+                .map_err(|e| HistoryError::Git(e.to_string()))?;
 
             results.push(CommitInfo {
                 oid: info.id().to_string(),
@@ -254,10 +254,7 @@ impl HistoryRepo {
         }
     }
 
-    fn head_tree_id(
-        &self,
-        repo: &gix::Repository,
-    ) -> Result<Option<gix::ObjectId>, HistoryError> {
+    fn head_tree_id(&self, repo: &gix::Repository) -> Result<Option<gix::ObjectId>, HistoryError> {
         let head = match self.head_commit_id(repo)? {
             Some(id) => id,
             None => return Ok(None),
@@ -535,9 +532,18 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(repo.blob_at(&oid, "aaaa0001").unwrap().as_deref(), Some("page one"));
-        assert_eq!(repo.blob_at(&oid, "aaaa0002").unwrap().as_deref(), Some("page two"));
-        assert_eq!(repo.blob_at(&oid, "aaaa0003").unwrap().as_deref(), Some("page three"));
+        assert_eq!(
+            repo.blob_at(&oid, "aaaa0001").unwrap().as_deref(),
+            Some("page one")
+        );
+        assert_eq!(
+            repo.blob_at(&oid, "aaaa0002").unwrap().as_deref(),
+            Some("page two")
+        );
+        assert_eq!(
+            repo.blob_at(&oid, "aaaa0003").unwrap().as_deref(),
+            Some("page three")
+        );
     }
 
     #[test]
@@ -552,7 +558,13 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(repo.blob_at(&oid2, "aaaa0001").unwrap().as_deref(), Some("content A"));
-        assert_eq!(repo.blob_at(&oid2, "aaaa0002").unwrap().as_deref(), Some("content B"));
+        assert_eq!(
+            repo.blob_at(&oid2, "aaaa0001").unwrap().as_deref(),
+            Some("content A")
+        );
+        assert_eq!(
+            repo.blob_at(&oid2, "aaaa0002").unwrap().as_deref(),
+            Some("content B")
+        );
     }
 }

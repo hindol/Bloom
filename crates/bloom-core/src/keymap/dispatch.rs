@@ -1,7 +1,7 @@
-use bloom_buffer::EditOp;
 use crate::types::*;
-use bloom_vim::state::Mode;
 use crate::window::{Direction, SplitDirection};
+use bloom_buffer::EditOp;
+use bloom_vim::state::Mode;
 use chrono::NaiveDate;
 
 use super::platform::platform_shortcut;

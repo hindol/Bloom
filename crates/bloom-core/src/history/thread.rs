@@ -23,15 +23,9 @@ pub enum HistoryRequest {
         message: String,
     },
     /// Retrieve commit history for a specific page (by UUID).
-    PageHistory {
-        uuid: String,
-        limit: usize,
-    },
+    PageHistory { uuid: String, limit: usize },
     /// Retrieve file content at a specific commit.
-    BlobAt {
-        oid: String,
-        uuid: String,
-    },
+    BlobAt { oid: String, uuid: String },
     /// Shut down the history thread.
     Shutdown,
 }
@@ -40,13 +34,9 @@ pub enum HistoryRequest {
 #[derive(Debug, Clone)]
 pub enum HistoryComplete {
     /// A commit was created (or skipped if no changes).
-    CommitDone {
-        oid: Option<String>,
-    },
+    CommitDone { oid: Option<String> },
     /// Page history results.
-    PageHistory {
-        entries: Vec<PageHistoryEntry>,
-    },
+    PageHistory { entries: Vec<PageHistoryEntry> },
     /// File content at a specific commit.
     BlobAt {
         oid: String,
@@ -132,15 +122,15 @@ fn history_main(
     loop {
         // Compute how long to wait before the next auto-commit check.
         let timeout = if dirty {
-            let since_dirty = last_dirty_at
-                .map(|t| t.elapsed())
-                .unwrap_or(Duration::ZERO);
+            let since_dirty = last_dirty_at.map(|t| t.elapsed()).unwrap_or(Duration::ZERO);
             let since_commit = last_commit_at.elapsed();
 
             // Commit if idle long enough OR if max interval exceeded.
             let idle_remaining = idle_timeout.saturating_sub(since_dirty);
             let max_remaining = max_interval.saturating_sub(since_commit);
-            idle_remaining.min(max_remaining).max(Duration::from_millis(100))
+            idle_remaining
+                .min(max_remaining)
+                .max(Duration::from_millis(100))
         } else {
             // Not dirty — just wait for a message.
             Duration::from_secs(1)
@@ -181,11 +171,7 @@ fn history_main(
             Ok(HistoryRequest::BlobAt { oid, uuid }) => {
                 match repo.blob_at(&oid, &uuid) {
                     Ok(content) => {
-                        let _ = completion_tx.send(HistoryComplete::BlobAt {
-                            oid,
-                            uuid,
-                            content,
-                        });
+                        let _ = completion_tx.send(HistoryComplete::BlobAt { oid, uuid, content });
                     }
                     Err(e) => {
                         let _ = completion_tx.send(HistoryComplete::Error {
@@ -264,7 +250,10 @@ fn do_commit(
     message: &str,
     completion_tx: &Sender<HistoryComplete>,
 ) {
-    let file_refs: Vec<(&str, &str)> = files.iter().map(|(u, c)| (u.as_str(), c.as_str())).collect();
+    let file_refs: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(u, c)| (u.as_str(), c.as_str()))
+        .collect();
 
     match repo.commit_all(&file_refs, message, None) {
         Ok(oid) => {

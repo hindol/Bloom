@@ -90,8 +90,8 @@ impl Journal {
     }
 
     fn default_frontmatter(&self, date: NaiveDate, parser: &dyn DocumentParser) -> String {
-        use bloom_md::parser::traits::Frontmatter;
         use crate::types::TagName;
+        use bloom_md::parser::traits::Frontmatter;
         use std::collections::HashMap;
 
         let fm = Frontmatter {

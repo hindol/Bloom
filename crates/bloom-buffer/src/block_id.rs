@@ -125,7 +125,9 @@ mod tests {
     fn generates_5_char_base36() {
         let id = next_block_id(&HashSet::new());
         assert_eq!(id.len(), 5);
-        assert!(id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
+        assert!(id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
     }
 
     #[test]
@@ -140,8 +142,14 @@ mod tests {
     #[test]
     fn compute_assignments_skips_existing() {
         let blocks = vec![
-            crate::BlockNeedingId { last_line: 0, has_id: true },
-            crate::BlockNeedingId { last_line: 2, has_id: false },
+            crate::BlockNeedingId {
+                last_line: 0,
+                has_id: true,
+            },
+            crate::BlockNeedingId {
+                last_line: 2,
+                has_id: false,
+            },
         ];
         let existing = HashSet::new();
         let insertions = compute_assignments(&blocks, &existing);
@@ -152,7 +160,10 @@ mod tests {
     #[test]
     fn apply_insertions_to_text() {
         let text = "Line one\nLine two\n";
-        let insertions = vec![BlockIdInsertion { line: 1, id: "abc12".into() }];
+        let insertions = vec![BlockIdInsertion {
+            line: 1,
+            id: "abc12".into(),
+        }];
         let result = apply_insertions(text, &insertions).unwrap();
         assert!(result.contains("Line two ^abc12"));
         assert!(result.contains("Line one\n"));

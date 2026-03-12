@@ -4,7 +4,9 @@ use chrono::{NaiveDate, NaiveDateTime};
 
 use crate::types::{BlockId, PageId, TagName, Timestamp};
 
-use super::traits::{ParsedBlockId, ParsedBlockLink, ParsedLink, ParsedTag, ParsedTask, ParsedTimestamp};
+use super::traits::{
+    ParsedBlockId, ParsedBlockLink, ParsedLink, ParsedTag, ParsedTask, ParsedTimestamp,
+};
 
 enum ParsedLinkKind {
     Page(ParsedLink),
@@ -58,7 +60,11 @@ pub fn parse_links(line: &str, line_number: usize) -> (Vec<ParsedLink>, Vec<Pars
     (links, block_links)
 }
 
-fn parse_link_content(content: &str, line: usize, byte_range: Range<usize>) -> Option<ParsedLinkKind> {
+fn parse_link_content(
+    content: &str,
+    line: usize,
+    byte_range: Range<usize>,
+) -> Option<ParsedLinkKind> {
     let (target_part, display) = if let Some(pipe_pos) = content.find('|') {
         (&content[..pipe_pos], content[pipe_pos + 1..].to_string())
     } else {

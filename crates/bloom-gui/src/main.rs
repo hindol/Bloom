@@ -53,8 +53,10 @@ fn main() {
     std::thread::Builder::new()
         .name("bloom-editor".into())
         .spawn(move || {
-            bloom_core::event_loop::run_event_loop(&mut editor, &frontend_rx, |action| {
-                match action {
+            bloom_core::event_loop::run_event_loop(
+                &mut editor,
+                &frontend_rx,
+                |action| match action {
                     LoopAction::Render(frame) => {
                         if let Some(app) = app_handle_for_loop.lock().unwrap().as_ref() {
                             let _ = app.emit("render", &frame);
@@ -67,8 +69,8 @@ fn main() {
                         }
                         false
                     }
-                }
-            });
+                },
+            );
         })
         .expect("failed to spawn editor thread");
 
@@ -79,7 +81,10 @@ fn main() {
         .setup(move |app| {
             *app_handle.lock().unwrap() = Some(app.handle().clone());
             // Trigger initial render by sending a resize
-            let _ = frontend_tx.send(FrontendEvent::Resize { cols: 120, rows: 40 });
+            let _ = frontend_tx.send(FrontendEvent::Resize {
+                cols: 120,
+                rows: 40,
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![key_event, resize])

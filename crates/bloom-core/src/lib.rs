@@ -91,7 +91,10 @@ impl BufferManager {
         self.buffers.get(&page_id.to_hex()).map(|(b, _)| b)
     }
 
-    pub fn get_with_info(&self, page_id: &types::PageId) -> Option<(&bloom_buffer::Buffer, &BufferInfo)> {
+    pub fn get_with_info(
+        &self,
+        page_id: &types::PageId,
+    ) -> Option<(&bloom_buffer::Buffer, &BufferInfo)> {
         self.buffers.get(&page_id.to_hex()).map(|(b, i)| (b, i))
     }
 
@@ -137,7 +140,8 @@ impl BufferManager {
 /// indexer). Fields are `None` until [`BloomEditor::init_vault`] sets them up.
 /// Designed for multiplexing with `crossbeam::select!`.
 pub struct EditorChannels {
-    pub write_complete_rx: Option<crossbeam::channel::Receiver<bloom_store::disk_writer::WriteComplete>>,
+    pub write_complete_rx:
+        Option<crossbeam::channel::Receiver<bloom_store::disk_writer::WriteComplete>>,
     pub watcher_rx: Option<crossbeam::channel::Receiver<bloom_store::traits::FileEvent>>,
     pub indexer_rx: Option<crossbeam::channel::Receiver<index::indexer::IndexComplete>>,
     pub history_rx: Option<crossbeam::channel::Receiver<history::HistoryComplete>>,
@@ -184,7 +188,8 @@ pub struct BloomEditor {
     pub(crate) which_key_visible: bool,
     pub(crate) active_theme: &'static bloom_md::theme::ThemePalette,
     // Auto-save
-    pub(crate) autosave_tx: Option<crossbeam::channel::Sender<bloom_store::disk_writer::WriteRequest>>,
+    pub(crate) autosave_tx:
+        Option<crossbeam::channel::Sender<bloom_store::disk_writer::WriteRequest>>,
     pub(crate) write_complete_rx:
         Option<crossbeam::channel::Receiver<bloom_store::disk_writer::WriteComplete>>,
     pub(crate) last_write_fingerprints:
@@ -397,7 +402,8 @@ pub(crate) struct QuickCaptureState {
 
 impl BloomEditor {
     pub fn new(config: config::Config) -> Result<Self, error::BloomError> {
-        let active_theme = bloom_md::theme::palette_by_name(&config.theme.name).unwrap_or(&bloom_md::theme::BLOOM_DARK);
+        let active_theme = bloom_md::theme::palette_by_name(&config.theme.name)
+            .unwrap_or(&bloom_md::theme::BLOOM_DARK);
         Ok(Self {
             vim_state: bloom_vim::VimState::new(),
             window_mgr: window::WindowManager::new(),
@@ -529,7 +535,9 @@ impl BloomEditor {
     pub(crate) fn persist_theme_to_config(&self) {
         let Some(root) = &self.vault_root else { return };
         let config_path = root.join("config.toml");
-        let Ok(content) = std::fs::read_to_string(&config_path) else { return };
+        let Ok(content) = std::fs::read_to_string(&config_path) else {
+            return;
+        };
         let name = self.active_theme.name;
         let new_content = if content.contains("name = ") {
             content
@@ -731,8 +739,7 @@ impl BloomEditor {
     /// Call this before `render()` — it handles all state mutations that
     /// depend on terminal size so render can be read-only.
     pub fn update_layout(&mut self, width: u16, height: u16) {
-        let has_pending =
-            !self.leader_keys.is_empty() || !self.vim_state.pending_keys().is_empty();
+        let has_pending = !self.leader_keys.is_empty() || !self.vim_state.pending_keys().is_empty();
         let timeout = std::time::Duration::from_millis(self.config.which_key_timeout_ms);
         let timed_out = self
             .pending_since
@@ -1337,10 +1344,17 @@ mod tests {
 
         // Verify file on disk has the new content (with auto-assigned block ID)
         let on_disk = std::fs::read_to_string(&file_path).unwrap();
-        assert!(on_disk.starts_with("Xhello ^"), "expected block ID, got: {on_disk}");
+        assert!(
+            on_disk.starts_with("Xhello ^"),
+            "expected block ID, got: {on_disk}"
+        );
         // Block ID is 5-char base36 after the ^
         let id_part = on_disk.trim().strip_prefix("Xhello ^").unwrap();
-        assert_eq!(id_part.len(), 5, "block ID should be 5 chars, got: {id_part}");
+        assert_eq!(
+            id_part.len(),
+            5,
+            "block ID should be 5 chars, got: {id_part}"
+        );
     }
 
     #[test]
@@ -1366,17 +1380,23 @@ mod tests {
         let on_disk = std::fs::read_to_string(&file_path).unwrap();
         // Paragraph 1 (lines 0-1): ID on last line (line 1) — "Line two ^xxxxx"
         assert!(
-            on_disk.lines().any(|l| l.starts_with("Line two ^") && l.len() == "Line two ^xxxxx".len()),
+            on_disk
+                .lines()
+                .any(|l| l.starts_with("Line two ^") && l.len() == "Line two ^xxxxx".len()),
             "expected block ID on 'Line two', got:\n{on_disk}"
         );
         // Paragraph 2 (line 3): ID on its own line — "Line three ^xxxxx"
         assert!(
-            on_disk.lines().any(|l| l.starts_with("Line three ^") && l.len() == "Line three ^xxxxx".len()),
+            on_disk
+                .lines()
+                .any(|l| l.starts_with("Line three ^") && l.len() == "Line three ^xxxxx".len()),
             "expected block ID on 'Line three', got:\n{on_disk}"
         );
         // Line one should NOT have an ID (it's not the last line of the block)
         assert!(
-            !on_disk.lines().any(|l| l.starts_with("XLine one ^") || l.starts_with("Line one ^")),
+            !on_disk
+                .lines()
+                .any(|l| l.starts_with("XLine one ^") || l.starts_with("Line one ^")),
             "Line one should not have block ID, got:\n{on_disk}"
         );
     }
@@ -2075,9 +2095,7 @@ mod tests {
     }
 
     fn _page_content(id: &str) -> String {
-        format!(
-            "---\nid: {id}\ntitle: \"Test Page\"\ncreated: 2026-01-01\ntags: []\n---\n\n"
-        )
+        format!("---\nid: {id}\ntitle: \"Test Page\"\ncreated: 2026-01-01\ntags: []\n---\n\n")
     }
 
     // UC-01: Open today's journal via SPC j j
@@ -2152,12 +2170,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(
-            &id,
-            "Test",
-            std::path::Path::new("[scratch]"),
-            "",
-        );
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "");
 
         // Insert "alpha"
         editor.handle_key(KeyEvent::char('i'));
@@ -2185,7 +2198,10 @@ mod tests {
 
         // The undo tree should have branches
         let tree = buf.undo_tree();
-        assert!(tree.node_count() >= 3, "undo tree should have branching nodes");
+        assert!(
+            tree.node_count() >= 3,
+            "undo tree should have branching nodes"
+        );
     }
 
     // UC-20: :w saves, :q quits (already tested via test_colon_w_saves, test_colon_q_quits)
@@ -2206,8 +2222,14 @@ mod tests {
         // Verify the initial content has unchecked and checked tasks
         let buf = editor.buffer_mgr.get(&id).unwrap();
         let text = buf.text().to_string();
-        assert!(text.contains("- [ ] buy milk"), "should have unchecked task");
-        assert!(text.contains("- [x] read paper"), "should have checked task");
+        assert!(
+            text.contains("- [ ] buy milk"),
+            "should have unchecked task"
+        );
+        assert!(
+            text.contains("- [x] read paper"),
+            "should have checked task"
+        );
 
         // Edit the buffer through Vim: go to col 3 (the space in [ ]), replace with x
         // Cursor is at start of "- [ ] buy milk"
@@ -2218,7 +2240,10 @@ mod tests {
 
         let buf = editor.buffer_mgr.get(&id).unwrap();
         let result = buf.text().to_string();
-        assert!(result.contains("- [x] buy milk"), "task should be toggled: {result}");
+        assert!(
+            result.contains("- [x] buy milk"),
+            "task should be toggled: {result}"
+        );
     }
 
     // UC-52: SPC w v splits window
@@ -2227,12 +2252,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = crate::uuid::generate_hex_id();
-        editor.open_page_with_content(
-            &id,
-            "Test",
-            std::path::Path::new("[scratch]"),
-            "hello",
-        );
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "hello");
 
         // Count panes before
         let frame = editor.render(80, 24);

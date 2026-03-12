@@ -1,4 +1,4 @@
-use crate::{UndoNodeId, UndoNodeData, UndoPersistData};
+use crate::{UndoNodeData, UndoNodeId, UndoPersistData};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 struct UndoNode {
@@ -330,6 +330,8 @@ mod tests {
     #[test]
     fn load_nonexistent_returns_none() {
         let conn = setup_db();
-        assert!(UndoTree::load_from_db(&conn, "nonexistent").unwrap().is_none());
+        assert!(UndoTree::load_from_db(&conn, "nonexistent")
+            .unwrap()
+            .is_none());
     }
 }

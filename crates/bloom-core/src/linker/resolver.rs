@@ -1,18 +1,14 @@
 use crate::index::{Index, UnlinkedMention};
-use bloom_md::parser::traits::*;
 use crate::types::*;
+use bloom_md::parser::traits::*;
 use std::ops::Range;
 use std::path::PathBuf;
 
 pub struct Linker {}
 
 pub enum LinkResolution {
-    Resolved {
-        page: PageMeta,
-    },
-    Orphaned {
-        display_hint: String,
-    },
+    Resolved { page: PageMeta },
+    Orphaned { display_hint: String },
 }
 
 pub struct HintUpdate {

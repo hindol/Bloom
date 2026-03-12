@@ -318,10 +318,7 @@ mod tests {
     fn test_find_page_by_block_id() {
         let mut idx = Index::open_in_memory().unwrap();
         let mut entry = make_entry("aabbccdd", "Test Page", "content", &[]);
-        entry.block_ids = vec![
-            (BlockId("k7m2x".into()), 5),
-            (BlockId("p3a9f".into()), 10),
-        ];
+        entry.block_ids = vec![(BlockId("k7m2x".into()), 5), (BlockId("p3a9f".into()), 10)];
         idx.index_page(&entry).unwrap();
 
         let result = idx.find_page_by_block_id(&BlockId("k7m2x".into()));
@@ -335,7 +332,9 @@ mod tests {
         assert_eq!(result2.unwrap().1, 10);
 
         // Nonexistent block
-        assert!(idx.find_page_by_block_id(&BlockId("zzzzz".into())).is_none());
+        assert!(idx
+            .find_page_by_block_id(&BlockId("zzzzz".into()))
+            .is_none());
     }
 
     // Block links indexed

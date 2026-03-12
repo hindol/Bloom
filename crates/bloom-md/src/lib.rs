@@ -6,8 +6,8 @@
 //! - Frontmatter (YAML) parsing and serialization
 //! - Theme palettes and style resolution
 
-pub mod types;
 pub mod parser;
 pub mod theme;
+pub mod types;
 
 pub use types::{BlockId, PageId, TagName, Timestamp};

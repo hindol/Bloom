@@ -261,10 +261,7 @@ impl Index {
         };
 
         let rows = match stmt.query_map(rusqlite::params![hex], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-            ))
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
         }) {
             Ok(r) => r,
             Err(_) => return Vec::new(),

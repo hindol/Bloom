@@ -1,11 +1,9 @@
 mod input;
 
 use std::io;
-use std::time::{Duration, Instant};
 
 use bloom_core::config::Config;
 use bloom_core::default_vault_path;
-use bloom_core::keymap::dispatch::Action;
 use bloom_core::BloomEditor;
 use crossbeam::channel;
 use crossterm::event::{self, Event, KeyEventKind};
@@ -49,6 +47,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
     } else {
         Config::defaults()
     };
+    let config_ref = config.clone();
     let mut editor = BloomEditor::new(config).map_err(|e| io::Error::other(format!("{e:?}")))?;
 
     // First-run detection: show setup wizard if no vault exists
@@ -58,7 +57,6 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
         // Existing vault — initialize and spawn background indexer
         let vault_path = default_vault_path();
         if let Err(e) = editor.init_vault(std::path::Path::new(&vault_path)) {
-            // Teardown happens in the caller; print the friendly error to stderr.
             return Err(io::Error::other(format!("{e}")));
         }
         editor.startup();
@@ -68,37 +66,45 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
     let size = terminal.size()?;
     editor.resize(size.height as usize, size.width as usize);
 
-    // Spawn dedicated input reader thread → crossbeam channel
-    let (input_tx, input_rx) = channel::unbounded();
+    // Spawn dedicated input reader → converts crossterm events to FrontendEvents
+    let (frontend_tx, frontend_rx) = channel::unbounded();
+    let tx = frontend_tx.clone();
     std::thread::Builder::new()
         .name("bloom-input".into())
         .spawn(move || {
             while let Ok(ev) = event::read() {
-                if input_tx.send(ev).is_err() {
-                    break; // receiver dropped, editor shutting down
+                let msg = match ev {
+                    Event::Key(key_event) => {
+                        if key_event.kind != KeyEventKind::Press {
+                            continue;
+                        }
+                        if let Some(bloom_key) = input::convert_key(key_event) {
+                            bloom_core::event_loop::FrontendEvent::Key(bloom_key)
+                        } else {
+                            continue;
+                        }
+                    }
+                    Event::Resize(w, h) => {
+                        bloom_core::event_loop::FrontendEvent::Resize { cols: w, rows: h }
+                    }
+                    _ => continue,
+                };
+                if tx.send(msg).is_err() {
+                    break;
                 }
             }
         })
         .expect("failed to spawn input thread");
 
-    // Grab channel receivers for select!
-    let channels = editor.channels();
-    let mut needs_render = true;
+    // Capture theme before entering the loop (it's a static ref, won't change mid-loop)
+    let theme = TuiTheme::new(editor.theme());
 
-    loop {
-        // Render immediately when state has changed
-        if needs_render {
-            let t_render = Instant::now();
-            let theme = TuiTheme::new(editor.theme());
+    // Run the shared event loop — same code path as the GUI
+    let mut render_error: Option<io::Error> = None;
 
-            terminal.draw(|f| {
-                let size = f.area();
-
-                let t0 = Instant::now();
-                editor.update_layout(size.width, size.height);
-                let frame = editor.render(size.width, size.height);
-                let core_ms = t0.elapsed().as_secs_f64() * 1000.0;
-
+    bloom_core::event_loop::run_event_loop(&mut editor, &frontend_rx, |action| match action {
+        bloom_core::event_loop::LoopAction::Render(frame) => {
+            let result = terminal.draw(|f| {
                 if let Some(pane) = frame.panes.iter().find(|p| p.is_active) {
                     let cursor_style = match pane.cursor.shape {
                         bloom_core::render::CursorShape::Block => {
@@ -112,102 +118,18 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
                     let _ = execute!(std::io::stdout(), cursor_style);
                 }
 
-                let t1 = Instant::now();
-                bloom_tui::render::draw(f, &frame, &theme, &editor.config);
-                let draw_ms = t1.elapsed().as_secs_f64() * 1000.0;
-
-                let total_ms = t_render.elapsed().as_secs_f64() * 1000.0;
-                if total_ms > 16.0 {
-                    tracing::warn!(
-                        core_ms = format!("{core_ms:.1}"),
-                        draw_ms = format!("{draw_ms:.1}"),
-                        total_ms = format!("{total_ms:.1}"),
-                        "slow TUI render"
-                    );
-                }
-            })?;
-
-            needs_render = false;
+                bloom_tui::render::draw(f, &frame, &theme, &config_ref);
+            });
+            if let Err(e) = result {
+                render_error = Some(e);
+                return false;
+            }
+            true
         }
+        bloom_core::event_loop::LoopAction::Quit => false,
+    });
 
-        // Compute timeout from editor timers (debounce, notifications, which-key)
-        let timeout = editor
-            .next_deadline()
-            .map(|d| d.saturating_duration_since(Instant::now()))
-            .unwrap_or(Duration::from_millis(500));
-
-        // Block until any channel fires or timeout expires
-        crossbeam::channel::select! {
-            recv(input_rx) -> msg => {
-                if let Ok(ev) = msg {
-                    match ev {
-                        Event::Key(key_event) => {
-                            if key_event.kind != KeyEventKind::Press {
-                                continue;
-                            }
-                            if let Some(bloom_key) = input::convert_key(key_event) {
-                                let actions = editor.handle_key(bloom_key);
-                                for action in actions {
-                                    match action {
-                                        Action::Quit => {
-                                            let _ = editor.save_session();
-                                            return Ok(());
-                                        }
-                                        Action::Save => {
-                                            let _ = editor.save_current();
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                needs_render = true;
-                            }
-                        }
-                        Event::Resize(w, h) => {
-                            editor.resize(h as usize, w as usize);
-                            needs_render = true;
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            recv(channels.write_complete_rx.as_ref().unwrap_or(&channel::never())) -> msg => {
-                if let Ok(wc) = msg {
-                    if editor.handle_write_complete(wc) {
-                        needs_render = true;
-                    }
-                }
-            }
-            recv(channels.watcher_rx.as_ref().unwrap_or(&channel::never())) -> msg => {
-                if let Ok(ev) = msg {
-                    if editor.handle_file_event(ev) {
-                        needs_render = true;
-                    }
-                }
-            }
-            recv(channels.indexer_rx.as_ref().unwrap_or(&channel::never())) -> msg => {
-                if let Ok(complete) = msg {
-                    editor.handle_index_complete(complete);
-                    needs_render = true;
-                }
-            }
-            recv(channels.history_rx.as_ref().unwrap_or(&channel::never())) -> msg => {
-                if let Ok(complete) = msg {
-                    editor.handle_history_complete(complete);
-                }
-            }
-            default(timeout) => {
-                // Timer fired — tick handles notification expiry, which-key popup
-            }
-        }
-
-        // After any wake: flush debounced file events, tick timers
-        if editor.flush_file_event_debounce() {
-            needs_render = true;
-        }
-        if editor.tick(Instant::now()) {
-            needs_render = true;
-        }
-    }
+    render_error.map_or(Ok(()), Err)
 }
 
 fn init_logging(vault_path: &str) {

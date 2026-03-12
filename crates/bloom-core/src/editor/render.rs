@@ -15,7 +15,9 @@ fn command_ghost_text(input: &str) -> Option<String> {
     }
     // :theme <partial> → ghost is the rest of the theme name
     if let Some(arg) = input.strip_prefix("theme ") {
-        let match_name = bloom_md::theme::THEME_NAMES.iter().find(|n| n.starts_with(arg))?;
+        let match_name = bloom_md::theme::THEME_NAMES
+            .iter()
+            .find(|n| n.starts_with(arg))?;
         let suffix = &match_name[arg.len()..];
         if suffix.is_empty() {
             return None;
@@ -248,13 +250,19 @@ impl BloomEditor {
                 // Compute windowed view of results around selected index.
                 let picker_height = (height as usize * 70 / 100).max(5);
                 let max_visible = picker_height.saturating_sub(4);
-                let all_results = if below_min { Vec::new() } else { ap.picker.results() };
+                let all_results = if below_min {
+                    Vec::new()
+                } else {
+                    ap.picker.results()
+                };
                 let total = all_results.len();
-                let selected = if total == 0 { 0 } else { ap.picker.selected_index().min(total - 1) };
-                let half = max_visible / 2;
-                let window_start = if total <= max_visible {
+                let selected = if total == 0 {
                     0
-                } else if selected <= half {
+                } else {
+                    ap.picker.selected_index().min(total - 1)
+                };
+                let half = max_visible / 2;
+                let window_start = if total <= max_visible || selected <= half {
                     0
                 } else if selected + half >= total {
                     total.saturating_sub(max_visible)
@@ -641,8 +649,8 @@ impl BloomEditor {
                 entries
                     .iter()
                     .map(|e| {
-                        let dt = chrono::DateTime::from_timestamp(e.timestamp, 0)
-                            .unwrap_or_default();
+                        let dt =
+                            chrono::DateTime::from_timestamp(e.timestamp, 0).unwrap_or_default();
                         let date = dt.format("%b %d, %H:%M").to_string();
                         let description = e.message.lines().next().unwrap_or("").to_string();
                         render::PageHistoryEntryFrame {
@@ -817,11 +825,12 @@ impl BloomEditor {
         // In Normal mode, cursor can be at len only on the implicit empty
         // trailing line (file ends with \n). Otherwise clamp to len-1.
         let has_trailing_empty_line = len > 0 && rope.char(len - 1) == '\n';
-        let max_pos = if matches!(vim_state.mode(), bloom_vim::Mode::Insert) || has_trailing_empty_line {
-            len
-        } else {
-            len.saturating_sub(1)
-        };
+        let max_pos =
+            if matches!(vim_state.mode(), bloom_vim::Mode::Insert) || has_trailing_empty_line {
+                len
+            } else {
+                len.saturating_sub(1)
+            };
         let clamped = cursor.min(max_pos);
         if clamped == len {
             let last_line = rope.len_lines().saturating_sub(1);

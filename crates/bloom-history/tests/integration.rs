@@ -67,7 +67,10 @@ fn rename_survival_via_stable_uuid() {
 
     // Edit after rename.
     repo.commit_all(
-        &[("aabb0001", "---\ntitle: Renamed Page\n---\nContent v2 after rename")],
+        &[(
+            "aabb0001",
+            "---\ntitle: Renamed Page\n---\nContent v2 after rename",
+        )],
         "edited after rename",
         Some(3000),
     )
@@ -141,20 +144,12 @@ fn multiple_pages_tracked_independently() {
     .unwrap();
 
     // Only modify page_a.
-    repo.commit_all(
-        &[("page_a", "A content v2")],
-        "update A",
-        Some(2000),
-    )
-    .unwrap();
+    repo.commit_all(&[("page_a", "A content v2")], "update A", Some(2000))
+        .unwrap();
 
     // Only modify page_b.
-    repo.commit_all(
-        &[("page_b", "B content v2")],
-        "update B",
-        Some(3000),
-    )
-    .unwrap();
+    repo.commit_all(&[("page_b", "B content v2")], "update B", Some(3000))
+        .unwrap();
 
     // page_a history: initial + update A = 2 commits.
     let hist_a = repo.page_history(Some("page_a"), 100).unwrap();

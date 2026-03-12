@@ -4,8 +4,8 @@
 //! cursor, navigates journal entries by date, and tracks frontier access for
 //! search ranking. Also provides block-link yanking to clipboard.
 
-use bloom_md::parser::traits::DocumentParser;
 use crate::*;
+use bloom_md::parser::traits::DocumentParser;
 
 /// Extract the link target from a `[[...]]` pattern at the given column.
 /// Returns either a page ID hex string or `^block_id` for block links.

@@ -96,7 +96,9 @@ impl BloomEditor {
         }
 
         // Command mode: intercept Tab for inline menu completion
-        if matches!(self.vim_state.mode(), bloom_vim::Mode::Command) && key.code == types::KeyCode::Tab {
+        if matches!(self.vim_state.mode(), bloom_vim::Mode::Command)
+            && key.code == types::KeyCode::Tab
+        {
             // Accept the selected completion into the command line
             let input = self.vim_state.pending_keys().to_string();
             let completion = if let Some(arg_prefix) = input.strip_prefix("theme ") {
@@ -130,14 +132,15 @@ impl BloomEditor {
             let action = self.vim_state.process_key(key.clone(), buf, cursor);
 
             // Esc in Normal mode with no overlays: dismiss persistent notifications
-            if key.code == types::KeyCode::Esc && matches!(mode_before_key, bloom_vim::Mode::Normal) {
+            if key.code == types::KeyCode::Esc && matches!(mode_before_key, bloom_vim::Mode::Normal)
+            {
                 self.dismiss_notifications();
             }
 
             let actions = self.translate_vim_action(action, mode_before_key);
             let result = self.execute_actions(actions);
             self.autosave_if_dirty();
-            return result;
+            result
         }
     }
 
@@ -837,7 +840,7 @@ impl BloomEditor {
             // Prune this page's persisted undo tree.
             if let Some(tx) = &self.indexer_tx {
                 let _ = tx.send(index::indexer::IndexRequest::PruneUndoPages(vec![
-                    page_id.to_hex(),
+                    page_id.to_hex()
                 ]));
             }
             self.set_active_page(None);
@@ -1001,9 +1004,28 @@ fn resolve_command(cmd: &str) -> String {
 
     // Exact match — no resolution needed
     if EX_COMMANDS.iter().any(|(c, _)| *c == trimmed)
-        || matches!(trimmed, "q" | "q!" | "quit" | "quit!" | "w" | "write"
-            | "wq" | "wq!" | "x" | "x!" | "e" | "edit" | "bd" | "bdelete"
-            | "sp" | "split" | "vs" | "vsplit" | "undo" | "redo")
+        || matches!(
+            trimmed,
+            "q" | "q!"
+                | "quit"
+                | "quit!"
+                | "w"
+                | "write"
+                | "wq"
+                | "wq!"
+                | "x"
+                | "x!"
+                | "e"
+                | "edit"
+                | "bd"
+                | "bdelete"
+                | "sp"
+                | "split"
+                | "vs"
+                | "vsplit"
+                | "undo"
+                | "redo"
+        )
     {
         return trimmed.to_string();
     }
@@ -1022,7 +1044,6 @@ fn resolve_command(cmd: &str) -> String {
 }
 
 impl BloomEditor {
-
     fn check_inline_triggers(&mut self) {
         let cursor = self.cursor();
         let Some(page_id) = self.active_page().cloned() else {

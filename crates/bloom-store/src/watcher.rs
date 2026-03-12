@@ -1,5 +1,5 @@
-use bloom_error::BloomError;
 use crate::traits::FileEvent;
+use bloom_error::BloomError;
 use notify::{Event, EventKind, RecursiveMode, Watcher};
 use std::path::Path;
 

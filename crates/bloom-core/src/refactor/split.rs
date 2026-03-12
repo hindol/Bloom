@@ -1,7 +1,7 @@
 use crate::error::BloomError;
 use crate::index::Index;
-use bloom_md::parser::traits::*;
 use crate::types::*;
+use bloom_md::parser::traits::*;
 use std::fs;
 
 use super::{SplitResult, TextEdit};

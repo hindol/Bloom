@@ -14,8 +14,8 @@ use rayon::prelude::*;
 
 use crate::error::BloomError;
 use crate::index::{FileFingerprint, Index, IndexEntry, RebuildStats};
-use bloom_md::parser::{self, traits::DocumentParser};
 use crate::types::*;
+use bloom_md::parser::{self, traits::DocumentParser};
 
 /// Requests sent from the UI thread to the indexer thread.
 pub enum IndexRequest {
@@ -152,23 +152,20 @@ fn indexer_main(
             }
             IndexRequest::PruneUndoPages(page_ids) => {
                 for page_id in &page_ids {
-                    let _ = index.connection().execute(
-                        "DELETE FROM undo_tree WHERE page_id = ?1",
-                        [page_id],
-                    );
-                    let _ = index.connection().execute(
-                        "DELETE FROM undo_tree_state WHERE page_id = ?1",
-                        [page_id],
-                    );
+                    let _ = index
+                        .connection()
+                        .execute("DELETE FROM undo_tree WHERE page_id = ?1", [page_id]);
+                    let _ = index
+                        .connection()
+                        .execute("DELETE FROM undo_tree_state WHERE page_id = ?1", [page_id]);
                 }
                 tracing::debug!(count = page_ids.len(), "undo trees pruned (buffer close)");
             }
             IndexRequest::PruneUndoBefore(epoch_ms) => {
                 // Delete nodes older than the threshold, then clean up orphaned state rows.
-                let _ = index.connection().execute(
-                    "DELETE FROM undo_tree WHERE timestamp_ms < ?1",
-                    [epoch_ms],
-                );
+                let _ = index
+                    .connection()
+                    .execute("DELETE FROM undo_tree WHERE timestamp_ms < ?1", [epoch_ms]);
                 let _ = index.connection().execute(
                     "DELETE FROM undo_tree_state WHERE page_id NOT IN (SELECT DISTINCT page_id FROM undo_tree)",
                     [],

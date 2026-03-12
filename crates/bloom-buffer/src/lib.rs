@@ -5,10 +5,10 @@
 //! cursor offsets; it goes through `Buffer::set_cursor()` which enforces
 //! bounds.
 
+pub mod block_id;
 pub mod edit;
 pub mod rope;
 pub mod undo;
-pub mod block_id;
 
 pub use edit::EditOp;
 pub use rope::Buffer;

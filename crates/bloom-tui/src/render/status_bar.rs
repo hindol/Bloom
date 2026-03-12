@@ -20,9 +20,7 @@ pub(super) fn draw_status_bar_slot(
             let prefix = format!(":{}", cmd.input);
             let mut spans = vec![Span::styled(&prefix, style)];
             if let Some(ghost) = &cmd.ghost_text {
-                let ghost_style = RStyle::default()
-                    .fg(theme.faded())
-                    .bg(theme.background());
+                let ghost_style = RStyle::default().fg(theme.faded()).bg(theme.background());
                 spans.push(Span::styled(ghost.as_str(), ghost_style));
             }
             f.render_widget(Paragraph::new(Line::from(spans)), area);

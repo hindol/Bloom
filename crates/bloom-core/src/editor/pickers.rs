@@ -4,8 +4,8 @@
 //! [`PickerKind`](crate::keymap::dispatch::PickerKind) (pages, buffers, tags,
 //! templates, themes, …) and handles selection, confirmation, and cancellation.
 
-use bloom_md::parser::traits::DocumentParser;
 use crate::*;
+use bloom_md::parser::traits::DocumentParser;
 
 /// Stable key for storing per-picker-kind state.
 pub(crate) fn picker_kind_key(kind: &keymap::dispatch::PickerKind) -> String {
