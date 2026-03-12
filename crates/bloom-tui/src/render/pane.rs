@@ -223,7 +223,30 @@ fn draw_editor_content_unified(
         // Content: slice from byte_start to next break
         let byte_end = screen_map.row_byte_end(line_idx, wrap_offset, &pane.visible_lines);
         let row_text = &text[byte_start..byte_end.min(text.len())];
-        let row_text_width = row_text.width();
+
+        // In no-wrap mode, clip the text to the visible content width so that
+        // the padding calculation is correct and stale characters beyond the
+        // line end are overwritten with background.
+        let content_width = total_width.saturating_sub(line_number_width as usize);
+        let (row_text, row_text_width) = if !config.word_wrap && row_text.width() > content_width {
+            // Find the byte offset where the display width exceeds content_width
+            let mut w = 0;
+            let mut clip_end = row_text.len();
+            for (i, ch) in row_text.char_indices() {
+                let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+                if w + cw > content_width {
+                    clip_end = i;
+                    break;
+                }
+                w += cw;
+            }
+            (&row_text[..clip_end], w)
+        } else {
+            (row_text, row_text.width())
+        };
+
+        // Visible byte end for span clipping (accounts for no-wrap clipping above).
+        let visible_byte_end = byte_start + row_text.len();
 
         // Render with span clipping
         if rendered_line.spans.is_empty() {
@@ -232,7 +255,7 @@ fn draw_editor_content_unified(
             let mut last_end = byte_start;
             for span_info in &rendered_line.spans {
                 let s = span_info.range.start.max(byte_start).min(text.len());
-                let e = span_info.range.end.min(byte_end).min(text.len());
+                let e = span_info.range.end.min(visible_byte_end).min(text.len());
                 if s >= e {
                     continue;
                 }
@@ -245,9 +268,9 @@ fn draw_editor_content_unified(
                 spans.push(Span::styled(slice.to_string(), style));
                 last_end = e;
             }
-            if last_end < byte_end.min(text.len()) {
+            if last_end < visible_byte_end.min(text.len()) {
                 spans.push(Span::styled(
-                    text[last_end..byte_end.min(text.len())].to_string(),
+                    text[last_end..visible_byte_end.min(text.len())].to_string(),
                     base_style,
                 ));
             }
