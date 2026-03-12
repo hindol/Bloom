@@ -92,6 +92,126 @@ fn uc14_jk_navigation() {
 }
 
 #[test]
+fn cursor_does_not_wrap_to_line_zero() {
+    // Test with content similar to a real vault page (block IDs, no trailing newline)
+    let content = "---\nid: abcd1234\ntitle: \"Test\"\ncreated: 2026-01-01\ntags: []\n---\n\n# Heading ^abc01\n\nSome text here. ^def02\n\n- Item one ^ghi03\n- Item two ^jkl04\n- [ ] Task one @due(2026-03-15) ^mno05\n- [x] Task two ^pqr06";
+    let mut sim = SimInput::with_content(content);
+
+    // Go to last line
+    sim.keys("G");
+    let last = sim.screen(80, 24).cursor().0;
+
+    // Press j 30 times — cursor must NEVER wrap to line 0
+    for i in 0..30 {
+        sim.keys("j");
+        let (line, _) = sim.screen(80, 24).cursor();
+        assert!(
+            line >= last.saturating_sub(1),
+            "after {}x j from line {}, cursor jumped to line {}",
+            i + 1, last, line,
+        );
+    }
+
+    // Verify cursor is still near the end
+    let (line, _) = sim.screen(80, 24).cursor();
+    assert!(
+        line > 0,
+        "cursor should not be at line 0 after pressing j past end"
+    );
+
+    // Now press i and type — text must NOT appear at the beginning
+    sim.keys("i");
+    sim.type_text("INSERTED");
+    sim.keys("<Esc>");
+
+    let text = sim.buffer_text();
+    assert!(
+        !text.starts_with("INSERTED"),
+        "text should not be inserted at beginning of buffer"
+    );
+}
+
+#[test]
+fn cursor_does_not_wrap_with_vault_page() {
+    // Test via vault — this exercises the full pipeline including block ID assignment
+    let vault = TestVault::new()
+        .page("Test Page")
+        .with_content("# Content\n\nParagraph one.\n\nParagraph two.\n\n- Item a\n- Item b\n")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // Open the page
+    sim.keys("SPC f f");
+    sim.type_text("Test");
+    sim.keys("Enter");
+
+    // Go to end, then j past it
+    sim.keys("G");
+    let last = sim.screen(80, 24).cursor().0;
+
+    for _ in 0..20 {
+        sim.keys("j");
+    }
+
+    let (line, _) = sim.screen(80, 24).cursor();
+    assert!(
+        line > 0 || last == 0,
+        "cursor should not wrap to 0, got line {} (last was {})",
+        line, last,
+    );
+}
+
+#[test]
+fn cursor_does_not_go_past_eof_no_trailing_newline() {
+    // Test without trailing newline
+    let mut sim = SimInput::with_content("line one\nline two\nline three");
+
+    sim.keys("G");
+    let last_line = sim.screen(80, 24).cursor().0;
+
+    for _ in 0..10 {
+        sim.keys("j");
+    }
+    let after = sim.screen(80, 24).cursor().0;
+    assert_eq!(after, last_line, "cursor should stay on last line without trailing newline");
+}
+
+#[test]
+fn cursor_does_not_go_past_eof_single_line() {
+    let mut sim = SimInput::with_content("hello");
+
+    assert_eq!(sim.screen(80, 24).cursor(), (0, 0));
+
+    for _ in 0..5 {
+        sim.keys("j");
+    }
+    assert_eq!(sim.screen(80, 24).cursor().0, 0, "single line: j should be no-op");
+}
+
+#[test]
+fn cursor_past_eof_after_delete() {
+    // Delete lines until only one remains — cursor should stay valid
+    let mut sim = SimInput::with_content("a\nb\nc\nd\n");
+
+    sim.keys("G"); // go to last line
+    sim.keys("dd"); // delete it
+    sim.keys("dd"); // delete again
+    sim.keys("dd"); // delete again
+
+    // Should still have valid cursor
+    let screen = sim.screen(80, 24);
+    let (line, _) = screen.cursor();
+    let text = sim.buffer_text();
+    let line_count = text.lines().count().max(1);
+    assert!(
+        line < line_count,
+        "cursor line {} should be within buffer ({} lines), text: '{text}'",
+        line,
+        line_count,
+    );
+}
+
+#[test]
 fn uc14_dw_delete_word() {
     let mut sim = SimInput::with_content("hello world");
 
