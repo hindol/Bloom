@@ -119,8 +119,11 @@ impl BloomEditor {
             return vec![keymap::dispatch::Action::Noop];
         }
 
-        // Vim processing
-        if let Some(buf) = self.active_page().and_then(|id| self.buffer_mgr.get(id)) {
+        // Vim processing — works even with no buffer (for :q, mode changes, etc.)
+        let buf_for_vim = self.active_page().and_then(|id| self.buffer_mgr.get(id));
+        let empty_buf = bloom_buffer::Buffer::from_text("");
+        let buf = buf_for_vim.unwrap_or(&empty_buf);
+        {
             let mode_before_key = self.vim_state.mode();
             let cursor = self.cursor();
 
@@ -136,8 +139,6 @@ impl BloomEditor {
             self.autosave_if_dirty();
             return result;
         }
-
-        vec![keymap::dispatch::Action::Noop]
     }
 
     /// Assign block IDs and save if the active buffer is dirty.
