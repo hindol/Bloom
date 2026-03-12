@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::types::KeyEvent;
+use crate::input::KeyEvent;
 
 /// Macro recording and playback state.
 pub struct MacroState {

@@ -21,7 +21,6 @@ pub mod timeline;
 pub mod types;
 pub mod uuid;
 pub mod vault;
-pub mod vim;
 pub mod which_key;
 pub mod window;
 
@@ -158,7 +157,7 @@ pub struct EditorChannels {
 pub struct BloomEditor {
     pub config: config::Config,
     pub(crate) buffer_mgr: BufferManager,
-    pub(crate) vim_state: vim::VimState,
+    pub(crate) vim_state: bloom_vim::VimState,
     pub(crate) window_mgr: window::WindowManager,
     pub(crate) which_key_tree: which_key::WhichKeyTree,
     pub(crate) _command_registry: which_key::CommandRegistry,
@@ -401,7 +400,7 @@ impl BloomEditor {
     pub fn new(config: config::Config) -> Result<Self, error::BloomError> {
         let active_theme = bloom_md::theme::palette_by_name(&config.theme.name).unwrap_or(&bloom_md::theme::BLOOM_DARK);
         Ok(Self {
-            vim_state: vim::VimState::new(),
+            vim_state: bloom_vim::VimState::new(),
             window_mgr: window::WindowManager::new(),
             which_key_tree: which_key::default_tree(),
             _command_registry: which_key::default_registry(),

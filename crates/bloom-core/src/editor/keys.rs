@@ -88,7 +88,7 @@ impl BloomEditor {
         // Check if this is the leader key (Space in Normal mode)
         if key.code == types::KeyCode::Char(' ')
             && key.modifiers == types::Modifiers::none()
-            && matches!(self.vim_state.mode(), vim::Mode::Normal)
+            && matches!(self.vim_state.mode(), bloom_vim::Mode::Normal)
         {
             self.leader_keys.push(key);
             self.pending_since = Some(Instant::now());
@@ -96,7 +96,7 @@ impl BloomEditor {
         }
 
         // Command mode: intercept Tab for inline menu completion
-        if matches!(self.vim_state.mode(), vim::Mode::Command) && key.code == types::KeyCode::Tab {
+        if matches!(self.vim_state.mode(), bloom_vim::Mode::Command) && key.code == types::KeyCode::Tab {
             // Accept the selected completion into the command line
             let input = self.vim_state.pending_keys().to_string();
             let completion = if let Some(arg_prefix) = input.strip_prefix("theme ") {
@@ -127,7 +127,7 @@ impl BloomEditor {
             let action = self.vim_state.process_key(key.clone(), buf, cursor);
 
             // Esc in Normal mode with no overlays: dismiss persistent notifications
-            if key.code == types::KeyCode::Esc && matches!(mode_before_key, vim::Mode::Normal) {
+            if key.code == types::KeyCode::Esc && matches!(mode_before_key, bloom_vim::Mode::Normal) {
                 self.dismiss_notifications();
             }
 
@@ -852,11 +852,11 @@ impl BloomEditor {
 
     pub(crate) fn translate_vim_action(
         &mut self,
-        action: vim::VimAction,
-        prev_mode: vim::Mode,
+        action: bloom_vim::VimAction,
+        prev_mode: bloom_vim::Mode,
     ) -> Vec<keymap::dispatch::Action> {
         match action {
-            vim::VimAction::Edit(edit) => {
+            bloom_vim::VimAction::Edit(edit) => {
                 self.pending_since = None;
                 self.which_key_visible = false;
                 if let Some(page_id) = self.active_page().cloned() {
@@ -872,7 +872,7 @@ impl BloomEditor {
                     }
                 }
                 // Check for inline completion triggers after an edit in Insert mode
-                if matches!(self.vim_state.mode(), vim::Mode::Insert) {
+                if matches!(self.vim_state.mode(), bloom_vim::Mode::Insert) {
                     self.check_inline_triggers();
                 }
                 vec![keymap::dispatch::Action::Edit(bloom_buffer::EditOp {
@@ -881,7 +881,7 @@ impl BloomEditor {
                     cursor_after: edit.cursor_after,
                 })]
             }
-            vim::VimAction::Motion(motion) => {
+            bloom_vim::VimAction::Motion(motion) => {
                 self.pending_since = None;
                 self.which_key_visible = false;
                 self.inline_completion = None;
@@ -893,25 +893,25 @@ impl BloomEditor {
                     },
                 )]
             }
-            vim::VimAction::ModeChange(ref mode) => {
-                if !matches!(mode, vim::Mode::Insert) {
+            bloom_vim::VimAction::ModeChange(ref mode) => {
+                if !matches!(mode, bloom_vim::Mode::Insert) {
                     self.inline_completion = None;
                 }
-                let was_insert = matches!(prev_mode, vim::Mode::Insert);
-                if matches!(mode, vim::Mode::Command) {
+                let was_insert = matches!(prev_mode, bloom_vim::Mode::Insert);
+                if matches!(mode, bloom_vim::Mode::Command) {
                     self.pending_since = Some(Instant::now());
                 } else {
                     self.pending_since = None;
                     self.which_key_visible = false;
                 }
                 // Edit group lifecycle: begin on Insert entry, end on Insert exit
-                if matches!(mode, vim::Mode::Insert) {
+                if matches!(mode, bloom_vim::Mode::Insert) {
                     if let Some(page_id) = self.active_page().cloned() {
                         if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                             buf.begin_edit_group();
                         }
                     }
-                } else if matches!(mode, vim::Mode::Normal) {
+                } else if matches!(mode, bloom_vim::Mode::Normal) {
                     // Leaving Insert (or Visual, Command) → close any open group
                     if let Some(page_id) = self.active_page().cloned() {
                         if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
@@ -944,15 +944,15 @@ impl BloomEditor {
                 }
                 vec![keymap::dispatch::Action::ModeChange(mode.clone())]
             }
-            vim::VimAction::Command(cmd) => self.handle_vim_command(&cmd),
-            vim::VimAction::Pending => {
+            bloom_vim::VimAction::Command(cmd) => self.handle_vim_command(&cmd),
+            bloom_vim::VimAction::Pending => {
                 if self.pending_since.is_none() {
                     self.pending_since = Some(Instant::now());
                 }
                 vec![keymap::dispatch::Action::Noop]
             }
-            vim::VimAction::Unhandled => vec![keymap::dispatch::Action::Noop],
-            vim::VimAction::RestoreCheckpoint => {
+            bloom_vim::VimAction::Unhandled => vec![keymap::dispatch::Action::Noop],
+            bloom_vim::VimAction::RestoreCheckpoint => {
                 if let Some(page_id) = self.active_page().cloned() {
                     if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                         buf.restore_edit_group_checkpoint();
@@ -961,7 +961,7 @@ impl BloomEditor {
                 }
                 vec![keymap::dispatch::Action::Noop]
             }
-            vim::VimAction::Composite(actions) => actions
+            bloom_vim::VimAction::Composite(actions) => actions
                 .into_iter()
                 .flat_map(|a| self.translate_vim_action(a, prev_mode.clone()))
                 .collect(),

@@ -1,0 +1,9 @@
+[package]
+name = "bloom-vim"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+# Buffer access for motions and text objects (read-only)
+bloom-buffer = { path = "../bloom-buffer" }

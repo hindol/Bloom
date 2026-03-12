@@ -1,6 +1,6 @@
 use bloom_buffer::EditOp;
 use crate::types::*;
-use crate::vim::state::Mode;
+use bloom_vim::state::Mode;
 use crate::window::{Direction, SplitDirection};
 use chrono::NaiveDate;
 

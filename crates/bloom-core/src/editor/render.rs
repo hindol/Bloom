@@ -66,10 +66,10 @@ impl BloomEditor {
         let mut panes = Vec::new();
 
         let mode_str = match self.vim_state.mode() {
-            vim::Mode::Normal => "NORMAL",
-            vim::Mode::Insert => "INSERT",
-            vim::Mode::Visual { .. } => "VISUAL",
-            vim::Mode::Command => "COMMAND",
+            bloom_vim::Mode::Normal => "NORMAL",
+            bloom_vim::Mode::Insert => "INSERT",
+            bloom_vim::Mode::Visual { .. } => "VISUAL",
+            bloom_vim::Mode::Command => "COMMAND",
         };
 
         // Compute pane rects from the core layout engine.
@@ -154,7 +154,7 @@ impl BloomEditor {
             // Build per-pane status bar
             let status_bar = if is_active {
                 // Active pane: priority CommandLine > QuickCapture > Normal
-                let content = if matches!(self.vim_state.mode(), vim::Mode::Command) {
+                let content = if matches!(self.vim_state.mode(), bloom_vim::Mode::Command) {
                     let input = self.vim_state.pending_keys().to_string();
                     let ghost_text = command_ghost_text(&input);
                     render::StatusBarContent::CommandLine(render::CommandLineSlot {
@@ -230,10 +230,10 @@ impl BloomEditor {
                     line: pane_cursor_line,
                     column: pane_cursor_col,
                     shape: match self.vim_state.mode() {
-                        vim::Mode::Normal => render::CursorShape::Block,
-                        vim::Mode::Insert => render::CursorShape::Bar,
-                        vim::Mode::Visual { .. } => render::CursorShape::Block,
-                        vim::Mode::Command => render::CursorShape::Bar,
+                        bloom_vim::Mode::Normal => render::CursorShape::Block,
+                        bloom_vim::Mode::Insert => render::CursorShape::Bar,
+                        bloom_vim::Mode::Visual { .. } => render::CursorShape::Block,
+                        bloom_vim::Mode::Command => render::CursorShape::Bar,
                     },
                 },
                 scroll_offset,
@@ -365,7 +365,7 @@ impl BloomEditor {
                 } else {
                     None
                 }
-            } else if matches!(self.vim_state.mode(), vim::Mode::Command) {
+            } else if matches!(self.vim_state.mode(), bloom_vim::Mode::Command) {
                 let input = self.vim_state.pending_keys();
 
                 // Detect argument completion: "theme <partial>"
@@ -410,7 +410,7 @@ impl BloomEditor {
             which_key: {
                 if !show_wk {
                     None
-                } else if matches!(self.vim_state.mode(), vim::Mode::Command) {
+                } else if matches!(self.vim_state.mode(), bloom_vim::Mode::Command) {
                     // Command mode: use inline_menu instead (see inline_menu field below)
                     None
                 } else if self.leader_keys.len() > 1 {
@@ -819,7 +819,7 @@ impl BloomEditor {
     fn cursor_position_for(
         cursor: usize,
         buf: &bloom_buffer::Buffer,
-        vim_state: &vim::VimState,
+        vim_state: &bloom_vim::VimState,
     ) -> (usize, usize) {
         let rope = buf.text();
         let len = rope.len_chars();
@@ -830,7 +830,7 @@ impl BloomEditor {
         // In Normal mode, cursor can be at len only on the implicit empty
         // trailing line (file ends with \n). Otherwise clamp to len-1.
         let has_trailing_empty_line = len > 0 && rope.char(len - 1) == '\n';
-        let max_pos = if matches!(vim_state.mode(), vim::Mode::Insert) || has_trailing_empty_line {
+        let max_pos = if matches!(vim_state.mode(), bloom_vim::Mode::Insert) || has_trailing_empty_line {
             len
         } else {
             len.saturating_sub(1)
