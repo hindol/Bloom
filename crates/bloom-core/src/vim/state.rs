@@ -917,7 +917,7 @@ fn is_repeatable(action: &VimAction) -> bool {
 mod tests {
     use super::*;
     use bloom_buffer::Buffer;
-    use crate::types::{KeyCode, KeyEvent, Modifiers};
+    use crate::types::KeyEvent;
 
     fn key(c: char) -> KeyEvent {
         KeyEvent::char(c)
@@ -1038,7 +1038,7 @@ mod tests {
     }
 
     #[test]
-    fn test_G_motion_to_document_end() {
+    fn test_g_motion_to_document_end() {
         let mut vim = VimState::new();
         let buf = Buffer::from_text("first\nsecond\nthird");
         let action = vim.process_key(key('G'), &buf, 0);
@@ -1318,7 +1318,7 @@ mod tests {
     }
 
     #[test]
-    fn test_O_opens_line_above_and_enters_insert() {
+    fn test_o_upper_opens_line_above_and_enters_insert() {
         let mut vim = VimState::new();
         let buf = Buffer::from_text("hello\nworld");
         let _action = vim.process_key(key('O'), &buf, 8);

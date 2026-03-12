@@ -11,7 +11,7 @@ use bloom_core::event_loop::{FrontendEvent, LoopAction};
 use bloom_core::BloomEditor;
 use crossbeam::channel::Sender;
 use serde::Deserialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 /// Key event from the frontend.
 #[derive(Debug, Deserialize)]

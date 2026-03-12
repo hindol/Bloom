@@ -2037,7 +2037,7 @@ mod tests {
         (editor, dir)
     }
 
-    fn page_content(id: &str) -> String {
+    fn _page_content(id: &str) -> String {
         format!(
             "---\nid: {id}\ntitle: \"Test Page\"\ncreated: 2026-01-01\ntags: []\n---\n\n"
         )

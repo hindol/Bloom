@@ -141,7 +141,7 @@ mod tests {
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         let theme = crate::theme::TuiTheme::new(editor.theme());
-        let expected_bg = Color::Rgb(
+        let _expected_bg = Color::Rgb(
             editor.theme().background.0,
             editor.theme().background.1,
             editor.theme().background.2,
