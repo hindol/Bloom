@@ -3,7 +3,7 @@
 //! Each test drives BloomEditor through key sequences and asserts on the
 //! visual output. No terminal, no GUI — runs in CI.
 
-use bloom_test_harness::{SimInput, TestScreen, TestVault};
+use bloom_test_harness::{SimInput, TestScreen, TestVault, linked_vault, task_vault, tagged_vault};
 
 // -----------------------------------------------------------------------
 // UC-01: Open today's journal
@@ -1039,4 +1039,243 @@ fn ex_command_theme_switch() {
     // Should cycle theme without crashing
     let screen = sim.screen(80, 24);
     assert_eq!(screen.mode(), "NORMAL");
+}
+
+// =======================================================================
+// Fixture-based tests — linked_vault
+// =======================================================================
+
+#[test]
+fn linked_vault_find_all_pages() {
+    let vault = linked_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    let screen = sim.screen(80, 24);
+    assert!(screen.has_picker());
+    assert!(
+        screen.picker_results().len() >= 3,
+        "linked vault should have 3 pages in picker, got {:?}",
+        screen.picker_results()
+    );
+    sim.keys("<Esc>");
+}
+
+#[test]
+fn linked_vault_open_specific_page() {
+    let vault = linked_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    sim.type_text("Rust");
+    sim.keys("Enter");
+
+    let screen = sim.screen(80, 24);
+    assert!(
+        screen.title().contains("Rust"),
+        "should open Rust Notes, got: '{}'",
+        screen.title()
+    );
+}
+
+#[test]
+fn linked_vault_search_content() {
+    let vault = linked_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC s s");
+    sim.type_text("rope");
+    let screen = sim.screen(80, 24);
+    let results = screen.picker_results();
+    assert!(
+        !results.is_empty(),
+        "search for 'rope' should find Text Editor Theory"
+    );
+    sim.keys("<Esc>");
+}
+
+#[test]
+fn linked_vault_backlinks_picker() {
+    let vault = linked_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    sim.type_text("Editor");
+    sim.keys("Enter");
+
+    sim.keys("SPC s l");
+    let screen = sim.screen(80, 24);
+    assert!(screen.has_picker(), "SPC s l should open backlinks picker");
+    sim.keys("<Esc>");
+}
+
+#[test]
+fn linked_vault_unlinked_mentions() {
+    let vault = linked_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    sim.type_text("Rust");
+    sim.keys("Enter");
+
+    sim.keys("SPC s u");
+    let screen = sim.screen(80, 24);
+    assert!(screen.has_picker(), "SPC s u should open unlinked mentions picker");
+    sim.keys("<Esc>");
+}
+
+// =======================================================================
+// Fixture-based tests — task_vault
+// =======================================================================
+
+#[test]
+fn task_vault_find_pages() {
+    let vault = task_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    let screen = sim.screen(80, 24);
+    assert!(screen.picker_results().len() >= 2, "should have at least 2 pages");
+    sim.keys("<Esc>");
+}
+
+#[test]
+fn task_vault_open_project_a() {
+    let vault = task_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    sim.type_text("Project A");
+    sim.keys("Enter");
+
+    let text = sim.buffer_text();
+    assert!(text.contains("- [ ] Review the API"), "should have unchecked task");
+    assert!(text.contains("- [x] Set up CI"), "should have checked task");
+}
+
+#[test]
+fn task_vault_search_tasks() {
+    let vault = task_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC s s");
+    sim.type_text("API design");
+    let screen = sim.screen(80, 24);
+    assert!(!screen.picker_results().is_empty(), "should find task");
+    sim.keys("<Esc>");
+}
+
+#[test]
+fn task_vault_agenda_opens() {
+    let vault = task_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC a a");
+    let screen = sim.screen(80, 24);
+    assert!(screen.title().len() > 0 || screen.has_picker(), "agenda should open");
+}
+
+#[test]
+fn task_vault_toggle_task() {
+    let vault = task_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    sim.type_text("Project A");
+    sim.keys("Enter");
+
+    let text = sim.buffer_text();
+    let task_line = text.lines().position(|l| l.contains("- [ ] Review")).unwrap_or(0);
+    for _ in 0..task_line { sim.keys("j"); }
+    sim.keys("3l");
+    sim.keys("r");
+    sim.type_text("x");
+
+    let text = sim.buffer_text();
+    assert!(text.contains("- [x] Review the API"), "task should be toggled");
+}
+
+// =======================================================================
+// Fixture-based tests — tagged_vault
+// =======================================================================
+
+#[test]
+fn tagged_vault_search_tags() {
+    let vault = tagged_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC s t");
+    let screen = sim.screen(80, 24);
+    assert!(screen.has_picker(), "tags picker should open");
+    sim.keys("<Esc>");
+}
+
+#[test]
+fn tagged_vault_find_all_pages() {
+    let vault = tagged_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    assert!(sim.screen(80, 24).picker_results().len() >= 4, "should show 4 pages");
+    sim.keys("<Esc>");
+}
+
+#[test]
+fn tagged_vault_open_meeting_notes() {
+    let vault = tagged_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    sim.type_text("Meeting");
+    sim.keys("Enter");
+
+    assert!(sim.buffer_text().contains("Discussed Rust"), "should load content");
+}
+
+// =======================================================================
+// Multi-buffer workflows
+// =======================================================================
+
+#[test]
+fn open_two_pages_and_switch() {
+    let vault = linked_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    sim.type_text("Rust");
+    sim.keys("Enter");
+    let t1 = sim.screen(80, 24).title().to_string();
+
+    sim.keys("SPC f f");
+    sim.type_text("Orphan");
+    sim.keys("Enter");
+    let t2 = sim.screen(80, 24).title().to_string();
+
+    assert_ne!(t1, t2, "should open different pages");
+
+    sim.keys("SPC b b");
+    assert!(sim.screen(80, 24).has_picker());
+    sim.keys("Enter");
+    assert!(sim.screen(80, 24).title().len() > 0);
+}
+
+#[test]
+fn split_and_open_different_pages() {
+    let vault = linked_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    sim.type_text("Rust");
+    sim.keys("Enter");
+
+    sim.keys("SPC w v");
+    assert!(sim.screen(80, 24).pane_count() >= 2);
+
+    sim.keys("SPC f f");
+    sim.type_text("Orphan");
+    sim.keys("Enter");
+
+    let screen = sim.screen(80, 24);
+    assert!(screen.pane_count() >= 2);
+    assert!(screen.line_count() > 0);
 }

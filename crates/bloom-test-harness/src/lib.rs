@@ -104,6 +104,79 @@ impl Default for TestVaultBuilder {
 }
 
 // ---------------------------------------------------------------------------
+// Pre-built vault fixtures
+// ---------------------------------------------------------------------------
+
+/// 3 pages with cross-links. For testing link following, backlinks, unlinked mentions.
+pub fn linked_vault() -> TestVault {
+    let id_rust = "aa110001";
+    let id_editor = "aa110002";
+    let id_orphan = "aa110003";
+
+    TestVault::new()
+        .raw_file("rust-notes.md", &format!(
+            "---\nid: {id_rust}\ntitle: \"Rust Notes\"\ncreated: 2026-01-15\ntags: [rust, programming]\n---\n\n\
+            # Rust Notes\n\n\
+            Rust is a systems programming language.\n\n\
+            See [[{id_editor}|Text Editor Theory]] for editor architecture.\n\n\
+            Memory safety is key.\n"
+        ))
+        .raw_file("text-editor-theory.md", &format!(
+            "---\nid: {id_editor}\ntitle: \"Text Editor Theory\"\ncreated: 2026-02-01\ntags: [editors, rust]\n---\n\n\
+            # Text Editor Theory\n\n\
+            Ropes are O(log n) for inserts.\n\n\
+            See [[{id_rust}|Rust Notes]] for language details.\n\n\
+            Piece tables are used by VS Code.\n"
+        ))
+        .raw_file("orphan-page.md", &format!(
+            "---\nid: {id_orphan}\ntitle: \"Orphan Page\"\ncreated: 2026-03-01\ntags: []\n---\n\n\
+            # Orphan Page\n\n\
+            This page has no links to or from other pages.\n"
+        ))
+        .build()
+}
+
+/// Pages with tasks in various states. For testing agenda, task toggle, search by status.
+pub fn task_vault() -> TestVault {
+    TestVault::new()
+        .raw_file(
+            "project-a.md",
+            "---\nid: bb220001\ntitle: \"Project A\"\ncreated: 2026-01-10\ntags: [project, work]\n---\n\n# Project A\n\n- [ ] Review the API design @due(2026-03-10)\n- [ ] Write unit tests @due(2026-03-15)\n- [x] Set up CI pipeline\n- [ ] Deploy to staging\n",
+        )
+        .raw_file(
+            "project-b.md",
+            "---\nid: bb220002\ntitle: \"Project B\"\ncreated: 2026-02-01\ntags: [project]\n---\n\n# Project B\n\n- [ ] Design the database schema\n- [ ] Implement auth module @due(2026-04-01)\n- [x] Write the RFC\n",
+        )
+        .raw_file(
+            "journal/2026-03-10.md",
+            "---\nid: bb220003\ntitle: \"2026-03-10\"\ncreated: 2026-03-10\ntags: []\n---\n\n- Worked on Project A today\n- [ ] Follow up with team @due(2026-03-12)\n- [x] Read the design doc\n",
+        )
+        .build()
+}
+
+/// Pages with diverse tags. For testing tag search, filter by tag.
+pub fn tagged_vault() -> TestVault {
+    TestVault::new()
+        .raw_file(
+            "rust-notes.md",
+            "---\nid: cc330001\ntitle: \"Rust Notes\"\ncreated: 2026-01-15\ntags: [rust, editors]\n---\n\n# Rust Notes\n\nContent about Rust.\n",
+        )
+        .raw_file(
+            "python-notes.md",
+            "---\nid: cc330002\ntitle: \"Python Notes\"\ncreated: 2026-02-01\ntags: [python]\n---\n\n# Python Notes\n\nContent about Python.\n",
+        )
+        .raw_file(
+            "meeting-notes.md",
+            "---\nid: cc330003\ntitle: \"Meeting Notes\"\ncreated: 2026-03-01\ntags: [rust, meetings]\n---\n\n# Meeting Notes\n\nDiscussed Rust architecture.\n",
+        )
+        .raw_file(
+            "untagged.md",
+            "---\nid: cc330004\ntitle: \"Untagged Page\"\ncreated: 2026-03-05\ntags: []\n---\n\n# Untagged\n\nNo tags here.\n",
+        )
+        .build()
+}
+
+// ---------------------------------------------------------------------------
 // SimInput — drives BloomEditor with key sequences
 // ---------------------------------------------------------------------------
 
