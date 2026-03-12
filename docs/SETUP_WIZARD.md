@@ -1,7 +1,7 @@
 # Bloom 🌱 — Setup Wizard
 
 > Wireframes for the first-launch setup wizard.
-> See [GOALS.md G21](GOALS.md) for the feature goal, [USE_CASES.md UC-73](USE_CASES.md) for the use case.
+> See [GOALS.md G21](GOALS.md) for the feature goal, [USE_CASES.md UC-73](test/USE_CASES.md) for the use case.
 
 ---
 
@@ -334,6 +334,6 @@ Same inline pattern. User can change path and retry.
 |----------|----------|
 | [GOALS.md G21](GOALS.md) | Setup wizard goal and vault structure |
 | [GOALS.md G13](GOALS.md) | Logseq import specification |
-| [USE_CASES.md UC-73](USE_CASES.md) | First launch use case |
-| [USE_CASES.md UC-74](USE_CASES.md) | Logseq import use case |
+| [USE_CASES.md UC-73](test/USE_CASES.md) | First launch use case |
+| [USE_CASES.md UC-74](test/USE_CASES.md) | Logseq import use case |
 | [THEMING.md](THEMING.md) | Colour slots referenced in style tables |

@@ -586,5 +586,5 @@ All borders use `faded` colour — they recede visually, letting the content and
 |----------|----------|
 | [GOALS.md G11](GOALS.md) | Window management goal and keybindings |
 | [KEYBINDINGS.md](KEYBINDINGS.md) | Full window keybinding reference |
-| [USE_CASES.md](USE_CASES.md) | UC-52 through UC-57 |
+| [USE_CASES.md](test/USE_CASES.md) | UC-52 through UC-57 |
 | [API_SURFACES.md](API_SURFACES.md) | `WindowManager` and `LayoutTree` types |

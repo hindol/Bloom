@@ -1,9 +1,11 @@
 # Bloom 🌱 — Use Cases
 
 > Every user-facing scenario in Bloom, written as testable acceptance criteria.
-> See [GOALS.md](GOALS.md) for goals, [KEYBINDINGS.md](KEYBINDINGS.md) for keybinding reference.
+> See [GOALS.md](../GOALS.md) for goals, [KEYBINDINGS.md](../KEYBINDINGS.md) for keybinding reference.
 >
-> **Development approach:** Code is built to satisfy these use cases. Each UC maps to one or more automated tests via `SimInput` + `insta` snapshots. The `Verifies:` line traces each UC back to a goal or architectural property.
+> **Development approach:** Code is built to satisfy these use cases. Each UC maps to one or more automated tests via `SimInput` + `TestScreen` in `crates/bloom-core/tests/e2e.rs`. The `Verifies:` line traces each UC back to a goal or architectural property.
+>
+> **Test coverage key:** ✅ = has e2e test, ⚠️ = partial coverage, ❌ = not yet tested.
 
 ---
 
@@ -1056,11 +1058,101 @@ Verifies: G10 (Cross-Platform)
 
 ---
 
+## Edge Cases & Regression Tests
+
+These were discovered during development and encode specific bugs or behaviors that must not regress.
+
+### UC-91: Dot repeat (`.`)
+
+Verifies: G7 (Vim)
+
+1. User performs `dw` to delete a word.
+2. User moves to another word and presses `.`.
+3. The same `dw` operation is replicated at the new position.
+4. **Status:** Not yet working — `.` is a no-op. Documented as a known gap.
+
+### UC-92: Persistent undo tree across restarts
+
+Verifies: G9 (Undo Tree)
+
+1. User makes edits: "alpha", "beta", "gamma" across separate Insert sessions.
+2. User undoes "gamma" (`u`), creating a branch point.
+3. User types "delta" — branch B created.
+4. User quits Bloom.
+5. User relaunches Bloom.
+6. The undo tree is fully restored: both branches visible in `SPC u u`.
+7. `u` undoes "delta", `Ctrl+R` redoes it. Branch navigation works.
+
+### UC-93: External file change + undo tree preservation
+
+Verifies: ARCHITECTURE (Data Safety), G9
+
+1. User has a page open with undo history (several edits).
+2. An external tool modifies the file on disk.
+3. Bloom detects the change, extends the undo tree with an "external change" node.
+4. `u` undoes past the external change, showing pre-external-change state.
+5. `Ctrl+R` redoes to the external change version.
+
+### UC-94: Picker scrolling in large vaults
+
+Verifies: G16 (Fuzzy Picker)
+
+1. Vault has 10,000+ pages.
+2. User opens `SPC f f` with empty query — shows recent pages.
+3. User presses `Ctrl+N` 50 times to scroll down.
+4. The selection highlight stays visible — results window scrolls.
+5. User types a query — results narrow. Selection resets to first result.
+6. Performance: picker remains responsive (no visible stutter).
+
+### UC-95: Block ID assignment on save
+
+Verifies: BLOCK_IDENTITY
+
+1. User creates a new page with content: headings, paragraphs, tasks.
+2. User saves (`:w` or auto-save).
+3. On next index cycle, blocks without IDs get 5-char base36 IDs appended.
+4. IDs appear at the end of each block's last line: `^k7m2x`.
+5. Re-saving the same file does not change existing IDs (idempotent).
+
+### UC-96: Single-instance vault lock
+
+Verifies: ARCHITECTURE
+
+1. User launches Bloom (TUI or GUI).
+2. `.bloom.lock` is created in the vault root with the PID.
+3. User attempts to launch a second instance pointing at the same vault.
+4. The second instance fails with a clear error: "another Bloom instance is running (PID N)."
+5. After the first instance exits, the lock file is deleted.
+6. A subsequent launch succeeds.
+
+---
+
+## Test Coverage Summary
+
+| Category | UCs | Tested |
+|----------|-----|--------|
+| Daily Workflow | UC-01 to UC-06 | ✅ UC-01 |
+| Page Management | UC-07 to UC-13 | ✅ UC-08 |
+| Writing & Editing | UC-14 to UC-23 | ✅ UC-14, 15, 17, 18, 20, ⚠️ 23 |
+| Linking | UC-24 to UC-31 | ❌ |
+| Tags | UC-32 to UC-36 | ❌ |
+| Search | UC-37 to UC-40 | ❌ |
+| Tasks & Agenda | UC-41 to UC-47 | ✅ UC-42 |
+| Timeline | UC-48 to UC-51 | ❌ |
+| Windows | UC-52 to UC-57 | ✅ UC-52, 55 |
+| Templates | UC-58 to UC-61 | ❌ |
+| Refactoring | UC-62 to UC-64 | ❌ |
+| MCP | UC-65 to UC-72 | ❌ |
+| System | UC-73 to UC-78 | ✅ UC-77, 78 |
+| Edge Cases | UC-79 to UC-90 | ✅ UC-87 |
+| Regressions | UC-91 to UC-96 | ✅ UC-92, 94, 95, 96 |
+
+---
+
 ## Related Documents
 
 | Document | Contents |
 |----------|----------|
-| [GOALS.md](GOALS.md) | Goals and non-goals that these use cases verify |
-| [KEYBINDINGS.md](KEYBINDINGS.md) | Keybinding reference |
-| [PICKER_SURFACES.md](PICKER_SURFACES.md) | Picker wireframes |
-| [CRATE_STRUCTURE.md](CRATE_STRUCTURE.md) | Testing strategy (SimInput, insta snapshots) |
+| [GOALS.md](../GOALS.md) | Goals and non-goals that these use cases verify |
+| [KEYBINDINGS.md](../KEYBINDINGS.md) | Keybinding reference |
+| [PICKER_SURFACES.md](../PICKER_SURFACES.md) | Picker wireframes |

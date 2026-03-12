@@ -1,6 +1,6 @@
 # Bloom 🌱 — Debuggability
 
-> Structured logging, log rotation, and diagnostic tools. See [ARCHITECTURE.md](ARCHITECTURE.md) for threading model.
+> Structured logging, log rotation, and diagnostic tools. See [ARCHITECTURE.md](../ARCHITECTURE.md) for threading model.
 
 ---
 
@@ -273,6 +273,6 @@ max_files = 4            # keep this many rotated files
 
 | Document | Section |
 |----------|---------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Communication Pattern — channel-based threading model |
-| [CRATE_STRUCTURE.md](CRATE_STRUCTURE.md) | `tracing` instrumentation on state transitions |
-| [GOALS.md](GOALS.md) | G22 — Index Rebuild |
+| [ARCHITECTURE.md](../ARCHITECTURE.md) | Communication Pattern — channel-based threading model |
+| [CRATE_STRUCTURE.md](../CRATE_STRUCTURE.md) | `tracing` instrumentation on state transitions |
+| [GOALS.md](../GOALS.md) | G22 — Index Rebuild |
