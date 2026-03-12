@@ -282,6 +282,9 @@ pub fn default_tree() -> WhichKeyTree {
     tree.register("T t", "Theme selector", "theme_selector".into());
     tree.register("T m", "Toggle MCP", "toggle_mcp".into());
 
+    // Help / Meta
+    tree.register("?", "All commands", "all_commands".into());
+
     // Set descriptive group labels
     tree.set_group_label("f", "files");
     tree.set_group_label("b", "buffers");

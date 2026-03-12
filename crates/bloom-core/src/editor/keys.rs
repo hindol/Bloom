@@ -979,6 +979,26 @@ impl BloomEditor {
         match resolved.as_str() {
             "undo" => vec![keymap::dispatch::Action::Undo],
             "redo" => vec![keymap::dispatch::Action::Redo],
+            "repeat" => {
+                // Dot repeat: replay the last repeatable command's keys.
+                if let Some(recorded) = self.vim_state.last_command().cloned() {
+                    for key in recorded.keys {
+                        self.handle_key(key);
+                    }
+                }
+                vec![keymap::dispatch::Action::Noop]
+            }
+            _ if resolved.starts_with("play-macro:") => {
+                // Macro replay: get stored keys from register, replay them.
+                let register = resolved.chars().last().unwrap_or('a');
+                let keys = self.vim_state.play_macro(register);
+                for key in keys {
+                    let actions = self.handle_key(key);
+                    // Actions are applied inline (handle_key dispatches)
+                    let _ = actions;
+                }
+                vec![keymap::dispatch::Action::Noop]
+            }
             _ => self.translate_ex_command(&resolved),
         }
     }

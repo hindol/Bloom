@@ -269,6 +269,9 @@ impl BloomEditor {
                 self.window_mgr.maximize_toggle();
                 vec![keymap::dispatch::Action::Noop]
             }
+            "all_commands" => vec![keymap::dispatch::Action::OpenPicker(
+                keymap::dispatch::PickerKind::AllCommands,
+            )],
             _ => vec![keymap::dispatch::Action::Noop],
         }
     }

@@ -203,12 +203,7 @@ fn uc23_dot_repeat() {
 
     // Dot repeat — should delete next word
     sim.keys(".");
-    let text = sim.buffer_text();
-    // NOTE: if dot repeat is not yet implemented, this asserts the current state
-    assert!(
-        text == "ccc\n" || text == "bbb ccc\n",
-        "dot repeat should delete next word (or be a no-op if unimplemented): '{text}'"
-    );
+    assert_eq!(sim.buffer_text(), "ccc\n", "dot repeat should delete next word");
 }
 
 // -----------------------------------------------------------------------
@@ -528,13 +523,11 @@ fn uc22_macro_record_replay() {
     let text = sim.buffer_text();
     assert!(!text.contains("aaa"), "first dd should remove aaa: '{text}'");
 
-    // Replay — macro replay may not be implemented yet
+    // Replay
     sim.keys("@a");
     let text = sim.buffer_text();
-    assert!(
-        !text.contains("bbb") || text.contains("bbb"),
-        "macro replay: '{text}' (may not be implemented yet)"
-    );
+    assert!(!text.contains("bbb"), "macro replay should remove bbb: '{text}'");
+    assert!(text.contains("ccc"), "ccc should remain: '{text}'");
 }
 
 // -----------------------------------------------------------------------
@@ -682,15 +675,19 @@ fn vim_w_b_word_motions() {
 
 #[test]
 fn uc89_all_commands_picker() {
-    // NOTE: SPC SPC / SPC ? for all commands picker is not yet wired
-    // in the which-key tree. This test documents the gap.
     let vault = TestVault::new().page("Test").build();
     let mut sim = SimInput::with_vault(vault);
 
-    // For now, just verify the picker infrastructure works with SPC f f
-    sim.keys("SPC f f");
+    // SPC ? opens the all commands picker
+    sim.keys("SPC ?");
     let screen = sim.screen(80, 24);
-    assert!(screen.has_picker(), "SPC f f should open find page picker");
+    assert!(screen.has_picker(), "SPC ? should open the commands picker");
+    assert!(
+        screen.picker_results().len() > 5,
+        "commands picker should have many results, got {}",
+        screen.picker_results().len()
+    );
+
     sim.keys("<Esc>");
 }
 
