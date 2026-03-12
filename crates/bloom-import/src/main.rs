@@ -1,4 +1,4 @@
-use bloom_core::parser::BloomMarkdownParser;
+use bloom_md::parser::BloomMarkdownParser;
 use bloom_core::uuid::generate_hex_id;
 use std::collections::HashMap;
 use std::path::Path;

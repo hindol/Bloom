@@ -15,7 +15,7 @@ fn command_ghost_text(input: &str) -> Option<String> {
     }
     // :theme <partial> → ghost is the rest of the theme name
     if let Some(arg) = input.strip_prefix("theme ") {
-        let match_name = theme::THEME_NAMES.iter().find(|n| n.starts_with(arg))?;
+        let match_name = bloom_md::theme::THEME_NAMES.iter().find(|n| n.starts_with(arg))?;
         let suffix = &match_name[arg.len()..];
         if suffix.is_empty() {
             return None;
@@ -370,7 +370,7 @@ impl BloomEditor {
 
                 // Detect argument completion: "theme <partial>"
                 let (items, selected) = if let Some(arg_prefix) = input.strip_prefix("theme ") {
-                    let theme_names = theme::THEME_NAMES;
+                    let theme_names = bloom_md::theme::THEME_NAMES;
                     let items: Vec<render::InlineMenuItem> = theme_names
                         .iter()
                         .filter(|name| arg_prefix.is_empty() || name.starts_with(arg_prefix))
@@ -760,7 +760,7 @@ impl BloomEditor {
                 if line_idx >= range.start {
                     let spans = self.parser.highlight_line(
                         &line_text,
-                        &parser::traits::LineContext {
+                        &bloom_md::parser::traits::LineContext {
                             in_code_block: false,
                             in_frontmatter: true,
                             code_fence_lang: None,
@@ -798,7 +798,7 @@ impl BloomEditor {
             if line_idx >= range.start {
                 let spans = self.parser.highlight_line(
                     &line_text,
-                    &parser::traits::LineContext {
+                    &bloom_md::parser::traits::LineContext {
                         in_code_block,
                         in_frontmatter,
                         code_fence_lang: code_fence_lang.clone(),

@@ -4,7 +4,7 @@
 //! [`PickerKind`](crate::keymap::dispatch::PickerKind) (pages, buffers, tags,
 //! templates, themes, …) and handles selection, confirmation, and cancellation.
 
-use crate::parser::traits::DocumentParser;
+use bloom_md::parser::traits::DocumentParser;
 use crate::*;
 
 /// Stable key for storing per-picker-kind state.
@@ -584,7 +584,7 @@ impl BloomEditor {
         let current_name = self.active_theme.name;
         let previous_theme = self.active_theme;
         let sample = "## Preview\n\n- [ ] Sample task @due(2026-03-05)\n- [x] Completed task\nSee [[abc123|Text Editor Theory]].\n#rust #editors";
-        let items: Vec<GenericPickerItem> = theme::THEME_NAMES
+        let items: Vec<GenericPickerItem> = bloom_md::theme::THEME_NAMES
             .iter()
             .map(|name| {
                 let current_marker = if *name == current_name {
@@ -592,7 +592,7 @@ impl BloomEditor {
                 } else {
                     ""
                 };
-                let desc = theme::theme_description(name);
+                let desc = bloom_md::theme::theme_description(name);
                 let right = if current_marker.is_empty() {
                     if desc.is_empty() {
                         None
@@ -617,7 +617,7 @@ impl BloomEditor {
                 }
             })
             .collect();
-        let current_idx = theme::THEME_NAMES
+        let current_idx = bloom_md::theme::THEME_NAMES
             .iter()
             .position(|n| *n == current_name)
             .unwrap_or(0);
@@ -643,7 +643,7 @@ impl BloomEditor {
         if let Some(ap) = &self.picker_state {
             if matches!(ap.kind, keymap::dispatch::PickerKind::Theme) {
                 if let Some(item) = ap.picker.selected() {
-                    if let Some(palette) = theme::palette_by_name(&item.id) {
+                    if let Some(palette) = bloom_md::theme::palette_by_name(&item.id) {
                         self.active_theme = palette;
                     }
                 }

@@ -14,7 +14,7 @@ use rayon::prelude::*;
 
 use crate::error::BloomError;
 use crate::index::{FileFingerprint, Index, IndexEntry, RebuildStats};
-use crate::parser::{self, traits::DocumentParser};
+use bloom_md::parser::{self, traits::DocumentParser};
 use crate::store;
 use crate::types::*;
 

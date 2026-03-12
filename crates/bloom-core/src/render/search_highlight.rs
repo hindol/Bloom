@@ -1,4 +1,4 @@
-use crate::parser::traits::{Style, StyledSpan};
+use bloom_md::parser::traits::{Style, StyledSpan};
 use std::ops::Range;
 
 /// Find all occurrences of `query` in `text` (case-insensitive) and return

@@ -268,7 +268,7 @@ pub(super) fn draw_picker_single_column(
         if !picker.query.is_empty() && !is_selected {
             let match_spans =
                 bloom_core::render::search_highlight::highlight_matches(&label, &picker.query);
-            let match_style = theme.style_for(&bloom_core::parser::traits::Style::SearchMatch);
+            let match_style = theme.style_for(&bloom_md::parser::traits::Style::SearchMatch);
             if match_spans.is_empty() {
                 spans.push(Span::styled(label.clone(), style));
             } else {
@@ -418,14 +418,14 @@ pub(super) fn render_highlighted_preview(
     theme: &TuiTheme,
 ) {
     let faded = theme.faded_style();
-    let match_style = theme.style_for(&bloom_core::parser::traits::Style::SearchMatch);
+    let match_style = theme.style_for(&bloom_md::parser::traits::Style::SearchMatch);
     let search_spans = bloom_core::render::search_highlight::highlight_matches(text, search_query);
     let match_ranges: Vec<std::ops::Range<usize>> =
         search_spans.iter().map(|s| s.range.clone()).collect();
 
-    let parser = bloom_core::parser::BloomMarkdownParser::new();
-    use bloom_core::parser::traits::DocumentParser as _;
-    let mut line_ctx = bloom_core::parser::traits::LineContext::default();
+    let parser = bloom_md::parser::BloomMarkdownParser::new();
+    use bloom_md::parser::traits::DocumentParser as _;
+    let mut line_ctx = bloom_md::parser::traits::LineContext::default();
 
     let mut byte_offset = 0usize;
     for (i, line) in text.lines().enumerate() {

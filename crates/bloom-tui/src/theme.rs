@@ -1,6 +1,6 @@
-use bloom_core::parser::traits::Style;
+use bloom_md::parser::traits::Style;
 use bloom_core::render::NotificationLevel;
-use bloom_core::theme::{self, Chrome, Rgb, StyleProps, ThemePalette};
+use bloom_md::theme::{self, Chrome, Rgb, StyleProps, ThemePalette};
 use ratatui::style::{Color, Modifier, Style as RStyle};
 
 /// Convert core `Rgb` to ratatui `Color`.

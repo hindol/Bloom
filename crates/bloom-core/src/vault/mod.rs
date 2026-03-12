@@ -7,7 +7,7 @@ pub mod setup;
 
 use crate::error::BloomError;
 use crate::index::Index;
-use crate::parser::traits::DocumentParser;
+use bloom_md::parser::traits::DocumentParser;
 use crate::store::traits::NoteStore;
 use crate::types::*;
 use std::path::{Path, PathBuf};

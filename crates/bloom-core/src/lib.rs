@@ -10,7 +10,6 @@ pub mod index;
 pub mod journal;
 pub mod keymap;
 pub mod linker;
-pub mod parser;
 pub mod picker;
 pub mod query;
 pub mod refactor;
@@ -18,7 +17,6 @@ pub mod render;
 pub mod session;
 pub mod store;
 pub mod template;
-pub mod theme;
 pub mod timeline;
 pub mod types;
 pub mod uuid;
@@ -37,7 +35,7 @@ pub use editor::event_loop;
 use std::collections::HashMap;
 use std::time::Instant;
 
-use parser::traits::DocumentParser;
+use bloom_md::parser::traits::DocumentParser;
 
 /// Manages all open text buffers, keyed by [`PageId`](types::PageId).
 ///
@@ -166,7 +164,7 @@ pub struct BloomEditor {
     pub(crate) _command_registry: which_key::CommandRegistry,
     pub(crate) index: Option<index::Index>,
     pub(crate) journal: Option<journal::Journal>,
-    pub(crate) parser: parser::BloomMarkdownParser,
+    pub(crate) parser: bloom_md::parser::BloomMarkdownParser,
     pub(crate) template_engine: Option<template::TemplateEngine>,
     pub(crate) template_mode: Option<template::TemplateModeState>,
     pub(crate) _linker: linker::Linker,
@@ -186,7 +184,7 @@ pub struct BloomEditor {
     pub(crate) leader_keys: Vec<types::KeyEvent>,
     pub(crate) pending_since: Option<Instant>,
     pub(crate) which_key_visible: bool,
-    pub(crate) active_theme: &'static theme::ThemePalette,
+    pub(crate) active_theme: &'static bloom_md::theme::ThemePalette,
     // Auto-save
     pub(crate) autosave_tx: Option<crossbeam::channel::Sender<store::disk_writer::WriteRequest>>,
     pub(crate) write_complete_rx:
@@ -349,7 +347,7 @@ pub(crate) struct ActivePicker {
     pub(crate) status_noun: String,
     pub(crate) min_query_len: usize,
     /// For theme picker: the theme to revert to on cancel.
-    pub(crate) previous_theme: Option<&'static theme::ThemePalette>,
+    pub(crate) previous_theme: Option<&'static bloom_md::theme::ThemePalette>,
     /// When true, the next character typed replaces the query (select-all UX).
     pub(crate) query_selected: bool,
 }
@@ -401,7 +399,7 @@ pub(crate) struct QuickCaptureState {
 
 impl BloomEditor {
     pub fn new(config: config::Config) -> Result<Self, error::BloomError> {
-        let active_theme = theme::palette_by_name(&config.theme.name).unwrap_or(&theme::BLOOM_DARK);
+        let active_theme = bloom_md::theme::palette_by_name(&config.theme.name).unwrap_or(&bloom_md::theme::BLOOM_DARK);
         Ok(Self {
             vim_state: vim::VimState::new(),
             window_mgr: window::WindowManager::new(),
@@ -409,7 +407,7 @@ impl BloomEditor {
             _command_registry: which_key::default_registry(),
             index: None,
             journal: None,
-            parser: parser::BloomMarkdownParser::new(),
+            parser: bloom_md::parser::BloomMarkdownParser::new(),
             template_engine: None,
             template_mode: None,
             _linker: linker::Linker::new(),
@@ -506,13 +504,13 @@ impl BloomEditor {
     }
 
     /// Get the active theme palette.
-    pub fn theme(&self) -> &'static theme::ThemePalette {
+    pub fn theme(&self) -> &'static bloom_md::theme::ThemePalette {
         self.active_theme
     }
 
     /// Set the active theme by name. Returns false if name not found.
     pub fn set_theme(&mut self, name: &str) -> bool {
-        if let Some(palette) = theme::palette_by_name(name) {
+        if let Some(palette) = bloom_md::theme::palette_by_name(name) {
             self.active_theme = palette;
             true
         } else {
@@ -523,7 +521,7 @@ impl BloomEditor {
     /// Cycle to the next theme.
     pub fn cycle_theme(&mut self) {
         let current = self.active_theme.name;
-        let names = theme::THEME_NAMES;
+        let names = bloom_md::theme::THEME_NAMES;
         let idx = names.iter().position(|n| *n == current).unwrap_or(0);
         let next = names[(idx + 1) % names.len()];
         self.set_theme(next);
@@ -1874,7 +1872,7 @@ mod tests {
             content.push_str(&format!("- List item {i}a\n- [ ] Task {i} @due(2026-03-10)\n- Item {i}b with\n  continuation line\n\n"));
         }
 
-        let parser = parser::BloomMarkdownParser::new();
+        let parser = bloom_md::parser::BloomMarkdownParser::new();
 
         // Measure parse time.
         let t0 = Instant::now();
@@ -1913,7 +1911,7 @@ mod tests {
     fn profile_block_id_bulk_1000_pages() {
         use std::time::Instant;
 
-        let parser = parser::BloomMarkdownParser::new();
+        let parser = bloom_md::parser::BloomMarkdownParser::new();
 
         // Generate 1000 pages with ~10 blocks each.
         let mut pages: Vec<String> = Vec::with_capacity(1000);
@@ -1962,7 +1960,7 @@ mod tests {
     fn profile_block_id_idempotent_1000_pages() {
         use std::time::Instant;
 
-        let parser = parser::BloomMarkdownParser::new();
+        let parser = bloom_md::parser::BloomMarkdownParser::new();
 
         // Generate 1000 pages, assign IDs, then re-check (should be no-op).
         let mut pages_with_ids: Vec<String> = Vec::with_capacity(1000);

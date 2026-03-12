@@ -4,7 +4,7 @@
 //! cursor, navigates journal entries by date, and tracks frontier access for
 //! search ranking. Also provides block-link yanking to clipboard.
 
-use crate::parser::traits::DocumentParser;
+use bloom_md::parser::traits::DocumentParser;
 use crate::*;
 
 /// Extract the link target from a `[[...]]` pattern at the given column.
@@ -84,7 +84,7 @@ impl BloomEditor {
         let content = if path.exists() {
             std::fs::read_to_string(&path).unwrap_or_default()
         } else {
-            let fm = parser::traits::Frontmatter {
+            let fm = bloom_md::parser::traits::Frontmatter {
                 id: None,
                 title: Some(title.clone()),
                 created: Some(today),
@@ -231,7 +231,7 @@ impl BloomEditor {
         let content = if path.exists() {
             std::fs::read_to_string(&path).unwrap_or_default()
         } else {
-            let fm = parser::traits::Frontmatter {
+            let fm = bloom_md::parser::traits::Frontmatter {
                 id: None,
                 title: Some(title.clone()),
                 created: Some(target),

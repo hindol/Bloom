@@ -10,7 +10,7 @@ use std::collections::HashSet;
 
 use rusqlite::Connection;
 
-use crate::parser::traits::Document;
+use bloom_md::parser::traits::Document;
 
 /// A computed block ID insertion: append ` ^{id}` to the end of the given line.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,8 +171,8 @@ pub fn apply_insertions(text: &str, insertions: &[BlockIdInsertion]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::markdown::BloomMarkdownParser;
-    use crate::parser::traits::DocumentParser;
+    use bloom_md::parser::markdown::BloomMarkdownParser;
+    use bloom_md::parser::traits::DocumentParser;
 
     fn parse(text: &str) -> Document {
         BloomMarkdownParser::new().parse(text)

@@ -101,7 +101,7 @@ impl BloomEditor {
             let input = self.vim_state.pending_keys().to_string();
             let completion = if let Some(arg_prefix) = input.strip_prefix("theme ") {
                 // Argument completion
-                theme::THEME_NAMES
+                bloom_md::theme::THEME_NAMES
                     .iter()
                     .find(|name| arg_prefix.is_empty() || name.starts_with(arg_prefix))
                     .map(|name| format!("theme {name}"))
@@ -989,7 +989,7 @@ fn resolve_command(cmd: &str) -> String {
     // Handle :theme <partial_name>
     if let Some(arg) = trimmed.strip_prefix("theme ") {
         let arg = arg.trim();
-        if let Some(name) = crate::theme::THEME_NAMES
+        if let Some(name) = bloom_md::theme::THEME_NAMES
             .iter()
             .find(|n| n.starts_with(arg))
         {

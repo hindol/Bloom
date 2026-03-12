@@ -4,7 +4,7 @@ use serde::Serialize;
 use std::time::Instant;
 
 // Re-exported from parser::traits (shared between parser and render layers).
-pub use crate::parser::traits::{Style, StyledSpan};
+pub use bloom_md::parser::traits::{Style, StyledSpan};
 
 // ---------------------------------------------------------------------------
 // Top-level render frame

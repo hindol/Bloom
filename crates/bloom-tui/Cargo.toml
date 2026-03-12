@@ -6,6 +6,7 @@ license = "AGPL-3.0-or-later"
 
 [dependencies]
 bloom-core = { path = "../bloom-core" }
+bloom-md = { path = "../bloom-md" }
 chrono = "0.4"
 crossbeam = "0.8"
 ratatui = "0.29"

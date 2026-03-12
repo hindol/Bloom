@@ -1,5 +1,5 @@
 use crate::error::BloomError;
-use crate::parser::traits::{DocumentParser, Frontmatter};
+use bloom_md::parser::traits::{DocumentParser, Frontmatter};
 use crate::store::traits::NoteStore;
 use crate::types::*;
 use std::collections::HashMap;

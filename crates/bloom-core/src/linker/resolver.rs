@@ -1,5 +1,5 @@
 use crate::index::{Index, UnlinkedMention};
-use crate::parser::traits::*;
+use bloom_md::parser::traits::*;
 use crate::types::*;
 use std::ops::Range;
 use std::path::PathBuf;

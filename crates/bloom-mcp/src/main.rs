@@ -1,7 +1,7 @@
 use bloom_core::config::Config;
 use bloom_core::default_vault_path;
 use bloom_core::index::Index;
-use bloom_core::parser::{traits::DocumentParser, BloomMarkdownParser};
+use bloom_md::parser::{traits::DocumentParser, BloomMarkdownParser};
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 

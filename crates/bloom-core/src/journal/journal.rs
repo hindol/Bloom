@@ -1,5 +1,5 @@
 use crate::error::BloomError;
-use crate::parser::traits::DocumentParser;
+use bloom_md::parser::traits::DocumentParser;
 use crate::store::traits::NoteStore;
 use chrono::{Local, NaiveDate};
 use std::path::{Path, PathBuf};
@@ -90,7 +90,7 @@ impl Journal {
     }
 
     fn default_frontmatter(&self, date: NaiveDate, parser: &dyn DocumentParser) -> String {
-        use crate::parser::traits::Frontmatter;
+        use bloom_md::parser::traits::Frontmatter;
         use crate::types::TagName;
         use std::collections::HashMap;
 

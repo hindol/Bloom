@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/bloom-buffer",
+    "crates/bloom-md",
     "crates/bloom-core",
     "crates/bloom-history",
     "crates/bloom-tui",

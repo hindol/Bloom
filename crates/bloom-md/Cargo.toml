@@ -1,0 +1,13 @@
+[package]
+name = "bloom-md"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+# Date/time handling for timestamps
+chrono = { version = "0.4", features = ["serde"] }
+# Serialization for frontmatter, Style enum
+serde = { version = "1", features = ["derive"] }
+# YAML frontmatter parsing
+serde_yaml = "0.9"
