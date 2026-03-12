@@ -63,6 +63,7 @@ pub struct StartupConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
 pub enum StartupMode {
     #[default]
     Journal,
@@ -137,6 +138,7 @@ pub struct McpConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
 pub enum McpMode {
     #[default]
     ReadOnly,
@@ -213,12 +215,35 @@ mod tests {
         let toml_str = r#"
             autosave_debounce_ms = 500
             [startup]
-            mode = "Restore"
+            mode = "restore"
             [theme]
             name = "bloom-light"
         "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.autosave_debounce_ms, 500);
         assert_eq!(config.theme.name, "bloom-light");
+    }
+
+    #[test]
+    fn test_config_with_unknown_sections() {
+        let toml_str = r#"
+            [startup]
+            mode = "restore"
+
+            [editor]
+            tab_width = 4
+            auto_save_ms = 300
+
+            [theme]
+            name = "lichen"
+
+            [calendar]
+            week_starts = "monday"
+        "#;
+        let result: Result<Config, _> = toml::from_str(toml_str);
+        match &result {
+            Ok(c) => assert_eq!(c.theme.name, "lichen"),
+            Err(e) => panic!("Config parse failed on unknown sections: {e}"),
+        }
     }
 }

@@ -42,7 +42,10 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
     let vault_path = default_vault_path();
     let config_path = std::path::Path::new(&vault_path).join("config.toml");
     let config = if config_path.exists() {
-        Config::load(&config_path).unwrap_or_else(|_| Config::defaults())
+        Config::load(&config_path).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "config parse failed, using defaults");
+            Config::defaults()
+        })
     } else {
         Config::defaults()
     };

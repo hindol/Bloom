@@ -581,7 +581,7 @@ impl BloomEditor {
                         match vault::Vault::create(&root) {
                             Ok(_) => {
                                 let config_path = root.join("config.toml");
-                                let _ = std::fs::write(&config_path, "# Bloom configuration\n# See docs for all options.\n\n[startup]\nmode = \"Journal\"\n");
+                                let _ = std::fs::write(&config_path, "# Bloom configuration\n# See docs for all options.\n\n[startup]\nmode = \"journal\"\n");
                                 wiz.vault_path = path_str;
                                 wiz.step = WizardStep::ImportChoice;
                             }
