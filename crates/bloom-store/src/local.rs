@@ -1,6 +1,6 @@
-use crate::error::BloomError;
-use crate::store::traits::{FileEvent, NoteStore};
-use crate::store::watcher::start_watcher;
+use bloom_error::BloomError;
+use crate::traits::{FileEvent, NoteStore};
+use crate::watcher::start_watcher;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -101,7 +101,7 @@ impl NoteStore for LocalFileStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::traits::NoteStore;
+    use crate::traits::NoteStore;
     use tempfile::TempDir;
 
     fn setup() -> (TempDir, LocalFileStore) {

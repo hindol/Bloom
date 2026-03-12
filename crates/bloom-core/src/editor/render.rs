@@ -94,20 +94,7 @@ impl BloomEditor {
         let pane_area_h = height.saturating_sub(wk_h);
         let pane_rects = self.window_mgr.compute_pane_rects(width, pane_area_h);
 
-        // Derived state: sync each pane's viewport dimensions from layout rects.
-        // This is a cache, not user-visible state — derived from terminal size.
-        for rect in &pane_rects {
-            if let Some(ps) = self.window_mgr.pane_state_mut(rect.pane_id) {
-                ps.viewport.height = rect.content_height as usize;
-                ps.viewport.width = rect.width as usize;
-            }
-        }
-
-        // Ensure cursor is visible in the active pane (scrolls the viewport if needed)
-        let (cursor_line, _cursor_col) = self.cursor_position();
-        let scrolloff = self.config.scrolloff;
-        self.viewport_mut()
-            .ensure_visible_with_scrolloff(cursor_line, scrolloff);
+        // Layout is computed above; now rendering is read-only below.
 
         for rect in &pane_rects {
             let is_active = rect.pane_id == self.window_mgr.active_pane();

@@ -782,7 +782,7 @@ impl BloomEditor {
         if let Some(vault_root) = &self.vault_root {
             let path = vault_root.join("pages").join("Agenda.md");
             if let Some(tx) = &self.autosave_tx {
-                let _ = tx.send(store::disk_writer::WriteRequest {
+                let _ = tx.send(bloom_store::disk_writer::WriteRequest {
                     path: path.clone(),
                     content: content.clone(),
                 });

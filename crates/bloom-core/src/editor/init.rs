@@ -42,10 +42,10 @@ impl BloomEditor {
         self.index = Some(index::Index::open_readonly(&index_path)?);
 
         self.journal = Some(journal::Journal::new(vault_root));
-        let file_store = store::local::LocalFileStore::new(vault_root.to_path_buf())?;
+        let file_store = bloom_store::local::LocalFileStore::new(vault_root.to_path_buf())?;
         // Grab the watcher receiver once — must not call watch() repeatedly
         {
-            use store::traits::NoteStore;
+            use bloom_store::traits::NoteStore;
             self.watcher_rx = Some(file_store.watch());
         }
         self.note_store = Some(file_store);
@@ -55,7 +55,7 @@ impl BloomEditor {
 
         // Start auto-save disk writer thread
         let (writer, tx, ack_rx) =
-            store::disk_writer::DiskWriter::new(self.config.autosave_debounce_ms);
+            bloom_store::disk_writer::DiskWriter::new(self.config.autosave_debounce_ms);
         self.autosave_tx = Some(tx);
         self.write_complete_rx = Some(ack_rx);
         std::thread::Builder::new()

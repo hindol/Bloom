@@ -95,6 +95,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
                 let size = f.area();
 
                 let t0 = Instant::now();
+                editor.update_layout(size.width, size.height);
                 let frame = editor.render(size.width, size.height);
                 let core_ms = t0.elapsed().as_secs_f64() * 1000.0;
 

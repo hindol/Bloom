@@ -9,6 +9,21 @@ use crate::BlockIdInsertion;
 const ID_LEN: usize = 5;
 const ALPHABET: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
 
+/// Load all known block IDs (live + retired) from the index for collision avoidance.
+pub fn load_all_known_ids(conn: &rusqlite::Connection) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    for table in &["block_ids", "retired_block_ids"] {
+        if let Ok(mut stmt) = conn.prepare(&format!("SELECT block_id FROM {table}")) {
+            if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+                for id in rows.flatten() {
+                    ids.insert(id);
+                }
+            }
+        }
+    }
+    ids
+}
+
 /// Generate a random 5-char base36 block ID not in `existing`.
 pub fn next_block_id(existing: &HashSet<String>) -> String {
     let mut seed: u64 =

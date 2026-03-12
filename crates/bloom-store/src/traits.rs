@@ -1,4 +1,4 @@
-use crate::error::BloomError;
+use bloom_error::BloomError;
 use std::path::{Path, PathBuf};
 
 /// Events emitted when files change on disk.

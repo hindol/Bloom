@@ -1,6 +1,6 @@
 use crate::error::BloomError;
 use bloom_md::parser::traits::DocumentParser;
-use crate::store::traits::NoteStore;
+use bloom_store::traits::NoteStore;
 use chrono::{Local, NaiveDate};
 use std::path::{Path, PathBuf};
 
@@ -110,7 +110,7 @@ impl Journal {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::local::LocalFileStore;
+    use bloom_store::local::LocalFileStore;
     use chrono::NaiveDate;
     use tempfile::TempDir;
 

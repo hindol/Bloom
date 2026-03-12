@@ -1,6 +1,6 @@
 use crate::error::BloomError;
 use bloom_md::parser::traits::{DocumentParser, Frontmatter};
-use crate::store::traits::NoteStore;
+use bloom_store::traits::NoteStore;
 use crate::types::*;
 use std::collections::HashMap;
 use std::path::Path;

@@ -5,12 +5,16 @@ edition = "2021"
 license = "AGPL-3.0-or-later"
 
 [dependencies]
+# Shared error type
+bloom-error = { path = "../bloom-error" }
 # Buffer with cursor-owning architecture
 bloom-buffer = { path = "../bloom-buffer" }
 # Markdown parser, highlighter, theme
 bloom-md = { path = "../bloom-md" }
 # Vim modal editing engine
 bloom-vim = { path = "../bloom-vim" }
+# File store, disk writer, watcher
+bloom-store = { path = "../bloom-store" }
 # Rope data structure for O(log n) text editing on large documents
 ropey = "1"
 # SQLite database engine (bundled) for the search/backlinks/tags index

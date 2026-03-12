@@ -2,14 +2,14 @@
 //!
 //! All saves go through [`BloomEditor::save_page`] — the single save path.
 //! It handles block ID assignment, content extraction, and routing to the
-//! [`DiskWriter`](crate::store::DiskWriter) (or inline atomic write in tests).
+//! [`DiskWriter`](bloom_store::DiskWriter) (or inline atomic write in tests).
 
 use crate::*;
 
 impl BloomEditor {
     /// Handle a single DiskWriter completion ack.
     /// Returns true if the visual state changed (dirty indicator flipped).
-    pub fn handle_write_complete(&mut self, wc: store::disk_writer::WriteComplete) -> bool {
+    pub fn handle_write_complete(&mut self, wc: bloom_store::disk_writer::WriteComplete) -> bool {
         tracing::debug!(path = %wc.path.display(), "write complete received");
         self.last_write_fingerprints
             .insert(wc.path.clone(), (wc.mtime, wc.size));
@@ -32,12 +32,12 @@ impl BloomEditor {
 
     /// Handle a single file watcher event.
     /// Returns true if the visual state changed (dialog shown, buffer reloaded, or dirty flag flipped).
-    pub fn handle_file_event(&mut self, event: store::traits::FileEvent) -> bool {
+    pub fn handle_file_event(&mut self, event: bloom_store::traits::FileEvent) -> bool {
         let path = match &event {
-            store::traits::FileEvent::Created(p)
-            | store::traits::FileEvent::Modified(p)
-            | store::traits::FileEvent::Deleted(p) => p.clone(),
-            store::traits::FileEvent::Renamed { to, .. } => to.clone(),
+            bloom_store::traits::FileEvent::Created(p)
+            | bloom_store::traits::FileEvent::Modified(p)
+            | bloom_store::traits::FileEvent::Deleted(p) => p.clone(),
+            bloom_store::traits::FileEvent::Renamed { to, .. } => to.clone(),
         };
         tracing::debug!(path = %path.display(), event = ?std::mem::discriminant(&event), "file event received");
         if path.extension().and_then(|e| e.to_str()) != Some("md") {
@@ -159,10 +159,10 @@ impl BloomEditor {
 
         // Write.
         if let Some(tx) = &self.autosave_tx {
-            let _ = tx.send(store::disk_writer::WriteRequest { path, content });
+            let _ = tx.send(bloom_store::disk_writer::WriteRequest { path, content });
         } else {
             // No DiskWriter (tests, pre-init). Inline atomic write.
-            if store::disk_writer::atomic_write(&path, &content).is_ok() {
+            if bloom_store::disk_writer::atomic_write(&path, &content).is_ok() {
                 if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
                     buf.mark_clean();
                 }
@@ -250,11 +250,11 @@ impl BloomEditor {
         };
         let Some(tx) = &self.autosave_tx else { return };
 
-        let store = match store::local::LocalFileStore::new(vault_root.clone()) {
+        let store = match bloom_store::local::LocalFileStore::new(vault_root.clone()) {
             Ok(s) => s,
             Err(_) => return,
         };
-        use store::traits::NoteStore;
+        use bloom_store::traits::NoteStore;
         let mut paths = store.list_pages().unwrap_or_default();
         paths.extend(store.list_journals().unwrap_or_default());
 
@@ -266,7 +266,7 @@ impl BloomEditor {
             };
             let doc = self.parser.parse(&content);
             if let Some(new_content) = block_id_gen::assign_block_ids(&content, &doc) {
-                let _ = tx.send(store::disk_writer::WriteRequest {
+                let _ = tx.send(bloom_store::disk_writer::WriteRequest {
                     path: full,
                     content: new_content,
                 });

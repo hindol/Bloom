@@ -15,7 +15,6 @@ pub mod query;
 pub mod refactor;
 pub mod render;
 pub mod session;
-pub mod store;
 pub mod template;
 pub mod timeline;
 pub mod types;
@@ -138,8 +137,8 @@ impl BufferManager {
 /// indexer). Fields are `None` until [`BloomEditor::init_vault`] sets them up.
 /// Designed for multiplexing with `crossbeam::select!`.
 pub struct EditorChannels {
-    pub write_complete_rx: Option<crossbeam::channel::Receiver<store::disk_writer::WriteComplete>>,
-    pub watcher_rx: Option<crossbeam::channel::Receiver<store::traits::FileEvent>>,
+    pub write_complete_rx: Option<crossbeam::channel::Receiver<bloom_store::disk_writer::WriteComplete>>,
+    pub watcher_rx: Option<crossbeam::channel::Receiver<bloom_store::traits::FileEvent>>,
     pub indexer_rx: Option<crossbeam::channel::Receiver<index::indexer::IndexComplete>>,
     pub history_rx: Option<crossbeam::channel::Receiver<history::HistoryComplete>>,
 }
@@ -170,7 +169,7 @@ pub struct BloomEditor {
 
     pub(crate) _timeline: timeline::Timeline,
     pub(crate) _refactorer: refactor::Refactor,
-    pub(crate) note_store: Option<store::local::LocalFileStore>,
+    pub(crate) note_store: Option<bloom_store::local::LocalFileStore>,
 
     // State
     pub(crate) picker_state: Option<ActivePicker>,
@@ -185,9 +184,9 @@ pub struct BloomEditor {
     pub(crate) which_key_visible: bool,
     pub(crate) active_theme: &'static bloom_md::theme::ThemePalette,
     // Auto-save
-    pub(crate) autosave_tx: Option<crossbeam::channel::Sender<store::disk_writer::WriteRequest>>,
+    pub(crate) autosave_tx: Option<crossbeam::channel::Sender<bloom_store::disk_writer::WriteRequest>>,
     pub(crate) write_complete_rx:
-        Option<crossbeam::channel::Receiver<store::disk_writer::WriteComplete>>,
+        Option<crossbeam::channel::Receiver<bloom_store::disk_writer::WriteComplete>>,
     pub(crate) last_write_fingerprints:
         std::collections::HashMap<std::path::PathBuf, (std::time::SystemTime, u64)>,
     pub(crate) terminal_height: u16,
@@ -199,7 +198,7 @@ pub struct BloomEditor {
     pub(crate) last_index_timing: Option<index::indexer::IndexTiming>,
     pub(crate) last_picker_queries: std::collections::HashMap<String, String>,
     // File watcher debounce
-    pub(crate) watcher_rx: Option<crossbeam::channel::Receiver<store::traits::FileEvent>>,
+    pub(crate) watcher_rx: Option<crossbeam::channel::Receiver<bloom_store::traits::FileEvent>>,
     pub(crate) pending_file_events: std::collections::HashSet<std::path::PathBuf>,
     pub(crate) file_event_deadline: Option<Instant>,
     // External file change dialog
@@ -726,6 +725,42 @@ impl BloomEditor {
     pub fn resize(&mut self, height: usize, width: usize) {
         self.terminal_height = height as u16;
         self.terminal_width = width as u16;
+    }
+
+    /// Update layout: sync viewport dimensions and ensure cursor is visible.
+    /// Call this before `render()` — it handles all state mutations that
+    /// depend on terminal size so render can be read-only.
+    pub fn update_layout(&mut self, width: u16, height: u16) {
+        let has_pending =
+            !self.leader_keys.is_empty() || !self.vim_state.pending_keys().is_empty();
+        let timeout = std::time::Duration::from_millis(self.config.which_key_timeout_ms);
+        let timed_out = self
+            .pending_since
+            .is_some_and(|since| since.elapsed() >= timeout);
+        let show_wk = has_pending && (self.which_key_visible || timed_out);
+        let wk_h: u16 = if show_wk {
+            let col_width = 24u16;
+            let cols = (width.saturating_sub(4) / col_width).max(1);
+            let entry_count = 12u16;
+            let rows_needed = entry_count.div_ceil(cols);
+            (rows_needed + 2).min(height / 3).max(3)
+        } else {
+            0
+        };
+        let pane_area_h = height.saturating_sub(wk_h);
+        let pane_rects = self.window_mgr.compute_pane_rects(width, pane_area_h);
+
+        for rect in &pane_rects {
+            if let Some(ps) = self.window_mgr.pane_state_mut(rect.pane_id) {
+                ps.viewport.height = rect.content_height as usize;
+                ps.viewport.width = rect.width as usize;
+            }
+        }
+
+        let (cursor_line, _) = self.cursor_position();
+        let scrolloff = self.config.scrolloff;
+        self.viewport_mut()
+            .ensure_visible_with_scrolloff(cursor_line, scrolloff);
     }
 
     // Buffer management

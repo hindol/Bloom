@@ -15,7 +15,6 @@ use rayon::prelude::*;
 use crate::error::BloomError;
 use crate::index::{FileFingerprint, Index, IndexEntry, RebuildStats};
 use bloom_md::parser::{self, traits::DocumentParser};
-use crate::store;
 use crate::types::*;
 
 /// Requests sent from the UI thread to the indexer thread.
@@ -251,8 +250,8 @@ fn run_full_rebuild(
 
     // Phase 1: List all files
     let t_scan = Instant::now();
-    let store = store::local::LocalFileStore::new(vault_root.to_path_buf())?;
-    use store::traits::NoteStore;
+    let store = bloom_store::local::LocalFileStore::new(vault_root.to_path_buf())?;
+    use bloom_store::traits::NoteStore;
     let mut all_paths = store.list_pages().unwrap_or_default();
     all_paths.extend(store.list_journals().unwrap_or_default());
     let files_scanned = all_paths.len();
@@ -316,8 +315,8 @@ fn run_incremental(
     // Phase 1: Scan
     let t_scan = Instant::now();
 
-    let store = store::local::LocalFileStore::new(vault_root.to_path_buf())?;
-    use store::traits::NoteStore;
+    let store = bloom_store::local::LocalFileStore::new(vault_root.to_path_buf())?;
+    use bloom_store::traits::NoteStore;
     let mut all_paths = store.list_pages().unwrap_or_default();
     all_paths.extend(store.list_journals().unwrap_or_default());
 
@@ -517,7 +516,7 @@ fn parse_paths(
             // Assign block IDs on the indexer thread if needed.
             let content = if assign_ids {
                 if let Some(new_content) = crate::block_id_gen::assign_block_ids(&content, &doc) {
-                    if crate::store::disk_writer::atomic_write(&full, &new_content).is_ok() {
+                    if bloom_store::disk_writer::atomic_write(&full, &new_content).is_ok() {
                         tracing::debug!(path = %rel_path.display(), "block IDs assigned by indexer");
                         new_content
                     } else {
