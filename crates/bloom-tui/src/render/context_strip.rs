@@ -1,76 +1,57 @@
-//! Renders the 3-line context strip for temporal navigation (journal day-hopping,
-//! page history, day activity). Appears above the status bar of the active pane.
+//! Renders the context strip as a single horizontal line for journal day-hopping.
+//! Shows:  ◄ prev day  │  ▸ current day  │  next day ►
+//! Overlays the last content line above the status bar. Auto-hides after timeout.
 
 use crate::theme::TuiTheme;
 use bloom_core::render::ContextStripFrame;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::Paragraph;
 
-/// Draw the context strip as a 3-line panel at the bottom of the pane area.
-/// The strip overlays the last 4 rows (3 content + 1 border) above the status bar.
+/// Draw the context strip as a single horizontal line above the status bar.
 pub(super) fn draw_context_strip(
     f: &mut Frame,
     pane_area: Rect,
     strip: &ContextStripFrame,
     theme: &TuiTheme,
 ) {
-    let strip_height = 5u16; // 3 content lines + top/bottom border
-    if pane_area.height < strip_height + 2 {
-        return; // Not enough room
+    if pane_area.height < 3 {
+        return;
     }
 
-    // Position the strip at the bottom of the pane area, just above the status bar.
-    // The status bar is the last row of each pane's total_height.
-    // We overlay just above it.
-    let y = pane_area.y + pane_area.height.saturating_sub(strip_height + 1);
-    let strip_rect = Rect::new(pane_area.x, y, pane_area.width, strip_height);
+    // Position: one row above the status bar (last row of pane content)
+    let y = pane_area.y + pane_area.height.saturating_sub(2);
+    let line_rect = Rect::new(pane_area.x, y, pane_area.width, 1);
 
-    let faded = Style::default().fg(theme.faded());
+    let faded = Style::default().fg(theme.faded()).bg(theme.highlight());
     let strong = Style::default()
         .fg(theme.foreground())
+        .bg(theme.highlight())
         .add_modifier(Modifier::BOLD);
-    let salient = Style::default().fg(theme.salient());
-    let bg = Style::default().bg(theme.background());
+    let salient = Style::default().fg(theme.salient()).bg(theme.highlight());
+    let sep = Style::default().fg(theme.faded()).bg(theme.highlight());
 
-    // Border
-    let block = Block::default()
-        .borders(Borders::TOP)
-        .border_style(faded)
-        .style(bg);
-    f.render_widget(block, strip_rect);
+    let mut spans: Vec<Span> = Vec::new();
+    spans.push(Span::styled(" ", faded));
 
-    let inner = Rect::new(
-        strip_rect.x + 1,
-        strip_rect.y + 1,
-        strip_rect.width.saturating_sub(2),
-        3,
-    );
-
-    // Previous day (faded)
+    // Previous day
     if let Some(prev) = &strip.prev_label {
-        let line = Line::from(Span::styled(format!("  {prev}"), faded));
-        f.render_widget(
-            Paragraph::new(line),
-            Rect::new(inner.x, inner.y, inner.width, 1),
-        );
+        spans.push(Span::styled("◄ ", faded));
+        spans.push(Span::styled(prev.as_str(), faded));
     }
 
-    // Current day (highlighted with ▸ marker)
-    let current_line = Line::from(vec![
-        Span::styled("▸ ", salient),
-        Span::styled(&strip.current_label, strong),
-    ]);
-    f.render_widget(
-        Paragraph::new(current_line).style(Style::default().bg(theme.highlight())),
-        Rect::new(inner.x, inner.y + 1, inner.width, 1),
-    );
+    spans.push(Span::styled("  │  ", sep));
 
-    // Next day (faded)
+    // Current day (highlighted)
+    spans.push(Span::styled("▸ ", salient));
+    spans.push(Span::styled(strip.current_label.as_str(), strong));
+
+    spans.push(Span::styled("  │  ", sep));
+
+    // Next day
     if let Some(next) = &strip.next_label {
-        let line = Line::from(Span::styled(format!("  {next}"), faded));
-        f.render_widget(
-            Paragraph::new(line),
-            Rect::new(inner.x, inner.y + 2, inner.width, 1),
-        );
+        spans.push(Span::styled(next.as_str(), faded));
+        spans.push(Span::styled(" ►", faded));
     }
+
+    f.render_widget(Paragraph::new(Line::from(spans)), line_rect);
 }

@@ -284,6 +284,7 @@ impl BloomEditor {
         self.open_page_with_content(&id, &title, &path, &content);
         self.last_viewed_journal_date = Some(target);
         self.in_journal_mode = true;
+        self.journal_nav_at = Some(Instant::now());
     }
 
     /// Persist a quick-capture submission to today's journal.

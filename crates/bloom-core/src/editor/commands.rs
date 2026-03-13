@@ -55,6 +55,7 @@ impl BloomEditor {
             "journal_today" => {
                 self.open_journal_today();
                 self.in_journal_mode = true;
+                self.journal_nav_at = Some(Instant::now());
                 vec![keymap::dispatch::Action::Noop]
             }
             "journal_picker" => vec![keymap::dispatch::Action::OpenPicker(

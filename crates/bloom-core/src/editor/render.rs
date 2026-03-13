@@ -659,9 +659,18 @@ impl BloomEditor {
         }
     }
 
-    /// Build context strip for journal day-hopping (3-line temporal nav panel).
+    /// Build context strip for journal day-hopping (single horizontal line).
+    /// Auto-hides 3 seconds after the last journal navigation.
     fn build_context_strip(&self) -> Option<render::ContextStripFrame> {
         if !self.in_journal_mode {
+            return None;
+        }
+        // Auto-hide after 3 seconds of no journal navigation
+        if let Some(nav_at) = self.journal_nav_at {
+            if nav_at.elapsed() > std::time::Duration::from_secs(3) {
+                return None;
+            }
+        } else {
             return None;
         }
         let journal = self.journal.as_ref()?;

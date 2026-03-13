@@ -715,6 +715,7 @@ impl BloomEditor {
                 }
                 self.last_viewed_journal_date = Some(date);
                 self.in_journal_mode = true;
+                self.journal_nav_at = Some(Instant::now());
                 vec![keymap::dispatch::Action::Noop]
             }
             _ => vec![keymap::dispatch::Action::Noop],
