@@ -301,7 +301,7 @@ Surveyed how production editors handle buffer mutation threading:
 
 4. **View refresh re-runs BQL query** (not row patch) because a mutation may change what the query returns (e.g., toggled task filtered out by `where not done`).
 
-5. **Toggle is self-undoing.** `x` on a task flips `[ ] → [x]`. `x` again flips back. No separate undo mechanism needed — the view undo stack (`Vec<ViewAction>`) was overengineering. If the user accidentally toggles, they just toggle again. Same as Vim's `~` (toggle case).
+5. **One-level undo for toggle.** After `x` toggles a task, the BQL refresh may filter it out of the view (`where not done` removes completed tasks). The user can't press `x` again on a row that's gone. Fix: the view keeps the **last toggle** as `Option<(BlockId, PageId)>`. Pressing `u` reverses it — untoggling in the source, then refreshing. Only one level deep — simple, no stack, covers the common case. After any other action (navigation, new toggle), the undo slot is overwritten.
 
 6. **Toggle is debounced.** Rapid `x` presses (multiple tasks or accidental double-tap) are collected for ~150ms, then applied in batch, then the view refreshes once. Same latency model as autosave. The user may see stale checkboxes for one frame — acceptable.
 
@@ -359,7 +359,7 @@ Systematic analysis of the settled architecture (BufferWriter struct on UI threa
 |----------|------|
 | 100 views open | Toggle → 1 HashMap lookup → ~3 matching views → 3 BQL queries ~3ms |
 | 10K blocks in event bus | 10K HashMap entries ~1ms setup. O(1) lookup per mutation. |
-| View toggle undo | Not needed — `x` is self-undoing (`[ ]→[x]→[ ]`). No undo stack. |
+| View toggle undo | One-level: `Option<(BlockId, PageId)>`. `u` reverses last toggle even if task was filtered out by BQL refresh. |
 | Toggle debounce | Batch 150ms, refresh once. Stale checkbox for one frame — acceptable. |
 
 ### Migration (Phase 1 → Phase 2)
