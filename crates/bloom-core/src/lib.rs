@@ -84,6 +84,15 @@ impl BufferSlot {
     pub fn is_read_only(&self) -> bool {
         matches!(self, BufferSlot::Frozen(_))
     }
+
+    /// Get a read-only reference to the inner Buffer (works for both Mutable and Frozen).
+    /// Used by Vim for motion computation on read-only buffers.
+    pub fn as_buffer(&self) -> &bloom_buffer::Buffer {
+        match self {
+            BufferSlot::Mutable(b) => b,
+            BufferSlot::Frozen(b) => b.as_buffer(),
+        }
+    }
 }
 
 pub struct BufferManager {

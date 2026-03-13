@@ -54,6 +54,11 @@ impl ReadOnly<Buffer> {
     pub fn thaw(self) -> Buffer {
         self.0
     }
+
+    /// Borrow the inner buffer for read-only access (e.g., Vim motion computation).
+    pub fn as_buffer(&self) -> &Buffer {
+        &self.0
+    }
 }
 
 impl Buffer {
