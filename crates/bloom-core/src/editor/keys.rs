@@ -138,8 +138,7 @@ impl BloomEditor {
         // Vim processing — works for both mutable and frozen (read-only) buffers.
         let buf_for_vim = self
             .active_page()
-            .and_then(|id| self.buffer_mgr.slot(id))
-            .map(|slot| slot.as_buffer());
+            .and_then(|id| self.buffer_mgr.get(id));
         let empty_buf = bloom_buffer::Buffer::from_text("");
         let buf = buf_for_vim.unwrap_or(&empty_buf);
         {

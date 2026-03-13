@@ -146,23 +146,21 @@ impl BufferManager {
         }
     }
 
-    /// Get an immutable reference to a mutable Buffer.
+    /// Get an immutable reference to the inner Buffer (both mutable and frozen).
     pub fn get(&self, page_id: &types::PageId) -> Option<&bloom_buffer::Buffer> {
-        self.buffers.get(&page_id.to_hex()).and_then(|(slot, _)| match slot {
-            BufferSlot::Mutable(buf) => Some(buf),
-            BufferSlot::Frozen(_) => None,
-        })
+        self.buffers
+            .get(&page_id.to_hex())
+            .map(|(slot, _)| slot.as_buffer())
     }
 
-    /// Get a Buffer with its info (mutable buffers only).
+    /// Get a Buffer with its info (both mutable and frozen).
     pub fn get_with_info(
         &self,
         page_id: &types::PageId,
     ) -> Option<(&bloom_buffer::Buffer, &BufferInfo)> {
-        self.buffers.get(&page_id.to_hex()).and_then(|(slot, info)| match slot {
-            BufferSlot::Mutable(buf) => Some((buf, info)),
-            BufferSlot::Frozen(_) => None,
-        })
+        self.buffers
+            .get(&page_id.to_hex())
+            .map(|(slot, info)| (slot.as_buffer(), info))
     }
 
     /// Get a mutable reference to a Buffer (mutable buffers only).
@@ -174,13 +172,6 @@ impl BufferManager {
     }
 
     /// Get a frozen (read-only) buffer reference.
-    pub fn get_frozen(&self, page_id: &types::PageId) -> Option<&bloom_buffer::ReadOnly<bloom_buffer::Buffer>> {
-        self.buffers.get(&page_id.to_hex()).and_then(|(slot, _)| match slot {
-            BufferSlot::Frozen(buf) => Some(buf),
-            BufferSlot::Mutable(_) => None,
-        })
-    }
-
     /// Get the BufferInfo regardless of buffer type.
     pub fn info(&self, page_id: &types::PageId) -> Option<&BufferInfo> {
         self.buffers.get(&page_id.to_hex()).map(|(_, info)| info)
@@ -244,11 +235,6 @@ impl BufferManager {
                 }
             }
         }
-    }
-
-    /// Access any buffer slot for read-only line iteration (works for both types).
-    pub fn slot(&self, page_id: &types::PageId) -> Option<&BufferSlot> {
-        self.buffers.get(&page_id.to_hex()).map(|(slot, _)| slot)
     }
 }
 
