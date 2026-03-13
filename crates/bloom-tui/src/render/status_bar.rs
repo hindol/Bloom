@@ -68,17 +68,24 @@ fn draw_normal_status(
     } else {
         theme.highlight()
     };
-    let base_style = if sb.mode_style.is_some() {
-        // Temporal mode: dark text on colored background
-        RStyle::default().fg(theme.background()).bg(bar_bg)
+
+    // Mode badge gets its own colored background; the rest of the bar uses bar_bg.
+    let mode_badge_style = if sb.mode_style.is_some() {
+        // Temporal mode: dark text on accent background
+        RStyle::default()
+            .fg(theme.background())
+            .bg(bar_bg)
+            .add_modifier(Modifier::BOLD)
     } else {
-        theme.status_bar_style(mode, true)
+        // Standard modes: use per-mode colors from theme (INSERT=green, VISUAL=popout, etc.)
+        theme.status_bar_style(mode, true).add_modifier(Modifier::BOLD)
     };
     let width = area.width as usize;
 
-    // Fill background
+    // Fill background with the neutral bar color (not the mode color)
+    let bar_style = RStyle::default().fg(theme.foreground()).bg(bar_bg);
     f.render_widget(
-        Paragraph::new(Line::from(Span::styled(" ".repeat(width), base_style))),
+        Paragraph::new(Line::from(Span::styled(" ".repeat(width), bar_style))),
         area,
     );
 
@@ -154,8 +161,7 @@ fn draw_normal_status(
     let right_width: usize = right_spans.iter().map(|s| s.content.width()).sum();
 
     // --- Build left-side spans with individual weights ---
-    // Mode badge: bold, uses the mode-specific style (already has bg color)
-    let mode_style = base_style.add_modifier(Modifier::BOLD);
+    // Mode badge: bold, colored background (only the badge, not the full bar)
     let mode_text = format!(" {} ", mode);
 
     // Separator: faded on bar bg
@@ -176,7 +182,7 @@ fn draw_normal_status(
     let title = truncate_with_ellipsis(&status.title, title_max);
 
     let mut left_spans: Vec<Span> = Vec::new();
-    left_spans.push(Span::styled(&mode_text, mode_style));
+    left_spans.push(Span::styled(&mode_text, mode_badge_style));
     left_spans.push(Span::styled(" \u{2502} ", sep_style));
     left_spans.push(Span::styled(title, title_style));
     if status.dirty {
