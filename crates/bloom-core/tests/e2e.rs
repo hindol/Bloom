@@ -518,7 +518,7 @@ fn uc04_journal_prev_next() {
     let title1 = sim.screen(80, 24).title().to_string();
 
     // SPC j p should skip to the previous day with a file (not just -1 day)
-    sim.keys("SPC j p");
+    sim.type_text("[d");
     let title2 = sim.screen(80, 24).title().to_string();
 
     // Titles should differ (skipped to a day that has a journal file)
@@ -1650,7 +1650,7 @@ fn jr05_day_hopping_skips_empty() {
     let today_title = sim.screen(80, 24).title().to_string();
 
     // Navigate back — should skip to March 5 (not yesterday)
-    sim.keys("SPC j p");
+    sim.type_text("[d");
     let prev_title = sim.screen(80, 24).title().to_string();
 
     assert_ne!(today_title, prev_title, "should navigate to a different day");
@@ -1671,10 +1671,10 @@ fn jr06_day_hopping_no_prev() {
     let title1 = sim.screen(80, 24).title().to_string();
 
     // No prior journal files exist
-    sim.keys("SPC j p");
+    sim.type_text("[d");
     let title2 = sim.screen(80, 24).title().to_string();
 
-    assert_eq!(title1, title2, "with no prior journals, SPC j p should stay");
+    assert_eq!(title1, title2, "with no prior journals, [d should stay");
 }
 
 // JR-07: JRNL mode appears after SPC j t

@@ -741,6 +741,10 @@ impl VimState {
                 VimAction::Pending
             }
             StandaloneCmd::PlayMacro(reg) => VimAction::Command(format!("play-macro:{reg}")),
+            StandaloneCmd::Bracket(ch, forward) => {
+                let dir = if forward { "]" } else { "[" };
+                VimAction::Command(format!("bracket:{dir}{ch}"))
+            }
         }
     }
 

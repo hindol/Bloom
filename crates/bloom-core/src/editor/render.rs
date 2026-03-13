@@ -211,7 +211,7 @@ impl BloomEditor {
                         None
                     },
                     right_hints: if show_jrnl {
-                        Some("↵:calendar  SPC j p/n".to_string())
+                        Some("↵:calendar  [d/]d".to_string())
                     } else {
                         None
                     },

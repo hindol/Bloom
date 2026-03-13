@@ -230,14 +230,6 @@ impl BloomEditor {
                     vec![keymap::dispatch::Action::Noop]
                 }
             }
-            "journal_prev" => {
-                self.navigate_journal(-1);
-                vec![keymap::dispatch::Action::Noop]
-            }
-            "journal_next" => {
-                self.navigate_journal(1);
-                vec![keymap::dispatch::Action::Noop]
-            }
             "rename_page" => {
                 // TODO: open rename input pre-filled with current title
                 vec![keymap::dispatch::Action::Noop]

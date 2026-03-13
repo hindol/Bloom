@@ -1137,6 +1137,26 @@ impl BloomEditor {
                 }
                 vec![keymap::dispatch::Action::Noop]
             }
+            "bracket:[d" => {
+                self.navigate_journal(-1);
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "bracket:]d" => {
+                self.navigate_journal(1);
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "bracket:[l" => {
+                // Jump to previous broken link (existing G20 feature)
+                vec![keymap::dispatch::Action::Noop] // TODO
+            }
+            "bracket:]l" => {
+                // Jump to next broken link (existing G20 feature)
+                vec![keymap::dispatch::Action::Noop] // TODO
+            }
+            _ if resolved.starts_with("bracket:") => {
+                // Unrecognized bracket command — ignore
+                vec![keymap::dispatch::Action::Noop]
+            }
             _ => self.translate_ex_command(&resolved),
         }
     }

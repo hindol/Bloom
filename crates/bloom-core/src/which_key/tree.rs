@@ -215,8 +215,6 @@ pub fn default_tree() -> WhichKeyTree {
     // Journal
     tree.register("j j", "Journal picker", "journal_picker".into());
     tree.register("j t", "Journal today", "journal_today".into());
-    tree.register("j p", "Journal previous", "journal_prev".into());
-    tree.register("j n", "Journal next", "journal_next".into());
     tree.register("j a", "Quick append", "journal_append".into());
     tree.register("j c", "Journal calendar", "journal_calendar".into());
 

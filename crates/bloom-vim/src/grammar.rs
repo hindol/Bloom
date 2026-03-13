@@ -83,6 +83,8 @@ pub enum StandaloneCmd {
     StartMacro(char),
     StopMacro,
     PlayMacro(char),
+    /// Bracket commands: `[x` / `]x` (e.g., `[d` = prev journal, `]d` = next journal)
+    Bracket(char, bool), // (suffix char, forward: true=`]x`, false=`[x`)
 }
 
 // ── count parsing ────────────────────────────────────────────────────
@@ -174,6 +176,30 @@ pub fn parse_pending(pending: &str, is_recording: bool) -> ParseResult {
             if remaining == 2 && chars[pos + 1].is_ascii_lowercase() {
                 return ParseResult::Complete(ParsedCommand::Standalone {
                     cmd: StandaloneCmd::PlayMacro(chars[pos + 1]),
+                    count: count1,
+                });
+            }
+            return ParseResult::Invalid;
+        }
+        '[' => {
+            if remaining == 1 {
+                return ParseResult::Incomplete;
+            }
+            if remaining == 2 {
+                return ParseResult::Complete(ParsedCommand::Standalone {
+                    cmd: StandaloneCmd::Bracket(chars[pos + 1], false),
+                    count: count1,
+                });
+            }
+            return ParseResult::Invalid;
+        }
+        ']' => {
+            if remaining == 1 {
+                return ParseResult::Incomplete;
+            }
+            if remaining == 2 {
+                return ParseResult::Complete(ParsedCommand::Standalone {
+                    cmd: StandaloneCmd::Bracket(chars[pos + 1], true),
                     count: count1,
                 });
             }
