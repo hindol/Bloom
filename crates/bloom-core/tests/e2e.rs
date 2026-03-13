@@ -1178,6 +1178,91 @@ fn ex_command_theme_switch() {
     assert_eq!(screen.mode(), "NORMAL");
 }
 
+// Regression: entering Command mode (:) must not hide the status bar.
+// The which-key space reservation was treating command text as "pending keys",
+// shrinking the pane area and hiding the command line behind the reserved space.
+// In Vim, the command line replaces the status bar at the bottom row.
+#[test]
+fn command_mode_status_bar_stays_at_bottom() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // Record status bar position in Normal mode
+    let normal = sim.screen(80, 24);
+    let sb_y_normal = normal
+        .frame
+        .panes
+        .iter()
+        .find(|p| p.is_active)
+        .map(|p| p.rect.y + p.rect.content_height)
+        .unwrap();
+
+    // Simulate the real trigger: user presses SPC (enters leader), waits for
+    // which-key to appear, then presses Esc to cancel, then enters `:` command mode.
+    sim.keys("SPC");
+    sim.tick(600); // which-key timeout fires → which_key_visible = true
+    sim.keys("<Esc>"); // cancel leader — clears which_key_visible
+
+    // Now enter command mode and type a command
+    sim.keys(":");
+    sim.type_text("theme");
+    sim.tick(600); // past which-key timeout — would trigger the bug
+
+    let cmd_screen = sim.screen(80, 24);
+    assert_eq!(cmd_screen.mode(), "COMMAND");
+
+    let sb_y_cmd = cmd_screen
+        .frame
+        .panes
+        .iter()
+        .find(|p| p.is_active)
+        .map(|p| p.rect.y + p.rect.content_height)
+        .unwrap();
+
+    // Status bar must stay at the same row — which-key must not steal space in Command mode
+    assert_eq!(
+        sb_y_normal, sb_y_cmd,
+        "status bar must not move in Command mode (Normal: row {}, Command: row {})",
+        sb_y_normal, sb_y_cmd
+    );
+
+    // After Tab autocomplete, it should still be at the bottom
+    sim.keys("Tab");
+    sim.tick(600);
+
+    let tab_screen = sim.screen(80, 24);
+    let sb_y_tab = tab_screen
+        .frame
+        .panes
+        .iter()
+        .find(|p| p.is_active)
+        .map(|p| p.rect.y + p.rect.content_height)
+        .unwrap();
+
+    assert_eq!(
+        sb_y_normal, sb_y_tab,
+        "status bar must not move after Tab (Normal: row {}, Tab: row {})",
+        sb_y_normal, sb_y_tab
+    );
+
+    // The command line should contain the completed text
+    if let Some(pane) = tab_screen.frame.panes.iter().find(|p| p.is_active) {
+        match &pane.status_bar.content {
+            bloom_core::render::StatusBarContent::CommandLine(cmd) => {
+                assert!(
+                    cmd.input.contains("theme"),
+                    "command line should contain 'theme' after Tab, got: '{}'",
+                    cmd.input
+                );
+            }
+            other => panic!(
+                "expected CommandLine status bar, got: {:?}",
+                std::mem::discriminant(other)
+            ),
+        }
+    }
+}
+
 // Theme picker live preview: moving selection changes theme in the frame
 #[test]
 fn theme_picker_live_preview() {

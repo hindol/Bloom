@@ -79,7 +79,10 @@ impl BloomEditor {
         // Compute pane rects from the core layout engine.
         // Reserve space for the which-key drawer only after timeout fires
         // (or if it's already visible from a previous render).
-        let has_pending = !self.leader_keys.is_empty() || !self.vim_state.pending_keys().is_empty();
+        // Never reserve space in Command mode — command completions use the inline menu instead.
+        let in_command_mode = matches!(self.vim_state.mode(), bloom_vim::Mode::Command);
+        let has_pending = !in_command_mode
+            && (!self.leader_keys.is_empty() || !self.vim_state.pending_keys().is_empty());
         let timeout = std::time::Duration::from_millis(self.config.which_key_timeout_ms);
         let timed_out = self
             .pending_since

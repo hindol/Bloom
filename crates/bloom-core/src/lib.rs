@@ -762,7 +762,11 @@ impl BloomEditor {
     /// Call this before `render()` — it handles all state mutations that
     /// depend on terminal size so render can be read-only.
     pub fn update_layout(&mut self, width: u16, height: u16) {
-        let has_pending = !self.leader_keys.is_empty() || !self.vim_state.pending_keys().is_empty();
+        // Never reserve which-key space in Command mode — command completions
+        // use the inline menu, not the which-key drawer.
+        let in_command_mode = matches!(self.vim_state.mode(), bloom_vim::Mode::Command);
+        let has_pending = !in_command_mode
+            && (!self.leader_keys.is_empty() || !self.vim_state.pending_keys().is_empty());
         let timeout = std::time::Duration::from_millis(self.config.which_key_timeout_ms);
         let timed_out = self
             .pending_since
@@ -2406,5 +2410,44 @@ mod tests {
         // Verify source is open
         let page = editor.active_page().cloned();
         assert!(page.is_some(), "source page should be open");
+    }
+
+    // Regression: Command mode must not reserve which-key drawer space.
+    // When pending_since is stale (from a prior leader sequence) and pending_keys()
+    // is non-empty (command text like "theme"), update_layout would shrink the pane
+    // area — hiding the status bar / command line behind the empty which-key space.
+    #[test]
+    fn test_command_mode_no_which_key_space() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", std::path::Path::new("[scratch]"), "hello\n");
+
+        // Baseline: full pane height in Normal mode
+        editor.update_layout(80, 24);
+        let f1 = editor.render(80, 24);
+        let baseline_ch = f1.panes[0].rect.content_height;
+
+        // Simulate a stale state: pending_since is set (from a prior SPC sequence)
+        // and which_key_visible is true (timeout had fired).
+        editor.pending_since = Some(Instant::now() - std::time::Duration::from_secs(10));
+        editor.which_key_visible = true;
+
+        // Enter Command mode with pending text
+        editor.handle_key(types::KeyEvent::char(':'));
+        for c in "theme".chars() {
+            editor.handle_key(types::KeyEvent::char(c));
+        }
+
+        // Render — this must NOT shrink the pane
+        editor.update_layout(80, 24);
+        let f2 = editor.render(80, 24);
+        let cmd_ch = f2.panes[0].rect.content_height;
+
+        assert_eq!(
+            baseline_ch, cmd_ch,
+            "Command mode must not shrink pane for which-key (baseline: {}, command: {})",
+            baseline_ch, cmd_ch
+        );
     }
 }
