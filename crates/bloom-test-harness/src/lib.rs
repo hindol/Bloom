@@ -427,6 +427,25 @@ impl TestScreen {
     pub fn theme_name(&self) -> &str {
         &self.frame.theme_name
     }
+
+    /// Whether a view overlay is visible.
+    pub fn has_view(&self) -> bool {
+        self.frame.view.is_some()
+    }
+
+    /// Get the view title if a view is open.
+    pub fn view_title(&self) -> Option<&str> {
+        self.frame.view.as_ref().map(|v| v.title.as_str())
+    }
+
+    /// Get the number of result rows in the view.
+    pub fn view_row_count(&self) -> usize {
+        self.frame
+            .view
+            .as_ref()
+            .map(|v| v.rows.len())
+            .unwrap_or(0)
+    }
 }
 
 // ---------------------------------------------------------------------------

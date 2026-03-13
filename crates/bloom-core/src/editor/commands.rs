@@ -89,7 +89,15 @@ impl BloomEditor {
                 window::Direction::Right,
             )],
             "close_window" => vec![keymap::dispatch::Action::CloseWindow],
-            "agenda" => vec![keymap::dispatch::Action::OpenAgenda],
+            "agenda" => {
+                // Use the configured Agenda view if available, otherwise open legacy agenda
+                if let Some(agenda_view) = self.config.views.iter().find(|v| v.name == "Agenda") {
+                    self.open_named_view(agenda_view.clone());
+                    vec![keymap::dispatch::Action::Noop]
+                } else {
+                    vec![keymap::dispatch::Action::OpenAgenda]
+                }
+            }
             "undo_tree" => vec![keymap::dispatch::Action::OpenUndoTree],
             "page_history" => vec![keymap::dispatch::Action::OpenPageHistory],
             "new_from_template" => vec![keymap::dispatch::Action::OpenPicker(
@@ -275,7 +283,33 @@ impl BloomEditor {
             "all_commands" => vec![keymap::dispatch::Action::OpenPicker(
                 keymap::dispatch::PickerKind::AllCommands,
             )],
-            _ => vec![keymap::dispatch::Action::Noop],
+            "view_prompt" => {
+                self.open_view_prompt();
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "view_list" => {
+                self.open_view_list();
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "view_edit" => {
+                self.edit_current_view();
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "view_delete" => {
+                self.delete_current_view();
+                vec![keymap::dispatch::Action::Noop]
+            }
+            _ => {
+                // Check for dynamic view commands from config
+                if action_id.starts_with("view_") {
+                    let view_name = &action_id[5..]; // Remove "view_" prefix
+                    if let Some(view) = self.config.views.iter().find(|v| v.name == view_name) {
+                        self.open_named_view(view.clone());
+                        return vec![keymap::dispatch::Action::Noop];
+                    }
+                }
+                vec![keymap::dispatch::Action::Noop]
+            }
         }
     }
 
@@ -337,6 +371,116 @@ impl BloomEditor {
                 // Unknown command — noop
                 vec![keymap::dispatch::Action::Noop]
             }
+        }
+    }
+
+    // View management methods
+    
+    fn open_view_prompt(&mut self) {
+        self.active_view = Some(ViewState {
+            name: "Query Prompt".to_string(),
+            query: String::new(),
+            result: None,
+            error: None,
+            selected: 0,
+            is_prompt: true,
+            query_input: String::new(),
+            query_cursor: 0,
+        });
+    }
+
+    fn open_view_list(&mut self) {
+        let items: Vec<crate::GenericPickerItem> = self
+            .config
+            .views
+            .iter()
+            .map(|v| crate::GenericPickerItem {
+                id: v.name.clone(),
+                label: v.name.clone(),
+                middle: v.key.as_ref().map(|k| format!("SPC {k}")),
+                right: Some(v.query.clone()),
+                preview_text: None,
+                score_boost: 0,
+            })
+            .collect();
+        let picker = crate::picker::Picker::new(items);
+        self.picker_state = Some(crate::ActivePicker {
+            kind: keymap::dispatch::PickerKind::AllCommands, // reuse for view selection
+            picker,
+            title: "Views".to_string(),
+            query: String::new(),
+            status_noun: "views".to_string(),
+            min_query_len: 0,
+            previous_theme: None,
+            query_selected: false,
+        });
+    }
+
+    fn edit_current_view(&mut self) {
+        // TODO: Implement view editing
+        self.notifications.push(render::Notification {
+            message: "View editing not implemented yet".to_string(),
+            level: render::NotificationLevel::Info,
+            expires_at: Some(std::time::Instant::now() + std::time::Duration::from_secs(3)),
+            created_at: std::time::Instant::now(),
+        });
+    }
+
+    fn delete_current_view(&mut self) {
+        // TODO: Implement view deletion
+        self.notifications.push(render::Notification {
+            message: "View deletion not implemented yet".to_string(),
+            level: render::NotificationLevel::Info,
+            expires_at: Some(std::time::Instant::now() + std::time::Duration::from_secs(3)),
+            created_at: std::time::Instant::now(),
+        });
+    }
+
+    fn open_named_view(&mut self, view_config: config::ViewConfig) {
+        let mut view_state = ViewState {
+            name: view_config.name.clone(),
+            query: view_config.query.clone(),
+            result: None,
+            error: None,
+            selected: 0,
+            is_prompt: false,
+            query_input: String::new(),
+            query_cursor: 0,
+        };
+        
+        // Execute the query immediately
+        self.execute_view_query(&mut view_state);
+        self.active_view = Some(view_state);
+    }
+
+    pub(crate) fn execute_view_query(&mut self, view_state: &mut ViewState) {
+        if let Some(index) = &self.index {
+            let query = if view_state.is_prompt {
+                &view_state.query_input
+            } else {
+                &view_state.query
+            };
+            
+            if query.is_empty() {
+                return;
+            }
+
+            // Get today's date for BQL queries
+            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            
+            match query::run_query(query, index.connection(), &today, None) {
+                Ok(result) => {
+                    view_state.result = Some(result);
+                    view_state.error = None;
+                    view_state.selected = 0; // Reset selection
+                }
+                Err(err) => {
+                    view_state.result = None;
+                    view_state.error = Some(err);
+                }
+            }
+        } else {
+            view_state.error = Some("Index not available".to_string());
         }
     }
 }

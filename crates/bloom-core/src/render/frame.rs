@@ -26,6 +26,7 @@ pub struct RenderFrame {
     pub date_picker: Option<DatePickerFrame>,
     pub context_strip: Option<ContextStripFrame>,
     pub dialog: Option<DialogFrame>,
+    pub view: Option<ViewFrame>,
     pub notifications: Vec<Notification>,
     pub scrolloff: usize,
     /// Active theme name — frontends resolve to a palette each frame for live preview.
@@ -479,6 +480,29 @@ pub enum WhichKeyContext {
     Leader,
     VimOperator { operator: String },
     CommandLine,
+}
+
+// ---------------------------------------------------------------------------
+// View frame (Live Views overlay)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct ViewFrame {
+    pub title: String,
+    pub query: String,
+    pub rows: Vec<ViewRow>,
+    pub selected: usize,
+    pub total: usize,
+    pub error: Option<String>,
+    pub is_prompt: bool,
+    pub query_cursor: usize,
+}
+
+#[derive(Serialize)]
+pub struct ViewRow {
+    pub cells: Vec<String>,
+    pub is_task: bool,
+    pub task_done: bool,
 }
 
 // ---------------------------------------------------------------------------

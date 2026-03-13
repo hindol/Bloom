@@ -199,6 +199,28 @@ fn key_event_to_string(event: &KeyEvent) -> String {
 /// Build the default which-key tree with all leader keybindings.
 pub fn default_tree() -> WhichKeyTree {
     let mut tree = WhichKeyTree::new();
+    build_static_tree(&mut tree);
+    tree
+}
+
+/// Build a configured which-key tree that includes dynamic view keybindings.
+pub fn configured_tree(config: &crate::config::Config) -> WhichKeyTree {
+    let mut tree = WhichKeyTree::new();
+    build_static_tree(&mut tree);
+    
+    // Register dynamic view keybindings from config
+    for view in &config.views {
+        if let Some(key) = &view.key {
+            let action_id = format!("view_{}", view.name);
+            tree.register(key, &view.name, action_id);
+        }
+    }
+    
+    tree
+}
+
+/// Build the static part of the which-key tree (all non-dynamic keybindings).
+fn build_static_tree(tree: &mut WhichKeyTree) {
 
     // Files
     tree.register("f f", "Find file", "find_page".into());
@@ -236,8 +258,14 @@ pub fn default_tree() -> WhichKeyTree {
     tree.register("t a", "Add tag", "add_tag".into());
     tree.register("t r", "Remove tag", "remove_tag".into());
 
-    // Agenda
-    tree.register("a a", "Agenda", "agenda".into());
+    // Agenda - handled via dynamic view system
+    // tree.register("a a", "Agenda", "agenda".into());
+
+    // Views
+    tree.register("v v", "Query prompt", "view_prompt".into());
+    tree.register("v l", "List views", "view_list".into());
+    tree.register("v e", "Edit view", "view_edit".into());
+    tree.register("v d", "Delete view", "view_delete".into());
 
     // Insert
     tree.register("i d", "Insert @due()", "insert_due".into());
@@ -306,8 +334,7 @@ pub fn default_tree() -> WhichKeyTree {
     tree.set_group_label("i", "insert");
     tree.set_group_label("t", "tags");
     tree.set_group_label("x", "tasks");
-
-    tree
+    tree.set_group_label("v", "views");
 }
 
 // ---------- CommandRegistry ----------

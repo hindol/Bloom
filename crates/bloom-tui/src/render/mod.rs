@@ -9,6 +9,7 @@ mod picker;
 mod status_bar;
 mod timeline;
 mod undo_tree;
+mod view;
 mod which_key;
 mod wizard;
 
@@ -94,6 +95,9 @@ pub fn draw(
     }
     if let Some(dialog) = &frame.dialog {
         dialog::draw_dialog(f, area, dialog, theme);
+    }
+    if let Some(view_frame) = &frame.view {
+        view::draw_view(f, view_frame, theme);
     }
     if !frame.notifications.is_empty() {
         notifications::draw_notifications(f, area, &frame.notifications, theme);

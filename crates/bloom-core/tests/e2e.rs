@@ -1828,3 +1828,100 @@ fn auto_align_tasks_on_esc() {
         }
     }
 }
+
+// -----------------------------------------------------------------------
+// Live Views — e2e tests
+// -----------------------------------------------------------------------
+
+// LV-01: SPC v v opens the query prompt view
+#[test]
+fn lv01_query_prompt_opens() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC v v");
+
+    let screen = sim.screen(80, 24);
+    assert!(screen.has_view(), "SPC v v should open a view overlay");
+    assert_eq!(
+        screen.view_title().unwrap_or(""),
+        "Query Prompt",
+        "query prompt should have title 'Query'"
+    );
+}
+
+// LV-02: SPC a a opens the Agenda view (default configured view)
+#[test]
+fn lv02_agenda_opens() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC a a");
+
+    let screen = sim.screen(80, 24);
+    assert!(screen.has_view(), "SPC a a should open the Agenda view");
+    assert_eq!(
+        screen.view_title().unwrap_or(""),
+        "Agenda",
+        "should be titled 'Agenda'"
+    );
+}
+
+// LV-03: View closes on Esc
+#[test]
+fn lv03_view_closes_on_esc() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC v v");
+    assert!(sim.screen(80, 24).has_view());
+
+    sim.keys("<Esc>");
+    assert!(!sim.screen(80, 24).has_view(), "Esc should close the view");
+}
+
+// LV-04: View closes on q
+#[test]
+fn lv04_view_closes_on_q() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC a a");
+    assert!(sim.screen(80, 24).has_view());
+
+    sim.keys("q");
+    assert!(!sim.screen(80, 24).has_view(), "q should close the view");
+}
+
+// LV-05: Query prompt accepts text input
+#[test]
+fn lv05_query_prompt_input() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC v v");
+    sim.type_text("tasks");
+
+    let screen = sim.screen(80, 24);
+    assert!(screen.has_view());
+    // The view should show the query text
+    if let Some(view) = &screen.frame.view {
+        assert!(
+            view.query.contains("tasks"),
+            "query should contain typed text, got: '{}'",
+            view.query
+        );
+    }
+}
+
+// LV-06: SPC v l opens the views list picker
+#[test]
+fn lv06_view_list_opens_picker() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC v l");
+
+    let screen = sim.screen(80, 24);
+    assert!(screen.has_picker(), "SPC v l should open a picker of saved views");
+}

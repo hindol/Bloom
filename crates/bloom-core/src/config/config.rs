@@ -43,6 +43,8 @@ pub struct Config {
     pub word_wrap: bool,
     #[serde(default = "default_wrap_indicator")]
     pub wrap_indicator: String,
+    #[serde(default = "default_views")]
+    pub views: Vec<ViewConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
@@ -54,6 +56,23 @@ pub enum AutoAlignMode {
     Block,
     #[serde(rename = "none")]
     None,
+}
+
+/// A named view backed by a BQL query.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ViewConfig {
+    pub name: String,
+    pub query: String,
+    /// Optional keybinding (e.g., "SPC a a"). If absent, only accessible via SPC v l.
+    pub key: Option<String>,
+}
+
+fn default_views() -> Vec<ViewConfig> {
+    vec![ViewConfig {
+        name: "Agenda".to_string(),
+        query: "tasks | where not done | sort due".to_string(),
+        key: Some("a a".to_string()),
+    }]
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -168,6 +187,7 @@ impl Config {
             scrolloff: default_scrolloff(),
             word_wrap: default_word_wrap(),
             wrap_indicator: default_wrap_indicator(),
+            views: default_views(),
         }
     }
 }

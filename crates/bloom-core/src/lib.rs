@@ -217,6 +217,8 @@ pub struct BloomEditor {
     pub(crate) inline_completion: Option<InlineCompletion>,
     // BQL query cache (invalidated on IndexComplete)
     pub(crate) query_cache: std::cell::RefCell<query::QueryCache>,
+    // Live Views state
+    pub(crate) active_view: Option<ViewState>,
     // Single-instance vault lock (held for the lifetime of the editor)
     pub(crate) vault_lock: Option<vault::lock::VaultLock>,
     // Git-backed history
@@ -224,6 +226,17 @@ pub struct BloomEditor {
     pub(crate) history_rx: Option<crossbeam::channel::Receiver<history::HistoryComplete>>,
     pub(crate) page_history_entries: Option<Vec<history::PageHistoryEntry>>,
     pub(crate) page_history_selected: usize,
+}
+
+pub(crate) struct ViewState {
+    pub(crate) name: String,
+    pub(crate) query: String,
+    pub(crate) result: Option<query::QueryResult>,
+    pub(crate) error: Option<String>,
+    pub(crate) selected: usize,
+    pub(crate) is_prompt: bool, // true for SPC v v (editable query), false for named view
+    pub(crate) query_input: String, // for prompt mode
+    pub(crate) query_cursor: usize,
 }
 
 pub(crate) struct InlineCompletion {
@@ -423,7 +436,7 @@ impl BloomEditor {
         Ok(Self {
             vim_state: bloom_vim::VimState::new(),
             window_mgr: window::WindowManager::new(),
-            which_key_tree: which_key::default_tree(),
+            which_key_tree: which_key::configured_tree(&config),
             _command_registry: which_key::default_registry(),
             index: None,
             journal: None,
@@ -468,6 +481,7 @@ impl BloomEditor {
             active_dialog: None,
             inline_completion: None,
             query_cache: std::cell::RefCell::new(query::QueryCache::new()),
+            active_view: None,
             vault_lock: None,
             history_tx: None,
             history_rx: None,

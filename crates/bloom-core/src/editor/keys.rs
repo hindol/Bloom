@@ -53,6 +53,11 @@ impl BloomEditor {
             return self.handle_quick_capture_key(&key);
         }
 
+        // If a view is active, handle view navigation
+        if self.active_view.is_some() {
+            return self.handle_view_key(&key);
+        }
+
         // If inline completion is active, intercept navigation/accept keys
         if self.inline_completion.is_some() {
             match &key.code {
@@ -1419,6 +1424,132 @@ impl BloomEditor {
                     Vec::new()
                 }
             }
+        }
+    }
+
+    pub(crate) fn handle_view_key(
+        &mut self,
+        key: &types::KeyEvent,
+    ) -> Vec<keymap::dispatch::Action> {
+        let view_state = if let Some(view_state) = &mut self.active_view {
+            view_state
+        } else {
+            return vec![keymap::dispatch::Action::Noop];
+        };
+
+        // In prompt mode, route most keys to text input — only Esc and arrow keys navigate
+        if view_state.is_prompt {
+            match &key.code {
+                types::KeyCode::Esc => {
+                    self.active_view = None;
+                    return vec![keymap::dispatch::Action::Noop];
+                }
+                types::KeyCode::Down => {
+                    if let Some(result) = &view_state.result {
+                        if let query::QueryResultKind::Rows(row_result) = &result.kind {
+                            view_state.selected = (view_state.selected + 1)
+                                .min(row_result.rows.len().saturating_sub(1));
+                        }
+                    }
+                    return vec![keymap::dispatch::Action::Noop];
+                }
+                types::KeyCode::Up => {
+                    view_state.selected = view_state.selected.saturating_sub(1);
+                    return vec![keymap::dispatch::Action::Noop];
+                }
+                _ => return self.handle_view_prompt_key(key),
+            }
+        }
+
+        // Named view mode — j/k/q navigate
+        match &key.code {
+            types::KeyCode::Esc | types::KeyCode::Char('q') => {
+                self.active_view = None;
+                vec![keymap::dispatch::Action::Noop]
+            }
+            types::KeyCode::Char('j') | types::KeyCode::Down => {
+                if let Some(result) = &view_state.result {
+                    if let query::QueryResultKind::Rows(row_result) = &result.kind {
+                        view_state.selected = (view_state.selected + 1)
+                            .min(row_result.rows.len().saturating_sub(1));
+                    }
+                }
+                vec![keymap::dispatch::Action::Noop]
+            }
+            types::KeyCode::Char('k') | types::KeyCode::Up => {
+                view_state.selected = view_state.selected.saturating_sub(1);
+                vec![keymap::dispatch::Action::Noop]
+            }
+            types::KeyCode::Enter => {
+                // TODO: jump to source
+                vec![keymap::dispatch::Action::Noop]
+            }
+            types::KeyCode::Char('x') => {
+                // TODO: toggle task
+                vec![keymap::dispatch::Action::Noop]
+            }
+            _ => vec![keymap::dispatch::Action::Noop],
+        }
+    }
+
+    fn handle_view_prompt_key(
+        &mut self,
+        key: &types::KeyEvent,
+    ) -> Vec<keymap::dispatch::Action> {
+        match &key.code {
+            types::KeyCode::Enter => {
+                // Execute query - inline to avoid borrowing issues
+                if let Some(view_state) = &mut self.active_view {
+                    if view_state.is_prompt && !view_state.query_input.is_empty() {
+                        if let Some(index) = &self.index {
+                            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+                            match query::run_query(&view_state.query_input, index.connection(), &today, None) {
+                                Ok(result) => {
+                                    view_state.result = Some(result);
+                                    view_state.error = None;
+                                    view_state.selected = 0;
+                                }
+                                Err(err) => {
+                                    view_state.result = None;
+                                    view_state.error = Some(err);
+                                }
+                            }
+                        } else {
+                            view_state.error = Some("Index not available".to_string());
+                        }
+                    }
+                }
+                vec![keymap::dispatch::Action::Noop]
+            }
+            types::KeyCode::Backspace => {
+                if let Some(view_state) = &mut self.active_view {
+                    if view_state.query_cursor > 0 {
+                        view_state.query_input.remove(view_state.query_cursor - 1);
+                        view_state.query_cursor -= 1;
+                    }
+                }
+                vec![keymap::dispatch::Action::Noop]
+            }
+            types::KeyCode::Left => {
+                if let Some(view_state) = &mut self.active_view {
+                    view_state.query_cursor = view_state.query_cursor.saturating_sub(1);
+                }
+                vec![keymap::dispatch::Action::Noop]
+            }
+            types::KeyCode::Right => {
+                if let Some(view_state) = &mut self.active_view {
+                    view_state.query_cursor = (view_state.query_cursor + 1).min(view_state.query_input.len());
+                }
+                vec![keymap::dispatch::Action::Noop]
+            }
+            types::KeyCode::Char(c) => {
+                if let Some(view_state) = &mut self.active_view {
+                    view_state.query_input.insert(view_state.query_cursor, *c);
+                    view_state.query_cursor += 1;
+                }
+                vec![keymap::dispatch::Action::Noop]
+            }
+            _ => vec![keymap::dispatch::Action::Noop],
         }
     }
 }
