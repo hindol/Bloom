@@ -1,5 +1,5 @@
 //! Renders the journal calendar overlay — a month grid with ◆ markers for days
-//! with journal entries and a preview pane for the selected day's content.
+//! with journal entries. The editor buffer behind it shows the selected day's content.
 
 use crate::theme::TuiTheme;
 use bloom_core::render::DatePickerFrame;
@@ -14,26 +14,26 @@ pub(super) fn draw_calendar(
     theme: &TuiTheme,
 ) {
     let grid_height = 10u16; // header + day-names + 6 week rows + footer
-    let grid_width = 32u16;
-
-    let has_preview = dp.preview.is_some() && area.width >= grid_width + 30;
-    let preview_width = if has_preview {
-        (area.width.saturating_sub(grid_width + 4)).min(40)
-    } else {
-        0
-    };
-    let total_width = (grid_width + preview_width + if has_preview { 1 } else { 0 }).min(area.width);
+    let grid_width = 32u16.min(area.width);
 
     if area.height < grid_height + 2 || area.width < grid_width {
         return;
     }
 
-    // Position: centered, anchored to bottom
-    let x = area.x + (area.width.saturating_sub(total_width)) / 2;
+    // Center horizontally, anchor to bottom
+    let x = area.x + (area.width.saturating_sub(grid_width)) / 2;
     let y = area.y + area.height.saturating_sub(grid_height + 1);
-    let outer_rect = Rect::new(x, y, total_width, grid_height);
+    let cal_rect = Rect::new(x, y, grid_width, grid_height);
 
-    f.render_widget(Clear, outer_rect);
+    f.render_widget(Clear, cal_rect);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.faded()))
+        .style(Style::default().bg(theme.background()));
+    f.render_widget(block, cal_rect);
+
+    let inner = Rect::new(cal_rect.x + 1, cal_rect.y + 1, cal_rect.width - 2, grid_height - 2);
 
     let faded = Style::default().fg(theme.faded()).bg(theme.background());
     let normal = Style::default().fg(theme.foreground()).bg(theme.background());
@@ -45,16 +45,6 @@ pub(super) fn draw_calendar(
         .fg(theme.background())
         .bg(theme.salient());
     let journal_marker = Style::default().fg(theme.salient()).bg(theme.background());
-
-    // --- Calendar grid (left side) ---
-    let cal_rect = Rect::new(x, y, grid_width, grid_height);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme.faded()))
-        .style(Style::default().bg(theme.background()));
-    f.render_widget(block, cal_rect);
-
-    let inner = Rect::new(cal_rect.x + 1, cal_rect.y + 1, cal_rect.width - 2, grid_height - 2);
 
     // Row 0: Month Year
     let month_name = chrono::Month::try_from(dp.month as u8)
@@ -76,8 +66,8 @@ pub(super) fn draw_calendar(
 
     // Rows 2+: Calendar grid
     let selected_day = dp.selected_date.day();
-    let is_selected_month = dp.selected_date.year() == dp.year
-        && dp.selected_date.month() == dp.month;
+    let is_selected_month =
+        dp.selected_date.year() == dp.year && dp.selected_date.month() == dp.month;
     let is_today_month = dp.today.year() == dp.year && dp.today.month() == dp.month;
     let today_day = dp.today.day();
 
@@ -129,44 +119,9 @@ pub(super) fn draw_calendar(
 
     // Footer: key hints
     let footer_y = inner.y + inner.height.saturating_sub(1);
-    let footer = format!(
-        "{} entries  [d/]d:skip  ↵:open",
-        dp.journal_days.len()
-    );
+    let footer = format!("{} entries  [d/]d:skip  ↵:open", dp.journal_days.len());
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(&footer, faded))),
         Rect::new(inner.x, footer_y, inner.width, 1),
     );
-
-    // --- Preview pane (right side) ---
-    if let (true, Some(preview)) = (has_preview, &dp.preview) {
-        let preview_x = x + grid_width;
-        let preview_rect = Rect::new(preview_x, y, preview_width + 1, grid_height);
-
-        let preview_block = Block::default()
-            .borders(Borders::ALL & !Borders::LEFT)
-            .border_style(Style::default().fg(theme.faded()))
-            .style(Style::default().bg(theme.background()));
-        f.render_widget(preview_block, preview_rect);
-
-        let preview_inner = Rect::new(
-            preview_x + 1,
-            y + 1,
-            preview_width.saturating_sub(1),
-            grid_height.saturating_sub(2),
-        );
-
-        for (i, line) in preview.lines().take(preview_inner.height as usize).enumerate() {
-            let line_y = preview_inner.y + i as u16;
-            let display = if line.len() > preview_inner.width as usize {
-                format!("{}…", &line[..preview_inner.width as usize - 1])
-            } else {
-                line.to_string()
-            };
-            f.render_widget(
-                Paragraph::new(Line::from(Span::styled(display, faded))),
-                Rect::new(preview_inner.x, line_y, preview_inner.width, 1),
-            );
-        }
-    }
 }

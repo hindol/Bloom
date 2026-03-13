@@ -108,6 +108,29 @@ impl BloomEditor {
         self.open_page_with_content(&id, "[scratch]", std::path::Path::new("[scratch]"), "");
     }
 
+    /// Open a journal date as a preview buffer during calendar navigation.
+    /// The buffer is tracked so it can be silently closed on Esc.
+    pub(crate) fn update_calendar_preview(&mut self) {
+        let date = match &self.date_picker_state {
+            Some(dp) => dp.selected_date,
+            None => return,
+        };
+        let Some(journal) = &self.journal else { return };
+        let path = journal.path_for_date(date);
+        if !path.exists() {
+            return;
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            return;
+        };
+        let title = date.format("%Y-%m-%d").to_string();
+        let id = crate::uuid::generate_hex_id();
+        self.open_page_with_content(&id, &title, &path, &content);
+        if let Some(dp) = &mut self.date_picker_state {
+            dp.preview_buffers.push(id);
+        }
+    }
+
     /// Follow the wiki-link under the cursor: `[[id|text]]` → open page by id.
     pub(crate) fn follow_link_at_cursor(&mut self) {
         let Some(page_id) = self.active_page().cloned() else {

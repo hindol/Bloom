@@ -405,6 +405,10 @@ pub(crate) struct DatePickerState {
     pub(crate) purpose: keymap::dispatch::DatePickerPurpose,
     /// Pending bracket key for [d/]d skip navigation.
     pub(crate) pending_bracket: Option<char>,
+    /// Page that was active before the calendar opened (restored on cancel).
+    pub(crate) original_page: Option<types::PageId>,
+    /// Buffers opened as previews — closed silently on Esc.
+    pub(crate) preview_buffers: Vec<types::PageId>,
 }
 
 // ---------------------------------------------------------------------------

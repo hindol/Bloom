@@ -294,11 +294,16 @@ impl BloomEditor {
                 }
                 keymap::dispatch::Action::OpenDatePicker(purpose) => {
                     let today = journal::Journal::today();
+                    let original = self.active_page().cloned();
                     self.date_picker_state = Some(DatePickerState {
                         selected_date: self.last_viewed_journal_date.unwrap_or(today),
                         purpose,
                         pending_bracket: None,
+                        original_page: original,
+                        preview_buffers: Vec::new(),
                     });
+                    // Load initial preview
+                    self.update_calendar_preview();
                 }
                 // Pass through to TUI: Quit, Save, and others
                 _ => {
@@ -605,11 +610,23 @@ impl BloomEditor {
                         if let Some(dp) = &mut self.date_picker_state {
                             dp.selected_date = date;
                         }
+                        self.update_calendar_preview();
                     }
                 }
                 return vec![keymap::dispatch::Action::Noop];
             }
-            // Not 'd' — ignore the bracket and process this key normally
+        }
+
+        // Helper: update selected date and preview
+        macro_rules! nav {
+            ($new_date:expr) => {{
+                let d = $new_date;
+                if let Some(dp) = &mut self.date_picker_state {
+                    dp.selected_date = d;
+                }
+                self.update_calendar_preview();
+                vec![keymap::dispatch::Action::Noop]
+            }};
         }
 
         match &key.code {
@@ -621,42 +638,50 @@ impl BloomEditor {
                 vec![keymap::dispatch::Action::Noop]
             }
             KeyCode::Esc | KeyCode::Char('q') => {
+                // Close all preview buffers and restore the original page
+                let original = dp.original_page.clone();
+                let previews: Vec<types::PageId> = dp.preview_buffers.clone();
                 self.date_picker_state = None;
+                for pid in &previews {
+                    self.buffer_mgr.close(pid);
+                }
+                if let Some(page_id) = original {
+                    self.set_active_page(Some(page_id));
+                }
                 vec![keymap::dispatch::Action::Noop]
             }
             // h/l: prev/next day
             KeyCode::Char('h') | KeyCode::Left => {
-                dp.selected_date = dp.selected_date - Duration::days(1);
-                vec![keymap::dispatch::Action::Noop]
+                let d = dp.selected_date - Duration::days(1);
+                nav!(d)
             }
             KeyCode::Char('l') | KeyCode::Right => {
-                dp.selected_date = dp.selected_date + Duration::days(1);
-                vec![keymap::dispatch::Action::Noop]
+                let d = dp.selected_date + Duration::days(1);
+                nav!(d)
             }
             // j/k: next/prev week
             KeyCode::Char('j') | KeyCode::Down => {
-                dp.selected_date = dp.selected_date + Duration::weeks(1);
-                vec![keymap::dispatch::Action::Noop]
+                let d = dp.selected_date + Duration::weeks(1);
+                nav!(d)
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                dp.selected_date = dp.selected_date - Duration::weeks(1);
-                vec![keymap::dispatch::Action::Noop]
+                let d = dp.selected_date - Duration::weeks(1);
+                nav!(d)
             }
             // H/L: prev/next month
             KeyCode::Char('H') => {
                 let d = dp.selected_date;
-                dp.selected_date =
-                    NaiveDate::from_ymd_opt(d.year(), d.month(), 1)
-                        .and_then(|first| first.pred_opt())
-                        .and_then(|prev_last| {
-                            NaiveDate::from_ymd_opt(
-                                prev_last.year(),
-                                prev_last.month(),
-                                d.day().min(prev_last.day()),
-                            )
-                        })
-                        .unwrap_or(d);
-                vec![keymap::dispatch::Action::Noop]
+                let target = NaiveDate::from_ymd_opt(d.year(), d.month(), 1)
+                    .and_then(|first| first.pred_opt())
+                    .and_then(|prev_last| {
+                        NaiveDate::from_ymd_opt(
+                            prev_last.year(),
+                            prev_last.month(),
+                            d.day().min(prev_last.day()),
+                        )
+                    })
+                    .unwrap_or(d);
+                nav!(target)
             }
             KeyCode::Char('L') => {
                 let d = dp.selected_date;
@@ -665,35 +690,31 @@ impl BloomEditor {
                 } else {
                     NaiveDate::from_ymd_opt(d.year(), d.month() + 1, 1)
                 };
-                dp.selected_date = next_month
+                let target = next_month
                     .and_then(|first| {
                         let last_day = (first + Duration::days(31)).with_day(1)?.pred_opt()?;
                         NaiveDate::from_ymd_opt(first.year(), first.month(), d.day().min(last_day.day()))
                     })
                     .unwrap_or(d);
-                vec![keymap::dispatch::Action::Noop]
+                nav!(target)
             }
-            // Enter: open journal for selected day (if it exists)
+            // Enter: confirm — keep current buffer, close other previews, enter JRNL mode
             KeyCode::Enter => {
                 let date = dp.selected_date;
-                let is_journal = matches!(
-                    dp.purpose,
-                    keymap::dispatch::DatePickerPurpose::JumpToJournal
-                );
+                let previews: Vec<types::PageId> = dp.preview_buffers.clone();
+                // Drop the mutable borrow before accessing self
+                let current_page = {
+                    let _ = &self.date_picker_state; // reborrow check
+                    self.active_page().cloned()
+                };
                 self.date_picker_state = None;
-                if is_journal {
-                    if let Some(journal) = &self.journal {
-                        let path = journal.path_for_date(date);
-                        if path.exists() {
-                            let title = date.format("%Y-%m-%d").to_string();
-                            let content = std::fs::read_to_string(&path).unwrap_or_default();
-                            let id = crate::uuid::generate_hex_id();
-                            self.open_page_with_content(&id, &title, &path, &content);
-                            self.last_viewed_journal_date = Some(date);
-                            self.in_journal_mode = true;
-                        }
+                for pid in &previews {
+                    if current_page.as_ref() != Some(pid) {
+                        self.buffer_mgr.close(pid);
                     }
                 }
+                self.last_viewed_journal_date = Some(date);
+                self.in_journal_mode = true;
                 vec![keymap::dispatch::Action::Noop]
             }
             _ => vec![keymap::dispatch::Action::Noop],

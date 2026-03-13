@@ -229,8 +229,6 @@ pub struct DatePickerFrame {
     /// Year and month being displayed.
     pub year: i32,
     pub month: u32,
-    /// Preview of the selected day's journal content (first few lines).
-    pub preview: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

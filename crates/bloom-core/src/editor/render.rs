@@ -739,33 +739,6 @@ impl BloomEditor {
             Vec::new()
         };
 
-        // Load preview for selected day (first ~8 non-frontmatter lines)
-        let preview = if let Some(journal) = &self.journal {
-            let path = journal.path_for_date(selected);
-            if path.exists() {
-                std::fs::read_to_string(&path).ok().map(|content| {
-                    let mut in_frontmatter = false;
-                    content
-                        .lines()
-                        .filter(|l| {
-                            if l.trim() == "---" {
-                                in_frontmatter = !in_frontmatter;
-                                return false;
-                            }
-                            !in_frontmatter
-                        })
-                        .filter(|l| !l.is_empty())
-                        .take(8)
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                })
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
         Some(render::DatePickerFrame {
             selected_date: selected,
             month_view,
@@ -774,7 +747,6 @@ impl BloomEditor {
             today,
             year,
             month,
-            preview,
         })
     }
 
