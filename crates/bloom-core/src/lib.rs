@@ -778,16 +778,14 @@ impl BloomEditor {
     /// Call this before `render()` — it handles all state mutations that
     /// depend on terminal size so render can be read-only.
     pub fn update_layout(&mut self, width: u16, height: u16) {
-        // Never reserve which-key space in Command mode — command completions
-        // use the inline menu, not the which-key drawer.
-        let in_command_mode = matches!(self.vim_state.mode(), bloom_vim::Mode::Command);
-        let has_pending = !in_command_mode
-            && (!self.leader_keys.is_empty() || !self.vim_state.pending_keys().is_empty());
+        // Reserve which-key space only for leader key sequences (SPC prefix).
+        // Vim operator pending and Command mode have their own overlays.
+        let has_leader_pending = !self.leader_keys.is_empty();
         let timeout = std::time::Duration::from_millis(self.config.which_key_timeout_ms);
         let timed_out = self
             .pending_since
             .is_some_and(|since| since.elapsed() >= timeout);
-        let show_wk = has_pending && (self.which_key_visible || timed_out);
+        let show_wk = has_leader_pending && (self.which_key_visible || timed_out);
         let wk_h: u16 = if show_wk {
             let col_width = 24u16;
             let cols = (width.saturating_sub(4) / col_width).max(1);

@@ -77,17 +77,15 @@ impl BloomEditor {
         };
 
         // Compute pane rects from the core layout engine.
-        // Reserve space for the which-key drawer only after timeout fires
-        // (or if it's already visible from a previous render).
-        // Never reserve space in Command mode — command completions use the inline menu instead.
-        let in_command_mode = matches!(self.vim_state.mode(), bloom_vim::Mode::Command);
-        let has_pending = !in_command_mode
-            && (!self.leader_keys.is_empty() || !self.vim_state.pending_keys().is_empty());
+        // Reserve space for the which-key drawer only for leader key sequences.
+        // Vim operator pending (d, c, y, [, ]) uses an overlay popup — no space needed.
+        // Command mode uses the inline menu — no space needed.
+        let has_leader_pending = !self.leader_keys.is_empty();
         let timeout = std::time::Duration::from_millis(self.config.which_key_timeout_ms);
         let timed_out = self
             .pending_since
             .is_some_and(|since| since.elapsed() >= timeout);
-        let show_wk = has_pending && (self.which_key_visible || timed_out);
+        let show_wk = has_leader_pending && (self.which_key_visible || timed_out);
 
         let wk_h = if show_wk {
             let col_width = 24u16;
