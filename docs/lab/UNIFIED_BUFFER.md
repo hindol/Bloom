@@ -276,11 +276,21 @@ Phase 1 gives us the UX (toggle works). Phase 2 gives us the architecture (singl
 
 ---
 
+## Decisions
+
+1. **Buffer owns cursors.** This eliminates a class of UI bugs where cursor position drifts out of sync with content. Every `insert`/`delete`/`replace` auto-adjusts all tracked cursors. This is an architectural invariant (see ARCHITECTURE.md). On frozen buffers, `ReadOnly::set_cursor()` is the one allowed mutation — cursor is navigation state, not content. No edits means no auto-adjustment needed, but movement still works.
+
+2. **DiskWriter stays separate.** I/O-bound (blocking disk writes) and CPU-bound (rope mutations) don't mix. Two threads, existing channel pair.
+
+3. **Event bus uses HashMap<BlockId, Vec<Sender>>** for O(1) lookup on mutation.
+
+4. **View refresh re-runs BQL query** (not row patch) because a mutation may change what the query returns (e.g., toggled task filtered out by `where not done`).
+
+---
+
 ## Open Questions
 
-1. **Cursor ownership.** Today cursors live on the Buffer. With a writer thread, cursor movement would be a message round-trip (too slow for 60fps typing). Current solution: cursor stays on ReadOnly via `set_cursor`. Better solution: cursor lives in pane state, not on the buffer.
-
-2. **Undo across views.** If the Agenda toggles a task in `tasks.md`, the undo entry is on `tasks.md`'s buffer. Can the user undo from the Agenda? Probably not — undo should be per-buffer, and the Agenda is a derived view.
+1. **Undo across views.** If the Agenda toggles a task in `tasks.md`, the undo entry is on `tasks.md`'s buffer. Can the user undo from the Agenda? Probably not — undo should be per-buffer, and the Agenda is a derived view.
 
 3. **Buffer eviction.** MCP and view toggles may load buffers for files not visible in any pane. These should be evicted after idle timeout (already spec'd at 60s in GOALS.md G17).
 
