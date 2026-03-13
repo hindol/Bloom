@@ -272,7 +272,25 @@ This is a large refactor. A gradual migration:
 
 3. **Phase 3**: Move `BufferWriter` to its own thread. UI thread sends messages via channel. Event bus becomes channel-based. `ReadOnly<Buffer>` references updated on StateChanged signal.
 
-Phase 1 gives us the UX (toggle works). Phase 2 gives us the architecture (single mutation path + event bus). Phase 3 gives us the threading (non-blocking UI).
+Phase 1 gives us the UX (toggle works). Phase 2 gives us the architecture (single mutation path + event bus). ~~Phase 3~~ Phase 3 is likely unnecessary — see Industry Practice below.
+
+---
+
+## Industry Practice: Synchronous Mutation is Fine
+
+Surveyed how production editors handle buffer mutation threading:
+
+| Editor | Model | Threading |
+|--------|-------|-----------|
+| **VS Code / Monaco** | Synchronous | Main thread. Fast enough — rope ops are µs. |
+| **Neovim** | Synchronous | Single-threaded for all buffer mutations. Async for RPC/plugins only. |
+| **Zed** | CRDT (for collab) | Local edits synchronous on main thread. CRDT for remote sync. |
+| **Xi Editor** | Async rope + message passing | Core ↔ frontend communicated via messages. **Abandoned** — complexity outweighed benefits. |
+| **Helix** | Synchronous | Main thread. No separate writer. |
+
+**Consensus:** Single-user editors don't need a separate writer thread. Rope mutations are µs — the rendering pass (ms) is always the bottleneck. The Elm *pattern* (messages → update → view) is valuable for code organization, but the *threading* aspect adds complexity without measurable latency improvement.
+
+**Conclusion:** Phase 2 (extract `BufferWriter` as a struct, synchronous on UI thread) is the sweet spot. It gives the Elm architecture's benefits (single mutation path, clear message types, testable) without Xi Editor's fate. Phase 3 is reserved for if/when we have empirical evidence of mutation latency issues (unlikely).
 
 ---
 
@@ -286,17 +304,19 @@ Phase 1 gives us the UX (toggle works). Phase 2 gives us the architecture (singl
 
 4. **View refresh re-runs BQL query** (not row patch) because a mutation may change what the query returns (e.g., toggled task filtered out by `where not done`).
 
+5. **View-level undo for toggle.** If we support `x` (toggle) from the Agenda, `u` must undo it — all or none. The Agenda keeps a `Vec<ViewAction>` where `ViewAction::Toggle { page_id, block_id, old_text }`. Pressing `u` pops and reverses. This is separate from the per-buffer undo tree — it's a view-scoped action stack with limited scope (only view-initiated mutations).
+
+6. **Synchronous mutation on UI thread (Phase 2).** The Elm pattern is for code organization, not threading. Rope ops are µs. A separate writer thread adds complexity without measurable benefit. Xi Editor's async approach was abandoned for this reason.
+
+7. **Event bus is for loose couplings only.** Direct method calls for tight couplings (mark_clean, set_cursor, begin/end_edit_group). Event bus for cross-component notifications where the producer doesn't know the consumers (block changes → views, page title changes → pickers). Rule: if you can name both producer and single consumer, use a direct call.
+
 ---
 
 ## Open Questions
 
-1. **Undo across views.** If the Agenda toggles a task in `tasks.md`, the undo entry is on `tasks.md`'s buffer. Can the user undo from the Agenda? Probably not — undo should be per-buffer, and the Agenda is a derived view.
+1. **Buffer eviction.** MCP and view toggles may load buffers for files not visible in any pane. These should be evicted after idle timeout (already spec'd at 60s in GOALS.md G17).
 
-3. **Buffer eviction.** MCP and view toggles may load buffers for files not visible in any pane. These should be evicted after idle timeout (already spec'd at 60s in GOALS.md G17).
-
-4. **Snapshot consistency.** If the writer is on a separate thread, the UI needs a consistent snapshot for rendering. Options: double-buffer (writer publishes a new snapshot, UI swaps), or reader-writer lock on the buffer collection.
-
-5. **Event bus granularity.** Block-level is the sweet spot for views. But what about the picker (needs to know when page titles change) or the status bar (needs to know when dirty flag changes)? These could be separate event types on the same bus, or separate subscription channels.
+2. **Event bus granularity.** Block-level is the sweet spot for views. Page-level for pickers (title changes). Dirty-flag changes stay as direct calls (tight coupling with save path). Do we need a unified bus or separate mechanisms?
 
 ---
 
