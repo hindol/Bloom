@@ -267,6 +267,98 @@ tasks   | where page in $journal | where not done     -- open tasks from any jou
 
 ---
 
+## Journal Scrubber — Placement Options
+
+The scrubber is a 3-line panel that appears on `[d`/`]d` navigation, showing prev/current/next journal days with stats and first task. It auto-hides after 3 seconds. Two placement options under consideration:
+
+### Option A: Separator Lines (`┄`)
+
+Dotted lines in `faded` color separate the scrubber from both content above and status bar below. Buffer background throughout — the scrubber reads as an inset within the content area.
+
+<div style="font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.5; background: #141414; color: #EBE9E7; border-radius: 6px; overflow: hidden; max-width: 680px; margin: 16px 0;">
+  <!-- Journal content -->
+  <div style="padding: 8px 16px;">
+    <div><span style="color: #EBE9E7;">- </span>Explored ropey crate for buffer model</div>
+    <div><span style="color: #EBE9E7;">- </span><span style="color: #F2DA61;">[ ]</span> Review gap buffer tradeoffs <span style="color: #A3A3A3;">@due</span><span style="color: #A3A3A3; opacity: 0.5;">(</span>03-10<span style="color: #A3A3A3; opacity: 0.5;">)</span></div>
+    <div><span style="color: #A3A3A3;">#rust #editors #data-structures</span></div>
+    <div>&nbsp;</div>
+  </div>
+  <!-- Separator -->
+  <div style="padding: 0 16px; color: #37373E; letter-spacing: 2px; font-size: 10px;">┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄</div>
+  <!-- Scrubber (3 lines, buffer background) -->
+  <div style="padding: 4px 16px;">
+    <div style="display: flex;">
+      <div style="flex: 1; color: #A3A3A3;"><span style="opacity: 0.7;">◄</span> Mar 8 Sat</div>
+      <div style="flex: 1;"><span style="color: #F4BF4F;">▸</span> <span style="color: #EBE9E7; font-weight: bold;">Mar 10 Mon</span></div>
+      <div style="flex: 1; color: #A3A3A3;">Mar 12 Wed <span style="opacity: 0.7;">►</span></div>
+    </div>
+    <div style="display: flex;">
+      <div style="flex: 1; color: #A3A3A3;">3 items · #rust</div>
+      <div style="flex: 1; color: #EBE9E7;">5 items · #rust #editors</div>
+      <div style="flex: 1; color: #A3A3A3;">2 items</div>
+    </div>
+    <div style="display: flex;">
+      <div style="flex: 1; color: #A3A3A3;"><span style="color: #A3A3A3;">[ ]</span> Review ropey</div>
+      <div style="flex: 1; color: #EBE9E7;"><span style="color: #F2DA61;">[ ]</span> Fix parser bug</div>
+      <div style="flex: 1; color: #A3A3A3;"><span style="color: #A3A3A3;">[x]</span> Read DDIA</div>
+    </div>
+  </div>
+  <!-- Separator -->
+  <div style="padding: 0 16px; color: #37373E; letter-spacing: 2px; font-size: 10px;">┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄</div>
+  <!-- Status bar -->
+  <div style="padding: 3px 16px; display: flex; justify-content: space-between; font-size: 12px;">
+    <div>
+      <span style="background: #F2DA61; color: #141414; font-weight: bold; padding: 0 4px;">JRNL</span>
+      <span style="color: #37373E;"> │ </span>
+      <span style="color: #EBE9E7;">2026-03-10</span>
+    </div>
+    <div style="color: #A3A3A3;">↵:calendar  [d/]d</div>
+  </div>
+</div>
+
+### Option B: Subtle Background Wash
+
+The scrubber uses `subtle` background (same as code blocks and picker surfaces) — the color shift creates separation without border lines. Cleaner, fewer visual elements.
+
+<div style="font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.5; background: #141414; color: #EBE9E7; border-radius: 6px; overflow: hidden; max-width: 680px; margin: 16px 0;">
+  <!-- Journal content -->
+  <div style="padding: 8px 16px;">
+    <div><span style="color: #EBE9E7;">- </span>Explored ropey crate for buffer model</div>
+    <div><span style="color: #EBE9E7;">- </span><span style="color: #F2DA61;">[ ]</span> Review gap buffer tradeoffs <span style="color: #A3A3A3;">@due</span><span style="color: #A3A3A3; opacity: 0.5;">(</span>03-10<span style="color: #A3A3A3; opacity: 0.5;">)</span></div>
+    <div><span style="color: #A3A3A3;">#rust #editors #data-structures</span></div>
+    <div>&nbsp;</div>
+  </div>
+  <!-- Scrubber (3 lines, subtle background) -->
+  <div style="padding: 4px 16px; background: #37373E;">
+    <div style="display: flex;">
+      <div style="flex: 1; color: #A3A3A3;"><span style="opacity: 0.7;">◄</span> Mar 8 Sat</div>
+      <div style="flex: 1;"><span style="color: #F4BF4F;">▸</span> <span style="color: #EBE9E7; font-weight: bold;">Mar 10 Mon</span></div>
+      <div style="flex: 1; color: #A3A3A3;">Mar 12 Wed <span style="opacity: 0.7;">►</span></div>
+    </div>
+    <div style="display: flex;">
+      <div style="flex: 1; color: #A3A3A3;">3 items · #rust</div>
+      <div style="flex: 1; color: #EBE9E7;">5 items · #rust #editors</div>
+      <div style="flex: 1; color: #A3A3A3;">2 items</div>
+    </div>
+    <div style="display: flex;">
+      <div style="flex: 1; color: #A3A3A3;"><span style="color: #A3A3A3;">[ ]</span> Review ropey</div>
+      <div style="flex: 1; color: #EBE9E7;"><span style="color: #F2DA61;">[ ]</span> Fix parser bug</div>
+      <div style="flex: 1; color: #A3A3A3;"><span style="color: #A3A3A3;">[x]</span> Read DDIA</div>
+    </div>
+  </div>
+  <!-- Status bar -->
+  <div style="background: #212228; padding: 3px 16px; display: flex; justify-content: space-between; font-size: 12px;">
+    <div>
+      <span style="background: #F2DA61; color: #141414; font-weight: bold; padding: 0 4px;">JRNL</span>
+      <span style="color: #37373E;"> │ </span>
+      <span style="color: #EBE9E7;">2026-03-10</span>
+    </div>
+    <div style="color: #A3A3A3;">↵:calendar  [d/]d</div>
+  </div>
+</div>
+
+---
+
 ## References
 
 - Current design: [GOALS.md G14](../GOALS.md) (Daily Journal)
