@@ -261,12 +261,30 @@ pub struct BloomEditor {
 pub(crate) struct ViewState {
     pub(crate) name: String,
     pub(crate) query: String,
-    pub(crate) result: Option<query::QueryResult>,
     pub(crate) error: Option<String>,
-    pub(crate) selected: usize,
-    pub(crate) is_prompt: bool, // true for SPC v v (editable query), false for named view
-    pub(crate) query_input: String, // for prompt mode
+    pub(crate) is_prompt: bool,
+    pub(crate) query_input: String,
     pub(crate) query_cursor: usize,
+    /// The read-only buffer holding rendered results.
+    pub(crate) buffer_id: Option<types::PageId>,
+    /// Maps buffer line → source location for Enter-to-source.
+    pub(crate) row_map: Vec<RowSource>,
+    /// Page that was active before the view opened.
+    pub(crate) previous_page: Option<types::PageId>,
+}
+
+#[derive(Clone)]
+pub(crate) enum RowSource {
+    /// Section header — not actionable.
+    Header,
+    /// Data row from a specific page at a specific line.
+    Source {
+        page_id: String,
+        page_title: String,
+        line: usize,
+    },
+    /// No source info available.
+    None,
 }
 
 pub(crate) struct InlineCompletion {

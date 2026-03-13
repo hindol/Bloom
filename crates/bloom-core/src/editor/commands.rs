@@ -377,15 +377,17 @@ impl BloomEditor {
     // View management methods
     
     fn open_view_prompt(&mut self) {
+        let previous_page = self.active_page().cloned();
         self.active_view = Some(ViewState {
             name: "Query Prompt".to_string(),
             query: String::new(),
-            result: None,
             error: None,
-            selected: 0,
             is_prompt: true,
             query_input: String::new(),
             query_cursor: 0,
+            buffer_id: None,
+            row_map: Vec::new(),
+            previous_page,
         });
     }
 
@@ -437,50 +439,184 @@ impl BloomEditor {
     }
 
     fn open_named_view(&mut self, view_config: config::ViewConfig) {
+        let previous_page = self.active_page().cloned();
         let mut view_state = ViewState {
             name: view_config.name.clone(),
             query: view_config.query.clone(),
-            result: None,
             error: None,
-            selected: 0,
             is_prompt: false,
             query_input: String::new(),
             query_cursor: 0,
+            buffer_id: None,
+            row_map: Vec::new(),
+            previous_page,
         };
-        
-        // Execute the query immediately
-        self.execute_view_query(&mut view_state);
+
+        self.render_view_to_buffer(&mut view_state);
         self.active_view = Some(view_state);
     }
 
-    pub(crate) fn execute_view_query(&mut self, view_state: &mut ViewState) {
-        if let Some(index) = &self.index {
-            let query = if view_state.is_prompt {
-                &view_state.query_input
-            } else {
-                &view_state.query
-            };
-            
-            if query.is_empty() {
-                return;
-            }
-
-            // Get today's date for BQL queries
-            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-            
-            match query::run_query(query, index.connection(), &today, None) {
-                Ok(result) => {
-                    view_state.result = Some(result);
-                    view_state.error = None;
-                    view_state.selected = 0; // Reset selection
-                }
-                Err(err) => {
-                    view_state.result = None;
-                    view_state.error = Some(err);
-                }
-            }
+    /// Execute the view query and render results into a read-only buffer.
+    pub(crate) fn render_view_to_buffer(&mut self, view_state: &mut ViewState) {
+        let query = if view_state.is_prompt {
+            &view_state.query_input
         } else {
-            view_state.error = Some("Index not available".to_string());
+            &view_state.query
+        };
+        if query.is_empty() {
+            return;
+        }
+
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let today_date = journal::Journal::today();
+
+        let result = if let Some(index) = &self.index {
+            query::run_query(query, index.connection(), &today, None)
+        } else {
+            Err("Index not available".to_string())
+        };
+
+        match result {
+            Ok(result) => {
+                view_state.error = None;
+                let (content, row_map) =
+                    format_view_result(&result, today_date);
+
+                let id = crate::uuid::generate_hex_id();
+                self.buffer_mgr
+                    .open_read_only(&id, &view_state.name, &content);
+                self.set_active_page(Some(id.clone()));
+                self.set_cursor(0);
+                view_state.buffer_id = Some(id);
+                view_state.row_map = row_map;
+            }
+            Err(err) => {
+                view_state.error = Some(err.clone());
+                let id = crate::uuid::generate_hex_id();
+                self.buffer_mgr
+                    .open_read_only(&id, &view_state.name, &format!("Error: {err}"));
+                self.set_active_page(Some(id.clone()));
+                view_state.buffer_id = Some(id);
+                view_state.row_map = Vec::new();
+            }
         }
     }
+}
+
+/// Format a BQL QueryResult into text content and a row map for Enter-to-source.
+fn format_view_result(
+    result: &query::QueryResult,
+    today: chrono::NaiveDate,
+) -> (String, Vec<RowSource>) {
+    let mut lines = Vec::new();
+    let mut row_map = Vec::new();
+
+    match &result.kind {
+        query::QueryResultKind::Rows(rr) => {
+            let is_tasks = matches!(result.source, query::Source::Tasks);
+            let done_col = rr.columns.iter().position(|c| c == "done");
+            let due_col = rr.columns.iter().position(|c| c == "due");
+            let text_col = rr.columns.iter().position(|c| c == "text");
+            let page_col = rr.columns.iter().position(|c| c == "page");
+            let line_col = rr.columns.iter().position(|c| c == "line");
+
+            let mut last_section: Option<String> = Option::None;
+
+            for row in &rr.rows {
+                // Insert section headers for tasks sorted by due date
+                if is_tasks {
+                    if let Some(idx) = due_col {
+                        let section = match &row.values.get(idx) {
+                            Some(query::CellValue::Text(d)) if !d.is_empty() => {
+                                match chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d") {
+                                    Ok(date) if date < today => "Overdue".to_string(),
+                                    Ok(date) if date == today => {
+                                        format!("Today · {}", today.format("%b %-d"))
+                                    }
+                                    Ok(_) => "Upcoming".to_string(),
+                                    Err(_) => "No date".to_string(),
+                                }
+                            }
+                            _ => "No date".to_string(),
+                        };
+                        if last_section.as_ref() != Some(&section) {
+                            if !lines.is_empty() {
+                                lines.push(String::new());
+                                row_map.push(RowSource::Header);
+                            }
+                            lines.push(section.clone());
+                            row_map.push(RowSource::Header);
+                            last_section = Some(section);
+                        }
+                    }
+                }
+
+                // Format the data row
+                let page_id = page_col
+                    .and_then(|i| row.values.get(i))
+                    .map(|v| v.to_string())
+                    .unwrap_or_default();
+                let page_title = page_id.clone(); // BQL returns title in page column
+                let line_num = line_col
+                    .and_then(|i| row.values.get(i))
+                    .and_then(|v| match v {
+                        query::CellValue::Int(n) => Some(*n as usize),
+                        _ => None,
+                    })
+                    .unwrap_or(0);
+
+                let text = if is_tasks {
+                    let done = done_col
+                        .and_then(|i| row.values.get(i))
+                        .map(|v| matches!(v, query::CellValue::Bool(true) | query::CellValue::Int(1)))
+                        .unwrap_or(false);
+                    let checkbox = if done { "[x]" } else { "[ ]" };
+                    let task_text = text_col
+                        .and_then(|i| row.values.get(i))
+                        .map(|v| v.to_string())
+                        .unwrap_or_default();
+                    let due = due_col
+                        .and_then(|i| row.values.get(i))
+                        .map(|v| v.to_string())
+                        .unwrap_or_default();
+                    let page_hint = if page_id.is_empty() {
+                        String::new()
+                    } else {
+                        format!("  ({})", page_id)
+                    };
+                    if due.is_empty() {
+                        format!("{checkbox} {task_text}{page_hint}")
+                    } else {
+                        format!("{checkbox} {task_text}  @due({due}){page_hint}")
+                    }
+                } else {
+                    // Generic: join all columns
+                    row.values
+                        .iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<_>>()
+                        .join("  ")
+                };
+
+                lines.push(text);
+                row_map.push(RowSource::Source {
+                    page_id: page_id.clone(),
+                    page_title,
+                    line: line_num,
+                });
+            }
+        }
+        query::QueryResultKind::Count(count) => {
+            lines.push(format!("Count: {count}"));
+            row_map.push(RowSource::None);
+        }
+        query::QueryResultKind::GroupCounts(groups) => {
+            for (group, count) in groups {
+                lines.push(format!("{group}  ({count})"));
+                row_map.push(RowSource::None);
+            }
+        }
+    }
+
+    (lines.join("\n"), row_map)
 }

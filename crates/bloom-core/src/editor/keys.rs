@@ -53,9 +53,13 @@ impl BloomEditor {
             return self.handle_quick_capture_key(&key);
         }
 
-        // If a view is active, handle view navigation
+        // If a view is active, handle q/Enter; other keys pass through to Vim
         if self.active_view.is_some() {
-            return self.handle_view_key(&key);
+            let actions = self.handle_view_key(&key);
+            if !actions.is_empty() {
+                return actions;
+            }
+            // Fall through to normal key handling (Vim navigation works on read-only buffer)
         }
 
         // If inline completion is active, intercept navigation/accept keys
@@ -1442,64 +1446,70 @@ impl BloomEditor {
         &mut self,
         key: &types::KeyEvent,
     ) -> Vec<keymap::dispatch::Action> {
-        let view_state = if let Some(view_state) = &mut self.active_view {
-            view_state
-        } else {
-            return vec![keymap::dispatch::Action::Noop];
+        let Some(view_state) = &self.active_view else {
+            return vec![];
         };
 
-        // In prompt mode, route most keys to text input — only Esc and arrow keys navigate
+        // Prompt mode: text input for query editing
         if view_state.is_prompt {
             match &key.code {
                 types::KeyCode::Esc => {
-                    self.active_view = None;
-                    return vec![keymap::dispatch::Action::Noop];
-                }
-                types::KeyCode::Down => {
-                    if let Some(result) = &view_state.result {
-                        if let query::QueryResultKind::Rows(row_result) = &result.kind {
-                            view_state.selected = (view_state.selected + 1)
-                                .min(row_result.rows.len().saturating_sub(1));
-                        }
-                    }
-                    return vec![keymap::dispatch::Action::Noop];
-                }
-                types::KeyCode::Up => {
-                    view_state.selected = view_state.selected.saturating_sub(1);
+                    self.close_active_view();
                     return vec![keymap::dispatch::Action::Noop];
                 }
                 _ => return self.handle_view_prompt_key(key),
             }
         }
 
-        // Named view mode — j/k/q navigate
+        // Named view mode: only intercept q (close) and Enter (jump to source).
+        // All other keys pass through to normal Vim on the read-only buffer.
         match &key.code {
-            types::KeyCode::Esc | types::KeyCode::Char('q') => {
-                self.active_view = None;
+            types::KeyCode::Char('q') | types::KeyCode::Esc => {
+                self.close_active_view();
                 vec![keymap::dispatch::Action::Noop]
             }
-            types::KeyCode::Char('j') | types::KeyCode::Down => {
-                if let Some(result) = &view_state.result {
-                    if let query::QueryResultKind::Rows(row_result) = &result.kind {
-                        view_state.selected = (view_state.selected + 1)
-                            .min(row_result.rows.len().saturating_sub(1));
+            types::KeyCode::Enter => {
+                let cursor_line = self.cursor_position().0;
+                let source = view_state.row_map.get(cursor_line).cloned();
+                if let Some(RowSource::Source {
+                    page_id,
+                    page_title,
+                    line,
+                    ..
+                }) = source
+                {
+                    self.close_active_view();
+                    if let Some(pid) = types::PageId::from_hex(&page_id) {
+                        if let Some(idx) = &self.index {
+                            if let Some(meta) = idx.find_page_by_id(&pid) {
+                                let full = self
+                                    .vault_root
+                                    .as_ref()
+                                    .map(|r| r.join(&meta.path))
+                                    .unwrap_or_else(|| meta.path.clone());
+                                if let Ok(content) = std::fs::read_to_string(&full) {
+                                    self.open_page_with_content(&pid, &page_title, &full, &content);
+                                    self.set_cursor(line);
+                                }
+                            }
+                        }
                     }
                 }
                 vec![keymap::dispatch::Action::Noop]
             }
-            types::KeyCode::Char('k') | types::KeyCode::Up => {
-                view_state.selected = view_state.selected.saturating_sub(1);
-                vec![keymap::dispatch::Action::Noop]
+            _ => vec![],  // Empty = pass through to normal Vim handling
+        }
+    }
+
+    /// Close the active view and restore the previous page.
+    fn close_active_view(&mut self) {
+        if let Some(vs) = self.active_view.take() {
+            if let Some(buf_id) = &vs.buffer_id {
+                self.buffer_mgr.close(buf_id);
             }
-            types::KeyCode::Enter => {
-                // TODO: jump to source
-                vec![keymap::dispatch::Action::Noop]
+            if let Some(prev) = vs.previous_page {
+                self.set_active_page(Some(prev));
             }
-            types::KeyCode::Char('x') => {
-                // TODO: toggle task
-                vec![keymap::dispatch::Action::Noop]
-            }
-            _ => vec![keymap::dispatch::Action::Noop],
         }
     }
 
@@ -1509,27 +1519,21 @@ impl BloomEditor {
     ) -> Vec<keymap::dispatch::Action> {
         match &key.code {
             types::KeyCode::Enter => {
-                // Execute query - inline to avoid borrowing issues
+                // Execute query and render to buffer
                 if let Some(view_state) = &mut self.active_view {
                     if view_state.is_prompt && !view_state.query_input.is_empty() {
-                        if let Some(index) = &self.index {
-                            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-                            match query::run_query(&view_state.query_input, index.connection(), &today, None) {
-                                Ok(result) => {
-                                    view_state.result = Some(result);
-                                    view_state.error = None;
-                                    view_state.selected = 0;
-                                }
-                                Err(err) => {
-                                    view_state.result = None;
-                                    view_state.error = Some(err);
-                                }
-                            }
-                        } else {
-                            view_state.error = Some("Index not available".to_string());
-                        }
+                        view_state.query = view_state.query_input.clone();
                     }
                 }
+                if let Some(vs) = self.active_view.as_mut() {
+                    // Close old preview buffer if any
+                    if let Some(old_id) = vs.buffer_id.take() {
+                        self.buffer_mgr.close(&old_id);
+                    }
+                }
+                let mut vs = self.active_view.take().unwrap();
+                self.render_view_to_buffer(&mut vs);
+                self.active_view = Some(vs);
                 vec![keymap::dispatch::Action::Noop]
             }
             types::KeyCode::Backspace => {
