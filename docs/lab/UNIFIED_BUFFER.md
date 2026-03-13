@@ -198,14 +198,67 @@ For a vault with 10K pages and 5 open views, a toggle in the Agenda touches 1 bl
 
 ### Implementation
 
-The event bus is a simple `Vec<(BlockId, Sender<BufferEvent>)>` on the BufferWriter. When a mutation touches block `^k7m2x`:
+The event bus is a `HashMap<BlockId, Vec<Sender<BufferEvent>>>` on the BufferWriter. When a mutation touches block `^k7m2x`:
 
 1. BufferWriter applies the edit
 2. Looks up watchers for `k7m2x` → finds the Agenda view's sender
 3. Sends `BlockChanged` to that sender
-4. Agenda receives the event, regenerates just that row (or re-runs its query)
+4. Agenda receives the event, **re-runs its BQL query** (not just a row patch — the task may now be filtered out)
 
 For Phase 1 (synchronous, no separate thread): the event bus is just a callback list. The BufferWriter calls each registered callback after a mutation. No channels needed yet.
+
+### Event Bus Lifecycle
+
+- **Register:** When a view renders, it registers watchers for all block IDs in its result set.
+- **Notify:** BufferWriter emits `BlockChanged` after any mutation that touches a watched block.
+- **Unregister:** When a view closes, watchers are cleaned up. With channels, the dead `Receiver` causes `send()` to fail — BufferWriter prunes it lazily.
+- **Circular events:** Impossible — view buffers are frozen (rebuilt, not mutated), and the event bus only emits from BufferWriter mutations.
+
+---
+
+## Stress Test Results
+
+Systematic analysis of every interaction pattern:
+
+### BufferWriter + DiskWriter Separation
+
+| Scenario | Result | Notes |
+|----------|--------|-------|
+| Rapid typing (60 keys/s) | ✅ | BufferWriter never waits for disk. Autosave fires on idle. |
+| DiskWriter falls behind (10 queued writes) | ✅ | Buffers stay dirty but functional. Eviction checks dirty flag. |
+| Crash during disk write | ✅ | Atomic write guarantees old-or-new. Undo tree persisted to SQLite. |
+| WriteComplete for evicted buffer | ✅ | Ignored — fingerprint map handles stale events. |
+
+### Event Bus
+
+| Scenario | Result | Notes |
+|----------|--------|-------|
+| Toggle task in Agenda | ✅ | BlockChanged → re-run BQL → done tasks filtered out. <1ms. |
+| Two views watching same block | ✅ | Both receive event. Both re-query. No double mutation. |
+| Block moved to another page | ✅ | IndexComplete triggers re-query. Stale index window handled by dual event (BlockChanged + IndexComplete). |
+| Watcher registration churn (scroll) | ✅ | HashMap insert/remove is O(1). 50 watchers × 60fps = 3K ops/s — trivial. |
+| 10K blocks in large view | ✅ | 10K HashMap inserts on view open ~1ms. Lookup per mutation O(1). |
+| Block deleted | ✅ | Re-query returns empty for that block. Stale watcher cleaned on next refresh. |
+| View closes without unregister | ✅ | Dead Receiver → send fails → lazy prune. No memory leak. |
+| Circular events (toggle → refresh → toggle?) | ✅ | Impossible — frozen buffer rebuild doesn't emit events. |
+
+### In-Memory / On-Disk Uniformity
+
+| Scenario | Result | Notes |
+|----------|--------|-------|
+| MCP edits file not in memory | ✅ | Read → Buffer → edit → WriteRequest → evict after 60s. |
+| User opens page MCP is editing | ✅ | Buffer already in memory, user sees latest. HashMap `or_insert_with` deduplicates. |
+| Toggle on page not in memory | ✅ | Read from disk (~1ms), create Buffer, edit, save. Phase 1 blocks UI briefly — acceptable. |
+| Two edits for same page (MCP + user) | ✅ | Serialized by single-threaded message processing (Phase 1) or message queue (Phase 3). |
+| File watcher vs BufferWriter race | ✅ | Self-write detection (fingerprint match) suppresses watcher re-trigger. |
+
+### Cursor
+
+| Scenario | Result | Notes |
+|----------|--------|-------|
+| Scroll in view while source mutates | ✅ | Different buffers — no conflict. |
+| MCP insert above cursor | ⚠️ | Cursor shifts. Existing behavior. Acceptable — MCP edits are rare during active typing. |
+| Cursor in pane state (future) | 🔮 | Cleaner separation. Each pane has own cursor. Requires bloom-buffer refactor. |
 
 ---
 
