@@ -1040,6 +1040,28 @@ impl BloomEditor {
         action: bloom_vim::VimAction,
         prev_mode: bloom_vim::Mode,
     ) -> Vec<keymap::dispatch::Action> {
+        // Read-only buffers: silently drop mutations, prevent Insert mode entry.
+        // Navigation, search, Visual mode, Command mode all pass through.
+        let is_ro = self
+            .active_page()
+            .map(|id| self.buffer_mgr.is_read_only(id))
+            .unwrap_or(false);
+        if is_ro {
+            match &action {
+                bloom_vim::VimAction::Edit(_) => {
+                    return vec![keymap::dispatch::Action::Noop];
+                }
+                bloom_vim::VimAction::ModeChange(mode)
+                    if matches!(mode, bloom_vim::Mode::Insert) =>
+                {
+                    // Revert Vim's mode back to Normal
+                    self.vim_state.force_normal_mode();
+                    return vec![keymap::dispatch::Action::Noop];
+                }
+                _ => {} // motions, other mode changes — pass through
+            }
+        }
+
         match action {
             bloom_vim::VimAction::Edit(edit) => {
                 self.pending_since = None;

@@ -130,6 +130,12 @@ impl VimState {
         }
     }
 
+    /// Force the mode back to Normal (used by read-only buffer filter).
+    pub fn force_normal_mode(&mut self) {
+        self.mode = Mode::Normal;
+        self.pending.clear();
+    }
+
     /// Get the contents of a register.
     pub fn register(&self, name: char) -> Option<&str> {
         self.registers.get(name)
