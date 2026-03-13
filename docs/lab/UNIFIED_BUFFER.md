@@ -301,7 +301,9 @@ Surveyed how production editors handle buffer mutation threading:
 
 4. **View refresh re-runs BQL query** (not row patch) because a mutation may change what the query returns (e.g., toggled task filtered out by `where not done`).
 
-5. **View-level undo for toggle.** If we support `x` (toggle) from the Agenda, `u` must undo it — all or none. The Agenda keeps a `Vec<ViewAction>` where `ViewAction::Toggle { page_id, block_id, old_text }`. Pressing `u` pops and reverses. This is separate from the per-buffer undo tree — it's a view-scoped action stack with limited scope (only view-initiated mutations).
+5. **Toggle is self-undoing.** `x` on a task flips `[ ] → [x]`. `x` again flips back. No separate undo mechanism needed — the view undo stack (`Vec<ViewAction>`) was overengineering. If the user accidentally toggles, they just toggle again. Same as Vim's `~` (toggle case).
+
+6. **Toggle is debounced.** Rapid `x` presses (multiple tasks or accidental double-tap) are collected for ~150ms, then applied in batch, then the view refreshes once. Same latency model as autosave. The user may see stale checkboxes for one frame — acceptable.
 
 6. **Synchronous mutation on UI thread (Phase 2).** The Elm pattern is for code organization, not threading. Rope ops are µs. A separate writer thread adds complexity without measurable benefit. Xi Editor's async approach was abandoned for this reason.
 
@@ -357,7 +359,8 @@ Systematic analysis of the settled architecture (BufferWriter struct on UI threa
 |----------|------|
 | 100 views open | Toggle → 1 HashMap lookup → ~3 matching views → 3 BQL queries ~3ms |
 | 10K blocks in event bus | 10K HashMap entries ~1ms setup. O(1) lookup per mutation. |
-| View-level undo (50-deep stack) | Pop + RestoreLine → same as toggle. Block ID survives line moves. |
+| View toggle undo | Not needed — `x` is self-undoing (`[ ]→[x]→[ ]`). No undo stack. |
+| Toggle debounce | Batch 150ms, refresh once. Stale checkbox for one frame — acceptable. |
 
 ### Migration (Phase 1 → Phase 2)
 
