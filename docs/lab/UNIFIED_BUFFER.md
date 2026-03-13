@@ -317,6 +317,62 @@ Surveyed how production editors handle buffer mutation threading:
 
 ---
 
+## Final Stress Test
+
+Systematic analysis of the settled architecture (BufferWriter struct on UI thread, block-level event bus, DiskWriter on separate thread):
+
+### Hot Path: Typing
+
+| Step | Latency |
+|------|---------|
+| `writer.apply(EditRequest)` overhead vs direct mutation | ~0 (one match arm, no allocation) |
+| `buf.insert()` | µs |
+| `render()` | ms |
+| **Total per keystroke** | **~1-2ms** (16ms frame budget, 14ms headroom) |
+
+### View Toggle (x in Agenda)
+
+| Step | Latency |
+|------|---------|
+| Index lookup for block_id | µs (SQLite) |
+| Buffer mutation (in-memory) | µs |
+| Buffer mutation (disk read) | ~1ms |
+| Event bus → Agenda callback | µs |
+| BQL re-query | <1ms (SQLite FTS) |
+| Frozen buffer rebuild | µs |
+| **Total** | **~2ms (in-memory) / ~3ms (disk read)** |
+
+### Concurrency
+
+| Scenario | Result |
+|----------|--------|
+| MCP + user edit same page | Serialized — single-threaded. No race. |
+| File watcher during toggle | Self-write fingerprint → dropped. No double-toggle. |
+| Syncthing + our save race | Existing auto-merge handles it. Same as today. |
+| Stale index after toggle | <300ms staleness window. IndexComplete triggers refresh. |
+
+### Scale
+
+| Scenario | Cost |
+|----------|------|
+| 100 views open | Toggle → 1 HashMap lookup → ~3 matching views → 3 BQL queries ~3ms |
+| 10K blocks in event bus | 10K HashMap entries ~1ms setup. O(1) lookup per mutation. |
+| View-level undo (50-deep stack) | Pop + RestoreLine → same as toggle. Block ID survives line moves. |
+
+### Migration (Phase 1 → Phase 2)
+
+| Change | Scope |
+|--------|-------|
+| `get_mut()` + mutation → `writer.apply()` | ~15 call sites |
+| Read path (`get()`, `text()`, `cursor()`) | Unchanged |
+| `set_cursor()` | Unchanged (stays on buffer) |
+| Save path | Moves into writer (dirty flag → WriteRequest) |
+| **Breaking changes** | **Mechanical refactor — no logic changes** |
+
+**Verdict: No issues found.** Architecture is simple, fast, correct, and migratable.
+
+---
+
 ## References
 
 - [ARCHITECTURE.md](../ARCHITECTURE.md) — current threading model
