@@ -62,10 +62,10 @@ impl ReadOnly<Buffer> {
         &self.0
     }
 
-    /// Borrow the inner buffer mutably — for cursor movement on frozen buffers.
-    /// Cursor position is a viewport concern, not a content mutation.
-    pub fn as_buffer_mut(&mut self) -> &mut Buffer {
-        &mut self.0
+    /// Access inner buffer mutably for cursor positioning.
+    /// Cursor is a viewport concern — not a content mutation.
+    pub fn set_cursor(&mut self, idx: usize, pos: usize) {
+        self.0.set_cursor(idx, pos);
     }
 }
 

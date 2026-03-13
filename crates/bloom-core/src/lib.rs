@@ -86,11 +86,18 @@ impl BufferSlot {
     }
 
     /// Get a read-only reference to the inner Buffer (works for both Mutable and Frozen).
-    /// Used by Vim for motion computation on read-only buffers.
     pub fn as_buffer(&self) -> &bloom_buffer::Buffer {
         match self {
             BufferSlot::Mutable(b) => b,
             BufferSlot::Frozen(b) => b.as_buffer(),
+        }
+    }
+
+    /// Set cursor position. Cursor is a viewport concern, allowed on both slot types.
+    pub fn set_cursor(&mut self, idx: usize, pos: usize) {
+        match self {
+            BufferSlot::Mutable(b) => b.set_cursor(idx, pos),
+            BufferSlot::Frozen(b) => b.set_cursor(idx, pos),
         }
     }
 }
@@ -241,10 +248,7 @@ impl BufferManager {
     /// Cursor movement is a viewport concern, not a content mutation.
     pub fn set_cursor(&mut self, page_id: &types::PageId, pos: usize) {
         if let Some((slot, _)) = self.buffers.get_mut(&page_id.to_hex()) {
-            match slot {
-                BufferSlot::Mutable(buf) => buf.set_cursor(0, pos),
-                BufferSlot::Frozen(ro) => ro.as_buffer_mut().set_cursor(0, pos),
-            }
+            slot.set_cursor(0, pos);
         }
     }
 }
