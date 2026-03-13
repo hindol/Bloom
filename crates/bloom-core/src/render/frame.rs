@@ -490,6 +490,8 @@ pub enum WhichKeyContext {
 pub struct ViewFrame {
     pub title: String,
     pub query: String,
+    /// Column headers (from BQL result columns).
+    pub columns: Vec<String>,
     pub rows: Vec<ViewRow>,
     pub selected: usize,
     pub total: usize,
@@ -499,10 +501,15 @@ pub struct ViewFrame {
 }
 
 #[derive(Serialize)]
-pub struct ViewRow {
-    pub cells: Vec<String>,
-    pub is_task: bool,
-    pub task_done: bool,
+pub enum ViewRow {
+    /// A section header (from `group` clause).
+    SectionHeader(String),
+    /// A data row with cell values.
+    Data {
+        cells: Vec<String>,
+        is_task: bool,
+        task_done: bool,
+    },
 }
 
 // ---------------------------------------------------------------------------

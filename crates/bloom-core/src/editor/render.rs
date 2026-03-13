@@ -1034,7 +1034,8 @@ impl BloomEditor {
 
     fn build_view_frame(&self) -> Option<render::ViewFrame> {
         let view_state = self.active_view.as_ref()?;
-        
+
+        let mut columns = Vec::new();
         let mut rows = Vec::new();
         let mut total = 0;
         let error = view_state.error.clone();
@@ -1042,33 +1043,29 @@ impl BloomEditor {
         if let Some(result) = &view_state.result {
             match &result.kind {
                 query::QueryResultKind::Rows(row_result) => {
+                    columns = row_result.columns.clone();
                     total = row_result.rows.len();
-                    
+                    let is_tasks = matches!(result.source, query::Source::Tasks);
+                    let done_col = if is_tasks {
+                        row_result.columns.iter().position(|c| c == "done")
+                    } else {
+                        None
+                    };
+
                     for row in &row_result.rows {
-                        let cells: Vec<String> = row.values.iter().map(|v| v.to_string()).collect();
-                        
-                        // Determine if this is a task row based on source type and column content
-                        let (is_task, task_done) = if matches!(result.source, query::Source::Tasks) {
-                            // For tasks source, check 'done' column (usually at index 3)
-                            let done = if row_result.columns.len() > 3 {
-                                if let Some(done_col_idx) = row_result.columns.iter().position(|c| c == "done") {
-                                    match &row.values.get(done_col_idx) {
-                                        Some(query::CellValue::Bool(done)) => *done,
-                                        Some(query::CellValue::Int(done)) => *done != 0,
-                                        _ => false,
-                                    }
-                                } else {
-                                    false
-                                }
-                            } else {
-                                false
+                        let cells: Vec<String> =
+                            row.values.iter().map(|v| v.to_string()).collect();
+                        let (is_task, task_done) = if let Some(idx) = done_col {
+                            let done = match row.values.get(idx) {
+                                Some(query::CellValue::Bool(d)) => *d,
+                                Some(query::CellValue::Int(d)) => *d != 0,
+                                _ => false,
                             };
                             (true, done)
                         } else {
                             (false, false)
                         };
-
-                        rows.push(render::ViewRow {
+                        rows.push(render::ViewRow::Data {
                             cells,
                             is_task,
                             task_done,
@@ -1076,20 +1073,19 @@ impl BloomEditor {
                     }
                 }
                 query::QueryResultKind::Count(count) => {
-                    rows.push(render::ViewRow {
-                        cells: vec![format!("Count: {}", count)],
+                    rows.push(render::ViewRow::Data {
+                        cells: vec![format!("Count: {count}")],
                         is_task: false,
                         task_done: false,
                     });
                     total = 1;
                 }
                 query::QueryResultKind::GroupCounts(groups) => {
+                    columns = vec!["Group".to_string(), "Count".to_string()];
                     for (group, count) in groups {
-                        rows.push(render::ViewRow {
-                            cells: vec![group.clone(), count.to_string()],
-                            is_task: false,
-                            task_done: false,
-                        });
+                        rows.push(render::ViewRow::SectionHeader(format!(
+                            "{group}  ({count})"
+                        )));
                     }
                     total = groups.len();
                 }
@@ -1103,6 +1099,7 @@ impl BloomEditor {
             } else {
                 view_state.query.clone()
             },
+            columns,
             rows,
             selected: view_state.selected,
             total,
