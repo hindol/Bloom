@@ -574,7 +574,7 @@ fn uc12_close_buffer() {
     assert!(sim.screen(80, 24).title().len() > 0);
 
     // SPC b d closes buffer
-    sim.keys("SPC b d");
+    sim.keys("SPC b k");
 
     // After close, a new buffer should be open (journal or scratch)
     let screen = sim.screen(80, 24);
@@ -1862,19 +1862,17 @@ fn lv02_agenda_opens() {
     assert_eq!(screen.title(), "Agenda", "should show Agenda buffer");
 }
 
-// LV-03: View closes via :q (like any buffer)
+// LV-03: View closes via SPC b k (kill buffer, Doom Emacs style)
 #[test]
-fn lv03_view_closes_on_quit() {
+fn lv03_view_closes_on_kill() {
     let vault = TestVault::new().page("Test").build();
     let mut sim = SimInput::with_vault(vault);
 
     sim.keys("SPC a a");
     assert_eq!(sim.screen(80, 24).title(), "Agenda");
 
-    sim.keys(":");
-    sim.type_text("q");
-    sim.keys("Enter");
-    assert_ne!(sim.screen(80, 24).title(), "Agenda", ":q should close the view buffer");
+    sim.keys("SPC b k");
+    assert_ne!(sim.screen(80, 24).title(), "Agenda", "SPC b k should kill the view buffer");
 }
 
 // LV-04: View closes via SPC b d (like any buffer)
@@ -1886,8 +1884,8 @@ fn lv04_view_closes_on_bd() {
     sim.keys("SPC a a");
     assert_eq!(sim.screen(80, 24).title(), "Agenda");
 
-    sim.keys("SPC b d");
-    assert_ne!(sim.screen(80, 24).title(), "Agenda", "SPC b d should close the view buffer");
+    sim.keys("SPC b k");
+    assert_ne!(sim.screen(80, 24).title(), "Agenda", "SPC b k should close the view buffer");
 }
 
 // LV-05: SPC v l opens the views list picker
@@ -1924,34 +1922,21 @@ fn ex_q_single_buffer_quits() {
     assert_ne!(screen.mode(), "COMMAND");
 }
 
-// :q with multiple buffers closes current buffer
+// :q with multiple panes closes the current pane (Vim semantics)
 #[test]
-fn ex_q_multi_buffer_closes() {
-    let vault = TestVault::new()
-        .page("Page A")
-        .page("Page B")
-        .build();
+fn ex_q_multi_pane_closes_pane() {
+    let vault = TestVault::new().page("Test").build();
     let mut sim = SimInput::with_vault(vault);
 
-    // Open Page A
-    sim.keys("SPC p p");
-    sim.keys("Enter");
-    let title_before = sim.screen(80, 24).title().to_string();
+    // Create a vertical split (2 panes)
+    sim.keys("SPC w v");
+    assert_eq!(sim.screen(80, 24).pane_count(), 2);
 
-    // Open Page B in the same pane
-    sim.keys("SPC p p");
-    // Move to second result and select
-    sim.keys("C-n");
-    sim.keys("Enter");
-    let title_b = sim.screen(80, 24).title().to_string();
-    assert_ne!(title_before, title_b, "should have switched to a different page");
-
-    // :q should close Page B and show Page A
+    // :q closes the current pane
     sim.keys(":");
     sim.type_text("q");
     sim.keys("Enter");
-    let after = sim.screen(80, 24);
-    assert_ne!(after.title(), title_b, ":q should close the current buffer");
+    assert_eq!(sim.screen(80, 24).pane_count(), 1, ":q should close the pane");
 }
 
 // :qa always quits regardless of buffer count
@@ -1987,8 +1972,8 @@ fn spc_bd_closes_buffer() {
     let title = sim.screen(80, 24).title().to_string();
 
     // SPC b d closes current
-    sim.keys("SPC b d");
-    assert_ne!(sim.screen(80, 24).title(), title, "SPC b d should close the buffer");
+    sim.keys("SPC b k");
+    assert_ne!(sim.screen(80, 24).title(), title, "SPC b k should close the buffer");
 }
 
 // View buffer navigation works (j/k)

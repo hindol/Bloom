@@ -232,7 +232,7 @@ fn build_static_tree(tree: &mut WhichKeyTree) {
 
     // Buffers
     tree.register("b b", "Switch buffer", "switch_buffer".into());
-    tree.register("b d", "Close buffer", "close_buffer".into());
+    tree.register("b k", "Kill buffer", "close_buffer".into());
 
     // Journal
     tree.register("j j", "Journal picker", "journal_picker".into());

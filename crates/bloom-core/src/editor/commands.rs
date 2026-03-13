@@ -330,41 +330,31 @@ impl BloomEditor {
             return vec![keymap::dispatch::Action::Noop];
         }
         match trimmed {
-            "q" | "quit" => {
-                // Like Vim: close buffer. If last buffer, quit the app.
-                if self.buffer_mgr.open_buffers().len() <= 1 {
+            "q" | "quit" | "q!" | "quit!" => {
+                // Vim semantics: close current pane. If last pane, quit app.
+                if self.window_mgr.pane_count() <= 1 {
                     vec![keymap::dispatch::Action::Quit]
                 } else {
-                    self.close_active_buffer();
-                    vec![keymap::dispatch::Action::Noop]
-                }
-            }
-            "q!" | "quit!" => {
-                if self.buffer_mgr.open_buffers().len() <= 1 {
-                    vec![keymap::dispatch::Action::Quit]
-                } else {
-                    self.close_active_buffer();
+                    let pane = self.window_mgr.active_pane();
+                    self.window_mgr.close(pane);
                     vec![keymap::dispatch::Action::Noop]
                 }
             }
             "qa" | "qa!" | "quitall" => vec![keymap::dispatch::Action::Quit],
             "w" | "write" => vec![keymap::dispatch::Action::Save],
-            "wq" | "x" => {
-                if self.buffer_mgr.open_buffers().len() <= 1 {
+            "wq" | "x" | "wq!" | "x!" => {
+                let _ = self.save_current();
+                if self.window_mgr.pane_count() <= 1 {
                     vec![
                         keymap::dispatch::Action::Save,
                         keymap::dispatch::Action::Quit,
                     ]
                 } else {
-                    let _ = self.save_current();
-                    self.close_active_buffer();
+                    let pane = self.window_mgr.active_pane();
+                    self.window_mgr.close(pane);
                     vec![keymap::dispatch::Action::Noop]
                 }
-            }
-            "wq!" | "x!" => vec![
-                keymap::dispatch::Action::Save,
-                keymap::dispatch::Action::Quit,
-            ],
+            },
             "e" | "edit" => vec![keymap::dispatch::Action::OpenPicker(
                 keymap::dispatch::PickerKind::FindPage,
             )],
