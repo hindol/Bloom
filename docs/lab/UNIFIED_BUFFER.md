@@ -308,15 +308,15 @@ Surveyed how production editors handle buffer mutation threading:
 
 6. **Synchronous mutation on UI thread (Phase 2).** The Elm pattern is for code organization, not threading. Rope ops are µs. A separate writer thread adds complexity without measurable benefit. Xi Editor's async approach was abandoned for this reason.
 
-7. **Event bus is for loose couplings only.** Direct method calls for tight couplings (mark_clean, set_cursor, begin/end_edit_group). Event bus for cross-component notifications where the producer doesn't know the consumers (block changes → views, page title changes → pickers). Rule: if you can name both producer and single consumer, use a direct call.
+7. **Direct calls for tight couplings, event bus for loose.** `mark_clean`, `set_cursor`, `begin/end_edit_group` — direct calls (one producer, one consumer). Block changes → views — event bus (one producer, N unknown consumers).
+
+8. **Event bus is block-level only.** Pickers use snapshots — they're ephemeral (open, pick, close) so stale titles are fine. The user expects this. No page-level subscriptions needed. The event bus serves only long-lived views that watch specific blocks. One event type (`BlockChanged`), one subscriber type (views).
 
 ---
 
 ## Open Questions
 
 1. **Buffer eviction.** MCP and view toggles may load buffers for files not visible in any pane. These should be evicted after idle timeout (already spec'd at 60s in GOALS.md G17).
-
-2. **Event bus granularity.** Block-level is the sweet spot for views. Page-level for pickers (title changes). Dirty-flag changes stay as direct calls (tight coupling with save path). Do we need a unified bus or separate mechanisms?
 
 ---
 
