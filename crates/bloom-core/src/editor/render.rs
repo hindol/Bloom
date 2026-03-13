@@ -669,22 +669,69 @@ impl BloomEditor {
         let store = self.note_store.as_ref()?;
         let current = self.last_viewed_journal_date?;
 
-        let fmt_date = |d: chrono::NaiveDate| -> String {
-            format!(
-                "◆ {} {}",
-                d.format("%b %-d"),
-                d.format("%a"),
-            )
+        let build_day = |d: chrono::NaiveDate| -> render::ContextStripDay {
+            let label = format!("{} {}", d.format("%b %-d"), d.format("%a"));
+            let path = journal.path_for_date(d);
+            let (stats, first_line) = if path.exists() {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    let mut in_fm = false;
+                    let body_lines: Vec<&str> = content
+                        .lines()
+                        .filter(|l| {
+                            if l.trim() == "---" {
+                                in_fm = !in_fm;
+                                return false;
+                            }
+                            !in_fm
+                        })
+                        .filter(|l| !l.is_empty())
+                        .collect();
+
+                    let item_count = body_lines.len();
+                    let tags: Vec<&str> = body_lines
+                        .iter()
+                        .flat_map(|l| l.split_whitespace())
+                        .filter(|w| w.starts_with('#') && w.len() > 1)
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .into_iter()
+                        .take(3)
+                        .collect();
+                    let tag_str = if tags.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" · {}", tags.join(" "))
+                    };
+                    let stats = format!("{item_count} items{tag_str}");
+
+                    // First unchecked task, or first body line
+                    let first = body_lines
+                        .iter()
+                        .find(|l| l.contains("- [ ] "))
+                        .or(body_lines.first())
+                        .map(|l| l.trim().to_string())
+                        .unwrap_or_default();
+
+                    (stats, first)
+                } else {
+                    ("—".to_string(), String::new())
+                }
+            } else {
+                ("no entries".to_string(), String::new())
+            };
+            render::ContextStripDay {
+                label,
+                stats,
+                first_line,
+            }
         };
 
         let prev = journal.prev_date(current, store);
         let next = journal.next_date(current, store);
 
         Some(render::ContextStripFrame {
-            prev_label: prev.map(&fmt_date),
-            current_label: fmt_date(current),
-            next_label: next.map(&fmt_date),
-            has_content: true,
+            prev: prev.map(&build_day),
+            current: build_day(current),
+            next: next.map(&build_day),
         })
     }
 

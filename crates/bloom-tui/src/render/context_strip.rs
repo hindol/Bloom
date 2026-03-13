@@ -1,26 +1,30 @@
-//! Renders the context strip as a single horizontal line for journal day-hopping.
-//! Shows:  ◄ prev day  │  ▸ current day  │  next day ►
-//! Overlays the last content line above the status bar. Auto-hides after timeout.
+//! Renders the journal scrubber as a 3-line, full-width panel above the status bar.
+//!
+//! ```text
+//!   ◄ Mar 8 Sat         ▸ Mar 10 Mon                    Mar 12 Wed ►
+//!   3 items · #rust       5 items · #rust #editors        2 items
+//!   [ ] Review ropey      [ ] Fix parser bug             [x] Read DDIA
+//! ```
 
 use crate::theme::TuiTheme;
 use bloom_core::render::ContextStripFrame;
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 
-/// Draw the context strip as a single horizontal line above the status bar.
 pub(super) fn draw_context_strip(
     f: &mut Frame,
     pane_area: Rect,
     strip: &ContextStripFrame,
     theme: &TuiTheme,
 ) {
-    if pane_area.height < 3 {
+    let strip_h = 3u16;
+    if pane_area.height < strip_h + 2 {
         return;
     }
 
-    // Position: one row above the status bar (last row of pane content)
-    let y = pane_area.y + pane_area.height.saturating_sub(2);
-    let line_rect = Rect::new(pane_area.x, y, pane_area.width, 1);
+    let y = pane_area.y + pane_area.height.saturating_sub(strip_h + 1);
+    let w = pane_area.width;
+    let col_w = (w / 3) as usize;
 
     let faded = Style::default().fg(theme.faded()).bg(theme.highlight());
     let strong = Style::default()
@@ -28,30 +32,127 @@ pub(super) fn draw_context_strip(
         .bg(theme.highlight())
         .add_modifier(Modifier::BOLD);
     let salient = Style::default().fg(theme.salient()).bg(theme.highlight());
-    let sep = Style::default().fg(theme.faded()).bg(theme.highlight());
+    let bg = Style::default().bg(theme.highlight());
 
-    let mut spans: Vec<Span> = Vec::new();
-    spans.push(Span::styled(" ", faded));
-
-    // Previous day
-    if let Some(prev) = &strip.prev_label {
-        spans.push(Span::styled("◄ ", faded));
-        spans.push(Span::styled(prev.as_str(), faded));
+    // Fill 3-line background
+    for row in 0..strip_h {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                " ".repeat(w as usize),
+                bg,
+            ))),
+            Rect::new(pane_area.x, y + row, w, 1),
+        );
     }
 
-    spans.push(Span::styled("  │  ", sep));
-
-    // Current day (highlighted)
-    spans.push(Span::styled("▸ ", salient));
-    spans.push(Span::styled(strip.current_label.as_str(), strong));
-
-    spans.push(Span::styled("  │  ", sep));
-
-    // Next day
-    if let Some(next) = &strip.next_label {
-        spans.push(Span::styled(next.as_str(), faded));
-        spans.push(Span::styled(" ►", faded));
+    // --- Row 0: Date labels ---
+    let mut row0: Vec<Span> = Vec::new();
+    row0.push(Span::styled(" ", bg));
+    // Prev
+    if let Some(prev) = &strip.prev {
+        row0.push(Span::styled("◄ ", faded));
+        row0.push(Span::styled(
+            pad_to(&prev.label, col_w.saturating_sub(4)),
+            faded,
+        ));
+    } else {
+        row0.push(Span::styled(pad_to("", col_w.saturating_sub(1)), bg));
     }
+    // Current
+    row0.push(Span::styled("▸ ", salient));
+    row0.push(Span::styled(
+        pad_to(&strip.current.label, col_w.saturating_sub(3)),
+        strong,
+    ));
+    // Next
+    if let Some(next) = &strip.next {
+        row0.push(Span::styled(
+            pad_to(&next.label, col_w.saturating_sub(3)),
+            faded,
+        ));
+        row0.push(Span::styled("►", faded));
+    }
+    f.render_widget(
+        Paragraph::new(Line::from(row0)),
+        Rect::new(pane_area.x, y, w, 1),
+    );
 
-    f.render_widget(Paragraph::new(Line::from(spans)), line_rect);
+    // --- Row 1: Stats ---
+    let mut row1: Vec<Span> = Vec::new();
+    row1.push(Span::styled(" ", bg));
+    if let Some(prev) = &strip.prev {
+        row1.push(Span::styled(pad_to(&prev.stats, col_w.saturating_sub(1)), faded));
+    } else {
+        row1.push(Span::styled(pad_to("", col_w.saturating_sub(1)), bg));
+    }
+    row1.push(Span::styled(
+        pad_to(&strip.current.stats, col_w.saturating_sub(1)),
+        Style::default().fg(theme.foreground()).bg(theme.highlight()),
+    ));
+    if let Some(next) = &strip.next {
+        row1.push(Span::styled(pad_to(&next.stats, col_w.saturating_sub(1)), faded));
+    }
+    f.render_widget(
+        Paragraph::new(Line::from(row1)),
+        Rect::new(pane_area.x, y + 1, w, 1),
+    );
+
+    // --- Row 2: First task/line ---
+    let mut row2: Vec<Span> = Vec::new();
+    row2.push(Span::styled(" ", bg));
+    if let Some(prev) = &strip.prev {
+        row2.push(Span::styled(
+            pad_to(&truncate(&prev.first_line, col_w.saturating_sub(2)), col_w.saturating_sub(1)),
+            faded,
+        ));
+    } else {
+        row2.push(Span::styled(pad_to("", col_w.saturating_sub(1)), bg));
+    }
+    row2.push(Span::styled(
+        pad_to(
+            &truncate(&strip.current.first_line, col_w.saturating_sub(2)),
+            col_w.saturating_sub(1),
+        ),
+        Style::default().fg(theme.foreground()).bg(theme.highlight()),
+    ));
+    if let Some(next) = &strip.next {
+        row2.push(Span::styled(
+            pad_to(&truncate(&next.first_line, col_w.saturating_sub(2)), col_w.saturating_sub(1)),
+            faded,
+        ));
+    }
+    f.render_widget(
+        Paragraph::new(Line::from(row2)),
+        Rect::new(pane_area.x, y + 2, w, 1),
+    );
+}
+
+fn pad_to(s: &str, width: usize) -> String {
+    use unicode_width::UnicodeWidthStr;
+    let w = s.width();
+    if w >= width {
+        s[..s.char_indices().take_while(|&(_, _)| true).count().min(s.len())]
+            .to_string()
+    } else {
+        format!("{}{}", s, " ".repeat(width - w))
+    }
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    use unicode_width::UnicodeWidthStr;
+    if s.width() <= max {
+        s.to_string()
+    } else {
+        let mut w = 0;
+        let mut end = 0;
+        for (i, ch) in s.char_indices() {
+            let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+            if w + cw > max.saturating_sub(1) {
+                break;
+            }
+            w += cw;
+            end = i + ch.len_utf8();
+        }
+        format!("{}…", &s[..end])
+    }
 }

@@ -235,18 +235,24 @@ pub struct DatePickerFrame {
 // Context Strip (temporal navigation panel — 3 lines above status bar)
 // ---------------------------------------------------------------------------
 
-/// A reusable 3-line strip showing a selected item plus its neighbors.
+/// A reusable strip showing a selected item plus its neighbors.
 /// Used for journal day-hopping, page history, and day activity.
 #[derive(Serialize)]
 pub struct ContextStripFrame {
-    /// Previous item label (faded). None if at boundary.
-    pub prev_label: Option<String>,
-    /// Current (selected) item label (bold/highlighted).
-    pub current_label: String,
-    /// Next item label (faded). None if at boundary.
-    pub next_label: Option<String>,
-    /// Whether the selected day has content (shown with ◆).
-    pub has_content: bool,
+    pub prev: Option<ContextStripDay>,
+    pub current: ContextStripDay,
+    pub next: Option<ContextStripDay>,
+}
+
+/// Summary info for one day in the context strip.
+#[derive(Serialize)]
+pub struct ContextStripDay {
+    /// Date label (e.g., "Mar 10 Mon").
+    pub label: String,
+    /// Summary line (e.g., "5 items · #rust #editors").
+    pub stats: String,
+    /// First task or first content line (e.g., "[ ] Fix parser bug").
+    pub first_line: String,
 }
 
 // ---------------------------------------------------------------------------
