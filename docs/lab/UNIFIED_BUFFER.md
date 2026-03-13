@@ -81,28 +81,27 @@ State Changed signal → UI re-renders
              └──────────┘
 ```
 
-### Threading Model
+### Execution Model
+
+The BufferWriter is **a struct on the UI thread**, not a separate thread. Synchronous mutation is fast enough (rope ops are µs — see Industry Practice below). The struct centralizes all mutation logic behind a single `apply(Message)` method.
 
 ```
-UI Thread (read-only):
-    poll input → produce Message → send to Writer channel
-    render(ReadOnly<Buffer>) → RenderFrame → TUI draws
-    cursor movement: direct set_cursor on ReadOnly (viewport only)
+UI Thread:
+    poll input → produce Message
+    buffer_writer.apply(message) → mutate Buffer, emit events
+    render(buffers) → RenderFrame → TUI draws
 
-BufferWriter Thread (single writer):
-    recv(Message) → match {
-        EditRequest → mutate Buffer → mark dirty → start debounce
-        CursorMove → set_cursor (forwarded from UI for frozen views)
-        ToggleTask → resolve block_id → find page → edit line
-        FileChanged → read disk → compare → merge or prompt
-        Save → atomic write → send SaveComplete
-        Evict → drop Buffer (if clean + invisible + idle)
-    }
-    send(StateChanged) → UI re-renders
+    BufferWriter (struct, not thread):
+        apply(EditRequest)  → mutate rope, mark dirty, queue WriteRequest
+        apply(ToggleTask)   → resolve block_id → find page → edit line
+        apply(FileChanged)  → read disk, compare, merge or prompt
+        emit(BlockChanged)  → notify subscribed views
 
-Disk Writer Thread (existing):
-    recv(WriteRequest) → atomic write → send WriteComplete
+DiskWriter Thread (existing, separate):
+    recv(WriteRequest) → debounce → atomic write → send WriteComplete
 ```
+
+No channels between UI and BufferWriter — it's a direct method call. The DiskWriter stays on its own thread (I/O-bound). This is the Elm pattern for code organization without Xi Editor's threading complexity.
 
 ---
 
@@ -264,15 +263,13 @@ Systematic analysis of every interaction pattern:
 
 ## Migration Path
 
-This is a large refactor. A gradual migration:
+This is a gradual migration:
 
-1. **Phase 1** (current): Direct mutation on UI thread. `ReadOnly<Buffer>` for views. `x` toggle sends a message that the UI thread processes synchronously (same thread, just a function call). Event bus is a simple callback list.
+1. **Phase 1** (current): Direct mutation scattered across `handle_key`, `handle_file_event`, etc. `ReadOnly<Buffer>` for views. Toggle would be a direct function call.
 
-2. **Phase 2**: Extract mutation logic into a `BufferWriter` struct (still on UI thread). All mutations go through `writer.apply(message)`. Event bus notifies views after each mutation. No threading change — just consolidation.
+2. **Phase 2** (target): Extract all mutation logic into a `BufferWriter` struct on the UI thread. All mutations go through `writer.apply(message)`. Event bus notifies subscribed views. Same thread, no channels — just a clean API boundary.
 
-3. **Phase 3**: Move `BufferWriter` to its own thread. UI thread sends messages via channel. Event bus becomes channel-based. `ReadOnly<Buffer>` references updated on StateChanged signal.
-
-Phase 1 gives us the UX (toggle works). Phase 2 gives us the architecture (single mutation path + event bus). ~~Phase 3~~ Phase 3 is likely unnecessary — see Industry Practice below.
+Phase 1 gives us the UX. Phase 2 gives us the architecture. No Phase 3 — synchronous is correct for single-user editors (see Industry Practice below).
 
 ---
 
