@@ -1051,6 +1051,14 @@ impl BloomEditor {
                     } else {
                         None
                     };
+                    let due_col = if is_tasks {
+                        row_result.columns.iter().position(|c| c == "due")
+                    } else {
+                        None
+                    };
+
+                    let today = journal::Journal::today();
+                    let mut last_section: Option<String> = None;
 
                     for row in &row_result.rows {
                         let cells: Vec<String> =
@@ -1065,6 +1073,30 @@ impl BloomEditor {
                         } else {
                             (false, false)
                         };
+
+                        // Insert section headers for tasks with due dates
+                        if is_tasks {
+                            if let Some(idx) = due_col {
+                                let section = match &row.values.get(idx) {
+                                    Some(query::CellValue::Text(d)) if !d.is_empty() => {
+                                        match chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d") {
+                                            Ok(date) if date < today => "Overdue".to_string(),
+                                            Ok(date) if date == today => {
+                                                format!("Today · {}", today.format("%b %-d"))
+                                            }
+                                            Ok(_) => "Upcoming".to_string(),
+                                            Err(_) => "No date".to_string(),
+                                        }
+                                    }
+                                    _ => "No date".to_string(),
+                                };
+                                if last_section.as_ref() != Some(&section) {
+                                    rows.push(render::ViewRow::SectionHeader(section.clone()));
+                                    last_section = Some(section);
+                                }
+                            }
+                        }
+
                         rows.push(render::ViewRow::Data {
                             cells,
                             is_task,
