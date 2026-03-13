@@ -290,6 +290,38 @@ Just the page title. No mode, no position, no pending keys. `subtle` background 
 | INSERT | `background` | `accent_green` | Green = "go" — you're actively writing |
 | VISUAL | `background` | `popout` | Selection is happening — needs to stand out |
 | COMMAND | `background` | `accent_blue` | Informational — you're talking to the editor |
+| HISTORY | `background` | `accent_yellow` | Time-travel — browsing past versions (see [TIME_TRAVEL.md](lab/TIME_TRAVEL.md)) |
+| DAY | `background` | `accent_yellow` | Time-travel — browsing daily activity (see [TIME_TRAVEL.md](lab/TIME_TRAVEL.md)) |
+| JOURNAL | `background` | `accent_yellow` | Time-travel — browsing journal days (see [JOURNAL_REDESIGN.md](lab/JOURNAL_REDESIGN.md)) |
+
+The temporal modes (`HISTORY`, `DAY`, `JOURNAL`) share `accent_yellow` to form a consistent visual family. They are active when the context strip or calendar grid from [TIME_TRAVEL.md](lab/TIME_TRAVEL.md) or [JOURNAL_REDESIGN.md](lab/JOURNAL_REDESIGN.md) is open.
+
+### Temporal Mode Status Bar Layout
+
+When a temporal mode is active, the status bar repurposes the right section — cursor position and thread indicators are hidden (both irrelevant during temporal browsing), replaced by **key hints** and **position**:
+
+```
+│ HIST │ Text Editor Theory           d:diff  r:restore  ↵:list 3/12│
+  ├─1──┘   ├──────2──────────┘        ├────────────5────────────┘├─6─┘
+```
+
+| # | Element | Description |
+|---|---------|-------------|
+| 1 | **Mode** | `HIST` / `DAY` / `JRNL` |
+| 2 | **Context title** | Page title (HIST), day name (DAY/JRNL), month name (calendar) |
+| 5 | **Key hints** | Available actions — replaces pending keys and thread indicators |
+| 6 | **Position** | Version position `3/12` (HIST), active day index `◆3` (DAY), selected day `[8]` (CAL) |
+
+Elements 3 (dirty marker) and 4 (macro recording) are hidden — not applicable during temporal browsing.
+
+Key hints shown per mode:
+
+| Mode | Status bar right section |
+|------|------------------------|
+| HIST (strip) | `d:diff  r:restore  ↵:list  3/12` |
+| HIST (expanded) | `j/k:nav  d:diff  r:restore  3/12` |
+| DAY | `e:detail  ↵:calendar  [d ]d  ◆3` |
+| JRNL | `↵:calendar  SPC j p/n` |
 
 ### Background Thread Indicators
 

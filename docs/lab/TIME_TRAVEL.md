@@ -2,7 +2,7 @@
 
 > Git-backed history via `gix` — the infrastructure layer for temporal features.
 > Status: **Draft** — exploratory, not committed.
-> See also: [DAY_VIEW.md](DAY_VIEW.md) for the daily activity summary built on this layer.
+> See also: [JOURNAL_REDESIGN.md](JOURNAL_REDESIGN.md) for journal navigation and calendar.
 
 ---
 
@@ -20,7 +20,7 @@ Bloom maintains a complete, automatic history of every change to your vault. Not
 
 **Fearless editing.** Every version of every thought is recoverable. Split pages, merge pages, delete sections — knowing you can always get back to any previous state. The undo tree handles per-keystroke recovery within a session; git handles everything beyond that.
 
-This document covers the **infrastructure layer**: git as the time-series store, auto-commit strategy, file and block history, and the threading model. The [Day View](DAY_VIEW.md) document covers the vault-wide daily activity summary built on top of this infrastructure.
+This document covers the **infrastructure layer**: git as the time-series store, auto-commit strategy, file and block history, day activity, and the threading model. [JOURNAL_REDESIGN.md](JOURNAL_REDESIGN.md) covers the journal file model and calendar navigation.
 
 ---
 
@@ -136,78 +136,295 @@ On restart, the undo tree is deserialized. `u` and `Ctrl-R` work across sessions
 
 The history of a single page over time.
 
-### Temporal Bar
+### Context Strip
 
-Bloom uses a **temporal bar** — a reusable bottom-center overlay for navigating through ordered items (history versions, calendar days). The same component powers page history (`SPC H h`) and future day view (`SPC H c`).
+Bloom uses a **context strip** — a 3-line panel above the status bar for navigating through ordered items (history versions, calendar days). The same component powers page history (`SPC H h`), day activity browsing (`SPC H c` → `[d`/`]d`), and journal day-hopping (`SPC j p`/`SPC j n`). See [JOURNAL_REDESIGN.md](JOURNAL_REDESIGN.md) for journal-specific navigation.
 
-```
-┌── Editor pane (live preview of selected version) ───────────────┐
-│                                                                  │
-│  ## Rope Data Structure                                          │
-│                                                                  │
-│+ Ropes are O(log n) for inserts.    ← green (added vs current)  │
-│+ They use balanced binary trees                                  │
-│                                                                  │
-│  See Xi Editor for details.                                      │
-├──────────────────────────────────────────────────────────────────┤
-│ HISTORY  Text Editor Theory                                      │
-├──────────────────────────────────────────────────────────────────┤
-│      ◄  Mar 8, 14:32 — "Added rope section"  (3 of 12)  ►      │
-└──────────────────────────────────────────────────────────────────┘
-```
+The strip shows the **selected item plus its neighbors** — one before, one after — giving temporal context at a glance. Neighbors are rendered in `faded` text. The status bar stays at the very bottom (always present) and becomes **mode-aware**: `HIST`, `DAY`, or `JRNL` mode replaces `NORMAL`, with key hints in the right section replacing cursor position and thread indicators (both irrelevant during temporal browsing). See [WINDOW_LAYOUTS.md](../../WINDOW_LAYOUTS.md) § Status Bar Anatomy for mode colour assignments.
 
-The bar is a single line anchored at the bottom center of the screen, drawn above the status bar. Arrows (`◄` / `►`) indicate navigation direction; they fade when at the boundary (oldest / newest).
+**Three states:**
 
-**Interaction model:**
+| State | Chrome overhead | Trigger |
+|-------|----------------|---------|
+| **Context strip** (default) | 3 lines above status bar | `SPC H h` or `]d`/`[d` |
+| **Expanded list** | ~40% of terminal above status bar | `Enter` from strip |
+| **Dismissed** | 0 (status bar returns to normal mode) | `Esc` / `q` |
+
+### Page History (`SPC H h`)
+
+While viewing any page, `SPC H h` opens the context strip with the page's **commit history** — every version of that file, newest first. Each entry is a commit that touched this page's UUID. Rename-proof — the UUID never changes, so history follows the page regardless of title changes.
+
+#### Context strip (default)
+
+<div style="font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.5; background: #141414; color: #EBE9E7; border-radius: 6px; overflow: hidden; max-width: 680px; margin: 16px 0;">
+  <!-- Editor pane (live preview) -->
+  <div style="padding: 12px 16px;">
+    <div style="color: #A3A3A3; font-size: 11px; margin-bottom: 8px;">Live preview of selected version</div>
+    <div><span style="color: #A3A3A3; opacity: 0.5;">##</span> <span style="color: #F4BF4F; font-weight: bold;">Rope Data Structure</span></div>
+    <div>&nbsp;</div>
+    <div><span style="color: #62C554;">+</span> <span style="color: #62C554;">Ropes are O(log n) for inserts.</span></div>
+    <div><span style="color: #62C554;">+</span> <span style="color: #62C554;">They use balanced binary trees</span></div>
+    <div>&nbsp;</div>
+    <div>See Xi Editor for details.</div>
+  </div>
+  <!-- Context strip -->
+  <div style="border-top: 1px solid #37373E;">
+    <div style="padding: 4px 16px; color: #A3A3A3;">
+      <div style="display: flex; justify-content: space-between;"><span>Mar 6 &nbsp; Restructured headings</span><span>+5 / -8</span></div>
+    </div>
+    <div style="padding: 4px 16px; background: #212228;">
+      <div style="display: flex; justify-content: space-between;"><span><span style="color: #EBE9E7;">▸</span> <span style="color: #EBE9E7; font-weight: bold;">Mar 8 &nbsp; Added rope section</span></span><span style="color: #62C554;">+12 / -0</span></div>
+    </div>
+    <div style="padding: 4px 16px; color: #A3A3A3;">
+      <div style="display: flex; justify-content: space-between;"><span>Mar 8 &nbsp; Fixed typo in rope section</span><span>+1 / -1</span></div>
+    </div>
+  </div>
+  <!-- Status bar (HIST mode) -->
+  <div style="background: #F2DA61; color: #141414; padding: 3px 16px; display: flex; justify-content: space-between; font-size: 12px;">
+    <div>
+      <span style="font-weight: bold;">HIST</span>
+      <span style="opacity: 0.4;"> │ </span>
+      <span>Text Editor Theory</span>
+    </div>
+    <div style="opacity: 0.7;">d:diff &nbsp; r:restore &nbsp; ↵:list &nbsp; 3/12</div>
+  </div>
+</div>
+
+- Selected item in **accent** colour with `▸` indicator
+- Previous/next items in **faded** text
+- At boundaries (first/last version), the missing neighbor row is blank
+- The status bar shows `HIST` mode, page title, key hints, and version position
+
+**Interaction model (context strip):**
 
 | Key | Action |
 |-----|--------|
-| `←` / `h` | Older version (live preview updates) |
-| `→` / `l` | Newer version |
+| `h` / `←` | Older version (live preview updates) |
+| `l` / `→` | Newer version |
 | `d` | Toggle inline diff highlights (green = added, red = removed vs current) |
-| `Enter` / `↓` | Expand into full picker list of all versions |
-| `r` | Restore — apply selected version to buffer (undo-able), close bar |
-| `Esc` / `q` | Dismiss bar, return to current version |
+| `Enter` | Expand into scrollable version list |
+| `r` | Restore — apply selected version to buffer (undo-able) |
+| `Esc` / `q` | Dismiss strip, return to current version |
 
 **Live preview:** While scrubbing, the editor pane displays the historical content read-only. The actual buffer is never modified — the preview is display-only. On `Esc`, the original content reappears instantly. On `r`, the preview content replaces the buffer (one undo step).
 
 **Inline diff:** Pressing `d` toggles line-level diff highlights on the live preview. Added lines are tinted `accent_green`, removed lines `accent_red`. The diff is computed against the current (saved) version. Pressing `d` again turns highlights off.
 
-**Expanded picker:** Pressing `Enter` or `↓` expands the bar into a scrollable list of all versions, resembling the standard picker. `Esc` collapses back to the single-line bar.
+#### Expanded history list (`Enter` from strip)
 
-**Reusable design:** The temporal bar is generic over its item type. Page history uses `PageHistoryEntry` (commit oid, date, message). Day view will use `NaiveDate`. The component provides:
-- `←` / `→` navigation with wrapping or boundary clamping
-- Position display: "(N of M)"
-- Expand/collapse to picker
+The strip grows upward into a scrollable list. The editor preview compresses to the top portion:
+
+<div style="font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.5; background: #141414; color: #EBE9E7; border-radius: 6px; overflow: hidden; max-width: 680px; margin: 16px 0;">
+  <!-- Editor pane (compressed preview) -->
+  <div style="padding: 12px 16px; border-bottom: 1px solid #37373E;">
+    <div><span style="color: #A3A3A3; opacity: 0.5;">##</span> <span style="color: #F4BF4F; font-weight: bold;">Rope Data Structure</span></div>
+    <div>Ropes are O(log n) for inserts. They use balanced binary trees.</div>
+    <div>See Xi Editor for a real-world implementation.</div>
+  </div>
+  <!-- Expanded version list -->
+  <div style="padding: 8px 0;">
+    <div style="padding: 4px 16px; background: #212228;">
+      <div style="display: flex; justify-content: space-between;"><span><span style="color: #EBE9E7;">▸</span> <span style="color: #EBE9E7; font-weight: bold;">Mar 8, 14:32</span> &nbsp; Added rope section</span><span style="color: #62C554;">+12 / -0</span></div>
+    </div>
+    <div style="padding: 4px 16px; color: #A3A3A3;">
+      <div style="display: flex; justify-content: space-between;"><span>&nbsp; Mar 8, 21:00 &nbsp; Fixed typo in rope section</span><span>+1 / -1</span></div>
+    </div>
+    <div style="padding: 4px 16px; color: #A3A3A3;">
+      <div style="display: flex; justify-content: space-between;"><span>&nbsp; Mar 6, 09:15 &nbsp; Restructured headings</span><span>+5 / -8</span></div>
+    </div>
+    <div style="padding: 4px 16px; color: #A3A3A3;">
+      <div style="display: flex; justify-content: space-between;"><span>&nbsp; Mar 1, 22:41 &nbsp; Created page</span><span>+28 / -0</span></div>
+    </div>
+    <div style="padding: 4px 16px; color: #A3A3A3;">
+      <div style="display: flex; justify-content: space-between;"><span>&nbsp; Feb 28, 11:20 &nbsp; Added Xi Editor reference</span><span>+3 / -0</span></div>
+    </div>
+    <div style="padding: 4px 16px; color: #A3A3A3;">
+      <div style="display: flex; justify-content: space-between;"><span>&nbsp; Feb 25, 16:07 &nbsp; Initial braindump</span><span>+15 / -0</span></div>
+    </div>
+    <div style="padding: 8px 16px; color: #A3A3A3; font-size: 12px;">6 of 12 versions · Feb 14 – Mar 8</div>
+  </div>
+  <!-- Status bar (HIST mode, expanded) -->
+  <div style="background: #F2DA61; color: #141414; padding: 3px 16px; display: flex; justify-content: space-between; font-size: 12px;">
+    <div>
+      <span style="font-weight: bold;">HIST</span>
+      <span style="opacity: 0.4;"> │ </span>
+      <span>Text Editor Theory</span>
+    </div>
+    <div style="opacity: 0.7;">j/k:nav &nbsp; d:diff &nbsp; r:restore &nbsp; 3/12</div>
+  </div>
+</div>
+
+- **No search/filter input.** History is chronological; you scrub, not search. Median page has ~20 versions — `j`/`k` scrolling is sufficient.
+- **Columns:** Date+time · Description (from commit message) · Diff stat (`+N / -M`)
+- Preview updates on highlight change (same as strip mode)
+- `Esc` collapses back to the 3-line strip (not full close)
+- `q` closes entirely (returns to normal editing, status bar reverts to `NOR`)
+- Status bar hints change: `j/k:nav` replaces `h/l`; `Esc` now means "collapse to strip"
+
+**Reusable design:** The context strip is generic over its item type. Page history uses `PageHistoryEntry` (commit oid, date, message). Day view uses `ActiveDay` (date, summary stats). The component provides:
+- `h` / `l` navigation with boundary clamping (strip mode)
+- `j` / `k` navigation with scrolling (expanded mode)
+- Expand / collapse state transition
 - Label formatting via a pluggable function
-
-### Page History (`SPC H h`)
-
-While viewing any page, `SPC H h` opens the temporal bar with the page's **commit history** — every version of that file, newest first. The bar shows the date, auto-generated description (from commit message), and diff stat.
-
-Each entry is a commit that touched this page's UUID. Rename-proof — the UUID never changes, so history follows the page regardless of title changes.
 
 ### Restore
 
-Pressing `r` on the temporal bar copies the selected version's full content into the current buffer. This is a normal edit — it goes through the rope, it's undo-able, it triggers auto-save. You can restore a past version and then `u` to undo if you change your mind. The git history gains a new commit showing the restore.
+Pressing `r` on the context strip copies the selected version's full content into the current buffer. This is a normal edit — it goes through the rope, it's undo-able, it triggers auto-save. You can restore a past version and then `u` to undo if you change your mind. The git history gains a new commit showing the restore.
 
 ### Block-Level History
 
-With universal block IDs (see [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md)), file time travel extends to individual blocks. Place your cursor on any block and `SPC H H` (block history) shows every version of *that specific block* across time:
+With universal block IDs (see [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md)), file time travel extends to individual blocks. Place your cursor on any block and `SPC H H` (block history) opens the context strip showing every version of *that specific block* across time:
 
-```
-═══ ^k7m2x — Block History ════════════════════════════════════════
+<div style="font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.5; background: #141414; color: #EBE9E7; border-radius: 6px; overflow: hidden; max-width: 680px; margin: 16px 0;">
+  <!-- Context strip (block history) -->
+  <div style="border-top: 1px solid #37373E;">
+    <div style="padding: 4px 16px; color: #A3A3A3;">
+      <div>Mar 1 &nbsp; <span style="color: #EBE9E7;">-</span> <span style="color: #F2DA61;">[ ]</span> <span style="color: #A3A3A3;">Review the ropey crate</span></div>
+    </div>
+    <div style="padding: 4px 16px; background: #212228;">
+      <div><span style="color: #EBE9E7;">▸</span> <span style="color: #EBE9E7; font-weight: bold;">Mar 6</span> &nbsp; <span style="color: #EBE9E7;">-</span> <span style="color: #F2DA61;">[ ]</span> Review the ropey API <span style="color: #A3A3A3;">@due</span><span style="color: #A3A3A3; opacity: 0.5;">(</span>2026-03-08<span style="color: #A3A3A3; opacity: 0.5;">)</span></div>
+    </div>
+    <div style="padding: 4px 16px; color: #A3A3A3;">
+      <div>Mar 8 &nbsp; <span style="color: #EBE9E7;">-</span> <span style="color: #F2DA61;">[ ]</span> <span style="color: #A3A3A3;">Review the ropey API @due(2026-03-10)</span></div>
+    </div>
+  </div>
+  <!-- Status bar (HIST mode, block) -->
+  <div style="background: #F2DA61; color: #141414; padding: 3px 16px; display: flex; justify-content: space-between; font-size: 12px;">
+    <div>
+      <span style="font-weight: bold;">HIST</span>
+      <span style="opacity: 0.4;"> │ </span>
+      <span>^k7m2x</span>
+    </div>
+    <div style="opacity: 0.7;">d:diff &nbsp; r:restore &nbsp; ↵:list &nbsp; 2/3</div>
+  </div>
+</div>
 
-  ◆ Mar 8    - [ ] Review the ropey API @due(2026-03-10)
-  ◆ Mar 6    - [ ] Review the ropey API @due(2026-03-08)
-  ◆ Mar 1    - [ ] Review the ropey crate
-
-  3 versions · first appeared Mar 1
-```
+Same context strip UX as page history — `h`/`l` to scrub, `d` for diff, `r` to restore. The status bar shows the block ID instead of a page title.
 
 This uses pickaxe search (`-S "^k7m2x"`) scoped to the page's UUID file (`-- 8f3a1b2c.md`). Because the git tree uses UUIDs, the search is scoped to one file's history, not the entire tree. Estimated: <10ms for a typical page.
 
 For cross-page block moves, an unscoped pickaxe search finds the block ID across all UUID files — revealing which page it lived in at each point in time.
+
+---
+
+## Day Activity
+
+A git-derived summary of vault-wide activity for any given day. Available via `SPC H c` (day activity calendar). This is a **separate feature** from the journal (`SPC j c`) — it shows what happened across the entire vault, not just what you journaled.
+
+| Keybinding | Action |
+|-----------|--------|
+| `SPC H c` | Open day activity calendar (◆ = days with git activity) |
+| `[d` / `]d` | Hop to previous / next day with activity (from within day activity view) |
+
+### What the Activity View Shows
+
+| Section | Source | Content |
+|---------|--------|---------|
+| ✏️ Edited | Git diff: first commit of day → last commit of day | Page name, `+N / -M` lines, content snippets |
+| 🌱 Created | Git diff: new files that day | Page titles + tags |
+| ✅ Completed | Git diff: task lines that changed from `[ ]` to `[x]` | Task text + source page (identified by block ID) |
+
+**Philosophy: over-surface, recall over precision.** When you're browsing back through time, too much context is better than too little. The stray detail is what triggers the memory.
+
+### Wireframe
+
+<div style="font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.5; background: #141414; color: #EBE9E7; border-radius: 6px; overflow: hidden; max-width: 680px; margin: 16px 0;">
+  <!-- Day activity content -->
+  <div style="padding: 12px 16px;">
+    <div style="color: #A3A3A3; font-size: 11px; margin-bottom: 8px;">Day Activity — Saturday, March 8, 2026</div>
+    <div>&nbsp;</div>
+    <div><span style="font-weight: bold;">✏️ &nbsp;Edited</span></div>
+    <div style="display: flex; justify-content: space-between;"><span>Text Editor Theory</span><span style="color: #62C554;">+12 lines</span></div>
+    <div style="display: flex; justify-content: space-between;"><span>Rust Programming</span><span style="color: #62C554;">+3 lines</span></div>
+    <div>&nbsp;</div>
+    <div><span style="font-weight: bold;">🌱 &nbsp;Created</span></div>
+    <div>Gap Buffer Tradeoffs <span style="color: #A3A3A3;">#data-structures</span></div>
+    <div>&nbsp;</div>
+    <div><span style="font-weight: bold;">✅ &nbsp;Completed</span></div>
+    <div style="display: flex; justify-content: space-between;"><span><span style="color: #62C554;">[x]</span> Compare with PieceTable</span><span style="color: #A3A3A3;">Text Editor Theory</span></div>
+    <div style="display: flex; justify-content: space-between;"><span><span style="color: #62C554;">[x]</span> Read Neovim buffer internals</span><span style="color: #A3A3A3;">Rust Programming</span></div>
+    <div>&nbsp;</div>
+    <div style="color: #A3A3A3; font-size: 12px;">3 pages edited · 1 page created · 2 tasks completed</div>
+  </div>
+  <!-- Context strip -->
+  <div style="border-top: 1px solid #37373E;">
+    <div style="padding: 4px 16px; color: #A3A3A3;">
+      <div><span style="color: #F4BF4F;">◆</span> Mar 6 Thu</div>
+    </div>
+    <div style="padding: 4px 16px; background: #212228;">
+      <div><span style="color: #EBE9E7;">▸</span> <span style="color: #F4BF4F;">◆</span> <span style="color: #EBE9E7; font-weight: bold;">Mar 8 Sat</span></div>
+    </div>
+    <div style="padding: 4px 16px; color: #A3A3A3;">
+      <div><span style="color: #F4BF4F;">◆</span> Mar 12 Wed</div>
+    </div>
+  </div>
+  <!-- Status bar (DAY mode) -->
+  <div style="background: #F2DA61; color: #141414; padding: 3px 16px; display: flex; justify-content: space-between; font-size: 12px;">
+    <div>
+      <span style="font-weight: bold;">DAY</span>
+      <span style="opacity: 0.4;"> │ </span>
+      <span>Saturday, March 8, 2026</span>
+    </div>
+    <div style="opacity: 0.7;">e:detail &nbsp; ↵:calendar &nbsp; [d ]d</div>
+  </div>
+</div>
+
+### Detail Levels
+
+The activity sections support three density levels, toggled with `e`:
+
+| Press | Mode | What activity shows |
+|-------|------|----------------|
+| (default) | **compact** | `Text Editor Theory  +12 lines` |
+| `e` | **expanded** | + 2-3 line snippets of additions |
+| `e` again | **full diff** | complete added/removed lines, colour-coded |
+
+One key cycles through densities. Same data, different zoom. Not a configuration — a keybinding.
+
+### Actions on Tasks
+
+Tasks in the activity view are **actionable.** Pressing `x` on a task toggles it in the source file.
+
+**How it works:** The activity view stores tasks by block ID (see [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md)). The toggle resolves `page_id^block_id` → current line in the index → flip `[ ]` ↔ `[x]` in the rope buffer. Same code path as the agenda's toggle.
+
+If the block ID is orphaned (the content was deleted since that day), the task renders as historical — no action available, dimmed styling.
+
+### Today's Activity
+
+Today is the only day whose activity changes. Today's activity is **computed live** — a git diff from this morning's first commit to HEAD. This is cheap (narrow time window, few commits) and ensures it stays current as you work.
+
+Refresh triggers: on index-complete (same trigger as backlinks refresh), so it updates when files are saved.
+
+### Day Activity Cache
+
+The cache stores **only the immutable parts** — data derived from git history, which cannot change after the day has passed.
+
+```sql
+CREATE TABLE day_activity_cache (
+    date        TEXT PRIMARY KEY,   -- "2026-03-08"
+    edits       TEXT NOT NULL,       -- JSON: [{page_id, page_title, added, removed, snippets, task_block_ids}]
+    created     TEXT NOT NULL,       -- JSON: [{page_id, title, tags}]
+    completed   TEXT NOT NULL,       -- JSON: [{block_id, page_id, task_text}]
+    computed_at TEXT NOT NULL
+);
+```
+
+Task *toggle state* is NOT cached — it's resolved live from the index at render time by block ID. This means toggling a task today that you wrote last month is immediately reflected. The cache stores *which* tasks appeared; the index provides *current* state.
+
+**Predictive prefetch.** No eager backfill. A small hot window follows your attention:
+
+| Trigger | Action |
+|---------|--------|
+| Open day N | Compute & cache N (if miss), then pre-compute N-1 and N+1 in background |
+| Calendar hover on day N | Pre-compute N in background |
+| `]d` from day N | Pre-compute N+2 (the hop *after* next) in background |
+| `[d` from day N | Pre-compute N-2 in background |
+
+The history thread does speculative work. If the user moves faster than the cache can fill (rapid `]d]d]d`), they see a brief spinner on cache misses — ~100ms, barely noticeable. In normal browsing (land, read, hop), the next day is always pre-computed.
+
+**LRU eviction.** Fixed budget: 50 entries (~250 KB). When full, the least-recently-accessed entry is evicted. Evicted entries are recomputed on demand (~100ms). No growing database — the cache is a sliding window, bounded at 50 rows forever.
+
+**Cache invalidation.** Past activity never changes — git history is append-only. If the user amends git history outside Bloom (rebase, force-push), Bloom detects the mismatch on next access (stored commit SHA vs. current) and recomputes.
 
 ---
 
@@ -256,7 +473,7 @@ The principle: **never compute on demand — compute before the user asks.** Two
 | Prefix | Prefetches |
 |--------|-----------|
 | `SPC H` | Page history for current page + block pickaxe for cursor line |
-| `SPC j` | Today's journal content + yesterday's day view |
+| `SPC j` | Today's journal content |
 | `SPC a` | Agenda task query results |
 
 The which-key popup appears after 300ms. The user reads it and decides for 300-800ms. Total free compute time: 600-1100ms — enough for page history and block pickaxe.
@@ -265,10 +482,10 @@ The which-key popup appears after 300ms. The user reads it and decides for 300-8
 
 | Context | On navigate to item N | Prefetch |
 |---------|----------------------|----------|
-| Day view (`[d`/`]d`) | Opened day N | Day N-1 and N+1 |
+| Day activity (`[d`/`]d`) | Opened day N | Day N-1 and N+1 |
 | History list (`j`/`k`) | Selected entry N | Blob + diff for N-1 and N+1 |
-| Calendar (arrow keys) | Hovered day N | Day view for N |
-| Calendar (month change) | Entered new month | Day views for days with `◆` markers |
+| Calendar (arrow keys) | Hovered day N | Day activity for N |
+| Calendar (month change) | Entered new month | Day activity for days with `◆` markers |
 
 **What we don't prefetch:** anything outside an active temporal context. Opening a page does not prefetch its history. Moving the cursor does not prefetch block history. These operations are infrequent enough that a one-time spinner (< 500ms) on first access is acceptable. Prefetch only kicks in once the user has entered a temporal browsing mode.
 
@@ -359,7 +576,7 @@ history | where page = "Text Editor Theory"              -- all versions of a pa
 history | where page = "Text Editor Theory" | where date before 2026-03-01
 ```
 
-See [DAY_VIEW.md](DAY_VIEW.md) for day-level BQL queries.
+See [JOURNAL_REDESIGN.md](JOURNAL_REDESIGN.md) for journal-level BQL queries.
 
 ### Emergence (Semantic Embeddings)
 
@@ -462,6 +679,6 @@ No external runtime dependencies. No `git` binary required. Works on macOS and W
 ## References
 
 - [`gix` crate](https://github.com/GitoxideLabs/gitoxide) — pure Rust git implementation, used by `cargo`
-- [DAY_VIEW.md](DAY_VIEW.md) — daily activity summary built on this layer
+- [JOURNAL_REDESIGN.md](JOURNAL_REDESIGN.md) — journal file model, calendar navigation
 - [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md) — self-healing block IDs powered by git history
 - [Journal Redesign](JOURNAL_REDESIGN.md) — `journal.md` rotation model

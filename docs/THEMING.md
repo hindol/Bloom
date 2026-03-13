@@ -298,6 +298,7 @@ for background.                             strong underline; UUID hidden
 | Status bar (Insert) | `background` | `accent_green` |
 | Status bar (Visual) | `background` | `popout` |
 | Status bar (Command) | `background` | `accent_blue` |
+| Status bar (History/Day/Journal) | `background` | `accent_yellow` |
 | Picker surface | `foreground` | `subtle` |
 | Picker selected row | `foreground` | `mild` |
 | Picker border | `faded` | — |

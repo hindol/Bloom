@@ -1,107 +1,252 @@
 # Journal Redesign 📓
 
-> One file called `journal.md`. Fresh every day. Archive browsed by calendar, not filenames.
+> Daily journal files in `journal/`, excluded from the page picker, navigated by time.
 > Status: **Draft** — exploratory, not committed.
-> See also: [TIME_TRAVEL.md](TIME_TRAVEL.md) for git-backed history, day views, and calendar navigation.
+> See also: [TIME_TRAVEL.md](TIME_TRAVEL.md) for git-backed history and the context strip component.
 
 ---
 
 ## The Problem
 
-Today Bloom creates one file per day in `journal/`: `2026-03-08.md`, `2026-03-09.md`, etc. This has three problems:
+Today Bloom creates one file per day in `journal/`: `2026-03-08.md`, `2026-03-09.md`, etc. This has two problems:
 
 1. **Date-named files are meaningless in a picker.** `SPC f f` shows "2026-03-08" alongside "Text Editor Theory" — one evokes an idea, the other evokes nothing. Journal files pollute the page namespace with noise.
 
 2. **Users think about files instead of writing.** "Which daily file was that thought in?" is the wrong question. You should be thinking about *when* or *what*, not *which file*.
 
-3. **The daily boundary is an implementation detail.** You don't care that March 8 is a separate file from March 9. You care about the stream of your thinking over time.
-
 ---
 
 ## The Design
 
-### One File: `journal.md`
+### One File Per Day (unchanged from G14)
 
-The user sees exactly one journal file, always called `journal.md`, living at the vault root (not in a subdirectory). `SPC j j` opens it. It's always there.
-
-Every day when Bloom starts (or at midnight if running), the current `journal.md` is **auto-rotated**: its contents are moved to the archive, and a fresh `journal.md` appears. If the journal is empty (no edits that day), no archive entry is created.
-
-The user never thinks about this. They open journal, they write, they close. Tomorrow it's fresh.
-
-### The Archive: `.journal/`
-
-Rotated journals live in a hidden directory:
+The journal file layout stays the same as [GOALS.md G14](../GOALS.md):
 
 ```
 ~/bloom/
-├── journal.md              ← today, always this name
-├── .journal/               ← hidden archive
-│   ├── 2026-03-07.md
-│   ├── 2026-03-06.md
-│   ├── 2026-03-04.md       ← March 5 had no entries, no file
+├── journal/
+│   ├── 2026-03-09.md       ← today
+│   ├── 2026-03-08.md
+│   ├── 2026-03-06.md       ← March 7 had no entries, no file
 │   └── ...
 ├── pages/
 └── ...
 ```
 
-Archive files are **never shown in `SPC f f`** (the page picker). They are a separate namespace — the journal log, not the knowledge base.
+- `SPC j j` opens today's journal (`journal/2026-03-09.md`). Created lazily — the file appears only after the first edit triggers auto-save.
+- After midnight, `SPC j j` targets the new date. No rotation, no file moves — a new file is simply created for the new day.
+- Journal pages are regular Bloom pages with frontmatter, UUID, and full link/tag/task support.
 
-Archive files are **fully indexed** — FTS5 search, tags, links, tasks, and (future) embeddings all cover them. `SPC s s` full-text search finds content in the archive. Queries can target them.
+### Picker Hierarchy
 
-### Quick Capture (unchanged UX)
+Three entry points into one picker component, differing only in scope:
+
+| Keybinding | Scope | Shows |
+|-----------|-------|-------|
+| `SPC f f` | All files | Pages + journal entries |
+| `SPC p p` | Pages only | Named pages in `pages/` |
+| `SPC j j` | Journal only | Journal entries in `journal/`, newest first |
+
+`SPC p p` and `SPC j j` are pre-filtered views of the same picker that powers `SPC f f`. The underlying component is identical — only the file scope differs.
+
+**Quick filters in `SPC f f`:** typing `/p` at the start of the query narrows to pages; `/j` narrows to journals. These filters only work in the "all files" picker — in `SPC p p` and `SPC j j` the scope is fixed.
+
+**Journal entry display:** In any picker, journal entries are displayed with a human-readable date ("Saturday, March 8, 2026") instead of the raw filename. Today's journal appears in `SPC j j` even if not yet created on disk (lazy creation), shown at the top.
+
+This replaces the earlier "exclude journal from SPC f f" approach. Nothing is excluded — users choose their scope.
+
+> **Note:** This changes `SPC f f` from "Find page" (current G14) to "Find file." `SPC p p` provides the old `SPC f f` behavior. GOALS.md, KEYBINDINGS.md, and PICKER_SURFACES.md will need updates when this design is adopted.
+
+### Quick Capture and Direct Access
 
 | Keybinding | Action |
 |-----------|--------|
-| `SPC j j` | Open today's journal |
-| `SPC j a` | Quick-append a line (without leaving current buffer) |
-| `SPC j t` | Quick-append a task |
+| `SPC j t` | Open today's journal (t = today) |
+| `SPC j a` | Quick-append a line to today's journal (without leaving current buffer) |
+| `SPC x a` | Quick-append a task to today's journal |
 
-These work exactly as today. The only difference is the file is always `journal.md`, not `journal/2026-03-08.md`.
+> **Note:** `SPC j t` replaces the old `SPC j j` (open today). `SPC x a` replaces the old `SPC j t` (append task) — tasks move to the `SPC x` prefix (mnemonic: checkbox). Tags stay at `SPC t`. These are keybinding changes to GOALS.md G14.
 
-### Task Carry-Forward
+---
 
-When `journal.md` rotates, any uncompleted tasks (`- [ ]`) are **automatically copied into the new journal**. A faint back-reference is added:
+## Navigation
 
-```markdown
-- [ ] Review the ropey crate API @due(2026-03-10)  ← carried from Mar 7
-```
+The journal is navigated by **time**, not by filename. Three mechanisms, from lightweight to spatial:
 
-The original task in the archive is left as-is (not modified). The carried copy is a new block — toggling either one is independent. This ensures open loops never disappear into the archive.
-
-**Completed tasks (`- [x]`) are NOT carried forward.** They stay in the archive where they were completed.
-
-### Orphan Nudge
-
-On rotation, Bloom scans the archived journal for **orphan blocks** — blocks with no `[[links]]`, no `#tags`, and no tasks. These are raw thoughts that will be hard to find later.
-
-If orphans are found, a non-blocking notification appears on next launch:
+### Flow
 
 ```
-📓 Yesterday's journal has 3 unlinked notes. SPC j r to review.
+SPC j t → journal/2026-03-09.md (today, editable)
+           │
+           SPC j p / SPC j n  →  prev / next journal day
+           │
+           context strip shows adjacent journal days at bottom
+           │
+           Enter on strip  →  journal calendar
+           SPC j c          →  journal calendar (direct entry)
+           │
+           type date in calendar  →  jump to that day
+           Enter on a day        →  open that day's journal
+
+SPC j j → journal picker (search/browse all journal entries)
 ```
 
-`SPC j r` opens a picker showing just the orphan blocks from the most recent rotation. For each orphan, the user can:
+### Day-Hopping (`SPC j p` / `SPC j n`)
 
-- **Tag it** — add a `#tag` (searchable forever)
-- **Link it** — promote to or link to a page
-- **Dismiss** — it's fine as-is, don't remind again
+From any journal, these keys hop to the previous/next day **that has a journal file** — empty days are skipped. The context strip from [TIME_TRAVEL.md](TIME_TRAVEL.md) appears at the bottom showing adjacent days:
 
-This is a gentle nudge, not a gate. Ignoring it is fine — the content is still indexed and searchable.
+<div style="font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.5; background: #141414; color: #EBE9E7; border-radius: 6px; overflow: hidden; max-width: 680px; margin: 16px 0;">
+  <!-- Journal content -->
+  <div style="padding: 12px 16px;">
+    <div style="color: #A3A3A3; font-size: 11px; margin-bottom: 8px;">journal/2026-03-08.md</div>
+    <div><span style="color: #EBE9E7;">- </span>Explored ropey crate for buffer model</div>
+    <div><span style="color: #EBE9E7;">- </span>Read about Xi Editor architecture</div>
+    <div><span style="color: #EBE9E7;">- </span><span style="color: #F2DA61;">[ ]</span> Review gap buffer tradeoffs <span style="color: #A3A3A3;">@due</span><span style="color: #A3A3A3; opacity: 0.5;">(</span>03-10<span style="color: #A3A3A3; opacity: 0.5;">)</span></div>
+    <div><span style="color: #EBE9E7;">- </span><span style="color: #62C554; text-decoration: line-through;">[x]</span><span style="color: #A3A3A3; text-decoration: line-through;"> Compare with PieceTable</span></div>
+    <div><span style="color: #A3A3A3;">#rust #editors #data-structures</span></div>
+  </div>
+  <!-- Context strip -->
+  <div style="border-top: 1px solid #37373E;">
+    <div style="padding: 4px 16px; color: #A3A3A3;">
+      <div><span style="color: #F4BF4F;">◆</span> Mar 6 Thu</div>
+    </div>
+    <div style="padding: 4px 16px; background: #212228;">
+      <div><span style="color: #EBE9E7;">▸</span> <span style="color: #F4BF4F;">◆</span> <span style="color: #EBE9E7; font-weight: bold;">Mar 8 Sat</span></div>
+    </div>
+    <div style="padding: 4px 16px; color: #A3A3A3;">
+      <div><span style="color: #F4BF4F;">◆</span> Mar 12 Wed</div>
+    </div>
+  </div>
+  <!-- Status bar (JRNL mode) -->
+  <div style="background: #F2DA61; color: #141414; padding: 3px 16px; display: flex; justify-content: space-between; font-size: 12px;">
+    <div>
+      <span style="font-weight: bold;">JRNL</span>
+      <span style="opacity: 0.4;"> │ </span>
+      <span>Saturday, March 8, 2026</span>
+    </div>
+    <div style="opacity: 0.7;">↵:calendar  SPC j p/n</div>
+  </div>
+</div>
 
-### Journal + Pages: Separate Namespaces
+| Key | Action |
+|-----|--------|
+| `SPC j n` | Jump to next day with a journal |
+| `SPC j p` | Jump to previous day with a journal |
+| `j` / `k` | Scroll within the current day |
+| `Enter` | On a page name — jump to that page. On context strip — expand to calendar. |
+| `x` | On a task — toggle it in the source file |
+| `o` | On a page — open in a split |
+| `q` | Close journal, return to previous buffer |
 
-| Namespace | Contents | Picker | Index |
-|-----------|----------|--------|-------|
-| **Pages** (`pages/`) | Named ideas with identity | `SPC f f` | Full |
-| **Journal** (`journal.md` + `.journal/`) | Daily stream, temporal | `SPC H c` (calendar) | Full |
+`SPC j p` / `SPC j n` work from any buffer — they open the journal for the day before/after the **most recently viewed journal day** (defaulting to today if no journal has been viewed this session).
 
-Pages are things you navigate by *name*. The journal is something you navigate by *time*. Mixing them in the same picker confuses both.
+### Journal Calendar (`SPC j c` or `Enter` on context strip)
 
-Both namespaces are fully searchable via `SPC s s` (full-text) and BQL queries. The separation is a *navigation* concern, not a *data* concern.
+The calendar grid allows spatial date navigation. Shows only journal entries — for vault-wide activity by date, see [TIME_TRAVEL.md § Day Activity](TIME_TRAVEL.md#day-activity) (`SPC H c`). Opens as a panel above the status bar:
 
-### BQL Integration
+<div style="font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.5; background: #141414; color: #EBE9E7; border-radius: 6px; overflow: hidden; max-width: 680px; margin: 16px 0;">
+  <!-- Editor content (unchanged) -->
+  <div style="padding: 12px 16px; color: #A3A3A3;">
+    <div><span style="opacity: 0.5;">##</span> <span style="color: #F4BF4F; font-weight: bold;">Rope Data Structure</span></div>
+    <div style="color: #EBE9E7;">Ropes are O(log n) for inserts. They use balanced binary trees.</div>
+    <div>&nbsp;</div>
+  </div>
+  <!-- Calendar grid -->
+  <div style="border-top: 1px solid #37373E; padding: 12px 16px;">
+    <div style="text-align: center; margin-bottom: 8px;">
+      <span style="color: #EBE9E7; font-weight: bold;">March 2026</span>
+    </div>
+    <div style="color: #A3A3A3; text-align: center; letter-spacing: 0.5px;">
+      <div style="margin-bottom: 4px;"><span style="display: inline-block; width: 36px;">Mo</span><span style="display: inline-block; width: 36px;">Tu</span><span style="display: inline-block; width: 36px;">We</span><span style="display: inline-block; width: 36px;">Th</span><span style="display: inline-block; width: 36px;">Fr</span><span style="display: inline-block; width: 36px;">Sa</span><span style="display: inline-block; width: 36px;">Su</span></div>
+      <div><span style="display: inline-block; width: 36px;"></span><span style="display: inline-block; width: 36px;"></span><span style="display: inline-block; width: 36px;"></span><span style="display: inline-block; width: 36px;"></span><span style="display: inline-block; width: 36px;"></span><span style="display: inline-block; width: 36px;"></span><span style="display: inline-block; width: 36px; color: #EBE9E7;">1</span></div>
+      <div><span style="display: inline-block; width: 36px;">2</span><span style="display: inline-block; width: 36px;">3</span><span style="display: inline-block; width: 36px;">4</span><span style="display: inline-block; width: 36px;">5</span><span style="display: inline-block; width: 36px;"><span style="color: #F4BF4F;">◆</span><span style="color: #EBE9E7;">6</span></span><span style="display: inline-block; width: 36px;">7</span><span style="display: inline-block; width: 36px; background: #7A9EFF; color: #141414; border-radius: 3px; font-weight: bold;">8</span></div>
+      <div><span style="display: inline-block; width: 36px;">9</span><span style="display: inline-block; width: 36px;">10</span><span style="display: inline-block; width: 36px;">11</span><span style="display: inline-block; width: 36px;"><span style="color: #F4BF4F;">◆</span><span style="color: #EBE9E7;">12</span></span><span style="display: inline-block; width: 36px;">13</span><span style="display: inline-block; width: 36px;">14</span><span style="display: inline-block; width: 36px;">15</span></div>
+      <div><span style="display: inline-block; width: 36px;">16</span><span style="display: inline-block; width: 36px;">17</span><span style="display: inline-block; width: 36px;">18</span><span style="display: inline-block; width: 36px;">19</span><span style="display: inline-block; width: 36px;">20</span><span style="display: inline-block; width: 36px;">21</span><span style="display: inline-block; width: 36px;">22</span></div>
+      <div><span style="display: inline-block; width: 36px;">23</span><span style="display: inline-block; width: 36px;">24</span><span style="display: inline-block; width: 36px;">25</span><span style="display: inline-block; width: 36px;"><span style="color: #F4BF4F;">◆</span><span style="color: #EBE9E7;">26</span></span><span style="display: inline-block; width: 36px;">27</span><span style="display: inline-block; width: 36px;">28</span><span style="display: inline-block; width: 36px;">29</span></div>
+      <div><span style="display: inline-block; width: 36px;">30</span><span style="display: inline-block; width: 36px;">31</span></div>
+    </div>
+    <div style="text-align: center; margin-top: 8px; color: #A3A3A3; font-size: 12px;">3 journal entries this month</div>
+  </div>
+  <!-- Status bar (JRNL mode) -->
+  <div style="background: #F2DA61; color: #141414; padding: 3px 16px; display: flex; justify-content: space-between; font-size: 12px;">
+    <div>
+      <span style="font-weight: bold;">JRNL</span>
+      <span style="opacity: 0.4;"> │ </span>
+      <span>March 2026</span>
+    </div>
+    <div style="opacity: 0.7;">h/l j/k H/L  ↵:open day  Esc:close</div>
+  </div>
+</div>
 
-The `journal` source in BQL targets the journal namespace (today's file + archive):
+- Selected day (`8`) shown with `popout` background (inverse highlight)
+- `◆` = days with a journal file in `journal/`
+- Today is marked even if the file hasn't been created yet (lazy creation)
+- `Enter` on a day with `◆` opens that journal. On a day without `◆`, no action.
+- `Esc` closes the calendar
+
+| Key | Action |
+|-----|--------|
+| `h` / `l` | Previous / next day |
+| `j` / `k` | Next / previous week |
+| `H` / `L` | Previous / next month |
+| `Enter` | Open journal for selected day (only if journal exists) |
+| `/` | Type a date to jump directly (e.g., `2026-01-15` or `jan 15`) |
+| `q` / `Esc` | Close calendar |
+
+### Expanded Calendar (from context strip)
+
+Pressing `Enter` on the context strip while viewing a journal day re-opens the calendar. The journal compresses to a compact summary above:
+
+<div style="font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.5; background: #141414; color: #EBE9E7; border-radius: 6px; overflow: hidden; max-width: 680px; margin: 16px 0;">
+  <!-- Compact journal summary -->
+  <div style="padding: 8px 16px; color: #A3A3A3; font-size: 12px;">
+    <span style="color: #EBE9E7;">Mar 8</span> — Explored ropey · Read about Xi Editor · ...
+  </div>
+  <!-- Calendar grid -->
+  <div style="border-top: 1px solid #37373E; padding: 12px 16px;">
+    <div style="text-align: center; margin-bottom: 8px;">
+      <span style="color: #EBE9E7; font-weight: bold;">March 2026</span>
+    </div>
+    <div style="color: #A3A3A3; text-align: center; letter-spacing: 0.5px;">
+      <div style="margin-bottom: 4px;"><span style="display: inline-block; width: 36px;">Mo</span><span style="display: inline-block; width: 36px;">Tu</span><span style="display: inline-block; width: 36px;">We</span><span style="display: inline-block; width: 36px;">Th</span><span style="display: inline-block; width: 36px;">Fr</span><span style="display: inline-block; width: 36px;">Sa</span><span style="display: inline-block; width: 36px;">Su</span></div>
+      <div><span style="display: inline-block; width: 36px;"></span><span style="display: inline-block; width: 36px;"></span><span style="display: inline-block; width: 36px;"></span><span style="display: inline-block; width: 36px;"></span><span style="display: inline-block; width: 36px;"></span><span style="display: inline-block; width: 36px;"></span><span style="display: inline-block; width: 36px; color: #EBE9E7;">1</span></div>
+      <div><span style="display: inline-block; width: 36px;">2</span><span style="display: inline-block; width: 36px;">3</span><span style="display: inline-block; width: 36px;">4</span><span style="display: inline-block; width: 36px;">5</span><span style="display: inline-block; width: 36px;"><span style="color: #F4BF4F;">◆</span><span style="color: #EBE9E7;">6</span></span><span style="display: inline-block; width: 36px;">7</span><span style="display: inline-block; width: 36px; background: #7A9EFF; color: #141414; border-radius: 3px; font-weight: bold;">8</span></div>
+      <div><span style="display: inline-block; width: 36px;">9</span><span style="display: inline-block; width: 36px;">10</span><span style="display: inline-block; width: 36px;">11</span><span style="display: inline-block; width: 36px;"><span style="color: #F4BF4F;">◆</span><span style="color: #EBE9E7;">12</span></span><span style="display: inline-block; width: 36px;">13</span><span style="display: inline-block; width: 36px;">14</span><span style="display: inline-block; width: 36px;">15</span></div>
+      <div><span style="display: inline-block; width: 36px;">16</span><span style="display: inline-block; width: 36px;">17</span><span style="display: inline-block; width: 36px;">18</span><span style="display: inline-block; width: 36px;">19</span><span style="display: inline-block; width: 36px;">20</span><span style="display: inline-block; width: 36px;">21</span><span style="display: inline-block; width: 36px;">22</span></div>
+      <div><span style="display: inline-block; width: 36px;">23</span><span style="display: inline-block; width: 36px;">24</span><span style="display: inline-block; width: 36px;">25</span><span style="display: inline-block; width: 36px;"><span style="color: #F4BF4F;">◆</span><span style="color: #EBE9E7;">26</span></span><span style="display: inline-block; width: 36px;">27</span><span style="display: inline-block; width: 36px;">28</span><span style="display: inline-block; width: 36px;">29</span></div>
+      <div><span style="display: inline-block; width: 36px;">30</span><span style="display: inline-block; width: 36px;">31</span></div>
+    </div>
+  </div>
+  <!-- Status bar (JRNL mode) -->
+  <div style="background: #F2DA61; color: #141414; padding: 3px 16px; display: flex; justify-content: space-between; font-size: 12px;">
+    <div>
+      <span style="font-weight: bold;">JRNL</span>
+      <span style="opacity: 0.4;"> │ </span>
+      <span>March 2026</span>
+    </div>
+    <div style="opacity: 0.7;">h/l j/k H/L  ↵:open day  Esc:strip</div>
+  </div>
+</div>
+
+---
+
+## Journal + Pages: Separate Namespaces
+
+| Namespace | Contents | Picker | Navigation | Index |
+|-----------|----------|--------|------------|-------|
+| **All files** | Everything | `SPC f f` | — | Full |
+| **Pages** (`pages/`) | Named ideas with identity | `SPC p p` | — | Full |
+| **Journal** (`journal/`) | Daily stream, temporal | `SPC j j` | `SPC j c` (calendar), `SPC j p`/`SPC j n` | Full |
+
+Pages are things you navigate by *name*. The journal is something you navigate by *time*. The "all files" picker is for when you don't care which namespace — search everything.
+
+All namespaces are fully searchable via `SPC s s` (full-text) and BQL queries.
+
+---
+
+## BQL Integration
+
+The `journal` source in BQL targets the journal namespace:
 
 ```
 journal | where date = today                          -- today's journal
@@ -110,60 +255,20 @@ blocks  | where page in $journal | where tags has "rust"  -- all journal blocks 
 tasks   | where page in $journal | where not done     -- open tasks from any journal day
 ```
 
-`$journal` is a context variable representing the journal namespace (today's file + all archive files).
-
----
-
-## Vault Structure (revised)
-
-```
-~/bloom/
-├── journal.md              ← today's journal (always this name)
-├── pages/                  ← named pages
-│   ├── Text Editor Theory.md
-│   └── Rust Programming.md
-├── .journal/               ← hidden archive (auto-rotated daily journals)
-│   ├── 2026-03-07.md
-│   ├── 2026-03-06.md
-│   └── ...
-├── templates/
-├── images/
-├── .index/
-├── .gitignore
-└── config.toml
-```
-
----
-
-## Migration from Current Design
-
-For users with an existing `journal/` directory:
-
-1. On first launch after upgrade, Bloom detects the old `journal/` directory.
-2. Files are moved to `.journal/` (renamed, not re-created).
-3. The most recent day's file becomes the new `journal.md`.
-4. A notification explains the change.
-
-This is a one-time migration, non-destructive (files are moved, not deleted).
+`$journal` is a context variable representing the journal namespace (all files in `journal/`).
 
 ---
 
 ## Open Questions
 
-1. **Midnight rotation while Bloom is running.** If you're writing at 11:59 PM and keep going past midnight, when does the rotation happen? Options: (a) on next launch only, (b) at midnight with a prompt, (c) silently at midnight, content before midnight stays in today's archive, content after goes to new journal. Leaning towards (a) — simplest, no surprises mid-session.
+1. **Linking to journal entries.** If a page wants to reference "what I wrote on March 8", how? The journal file has a UUID — you can link by UUID as with any page. But the user doesn't know the UUID. Maybe: `[[journal:2026-03-08]]` as a special link syntax that resolves to the UUID? Or rely on the existing `[[` picker with a journal filter?
 
-2. **Archive editability.** Should archived journals be read-only? Or editable (for fixing typos, adding tags after the fact)? Editable is more flexible but means the archive is mutable. Leaning towards editable — the orphan nudge workflow requires adding tags to archived content.
-
-3. **Carry-forward limit.** If a task has been carried forward for 30 days straight, it's clearly stuck. Should Bloom flag long-carried tasks differently? Maybe surface them with a different indicator after N days.
-
-4. **Journal frontmatter.** Today's `journal.md` — does it have frontmatter? It doesn't need an ID (it's not linkable by UUID). It might want `created: 2026-03-08` for the indexer. Minimal frontmatter: just the date.
-
-5. **Linking to journal entries.** If a page wants to reference "what I wrote on March 8", how? Today you'd link to the journal page by UUID. In this model, the archive file has a UUID but isn't in the page picker. Maybe: `[[journal:2026-03-08]]` as a special link syntax? Or just use BQL inline queries.
+2. **Days with no journal in the calendar.** The `◆` marker means "has a journal file." Should the calendar also show a lighter marker for days with only page edits (no journal)? Or keep it purely journal-focused?
 
 ---
 
 ## References
 
 - Current design: [GOALS.md G14](../GOALS.md) (Daily Journal)
-- [TIME_TRAVEL.md](TIME_TRAVEL.md) — git-backed history, day view design, calendar + day-hopping navigation
-- Task carry-forward inspired by: Bullet Journal "migration" concept
+- [TIME_TRAVEL.md](TIME_TRAVEL.md) — git-backed history, context strip component, calendar
+- [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md) — stable IDs for task actions
