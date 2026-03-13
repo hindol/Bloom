@@ -135,27 +135,6 @@ pub static VERDANT: ThemePalette = ThemePalette {
     accent_yellow: Rgb(0xC8, 0xB0, 0x50),
 };
 
-/// Ink — pure monochrome dark. White ink on black paper, zero-colour minimalism.
-pub static INK: ThemePalette = ThemePalette {
-    name: "ink",
-    foreground: Rgb(0xC3, 0xC3, 0xC3),
-    background: Rgb(0x0E, 0x0E, 0x0E),
-    modeline: Rgb(0x18, 0x18, 0x18),
-    highlight: Rgb(0x1C, 0x1C, 0x1C),
-    critical: Rgb(0xCC, 0x60, 0x60),
-    popout: Rgb(0xA0, 0x90, 0xD0),
-    strong: Rgb(0xDB, 0xDB, 0xDB),
-    salient: Rgb(0xA0, 0xA0, 0xA0),
-    faded: Rgb(0x8F, 0x8F, 0x8F),
-    subtle: Rgb(0x1E, 0x1E, 0x1E),
-    mild: Rgb(0x36, 0x36, 0x36),
-    ultralight: Rgb(0x2A, 0x2A, 0x2A),
-    accent_red: Rgb(0xCC, 0x60, 0x60),
-    accent_green: Rgb(0x60, 0xB4, 0x60),
-    accent_blue: Rgb(0x60, 0x94, 0xBC),
-    accent_yellow: Rgb(0xBC, 0xB0, 0x50),
-};
-
 // ── Light themes ─────────────────────────────────────────────────────────
 
 /// Bloom Light — warm neutral flagship. Clean warm white, the daytime counterpart.

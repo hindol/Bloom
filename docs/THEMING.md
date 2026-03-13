@@ -373,7 +373,7 @@ Themes are defined in `config.toml`:
 
 ```toml
 [theme]
-name = "bloom-dark"   # any built-in: bloom-dark, bloom-light, aurora, frost, ember, solarium, twilight, sakura, verdant, lichen, ink, paper
+name = "bloom-dark"   # any built-in: bloom-dark, bloom-light, aurora, frost, ember, solarium, twilight, sakura, verdant, lichen, paper
 
 # Override individual slots (optional)
 [theme.overrides]

@@ -2,7 +2,7 @@ mod palette;
 mod resolve;
 
 pub use palette::{
-    Rgb, ThemePalette, AURORA, BLOOM_DARK, BLOOM_LIGHT, EMBER, FROST, INK, LICHEN, PAPER, SAKURA,
+    Rgb, ThemePalette, AURORA, BLOOM_DARK, BLOOM_LIGHT, EMBER, FROST, LICHEN, PAPER, SAKURA,
     SOLARIUM, TWILIGHT, VERDANT,
 };
 pub use resolve::{resolve, resolve_chrome, resolve_status_bar, Chrome, StyleProps};
@@ -19,7 +19,6 @@ pub const THEME_NAMES: &[&str] = &[
     "sakura",
     "verdant",
     "lichen",
-    "ink",
     "paper",
 ];
 
@@ -36,7 +35,6 @@ pub fn palette_by_name(name: &str) -> Option<&'static ThemePalette> {
         "sakura" => Some(&SAKURA),
         "verdant" => Some(&VERDANT),
         "lichen" => Some(&LICHEN),
-        "ink" => Some(&INK),
         "paper" => Some(&PAPER),
         _ => None,
     }
@@ -55,7 +53,6 @@ pub fn theme_description(name: &str) -> &'static str {
         "sakura" => "soft pink light, cherry blossom",
         "verdant" => "deep forest green, dense canopy",
         "lichen" => "sage green light, stone garden",
-        "ink" => "pure monochrome dark, minimalist",
         "paper" => "pure monochrome light, minimalist",
         _ => "",
     }
