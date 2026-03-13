@@ -138,17 +138,88 @@ This doesn't mean we should implement mirroring, but the architecture makes it f
 
 ---
 
+## Threading: Keep DiskWriter Separate
+
+The existing DiskWriter thread handles debounced atomic writes (write → fsync → rename). It's I/O-bound and blocking. The BufferWriter would be CPU-bound and fast (rope operations are µs). **Keep them separate:**
+
+```
+BufferWriter (CPU, fast):
+    mutate rope → mark dirty → send WriteRequest to DiskWriter
+    never touches the filesystem
+
+DiskWriter (I/O, blocking, existing):
+    recv WriteRequest → debounce → atomic write → send WriteComplete
+    never touches rope/buffer state
+```
+
+Two threads, clear separation of concerns. The BufferWriter never blocks on I/O. The DiskWriter never holds buffer locks. Communication is the existing channel pair.
+
+---
+
+## Event Bus: Block-Level Notifications
+
+Views need to know when their visible blocks change. Instead of polling (re-running BQL on every render) or global invalidation (regenerate everything on IndexComplete), use a **targeted notification layer**:
+
+```rust
+pub enum BufferEvent {
+    /// A specific block was modified (toggle, edit, etc.)
+    BlockChanged { block_id: BlockId, page_id: PageId },
+    /// A page was saved to disk
+    PageSaved { page_id: PageId },
+    /// Index was rebuilt (tags, links, search results may have changed)
+    IndexComplete,
+}
+```
+
+### Subscription Model
+
+Views register interest in specific block IDs when they render:
+
+```rust
+// When the Agenda renders, it registers the blocks it's showing
+view.watch(vec!["a1b2c", "d3e4f", "g5h6i"]);
+
+// BufferWriter emits events after mutations
+writer.emit(BufferEvent::BlockChanged { block_id: "a1b2c", page_id: ... });
+
+// Views with matching subscriptions regenerate affected rows
+// Only the Agenda refreshes — other views showing different blocks are untouched
+```
+
+### Why This Matters
+
+| Approach | Cost per mutation | Scales with |
+|----------|------------------|-------------|
+| Polling (re-run BQL every frame) | O(query) per frame | Query complexity |
+| Global invalidation (on IndexComplete) | O(all views) per save | Number of views |
+| **Block-level subscription** | O(1) lookup per mutation | Number of watchers on that block |
+
+For a vault with 10K pages and 5 open views, a toggle in the Agenda touches 1 block. Block-level notification refreshes 1 view row. Global invalidation would re-run 5 BQL queries.
+
+### Implementation
+
+The event bus is a simple `Vec<(BlockId, Sender<BufferEvent>)>` on the BufferWriter. When a mutation touches block `^k7m2x`:
+
+1. BufferWriter applies the edit
+2. Looks up watchers for `k7m2x` → finds the Agenda view's sender
+3. Sends `BlockChanged` to that sender
+4. Agenda receives the event, regenerates just that row (or re-runs its query)
+
+For Phase 1 (synchronous, no separate thread): the event bus is just a callback list. The BufferWriter calls each registered callback after a mutation. No channels needed yet.
+
+---
+
 ## Migration Path
 
 This is a large refactor. A gradual migration:
 
-1. **Phase 1** (current): Direct mutation on UI thread. `ReadOnly<Buffer>` for views. `x` toggle sends a message that the UI thread processes synchronously (same thread, just a function call).
+1. **Phase 1** (current): Direct mutation on UI thread. `ReadOnly<Buffer>` for views. `x` toggle sends a message that the UI thread processes synchronously (same thread, just a function call). Event bus is a simple callback list.
 
-2. **Phase 2**: Extract mutation logic into a `BufferWriter` struct (still on UI thread). All mutations go through `writer.apply(message)`. No threading change — just consolidation.
+2. **Phase 2**: Extract mutation logic into a `BufferWriter` struct (still on UI thread). All mutations go through `writer.apply(message)`. Event bus notifies views after each mutation. No threading change — just consolidation.
 
-3. **Phase 3**: Move `BufferWriter` to its own thread. UI thread sends messages via channel. `ReadOnly<Buffer>` references updated on StateChanged signal.
+3. **Phase 3**: Move `BufferWriter` to its own thread. UI thread sends messages via channel. Event bus becomes channel-based. `ReadOnly<Buffer>` references updated on StateChanged signal.
 
-Phase 1 gives us the UX (toggle works). Phase 2 gives us the architecture (single mutation path). Phase 3 gives us the threading (non-blocking UI).
+Phase 1 gives us the UX (toggle works). Phase 2 gives us the architecture (single mutation path + event bus). Phase 3 gives us the threading (non-blocking UI).
 
 ---
 
@@ -161,6 +232,8 @@ Phase 1 gives us the UX (toggle works). Phase 2 gives us the architecture (singl
 3. **Buffer eviction.** MCP and view toggles may load buffers for files not visible in any pane. These should be evicted after idle timeout (already spec'd at 60s in GOALS.md G17).
 
 4. **Snapshot consistency.** If the writer is on a separate thread, the UI needs a consistent snapshot for rendering. Options: double-buffer (writer publishes a new snapshot, UI swaps), or reader-writer lock on the buffer collection.
+
+5. **Event bus granularity.** Block-level is the sweet spot for views. But what about the picker (needs to know when page titles change) or the status bar (needs to know when dirty flag changes)? These could be separate event types on the same bus, or separate subscription channels.
 
 ---
 
