@@ -19,6 +19,8 @@ pub use undo::{UndoNodeInfo, UndoTree};
 /// Exposes only read methods — no insert, delete, replace, undo, or cursor mutation.
 /// Same rope internally, same rendering path, compile-time enforcement.
 /// Created via `Buffer::freeze()`, reversed via `ReadOnly::thaw()`.
+///
+/// Exception: cursor movement IS allowed (it's a viewport concern, not content mutation).
 pub struct ReadOnly<T>(T);
 
 impl ReadOnly<Buffer> {
@@ -58,6 +60,12 @@ impl ReadOnly<Buffer> {
     /// Borrow the inner buffer for read-only access (e.g., Vim motion computation).
     pub fn as_buffer(&self) -> &Buffer {
         &self.0
+    }
+
+    /// Borrow the inner buffer mutably — for cursor movement on frozen buffers.
+    /// Cursor position is a viewport concern, not a content mutation.
+    pub fn as_buffer_mut(&mut self) -> &mut Buffer {
+        &mut self.0
     }
 }
 

@@ -236,6 +236,17 @@ impl BufferManager {
             }
         }
     }
+
+    /// Set cursor position on any buffer (mutable or frozen).
+    /// Cursor movement is a viewport concern, not a content mutation.
+    pub fn set_cursor(&mut self, page_id: &types::PageId, pos: usize) {
+        if let Some((slot, _)) = self.buffers.get_mut(&page_id.to_hex()) {
+            match slot {
+                BufferSlot::Mutable(buf) => buf.set_cursor(0, pos),
+                BufferSlot::Frozen(ro) => ro.as_buffer_mut().set_cursor(0, pos),
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -633,11 +644,7 @@ impl BloomEditor {
 
     pub(crate) fn set_cursor(&mut self, pos: usize) {
         if let Some(page_id) = self.active_page().cloned() {
-            if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
-                buf.set_cursor(0, pos);
-            } else {
-                tracing::error!(page = %page_id.to_hex(), pos, "set_cursor: buffer not found!");
-            }
+            self.buffer_mgr.set_cursor(&page_id, pos);
         } else {
             tracing::error!(pos, "set_cursor: no active page!");
         }

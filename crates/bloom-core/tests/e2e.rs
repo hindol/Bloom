@@ -1995,3 +1995,38 @@ fn view_buffer_vim_navigation() {
     // The key point: no crash, no error, key was processed
     assert_eq!(sim.screen(80, 24).mode(), "NORMAL");
 }
+
+// Regression: j/k must move cursor in read-only (frozen) view buffers
+#[test]
+fn agenda_cursor_moves_with_j() {
+    let vault = TestVault::new()
+        .page("Tasks")
+        .with_content("- [ ] First task @due(2026-03-01)\n- [ ] Second task @due(2026-03-02)\n- [ ] Third task\n")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC a a");
+    let screen = sim.screen(80, 24);
+    assert_eq!(screen.title(), "Agenda");
+    let lines = screen.line_count();
+    eprintln!("Agenda has {} visible lines", lines);
+    eprintln!("Mode: {}", screen.mode());
+
+    let (line0, _) = screen.cursor();
+    eprintln!("Cursor before j: line={}", line0);
+
+    sim.keys("j");
+    let screen2 = sim.screen(80, 24);
+    let (line1, _) = screen2.cursor();
+    eprintln!("Cursor after j: line={}", line1);
+    eprintln!("Mode after j: {}", screen2.mode());
+
+    // If the buffer has content, cursor should have moved
+    if lines > 1 {
+        assert!(
+            line1 > line0,
+            "j should move cursor down in agenda (before={}, after={})\nlines: {}",
+            line0, line1, lines,
+        );
+    }
+}
