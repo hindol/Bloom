@@ -297,6 +297,7 @@ impl BloomEditor {
                     self.date_picker_state = Some(DatePickerState {
                         selected_date: self.last_viewed_journal_date.unwrap_or(today),
                         purpose,
+                        pending_bracket: None,
                     });
                 }
                 // Pass through to TUI: Quit, Save, and others
@@ -590,7 +591,35 @@ impl BloomEditor {
             return vec![];
         };
 
+        // Handle pending bracket: [d / ]d to skip to prev/next journal day
+        if let Some(bracket) = dp.pending_bracket.take() {
+            if let KeyCode::Char('d') = &key.code {
+                let current = dp.selected_date;
+                if let (Some(journal), Some(store)) = (&self.journal, &self.note_store) {
+                    let target = if bracket == '[' {
+                        journal.prev_date(current, store)
+                    } else {
+                        journal.next_date(current, store)
+                    };
+                    if let Some(date) = target {
+                        if let Some(dp) = &mut self.date_picker_state {
+                            dp.selected_date = date;
+                        }
+                    }
+                }
+                return vec![keymap::dispatch::Action::Noop];
+            }
+            // Not 'd' — ignore the bracket and process this key normally
+        }
+
         match &key.code {
+            // [ / ] start bracket prefix for skip navigation
+            KeyCode::Char('[') | KeyCode::Char(']') => {
+                if let KeyCode::Char(c) = &key.code {
+                    dp.pending_bracket = Some(*c);
+                }
+                vec![keymap::dispatch::Action::Noop]
+            }
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.date_picker_state = None;
                 vec![keymap::dispatch::Action::Noop]

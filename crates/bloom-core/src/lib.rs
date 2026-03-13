@@ -403,6 +403,8 @@ pub(crate) struct QuickCaptureState {
 pub(crate) struct DatePickerState {
     pub(crate) selected_date: chrono::NaiveDate,
     pub(crate) purpose: keymap::dispatch::DatePickerPurpose,
+    /// Pending bracket key for [d/]d skip navigation.
+    pub(crate) pending_bracket: Option<char>,
 }
 
 // ---------------------------------------------------------------------------
