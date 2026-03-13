@@ -417,12 +417,6 @@ impl TestScreen {
         self.frame.date_picker.is_some()
     }
 
-    /// Get the mode_style from the active pane's status bar (e.g., "accent_yellow").
-    pub fn mode_style(&self) -> Option<&str> {
-        self.active_pane()
-            .and_then(|p| p.status_bar.mode_style.as_deref())
-    }
-
     /// Get the right_hints from the active pane's status bar.
     pub fn right_hints(&self) -> Option<&str> {
         self.active_pane()

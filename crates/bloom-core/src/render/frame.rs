@@ -324,9 +324,7 @@ pub enum CursorShape {
 pub struct StatusBarFrame {
     pub content: StatusBarContent,
     pub mode: String,
-    /// Override mode background color (e.g., "accent_yellow" for temporal modes).
-    pub mode_style: Option<String>,
-    /// Right-aligned hint text (e.g., "↵:calendar  SPC j p/n").
+    /// Right-aligned hint text (e.g., "↵:calendar  [d/]d").
     pub right_hints: Option<String>,
 }
 
@@ -391,7 +389,6 @@ impl Default for StatusBarFrame {
                 indexing: false,
             }),
             mode: String::from("NORMAL"),
-            mode_style: None,
             right_hints: None,
         }
     }

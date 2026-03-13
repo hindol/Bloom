@@ -65,23 +65,9 @@ fn draw_normal_status(
     let mode = &sb.mode;
     let bar_bg = theme.highlight();
 
-    // Mode badge gets its own colored background; the rest of the bar uses bar_bg.
-    let mode_badge_style = if sb.mode_style.as_deref() == Some("accent_yellow") {
-        // Temporal mode: dark text on accent background (badge only)
-        RStyle::default()
-            .fg(theme.background())
-            .bg(theme.accent_yellow())
-            .add_modifier(Modifier::BOLD)
-    } else if sb.mode_style.is_some() {
-        // Other custom mode styles
-        RStyle::default()
-            .fg(theme.background())
-            .bg(bar_bg)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        // Standard modes: use per-mode colors from theme (INSERT=green, VISUAL=popout, etc.)
-        theme.status_bar_style(mode, true).add_modifier(Modifier::BOLD)
-    };
+    // Mode badge: colored background from theme resolver (all modes handled uniformly).
+    // The rest of the bar uses the neutral bar_bg (highlight).
+    let mode_badge_style = theme.status_bar_style(mode, true).add_modifier(Modifier::BOLD);
     let width = area.width as usize;
 
     // Fill background with the neutral bar color (not the mode color)

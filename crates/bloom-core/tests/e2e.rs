@@ -1687,11 +1687,6 @@ fn jr07_jrnl_mode_on_journal_today() {
 
     let screen = sim.screen(80, 24);
     assert_eq!(screen.mode(), "JRNL", "SPC j t should activate JRNL mode");
-    assert_eq!(
-        screen.mode_style(),
-        Some("accent_yellow"),
-        "JRNL mode should use accent_yellow"
-    );
     assert!(
         screen.right_hints().is_some(),
         "JRNL mode should show key hints"

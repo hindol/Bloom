@@ -205,11 +205,6 @@ impl BloomEditor {
                     } else {
                         mode_str.to_string()
                     },
-                    mode_style: if show_jrnl {
-                        Some("accent_yellow".to_string())
-                    } else {
-                        None
-                    },
                     right_hints: if show_jrnl {
                         Some("↵:calendar  [d/]d".to_string())
                     } else {
@@ -230,7 +225,6 @@ impl BloomEditor {
                         indexing: self.indexing,
                     }),
                     mode: mode_str.to_string(),
-                    mode_style: None,
                     right_hints: None,
                 }
             };
@@ -824,11 +818,6 @@ impl BloomEditor {
                 "HISTORY".to_string()
             } else {
                 mode_str.to_string()
-            },
-            mode_style: if is_active {
-                Some("accent_yellow".to_string())
-            } else {
-                None
             },
             right_hints: if is_active {
                 Some("d:diff  r:restore  ↵:list".to_string())
