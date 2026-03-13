@@ -1178,6 +1178,71 @@ fn ex_command_theme_switch() {
     assert_eq!(screen.mode(), "NORMAL");
 }
 
+// Theme picker live preview: moving selection changes theme in the frame
+#[test]
+fn theme_picker_live_preview() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // Record initial theme
+    let initial_theme = sim.screen(80, 24).theme_name().to_string();
+
+    // Open theme picker via SPC T t
+    sim.keys("SPC T t");
+    let screen = sim.screen(80, 24);
+    assert!(screen.has_picker(), "SPC T t should open theme picker");
+
+    // Theme should still be the initial one (picker pre-selects current)
+    assert_eq!(
+        screen.theme_name(),
+        initial_theme,
+        "picker should start on current theme"
+    );
+
+    // Move selection down — should preview a different theme
+    sim.keys("C-n");
+    let after_move = sim.screen(80, 24);
+    assert_ne!(
+        after_move.theme_name(),
+        initial_theme,
+        "moving selection should live-preview a different theme"
+    );
+
+    // Press Escape — should revert to original theme
+    sim.keys("<Esc>");
+    let after_cancel = sim.screen(80, 24);
+    assert!(!after_cancel.has_picker(), "picker should be closed");
+    assert_eq!(
+        after_cancel.theme_name(),
+        initial_theme,
+        "cancel should revert to original theme"
+    );
+}
+
+// Theme picker confirm: Enter persists the new theme
+#[test]
+fn theme_picker_confirm_persists() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    let initial_theme = sim.screen(80, 24).theme_name().to_string();
+
+    // Open picker, move to a different theme, confirm
+    sim.keys("SPC T t");
+    sim.keys("C-n");
+    let previewed = sim.screen(80, 24).theme_name().to_string();
+    assert_ne!(previewed, initial_theme);
+
+    sim.keys("Enter");
+    let after_confirm = sim.screen(80, 24);
+    assert!(!after_confirm.has_picker());
+    assert_eq!(
+        after_confirm.theme_name(),
+        previewed,
+        "confirmed theme should persist after picker closes"
+    );
+}
+
 // =======================================================================
 // Fixture-based tests — linked_vault
 // =======================================================================

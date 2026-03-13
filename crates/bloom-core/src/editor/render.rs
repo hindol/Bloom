@@ -63,6 +63,7 @@ impl BloomEditor {
                 dialog: None,
                 notifications: Vec::new(),
                 scrolloff: self.config.scrolloff,
+                theme_name: self.active_theme.name.to_string(),
             };
         }
 
@@ -651,6 +652,7 @@ impl BloomEditor {
                 .cloned()
                 .collect(),
             scrolloff: self.config.scrolloff,
+            theme_name: self.active_theme.name.to_string(),
         }
     }
 

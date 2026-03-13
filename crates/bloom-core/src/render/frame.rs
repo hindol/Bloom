@@ -28,6 +28,8 @@ pub struct RenderFrame {
     pub dialog: Option<DialogFrame>,
     pub notifications: Vec<Notification>,
     pub scrolloff: usize,
+    /// Active theme name — frontends resolve to a palette each frame for live preview.
+    pub theme_name: String,
 }
 
 // ---------------------------------------------------------------------------

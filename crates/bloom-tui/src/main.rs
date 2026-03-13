@@ -96,14 +96,19 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
         })
         .expect("failed to spawn input thread");
 
-    // Capture theme before entering the loop (it's a static ref, won't change mid-loop)
-    let theme = TuiTheme::new(editor.theme());
-
     // Run the shared event loop — same code path as the GUI
     let mut render_error: Option<io::Error> = None;
 
+    // Fallback theme in case palette_by_name fails (shouldn't happen)
+    let fallback_theme = TuiTheme::new(editor.theme());
+
     bloom_core::event_loop::run_event_loop(&mut editor, &frontend_rx, |action| match action {
         bloom_core::event_loop::LoopAction::Render(frame) => {
+            // Resolve theme fresh each frame for live preview support
+            let theme = bloom_md::theme::palette_by_name(&frame.theme_name)
+                .map(TuiTheme::new)
+                .unwrap_or_else(|| fallback_theme.clone());
+
             let result = terminal.draw(|f| {
                 if let Some(pane) = frame.panes.iter().find(|p| p.is_active) {
                     let cursor_style = match pane.cursor.shape {

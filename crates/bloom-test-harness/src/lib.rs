@@ -428,6 +428,11 @@ impl TestScreen {
         self.active_pane()
             .and_then(|p| p.status_bar.right_hints.as_deref())
     }
+
+    /// Get the active theme name from the render frame.
+    pub fn theme_name(&self) -> &str {
+        &self.frame.theme_name
+    }
 }
 
 // ---------------------------------------------------------------------------

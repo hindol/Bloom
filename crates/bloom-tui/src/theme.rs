@@ -36,6 +36,7 @@ pub fn to_rstyle(props: &StyleProps) -> RStyle {
 }
 
 /// Thin wrapper around a core `ThemePalette` that produces ratatui styles.
+#[derive(Clone, Copy)]
 pub struct TuiTheme<'a> {
     pub palette: &'a ThemePalette,
 }
