@@ -141,15 +141,17 @@ fn align_timestamp_block(buf: &mut Buffer, start: usize, end: usize) {
     struct TaskLine {
         text_before_at: String,
         at_and_after: String,
+        block_id_suffix: String, // " ^xxxxx" if present, empty otherwise
         has_at: bool,
     }
 
     let mut parsed: Vec<TaskLine> = Vec::new();
     for line in &lines {
         let trimmed = line.trim_end_matches('\n');
-        if let Some(at_pos) = find_first_timestamp_pos(trimmed) {
-            let before = &trimmed[..at_pos];
-            let after = &trimmed[at_pos..];
+        let (content, block_id) = split_block_id(trimmed);
+        if let Some(at_pos) = find_first_timestamp_pos(content) {
+            let before = &content[..at_pos];
+            let after = &content[at_pos..];
 
             // Relocate: find tags after timestamps and move them before @
             let (relocated_before, cleaned_after) = relocate_post_at_tags(before, after);
@@ -157,12 +159,14 @@ fn align_timestamp_block(buf: &mut Buffer, start: usize, end: usize) {
             parsed.push(TaskLine {
                 text_before_at: relocated_before.trim_end().to_string(),
                 at_and_after: cleaned_after.trim().to_string(),
+                block_id_suffix: block_id.to_string(),
                 has_at: true,
             });
         } else {
             parsed.push(TaskLine {
-                text_before_at: trimmed.to_string(),
+                text_before_at: content.trim_end().to_string(),
                 at_and_after: String::new(),
+                block_id_suffix: block_id.to_string(),
                 has_at: false,
             });
         }
@@ -194,13 +198,14 @@ fn align_timestamp_block(buf: &mut Buffer, start: usize, end: usize) {
         let new_line = if p.has_at {
             let padding = align_col.saturating_sub(p.text_before_at.width());
             format!(
-                "{}{}{}",
+                "{}{}{}{}",
                 p.text_before_at,
                 " ".repeat(padding),
-                p.at_and_after
+                p.at_and_after,
+                p.block_id_suffix,
             )
         } else {
-            p.text_before_at.clone()
+            format!("{}{}", p.text_before_at, p.block_id_suffix)
         };
 
         if new_line != old_trimmed {
@@ -216,6 +221,21 @@ fn find_first_timestamp_pos(line: &str) -> Option<usize> {
         .iter()
         .filter_map(|prefix| line.find(prefix))
         .min()
+}
+
+/// Split a trailing block ID (` ^xxxxx`) from the line content.
+/// Returns (content_without_id, block_id_suffix_including_space).
+/// If no block ID is found, returns (original, "").
+fn split_block_id(line: &str) -> (&str, &str) {
+    // Block IDs are ` ^` followed by 5 base36 chars at end of line
+    if let Some(caret_pos) = line.rfind(" ^") {
+        let suffix = &line[caret_pos + 2..];
+        if suffix.len() == 5 && suffix.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        {
+            return (&line[..caret_pos], &line[caret_pos..]);
+        }
+    }
+    (line, "")
 }
 
 /// Move #tags that appear after @timestamps to before the first @.
@@ -685,5 +705,42 @@ mod tests {
             longest_plain,
             text
         );
+    }
+
+    #[test]
+    fn test_block_ids_excluded_from_alignment_width() {
+        // Block IDs (^xxxxx) should not inflate the alignment column.
+        // Without this fix, a long block ID on a non-timestamp line would
+        // push all timestamps far to the right.
+        let input = "- [ ] Short @due(2026-03-05)\n\
+                      - [ ] Medium task @due(2026-03-10)\n\
+                      - [ ] Write tests #testing ^g5h6i\n";
+        let mut buf = Buffer::from_text(input);
+        auto_align_page(&mut buf);
+        let text = buf.text().to_string();
+
+        let at_positions: Vec<usize> = text.lines().filter_map(|l| l.find("@due")).collect();
+        assert_eq!(at_positions.len(), 2);
+        assert_eq!(at_positions[0], at_positions[1], "should align\n{}", text);
+
+        // The alignment column should be based on "- [ ] Write tests #testing"
+        // (31 chars), NOT "- [ ] Write tests #testing ^g5h6i" (38 chars).
+        let text_without_id = "- [ ] Write tests #testing".len();
+        // @due should be at text_without_id + 1 (the alignment adds 1 space)
+        assert!(
+            at_positions[0] <= text_without_id + 2,
+            "@due at col {} should be near {} (text without block ID), not inflated\n{}",
+            at_positions[0],
+            text_without_id + 1,
+            text
+        );
+
+        // Block IDs should still be present at end of lines
+        assert!(text.contains("^g5h6i"), "block ID should be preserved\n{}", text);
+
+        // Idempotent
+        let first = text.clone();
+        auto_align_page(&mut buf);
+        assert_eq!(buf.text().to_string(), first, "should be idempotent");
     }
 }
