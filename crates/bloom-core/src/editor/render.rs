@@ -117,10 +117,9 @@ impl BloomEditor {
                 if let Some(ps) = pane_state {
                     if let Some(page_id) = &ps.page_id {
                         if let Some(buf) = self.buffer_mgr.get(page_id) {
-                            let infos = self.buffer_mgr.open_buffers();
-                            let title = infos
-                                .iter()
-                                .find(|i| i.page_id == *page_id)
+                            let title = self
+                                .buffer_mgr
+                                .info(page_id)
                                 .map(|i| i.title.clone())
                                 .unwrap_or_default();
                             let lines = self.render_buffer_lines_with_viewport(buf, &ps.viewport);
@@ -134,6 +133,34 @@ impl BloomEditor {
                                 cc,
                                 ps.viewport.first_visible_line,
                             )
+                        } else if let Some(slot) = self.buffer_mgr.slot(page_id) {
+                            // Read-only buffer: render lines from StaticBuffer
+                            let title = self
+                                .buffer_mgr
+                                .info(page_id)
+                                .map(|i| i.title.clone())
+                                .unwrap_or_default();
+                            let line_count = slot.len_lines();
+                            let first = ps.viewport.first_visible_line;
+                            let height = ps.viewport.height;
+                            let ctx = bloom_md::parser::traits::LineContext {
+                                in_code_block: false,
+                                in_frontmatter: false,
+                                code_fence_lang: None,
+                            };
+                            let lines: Vec<render::RenderedLine> = (first
+                                ..line_count.min(first + height))
+                                .map(|i| {
+                                    let text = slot.line_text(i);
+                                    let spans = self.parser.highlight_line(&text, &ctx);
+                                    render::RenderedLine {
+                                        source: render::LineSource::Buffer(i),
+                                        text,
+                                        spans,
+                                    }
+                                })
+                                .collect();
+                            (title, false, lines, 0, 0, first)
                         } else {
                             (String::new(), false, Vec::new(), 0, 0, 0)
                         }

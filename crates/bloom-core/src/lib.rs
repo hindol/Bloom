@@ -39,8 +39,59 @@ use bloom_md::parser::traits::DocumentParser;
 ///
 /// Each buffer is paired with [`BufferInfo`] metadata (title, path, dirty flag).
 /// The editor opens, closes, and reloads buffers through this manager.
+/// Either a mutable rope-backed buffer or a lightweight read-only buffer.
+pub enum BufferSlot {
+    Mutable(bloom_buffer::Buffer),
+    ReadOnly(bloom_buffer::StaticBuffer),
+}
+
+impl BufferSlot {
+    pub fn len_lines(&self) -> usize {
+        use bloom_buffer::ReadBuffer;
+        match self {
+            BufferSlot::Mutable(b) => b.len_lines(),
+            BufferSlot::ReadOnly(b) => b.len_lines(),
+        }
+    }
+
+    pub fn len_chars(&self) -> usize {
+        use bloom_buffer::ReadBuffer;
+        match self {
+            BufferSlot::Mutable(b) => b.len_chars(),
+            BufferSlot::ReadOnly(b) => b.len_chars(),
+        }
+    }
+
+    pub fn line_text(&self, idx: usize) -> String {
+        use bloom_buffer::ReadBuffer;
+        match self {
+            BufferSlot::Mutable(b) => b.line(idx).to_string(),
+            BufferSlot::ReadOnly(b) => b.line_text(idx),
+        }
+    }
+
+    pub fn text_string(&self) -> String {
+        use bloom_buffer::ReadBuffer;
+        match self {
+            BufferSlot::Mutable(b) => b.text().to_string(),
+            BufferSlot::ReadOnly(b) => b.text_string(),
+        }
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        match self {
+            BufferSlot::Mutable(b) => b.is_dirty(),
+            BufferSlot::ReadOnly(_) => false,
+        }
+    }
+
+    pub fn is_read_only(&self) -> bool {
+        matches!(self, BufferSlot::ReadOnly(_))
+    }
+}
+
 pub struct BufferManager {
-    buffers: HashMap<String, (bloom_buffer::Buffer, BufferInfo)>,
+    buffers: HashMap<String, (BufferSlot, BufferInfo)>,
 }
 
 /// Metadata for an open buffer: identity, display title, file path, and dirty state.
@@ -50,7 +101,6 @@ pub struct BufferInfo {
     pub path: std::path::PathBuf,
     pub dirty: bool,
     pub last_focused: Instant,
-    pub read_only: bool,
 }
 
 impl Default for BufferManager {
@@ -82,57 +132,82 @@ impl BufferManager {
                 path: path.to_path_buf(),
                 dirty: false,
                 last_focused: Instant::now(),
-                read_only: false,
             };
-            (buf, info)
+            (BufferSlot::Mutable(buf), info)
         });
-        &mut self.buffers.get_mut(&key).unwrap().0
+        match &mut self.buffers.get_mut(&key).unwrap().0 {
+            BufferSlot::Mutable(buf) => buf,
+            BufferSlot::ReadOnly(_) => panic!("open() called on a read-only buffer"),
+        }
     }
 
+    /// Get an immutable reference to a mutable Buffer.
     pub fn get(&self, page_id: &types::PageId) -> Option<&bloom_buffer::Buffer> {
-        self.buffers.get(&page_id.to_hex()).map(|(b, _)| b)
+        self.buffers.get(&page_id.to_hex()).and_then(|(slot, _)| match slot {
+            BufferSlot::Mutable(buf) => Some(buf),
+            BufferSlot::ReadOnly(_) => None,
+        })
     }
 
+    /// Get a Buffer with its info (mutable buffers only).
     pub fn get_with_info(
         &self,
         page_id: &types::PageId,
     ) -> Option<(&bloom_buffer::Buffer, &BufferInfo)> {
-        self.buffers.get(&page_id.to_hex()).map(|(b, i)| (b, i))
+        self.buffers.get(&page_id.to_hex()).and_then(|(slot, info)| match slot {
+            BufferSlot::Mutable(buf) => Some((buf, info)),
+            BufferSlot::ReadOnly(_) => None,
+        })
     }
 
+    /// Get a mutable reference to a Buffer (mutable buffers only).
     pub fn get_mut(&mut self, page_id: &types::PageId) -> Option<&mut bloom_buffer::Buffer> {
-        self.buffers.get_mut(&page_id.to_hex()).map(|(b, _)| b)
+        self.buffers.get_mut(&page_id.to_hex()).and_then(|(slot, _)| match slot {
+            BufferSlot::Mutable(buf) => Some(buf),
+            BufferSlot::ReadOnly(_) => None,
+        })
+    }
+
+    /// Get a StaticBuffer reference (read-only buffers only).
+    pub fn get_static(&self, page_id: &types::PageId) -> Option<&bloom_buffer::StaticBuffer> {
+        self.buffers.get(&page_id.to_hex()).and_then(|(slot, _)| match slot {
+            BufferSlot::ReadOnly(buf) => Some(buf),
+            BufferSlot::Mutable(_) => None,
+        })
+    }
+
+    /// Get the BufferInfo regardless of buffer type.
+    pub fn info(&self, page_id: &types::PageId) -> Option<&BufferInfo> {
+        self.buffers.get(&page_id.to_hex()).map(|(_, info)| info)
     }
 
     pub fn close(&mut self, page_id: &types::PageId) {
         self.buffers.remove(&page_id.to_hex());
     }
 
-    /// Open or replace a buffer as read-only.
+    /// Open or replace a buffer as read-only (StaticBuffer).
     pub fn open_read_only(
         &mut self,
         page_id: &types::PageId,
         title: &str,
         content: &str,
-    ) -> &bloom_buffer::Buffer {
+    ) {
         let key = page_id.to_hex();
-        let buf = bloom_buffer::Buffer::from_text(content);
+        let buf = bloom_buffer::StaticBuffer::new(content);
         let info = BufferInfo {
             page_id: page_id.clone(),
             title: title.to_string(),
             path: std::path::PathBuf::from("[read-only]"),
             dirty: false,
             last_focused: Instant::now(),
-            read_only: true,
         };
-        self.buffers.insert(key.clone(), (buf, info));
-        &self.buffers.get(&key).unwrap().0
+        self.buffers.insert(key, (BufferSlot::ReadOnly(buf), info));
     }
 
     pub fn is_read_only(&self, page_id: &types::PageId) -> bool {
         self.buffers
             .get(&page_id.to_hex())
-            .map(|(_, info)| info.read_only)
+            .map(|(slot, _)| matches!(slot, BufferSlot::ReadOnly(_)))
             .unwrap_or(false)
     }
 
@@ -154,9 +229,21 @@ impl BufferManager {
 
     /// Reload a buffer's content from a string (external file change).
     pub fn reload(&mut self, page_id: &types::PageId, content: &str) {
-        if let Some((buf, _)) = self.buffers.get_mut(&page_id.to_hex()) {
-            *buf = bloom_buffer::Buffer::from_text(content);
+        if let Some((slot, _)) = self.buffers.get_mut(&page_id.to_hex()) {
+            match slot {
+                BufferSlot::Mutable(buf) => {
+                    *buf = bloom_buffer::Buffer::from_text(content);
+                }
+                BufferSlot::ReadOnly(buf) => {
+                    *buf = bloom_buffer::StaticBuffer::new(content);
+                }
+            }
         }
+    }
+
+    /// Access any buffer slot for read-only line iteration (works for both types).
+    pub fn slot(&self, page_id: &types::PageId) -> Option<&BufferSlot> {
+        self.buffers.get(&page_id.to_hex()).map(|(slot, _)| slot)
     }
 }
 
