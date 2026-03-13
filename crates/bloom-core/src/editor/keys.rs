@@ -1304,8 +1304,10 @@ fn resolve_command(cmd: &str) -> String {
         || matches!(
             trimmed,
             "q" | "q!"
+                | "qa" | "qa!"
                 | "quit"
                 | "quit!"
+                | "quitall"
                 | "w"
                 | "write"
                 | "wq"

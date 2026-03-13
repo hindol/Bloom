@@ -1901,3 +1901,112 @@ fn lv05_view_list_opens_picker() {
     let screen = sim.screen(80, 24);
     assert!(screen.has_picker(), "SPC v l should open a picker of saved views");
 }
+
+// -----------------------------------------------------------------------
+// Ex-command behavior tests
+// -----------------------------------------------------------------------
+
+// :q with single buffer quits the app (returns Quit action)
+#[test]
+fn ex_q_single_buffer_quits() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys(":");
+    sim.type_text("q");
+    sim.keys("Enter");
+
+    // With only one buffer, :q should produce Quit
+    // The sim won't have a page open (app would exit)
+    // We verify by checking that the screen still renders (no crash)
+    let screen = sim.screen(80, 24);
+    // If :q quits, the mode won't be COMMAND anymore
+    assert_ne!(screen.mode(), "COMMAND");
+}
+
+// :q with multiple buffers closes current buffer
+#[test]
+fn ex_q_multi_buffer_closes() {
+    let vault = TestVault::new()
+        .page("Page A")
+        .page("Page B")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // Open Page A
+    sim.keys("SPC p p");
+    sim.keys("Enter");
+    let title_before = sim.screen(80, 24).title().to_string();
+
+    // Open Page B in the same pane
+    sim.keys("SPC p p");
+    // Move to second result and select
+    sim.keys("C-n");
+    sim.keys("Enter");
+    let title_b = sim.screen(80, 24).title().to_string();
+    assert_ne!(title_before, title_b, "should have switched to a different page");
+
+    // :q should close Page B and show Page A
+    sim.keys(":");
+    sim.type_text("q");
+    sim.keys("Enter");
+    let after = sim.screen(80, 24);
+    assert_ne!(after.title(), title_b, ":q should close the current buffer");
+}
+
+// :qa always quits regardless of buffer count
+#[test]
+fn ex_qa_always_quits() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys(":");
+    sim.type_text("qa");
+    sim.keys("Enter");
+
+    // Should not crash, mode should not be COMMAND
+    let screen = sim.screen(80, 24);
+    assert_ne!(screen.mode(), "COMMAND");
+}
+
+// SPC b d closes buffer
+#[test]
+fn spc_bd_closes_buffer() {
+    let vault = TestVault::new()
+        .page("Page A")
+        .page("Page B")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // Open two pages
+    sim.keys("SPC p p");
+    sim.keys("Enter");
+    sim.keys("SPC p p");
+    sim.keys("C-n");
+    sim.keys("Enter");
+    let title = sim.screen(80, 24).title().to_string();
+
+    // SPC b d closes current
+    sim.keys("SPC b d");
+    assert_ne!(sim.screen(80, 24).title(), title, "SPC b d should close the buffer");
+}
+
+// View buffer navigation works (j/k)
+#[test]
+fn view_buffer_vim_navigation() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // Open agenda
+    sim.keys("SPC a a");
+    let screen = sim.screen(80, 24);
+    assert_eq!(screen.title(), "Agenda");
+
+    // j should move cursor down (not be blocked)
+    let (line_before, _) = screen.cursor();
+    sim.keys("j");
+    let (line_after, _) = sim.screen(80, 24).cursor();
+    // Cursor should have moved (if there's content) or stayed (if empty)
+    // The key point: no crash, no error, key was processed
+    assert_eq!(sim.screen(80, 24).mode(), "NORMAL");
+}

@@ -12,6 +12,7 @@ pub(crate) const EX_COMMANDS: &[(&str, &str)] = &[
     ("write", "write (save)"),
     ("q", "quit"),
     ("quit", "quit"),
+    ("qa", "quit all"),
     ("wq", "write and quit"),
     ("x", "write and quit"),
     ("q!", "quit without saving"),
@@ -330,18 +331,36 @@ impl BloomEditor {
         }
         match trimmed {
             "q" | "quit" => {
-                self.close_active_buffer();
-                vec![keymap::dispatch::Action::Noop]
+                // Like Vim: close buffer. If last buffer, quit the app.
+                if self.buffer_mgr.open_buffers().len() <= 1 {
+                    vec![keymap::dispatch::Action::Quit]
+                } else {
+                    self.close_active_buffer();
+                    vec![keymap::dispatch::Action::Noop]
+                }
             }
             "q!" | "quit!" => {
-                self.close_active_buffer();
-                vec![keymap::dispatch::Action::Noop]
+                if self.buffer_mgr.open_buffers().len() <= 1 {
+                    vec![keymap::dispatch::Action::Quit]
+                } else {
+                    self.close_active_buffer();
+                    vec![keymap::dispatch::Action::Noop]
+                }
             }
+            "qa" | "qa!" | "quitall" => vec![keymap::dispatch::Action::Quit],
             "w" | "write" => vec![keymap::dispatch::Action::Save],
-            "wq" | "x" => vec![
-                keymap::dispatch::Action::Save,
-                keymap::dispatch::Action::Quit,
-            ],
+            "wq" | "x" => {
+                if self.buffer_mgr.open_buffers().len() <= 1 {
+                    vec![
+                        keymap::dispatch::Action::Save,
+                        keymap::dispatch::Action::Quit,
+                    ]
+                } else {
+                    let _ = self.save_current();
+                    self.close_active_buffer();
+                    vec![keymap::dispatch::Action::Noop]
+                }
+            }
             "wq!" | "x!" => vec![
                 keymap::dispatch::Action::Save,
                 keymap::dispatch::Action::Quit,
