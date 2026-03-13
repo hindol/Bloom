@@ -18,6 +18,9 @@ fn default_word_wrap() -> bool {
 fn default_wrap_indicator() -> String {
     "↪".into()
 }
+fn default_max_results() -> u64 {
+    100
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -43,6 +46,8 @@ pub struct Config {
     pub word_wrap: bool,
     #[serde(default = "default_wrap_indicator")]
     pub wrap_indicator: String,
+    #[serde(default = "default_max_results")]
+    pub max_results: u64,
     #[serde(default = "default_views")]
     pub views: Vec<ViewConfig>,
 }
@@ -187,6 +192,7 @@ impl Config {
             scrolloff: default_scrolloff(),
             word_wrap: default_word_wrap(),
             wrap_indicator: default_wrap_indicator(),
+            max_results: default_max_results(),
             views: default_views(),
         }
     }

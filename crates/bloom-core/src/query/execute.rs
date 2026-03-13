@@ -178,9 +178,19 @@ pub fn run_query(
     today: &str,
     page_id: Option<&str>,
 ) -> Result<QueryResult, String> {
+    run_query_with_limit(input, conn, today, page_id, 100)
+}
+
+pub fn run_query_with_limit(
+    input: &str,
+    conn: &Connection,
+    today: &str,
+    page_id: Option<&str>,
+    default_limit: u64,
+) -> Result<QueryResult, String> {
     let query = super::parse(input).map_err(|e| e.to_string())?;
     let validated = super::validate(&query, today).map_err(|e| e.to_string())?;
-    let compiled = super::compile(&validated);
+    let compiled = super::compile_with_limit(&validated, default_limit);
     let context = QueryContext {
         page_id: page_id.map(String::from),
     };

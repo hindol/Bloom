@@ -486,7 +486,13 @@ impl BloomEditor {
         let today_date = journal::Journal::today();
 
         let result = if let Some(index) = &self.index {
-            query::run_query(query, index.connection(), &today, None)
+            query::run_query_with_limit(
+                query,
+                index.connection(),
+                &today,
+                None,
+                self.config.max_results,
+            )
         } else {
             Err("Index not available".to_string())
         };

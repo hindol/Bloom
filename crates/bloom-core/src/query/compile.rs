@@ -53,6 +53,12 @@ impl std::fmt::Display for CompileError {
 
 /// Compile a validated BQL query into SQL.
 pub fn compile(validated: &ValidatedQuery) -> CompiledQuery {
+    compile_with_limit(validated, 100)
+}
+
+/// Compile with a configurable default row limit.
+/// If the query has an explicit `limit` clause, that takes precedence.
+pub fn compile_with_limit(validated: &ValidatedQuery, default_limit: u64) -> CompiledQuery {
     let schema = validated.schema;
 
     // Determine structural query shape.
@@ -124,11 +130,14 @@ pub fn compile(validated: &ValidatedQuery) -> CompiledQuery {
             }
         }
 
-        // LIMIT
-        for clause in &validated.clauses {
-            if let ValidatedClause::Limit(n) = clause {
-                sql.push_str(&format!(" LIMIT {n}"));
-            }
+        // LIMIT — use explicit limit if present, otherwise inject default
+        let explicit_limit = validated.clauses.iter().find_map(|c| match c {
+            ValidatedClause::Limit(n) => Some(*n),
+            _ => None,
+        });
+        let limit = explicit_limit.unwrap_or(default_limit);
+        if !has_count {
+            sql.push_str(&format!(" LIMIT {limit}"));
         }
 
         CompiledQuery {
