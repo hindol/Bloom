@@ -50,6 +50,7 @@ pub struct BufferInfo {
     pub path: std::path::PathBuf,
     pub dirty: bool,
     pub last_focused: Instant,
+    pub read_only: bool,
 }
 
 impl Default for BufferManager {
@@ -81,6 +82,7 @@ impl BufferManager {
                 path: path.to_path_buf(),
                 dirty: false,
                 last_focused: Instant::now(),
+                read_only: false,
             };
             (buf, info)
         });
@@ -104,6 +106,34 @@ impl BufferManager {
 
     pub fn close(&mut self, page_id: &types::PageId) {
         self.buffers.remove(&page_id.to_hex());
+    }
+
+    /// Open or replace a buffer as read-only.
+    pub fn open_read_only(
+        &mut self,
+        page_id: &types::PageId,
+        title: &str,
+        content: &str,
+    ) -> &bloom_buffer::Buffer {
+        let key = page_id.to_hex();
+        let buf = bloom_buffer::Buffer::from_text(content);
+        let info = BufferInfo {
+            page_id: page_id.clone(),
+            title: title.to_string(),
+            path: std::path::PathBuf::from("[read-only]"),
+            dirty: false,
+            last_focused: Instant::now(),
+            read_only: true,
+        };
+        self.buffers.insert(key.clone(), (buf, info));
+        &self.buffers.get(&key).unwrap().0
+    }
+
+    pub fn is_read_only(&self, page_id: &types::PageId) -> bool {
+        self.buffers
+            .get(&page_id.to_hex())
+            .map(|(_, info)| info.read_only)
+            .unwrap_or(false)
     }
 
     pub fn open_buffers(&self) -> Vec<&BufferInfo> {

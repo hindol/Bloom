@@ -155,10 +155,12 @@ impl BloomEditor {
     }
 
     /// Assign block IDs and save if the active buffer is dirty.
-    /// Called once at the end of handle_key(). Uses the single save path.
+    /// Skipped for read-only buffers (views, logs).
     fn autosave_if_dirty(&mut self) {
         if let Some(page_id) = self.active_page().cloned() {
-            self.save_page(&page_id);
+            if !self.buffer_mgr.is_read_only(&page_id) {
+                self.save_page(&page_id);
+            }
         }
     }
 
@@ -1112,31 +1114,40 @@ impl BloomEditor {
                 } else if matches!(mode, bloom_vim::Mode::Normal) {
                     // Leaving Insert (or Visual, Command) → close any open group
                     if let Some(page_id) = self.active_page().cloned() {
+                        let is_ro = self.buffer_mgr.is_read_only(&page_id);
                         if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                             buf.end_edit_group();
                         }
-                        // Assign block IDs after edit group close (not in save path).
-                        self.ensure_block_ids(&page_id);
+                        // Skip block IDs and alignment for read-only buffers
+                        if !is_ro {
+                            self.ensure_block_ids(&page_id);
+                        }
                     }
-                    // Auto-align only on Insert→Normal transition
+                    // Auto-align only on Insert→Normal transition, skip for read-only
                     if was_insert {
-                        match self.config.auto_align {
-                            config::AutoAlignMode::Page => {
-                                if let Some(page_id) = self.active_page().cloned() {
-                                    if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
-                                        align::auto_align_page(buf);
+                        let is_ro = self
+                            .active_page()
+                            .map(|id| self.buffer_mgr.is_read_only(id))
+                            .unwrap_or(true);
+                        if !is_ro {
+                            match self.config.auto_align {
+                                config::AutoAlignMode::Page => {
+                                    if let Some(page_id) = self.active_page().cloned() {
+                                        if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                                            align::auto_align_page(buf);
+                                        }
                                     }
                                 }
-                            }
-                            config::AutoAlignMode::Block => {
-                                let cursor_line = self.cursor_position().0;
-                                if let Some(page_id) = self.active_page().cloned() {
-                                    if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
-                                        align::auto_align_block(buf, cursor_line);
+                                config::AutoAlignMode::Block => {
+                                    let cursor_line = self.cursor_position().0;
+                                    if let Some(page_id) = self.active_page().cloned() {
+                                        if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                                            align::auto_align_block(buf, cursor_line);
+                                        }
                                     }
                                 }
+                                config::AutoAlignMode::None => {}
                             }
-                            config::AutoAlignMode::None => {}
                         }
                     }
                 }

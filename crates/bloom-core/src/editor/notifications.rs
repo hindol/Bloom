@@ -104,12 +104,9 @@ impl BloomEditor {
         }
         let content = lines.join("\n");
         let id = crate::uuid::generate_hex_id();
-        self.open_page_with_content(
-            &id,
-            "[messages]",
-            std::path::Path::new("[messages]"),
-            &content,
-        );
+        self.buffer_mgr.open_read_only(&id, "[messages]", &content);
+        self.set_active_page(Some(id));
+        self.set_cursor(0);
     }
 
     pub(crate) fn open_log_buffer(&mut self) {
@@ -121,7 +118,8 @@ impl BloomEditor {
             if let Ok(raw) = std::fs::read_to_string(&path) {
                 let content = format_log_lines(&raw);
                 let id = crate::uuid::generate_hex_id();
-                self.open_page_with_content(&id, "[log]", std::path::Path::new("[log]"), &content);
+                self.buffer_mgr.open_read_only(&id, "[log]", &content);
+                self.set_active_page(Some(id.clone()));
                 // Scroll to the last line
                 if let Some(buf) = self.buffer_mgr.get(&id) {
                     let len = buf.len_chars();

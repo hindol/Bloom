@@ -14,6 +14,83 @@ pub use edit::EditOp;
 pub use rope::Buffer;
 pub use undo::{UndoNodeInfo, UndoTree};
 
+/// Read-only buffer trait — the base interface for both mutable and immutable buffers.
+///
+/// Provides access to text content, line iteration, cursor state, and metadata.
+/// `Buffer` implements this (with full rope + undo), and `StaticBuffer` implements
+/// it as a lightweight read-only container for views, logs, and other non-editable content.
+pub trait ReadBuffer {
+    fn text_string(&self) -> String;
+    fn len_chars(&self) -> usize;
+    fn len_lines(&self) -> usize;
+    fn line_text(&self, idx: usize) -> String;
+    fn is_dirty(&self) -> bool;
+    fn is_read_only(&self) -> bool;
+}
+
+/// A lightweight read-only buffer backed by a simple string.
+/// Used for view results, log viewer, and other non-editable content.
+pub struct StaticBuffer {
+    content: String,
+    lines: Vec<String>,
+}
+
+impl StaticBuffer {
+    pub fn new(content: &str) -> Self {
+        let lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+        Self {
+            content: content.to_string(),
+            lines,
+        }
+    }
+
+    pub fn lines(&self) -> &[String] {
+        &self.lines
+    }
+}
+
+impl ReadBuffer for StaticBuffer {
+    fn text_string(&self) -> String {
+        self.content.clone()
+    }
+    fn len_chars(&self) -> usize {
+        self.content.len()
+    }
+    fn len_lines(&self) -> usize {
+        self.lines.len()
+    }
+    fn line_text(&self, idx: usize) -> String {
+        self.lines.get(idx).cloned().unwrap_or_default()
+    }
+    fn is_dirty(&self) -> bool {
+        false
+    }
+    fn is_read_only(&self) -> bool {
+        true
+    }
+}
+
+impl ReadBuffer for Buffer {
+    fn text_string(&self) -> String {
+        self.text().to_string()
+    }
+    fn len_chars(&self) -> usize {
+        self.text().len_chars()
+    }
+    fn len_lines(&self) -> usize {
+        self.text().len_lines()
+    }
+    fn line_text(&self, idx: usize) -> String {
+        self.line(idx).to_string()
+    }
+    fn is_dirty(&self) -> bool {
+        self.is_dirty()
+    }
+    fn is_read_only(&self) -> bool {
+        false
+    }
+}
+
 /// Unique identifier for an undo tree node.
 pub type UndoNodeId = u64;
 
