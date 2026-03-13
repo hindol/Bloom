@@ -16,15 +16,26 @@ pub fn auto_align_page(buf: &mut Buffer) {
     // Pass 1: Frontmatter
     align_frontmatter_block(buf, &lines);
 
-    // Pass 2: Task blocks and table blocks (line-by-line scan)
+    // Pass 2: List blocks (with timestamp alignment) and table blocks.
+    // Group contiguous list items together so that non-task bullets contribute
+    // to the max-width calculation — prevents aligned tasks from looking
+    // misaligned relative to surrounding plain list items.
     let mut i = 0;
     while i < lines.len() {
-        if is_task_line(&lines[i]) {
+        if is_list_line(&lines[i]) {
             let start = i;
-            while i < lines.len() && is_task_line(&lines[i]) {
+            while i < lines.len() && is_list_line(&lines[i]) {
                 i += 1;
             }
-            align_timestamp_block(buf, start, i);
+            // Only run timestamp alignment if the block contains at least one
+            // task line with a timestamp keyword.
+            let has_timestamp = lines[start..i].iter().any(|l| {
+                is_task_line(l)
+                    && (l.contains("@due(") || l.contains("@start(") || l.contains("@at("))
+            });
+            if has_timestamp {
+                align_timestamp_block(buf, start, i);
+            }
         } else if is_table_line(&lines[i]) {
             let start = i;
             while i < lines.len() && is_table_line(&lines[i]) {
@@ -54,9 +65,16 @@ pub fn auto_align_block(buf: &mut Buffer, cursor_line: usize) {
 
     if is_in_frontmatter(&lines, cursor_line) {
         align_frontmatter_block(buf, &lines);
-    } else if is_task_line(cursor_text) {
-        let (start, end) = find_block_bounds(&lines, cursor_line, is_task_line);
-        align_timestamp_block(buf, start, end);
+    } else if is_list_line(cursor_text) {
+        let (start, end) = find_block_bounds(&lines, cursor_line, is_list_line);
+        // Only align if the block contains at least one task with a timestamp
+        let has_timestamp = lines[start..end].iter().any(|l| {
+            is_task_line(l)
+                && (l.contains("@due(") || l.contains("@start(") || l.contains("@at("))
+        });
+        if has_timestamp {
+            align_timestamp_block(buf, start, end);
+        }
     } else if is_table_line(cursor_text) {
         let (start, end) = find_block_bounds(&lines, cursor_line, is_table_line);
         align_table_block(buf, start, end);
@@ -72,6 +90,11 @@ pub fn auto_align_block(buf: &mut Buffer, cursor_line: usize) {
 fn is_task_line(line: &str) -> bool {
     let t = line.trim_start();
     t.starts_with("- [ ] ") || t.starts_with("- [x] ") || t.starts_with("- [X] ")
+}
+
+fn is_list_line(line: &str) -> bool {
+    let t = line.trim_start();
+    t.starts_with("- ")
 }
 
 fn is_table_line(line: &str) -> bool {
@@ -566,5 +589,101 @@ mod tests {
         let first = text.clone();
         auto_align_page(&mut buf);
         assert_eq!(buf.text().to_string(), first);
+    }
+
+    #[test]
+    fn test_timestamp_alignment_with_block_ids() {
+        let mut buf = Buffer::from_text(
+            "- [ ] Short task @due(2026-03-05) ^a1b2c\n\
+             - [ ] A much longer task description @due(2026-03-10) ^d3e4f\n\
+             - [x] Done @due(2026-03-04) ^g5h6i\n",
+        );
+        auto_align_page(&mut buf);
+        let text = buf.text().to_string();
+        // All @due should be at the same column
+        let positions: Vec<usize> = text.lines().filter_map(|l| l.find("@due")).collect();
+        assert_eq!(positions.len(), 3, "should have 3 lines with @due");
+        assert_eq!(
+            positions[0], positions[1],
+            "lines 0 and 1 should have @due at same column\n{}",
+            text
+        );
+        assert_eq!(
+            positions[1], positions[2],
+            "lines 1 and 2 should have @due at same column\n{}",
+            text
+        );
+        // Block IDs should still be at end of each line
+        for line in text.lines() {
+            assert!(
+                line.contains(" ^"),
+                "block ID should be preserved: {}",
+                line
+            );
+        }
+    }
+
+    #[test]
+    fn test_timestamp_alignment_mixed_block_ids() {
+        // Some lines have block IDs, some don't; one line has no timestamp
+        let mut buf = Buffer::from_text(
+            "- [ ] Review ropey API #rust @due(2026-03-05) ^a1b2c\n\
+             - [ ] Fix parser @due(2026-03-10) #rust ^d3e4f\n\
+             - [ ] Read DDIA @start(2026-03-02) @due(2026-03-15)\n\
+             - [ ] Write tests #testing ^g5h6i\n",
+        );
+        auto_align_page(&mut buf);
+        let text = buf.text().to_string();
+        // Lines with @due/@start should all have their first @ at the same column
+        let at_positions: Vec<usize> = text
+            .lines()
+            .filter_map(|l| {
+                ["@due(", "@start(", "@at("]
+                    .iter()
+                    .filter_map(|p| l.find(p))
+                    .min()
+            })
+            .collect();
+        assert_eq!(at_positions.len(), 3);
+        assert_eq!(
+            at_positions[0], at_positions[1],
+            "first @ should align\n{}",
+            text
+        );
+        assert_eq!(
+            at_positions[1], at_positions[2],
+            "first @ should align\n{}",
+            text
+        );
+    }
+
+    #[test]
+    fn test_non_task_list_items_contribute_to_alignment_width() {
+        // Non-task list items in the same contiguous block should contribute
+        // to the alignment column, so timestamps don't look misaligned
+        // relative to surrounding plain bullets.
+        let mut buf = Buffer::from_text(
+            "- This is a regular note that is quite long\n\
+             - [ ] Short task @due(2026-03-05)\n\
+             - [ ] Another task @due(2026-03-10)\n\
+             - And another plain bullet point\n",
+        );
+        auto_align_page(&mut buf);
+        let text = buf.text().to_string();
+
+        // The @due column should be pushed right by the long non-task line
+        let at_positions: Vec<usize> = text.lines().filter_map(|l| l.find("@due")).collect();
+        assert_eq!(at_positions.len(), 2, "should have 2 lines with @due");
+        assert_eq!(at_positions[0], at_positions[1], "both @due should align\n{}", text);
+
+        // The @ column should be past the longest non-task line's width
+        let longest_plain = "- This is a regular note that is quite long".len();
+        assert!(
+            at_positions[0] > longest_plain,
+            "@due at col {} should be past longest plain line width {}\n{}",
+            at_positions[0],
+            longest_plain,
+            text
+        );
     }
 }

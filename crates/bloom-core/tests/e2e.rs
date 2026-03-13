@@ -1788,3 +1788,48 @@ fn jr12_quick_capture_smoke() {
     // If journal was written successfully, we should see a notification
     assert_ne!(screen.mode(), "COMMAND", "should return to normal after quick capture");
 }
+
+// Regression: auto-align should align @due timestamps in task blocks on Esc
+#[test]
+fn auto_align_tasks_on_esc() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // Open a page and enter insert mode
+    sim.keys("SPC p p");
+    sim.keys("Enter");  // open the page
+    // Go to end of file and enter insert mode
+    sim.keys("G");
+    sim.keys("o"); // open new line below in Insert mode
+
+    // Type task lines with timestamps at different positions
+    sim.type_text("- [ ] Short @due(2026-03-05)");
+    sim.keys("Enter");
+    sim.type_text("- [ ] A much longer task name here @due(2026-03-10)");
+    sim.keys("Enter");
+    sim.type_text("- [ ] Medium task @due(2026-03-15)");
+
+    // Press Esc to trigger auto-align
+    sim.keys("<Esc>");
+
+    // Check that the @due positions are aligned
+    let text = sim.buffer_text();
+    let task_lines: Vec<&str> = text.lines().filter(|l| l.contains("@due")).collect();
+
+    if task_lines.len() >= 2 {
+        let positions: Vec<usize> = task_lines
+            .iter()
+            .filter_map(|l| l.find("@due"))
+            .collect();
+        // All @due should be at the same column
+        let first = positions[0];
+        for (i, pos) in positions.iter().enumerate() {
+            assert_eq!(
+                *pos, first,
+                "line {} has @due at col {} but expected col {} — alignment failed.\nLines:\n{}",
+                i, pos, first,
+                task_lines.join("\n")
+            );
+        }
+    }
+}
