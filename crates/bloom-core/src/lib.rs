@@ -203,6 +203,7 @@ pub struct BloomEditor {
     pub(crate) indexer_rx: Option<crossbeam::channel::Receiver<index::indexer::IndexComplete>>,
     pub(crate) indexer_tx: Option<crossbeam::channel::Sender<index::indexer::IndexRequest>>,
     pub(crate) indexing: bool,
+    pub(crate) initial_index_done: bool,
     pub(crate) last_index_timing: Option<index::indexer::IndexTiming>,
     pub(crate) last_picker_queries: std::collections::HashMap<String, String>,
     // File watcher debounce
@@ -450,6 +451,7 @@ impl BloomEditor {
             indexer_rx: None,
             indexer_tx: None,
             indexing: false,
+            initial_index_done: false,
             last_index_timing: None,
             last_picker_queries: std::collections::HashMap::new(),
             watcher_rx: None,
@@ -615,7 +617,6 @@ impl BloomEditor {
         }
 
         let t = &complete.timing;
-        let message = format!("Index ready — {} files, {}ms", t.files_scanned, t.total_ms,);
         self.last_index_timing = Some(index::indexer::IndexTiming {
             scan_ms: t.scan_ms,
             read_parse_ms: t.read_parse_ms,
@@ -624,7 +625,14 @@ impl BloomEditor {
             files_scanned: t.files_scanned,
             files_changed: t.files_changed,
         });
-        self.push_notification(message, render::NotificationLevel::Info);
+
+        // Only show notification on the first index after startup (not every incremental update).
+        // Errors are always shown regardless.
+        if !self.initial_index_done {
+            self.initial_index_done = true;
+            let message = format!("Index ready — {} files, {}ms", t.files_scanned, t.total_ms);
+            self.push_notification(message, render::NotificationLevel::Info);
+        }
         // Reload the index connection to pick up changes from the indexer thread
         if let Some(vault_root) = &self.vault_root {
             let index_path = vault::paths::index_db(vault_root);

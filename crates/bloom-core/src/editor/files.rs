@@ -23,6 +23,15 @@ impl BloomEditor {
             if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                 if buf.is_dirty() {
                     buf.mark_clean();
+                    let filename = wc
+                        .path
+                        .file_name()
+                        .map(|f| f.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "file".to_string());
+                    self.push_notification(
+                        format!("✓ Saved {filename}"),
+                        render::NotificationLevel::Info,
+                    );
                     return true;
                 }
             }
