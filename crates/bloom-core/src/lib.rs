@@ -728,6 +728,12 @@ impl BloomEditor {
                 );
             }
         }
+        // Journal scrubber auto-hide (3 seconds after last nav)
+        if self.in_journal_mode {
+            if let Some(nav_at) = self.journal_nav_at {
+                consider(nav_at + std::time::Duration::from_secs(3));
+            }
+        }
         earliest
     }
 
@@ -765,7 +771,15 @@ impl BloomEditor {
             false
         };
 
-        notif_changed || wk_changed
+        // Check if journal scrubber should auto-hide (3s after last nav)
+        let scrubber_changed = if self.in_journal_mode {
+            self.journal_nav_at
+                .is_some_and(|t| now.duration_since(t) >= std::time::Duration::from_secs(3))
+        } else {
+            false
+        };
+
+        notif_changed || wk_changed || scrubber_changed
     }
 
     /// Update the terminal size (e.g. on terminal resize).
