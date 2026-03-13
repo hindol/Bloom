@@ -123,11 +123,19 @@ impl BloomEditor {
         let Ok(content) = std::fs::read_to_string(&path) else {
             return;
         };
+        // Read the page ID from frontmatter instead of generating a new one.
+        // This way re-visiting the same day reuses the buffer.
+        let id = self
+            .parser
+            .parse_frontmatter(&content)
+            .and_then(|fm| fm.id)
+            .unwrap_or_else(crate::uuid::generate_hex_id);
         let title = date.format("%Y-%m-%d").to_string();
-        let id = crate::uuid::generate_hex_id();
         self.open_page_with_content(&id, &title, &path, &content);
         if let Some(dp) = &mut self.date_picker_state {
-            dp.preview_buffers.push(id);
+            if !dp.preview_buffers.contains(&id) {
+                dp.preview_buffers.push(id);
+            }
         }
     }
 
