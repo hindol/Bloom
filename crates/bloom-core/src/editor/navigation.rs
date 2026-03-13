@@ -67,6 +67,8 @@ impl BloomEditor {
         if let Some(idx) = &self.index {
             idx.record_access(id);
         }
+        // Clear journal mode — journal-specific callers re-set it after this.
+        self.in_journal_mode = false;
     }
 
     pub(crate) fn open_journal_today(&mut self) {
@@ -98,6 +100,7 @@ impl BloomEditor {
 
         let id = crate::uuid::generate_hex_id();
         self.open_page_with_content(&id, &title, &path, &content);
+        self.last_viewed_journal_date = Some(today);
     }
 
     pub(crate) fn open_scratch_buffer(&mut self) {
@@ -202,28 +205,38 @@ impl BloomEditor {
         self.yank_link_to_current_page()
     }
 
-    /// Navigate to the previous or next journal entry.
+    /// Navigate to the previous or next journal entry that has a file.
+    /// Empty days are skipped — only days with actual journal files are visited.
     pub(crate) fn navigate_journal(&mut self, delta: i32) {
         let Some(journal) = &self.journal else { return };
+        let Some(store) = &self.note_store else { return };
         let today = journal::Journal::today();
 
-        // Find current journal date from active page
+        // Use last_viewed_journal_date if available, else try active page, else today
         let current_date = self
-            .active_page()
-            .and_then(|id| self.buffer_mgr.get(id))
-            .and_then(|buf| {
-                let text = buf.text().to_string();
-                self.parser
-                    .parse_frontmatter(&text)
-                    .and_then(|fm| fm.created)
+            .last_viewed_journal_date
+            .or_else(|| {
+                self.active_page()
+                    .and_then(|id| self.buffer_mgr.get(id))
+                    .and_then(|buf| {
+                        let text = buf.text().to_string();
+                        self.parser
+                            .parse_frontmatter(&text)
+                            .and_then(|fm| fm.created)
+                    })
             })
             .unwrap_or(today);
 
-        // Simply offset by one day
+        // Skip to next/prev day that has a journal file
         let target = if delta > 0 {
-            current_date.succ_opt().unwrap_or(current_date)
+            journal.next_date(current_date, store)
         } else {
-            current_date.pred_opt().unwrap_or(current_date)
+            journal.prev_date(current_date, store)
+        };
+
+        let Some(target) = target else {
+            // No journal in that direction — do nothing
+            return;
         };
 
         let title = target.format("%Y-%m-%d").to_string();
@@ -231,6 +244,8 @@ impl BloomEditor {
         let content = if path.exists() {
             std::fs::read_to_string(&path).unwrap_or_default()
         } else {
+            // Should not happen since next_date/prev_date only return existing dates,
+            // but handle gracefully.
             let fm = bloom_md::parser::traits::Frontmatter {
                 id: None,
                 title: Some(title.clone()),
@@ -244,5 +259,44 @@ impl BloomEditor {
         };
         let id = crate::uuid::generate_hex_id();
         self.open_page_with_content(&id, &title, &path, &content);
+        self.last_viewed_journal_date = Some(target);
+        self.in_journal_mode = true;
+    }
+
+    /// Persist a quick-capture submission to today's journal.
+    pub(crate) fn submit_quick_capture(
+        &mut self,
+        kind: &keymap::dispatch::QuickCaptureKind,
+        text: &str,
+    ) {
+        let Some(journal) = &self.journal else { return };
+        let Some(store) = &self.note_store else { return };
+        let today = journal::Journal::today();
+
+        let result = match kind {
+            keymap::dispatch::QuickCaptureKind::Note => {
+                let line = format!("- {text}");
+                journal.append(today, &line, store, &self.parser)
+            }
+            keymap::dispatch::QuickCaptureKind::Task => {
+                journal.append_task(today, text, store, &self.parser)
+            }
+        };
+
+        match result {
+            Ok(()) => {
+                let label = today.format("%b %-d").to_string();
+                self.push_notification(
+                    format!("✓ Added to {label} journal"),
+                    render::NotificationLevel::Info,
+                );
+            }
+            Err(e) => {
+                self.push_notification(
+                    format!("✗ Journal write failed: {e}"),
+                    render::NotificationLevel::Error,
+                );
+            }
+        }
     }
 }

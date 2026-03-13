@@ -14,7 +14,8 @@ fn uc01_open_journal() {
     let vault = TestVault::new().page("Existing Page").build();
     let mut sim = SimInput::with_vault(vault);
 
-    sim.keys("SPC j j");
+    // SPC j t opens today's journal (was SPC j j before journal redesign)
+    sim.keys("SPC j t");
 
     let screen = sim.screen(80, 24);
     // Journal page should be active — title contains the date
@@ -498,19 +499,35 @@ fn uc02_quick_capture_journal_append() {
 
 #[test]
 fn uc04_journal_prev_next() {
-    let vault = TestVault::new().page("Test").build();
+    // Create journal files for two specific dates so day-hopping has targets
+    let vault = TestVault::new()
+        .page("Test")
+        .raw_file(
+            "journal/2026-03-10.md",
+            "---\nid: aaaa1111\ntitle: \"2026-03-10\"\ncreated: 2026-03-10\ntags: [journal]\n---\n\n- Earlier journal\n",
+        )
+        .raw_file(
+            "journal/2026-03-08.md",
+            "---\nid: aaaa2222\ntitle: \"2026-03-08\"\ncreated: 2026-03-08\ntags: [journal]\n---\n\n- Even earlier\n",
+        )
+        .build();
     let mut sim = SimInput::with_vault(vault);
 
-    // Open journal first
-    sim.keys("SPC j j");
+    // Open today's journal first (SPC j t after journal redesign)
+    sim.keys("SPC j t");
     let title1 = sim.screen(80, 24).title().to_string();
 
-    // SPC j p navigates to previous day
+    // SPC j p should skip to the previous day with a file (not just -1 day)
     sim.keys("SPC j p");
     let title2 = sim.screen(80, 24).title().to_string();
 
-    // Titles should differ (different dates)
+    // Titles should differ (skipped to a day that has a journal file)
     assert_ne!(title1, title2, "prev journal should have different date");
+    assert!(
+        title2.contains("2026-03-10") || title2.contains("2026-03-08"),
+        "should land on a day with a journal file, got: '{}'",
+        title2
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -1398,4 +1415,226 @@ fn split_and_open_different_pages() {
     let screen = sim.screen(80, 24);
     assert!(screen.pane_count() >= 2);
     assert!(screen.line_count() > 0);
+}
+
+// -----------------------------------------------------------------------
+// Journal Redesign — e2e tests
+// -----------------------------------------------------------------------
+
+// JR-01: SPC j t opens today's journal (redesigned keybinding)
+#[test]
+fn jr01_spc_j_t_opens_today() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC j t");
+
+    let screen = sim.screen(80, 24);
+    assert!(
+        screen.title().contains("202"),
+        "SPC j t should open today's journal, got title: '{}'",
+        screen.title()
+    );
+}
+
+// JR-02: SPC j j opens the journal picker (not today's journal)
+#[test]
+fn jr02_spc_j_j_opens_journal_picker() {
+    let vault = TestVault::new()
+        .page("Test")
+        .raw_file(
+            "journal/2026-03-10.md",
+            "---\nid: aaaa1111\ntitle: \"2026-03-10\"\ncreated: 2026-03-10\ntags: [journal]\n---\n",
+        )
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC j j");
+
+    let screen = sim.screen(80, 24);
+    assert!(screen.has_picker(), "SPC j j should open journal picker");
+}
+
+// JR-03: SPC p p opens pages-only picker
+#[test]
+fn jr03_spc_p_p_opens_pages_picker() {
+    let vault = TestVault::new().page("My Notes").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC p p");
+
+    let screen = sim.screen(80, 24);
+    assert!(screen.has_picker(), "SPC p p should open pages picker");
+}
+
+// JR-04: SPC x a opens task quick capture
+#[test]
+fn jr04_spc_x_a_opens_task_capture() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC x a");
+
+    let screen = sim.screen(80, 24);
+    // Quick capture replaces the normal status bar content
+    assert!(
+        !screen.has_picker(),
+        "SPC x a should open quick capture, not a picker"
+    );
+}
+
+// JR-05: Day-hopping skips empty days
+#[test]
+fn jr05_day_hopping_skips_empty() {
+    let vault = TestVault::new()
+        .page("Test")
+        .raw_file(
+            "journal/2026-03-05.md",
+            "---\nid: bbbb1111\ntitle: \"2026-03-05\"\ncreated: 2026-03-05\ntags: [journal]\n---\n\n- Earlier entry\n",
+        )
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // Open today's journal
+    sim.keys("SPC j t");
+    let today_title = sim.screen(80, 24).title().to_string();
+
+    // Navigate back — should skip to March 5 (not yesterday)
+    sim.keys("SPC j p");
+    let prev_title = sim.screen(80, 24).title().to_string();
+
+    assert_ne!(today_title, prev_title, "should navigate to a different day");
+    assert!(
+        prev_title.contains("2026-03-05"),
+        "should skip to March 5 (only existing journal), got: '{}'",
+        prev_title
+    );
+}
+
+// JR-06: Day-hopping with no previous journal does nothing
+#[test]
+fn jr06_day_hopping_no_prev() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC j t");
+    let title1 = sim.screen(80, 24).title().to_string();
+
+    // No prior journal files exist
+    sim.keys("SPC j p");
+    let title2 = sim.screen(80, 24).title().to_string();
+
+    assert_eq!(title1, title2, "with no prior journals, SPC j p should stay");
+}
+
+// JR-07: JRNL mode appears after SPC j t
+#[test]
+fn jr07_jrnl_mode_on_journal_today() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC j t");
+
+    let screen = sim.screen(80, 24);
+    assert_eq!(screen.mode(), "JRNL", "SPC j t should activate JRNL mode");
+    assert_eq!(
+        screen.mode_style(),
+        Some("accent_yellow"),
+        "JRNL mode should use accent_yellow"
+    );
+    assert!(
+        screen.right_hints().is_some(),
+        "JRNL mode should show key hints"
+    );
+}
+
+// JR-08: JRNL mode does NOT appear after startup (journal startup mode)
+#[test]
+fn jr08_no_jrnl_mode_on_startup() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // Startup opens journal but should NOT set JRNL mode
+    let screen = sim.screen(80, 24);
+    assert_ne!(
+        screen.mode(),
+        "JRNL",
+        "startup should not set JRNL mode"
+    );
+}
+
+// JR-09: Context strip appears in JRNL mode with adjacent journals
+#[test]
+fn jr09_context_strip_in_jrnl_mode() {
+    let vault = TestVault::new()
+        .page("Test")
+        .raw_file(
+            "journal/2026-03-08.md",
+            "---\nid: cccc1111\ntitle: \"2026-03-08\"\ncreated: 2026-03-08\ntags: [journal]\n---\n",
+        )
+        .raw_file(
+            "journal/2026-03-05.md",
+            "---\nid: cccc2222\ntitle: \"2026-03-05\"\ncreated: 2026-03-05\ntags: [journal]\n---\n",
+        )
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // Enter journal mode via SPC j t, then navigate to a day
+    sim.keys("SPC j t");
+    // In JRNL mode, context strip should appear showing adjacent days
+    let screen = sim.screen(80, 24);
+    assert!(
+        screen.has_context_strip(),
+        "context strip should appear in JRNL mode"
+    );
+}
+
+// JR-10: SPC j c opens the journal calendar
+#[test]
+fn jr10_spc_j_c_opens_calendar() {
+    let vault = TestVault::new()
+        .page("Test")
+        .raw_file(
+            "journal/2026-03-10.md",
+            "---\nid: dddd1111\ntitle: \"2026-03-10\"\ncreated: 2026-03-10\ntags: [journal]\n---\n",
+        )
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC j c");
+
+    let screen = sim.screen(80, 24);
+    assert!(screen.has_date_picker(), "SPC j c should open journal calendar");
+}
+
+// JR-11: Calendar closes on Escape
+#[test]
+fn jr11_calendar_closes_on_escape() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC j c");
+    assert!(sim.screen(80, 24).has_date_picker());
+
+    sim.keys("<Esc>");
+    assert!(!sim.screen(80, 24).has_date_picker(), "Esc should close calendar");
+}
+
+// JR-12: Quick capture appends to journal (smoke test)
+#[test]
+fn jr12_quick_capture_smoke() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // Open quick capture
+    sim.keys("SPC j a");
+    // Type some text
+    sim.type_text("Test note from e2e");
+    // Submit
+    sim.keys("Enter");
+
+    // Should return to normal (not have quick capture open)
+    let screen = sim.screen(80, 24);
+    // If journal was written successfully, we should see a notification
+    assert_ne!(screen.mode(), "COMMAND", "should return to normal after quick capture");
 }

@@ -406,6 +406,28 @@ impl TestScreen {
     fn active_pane(&self) -> Option<&bloom_core::render::PaneFrame> {
         self.frame.panes.iter().find(|p| p.is_active)
     }
+
+    /// Whether a context strip is visible.
+    pub fn has_context_strip(&self) -> bool {
+        self.frame.context_strip.is_some()
+    }
+
+    /// Whether a date picker / calendar is visible.
+    pub fn has_date_picker(&self) -> bool {
+        self.frame.date_picker.is_some()
+    }
+
+    /// Get the mode_style from the active pane's status bar (e.g., "accent_yellow").
+    pub fn mode_style(&self) -> Option<&str> {
+        self.active_pane()
+            .and_then(|p| p.status_bar.mode_style.as_deref())
+    }
+
+    /// Get the right_hints from the active pane's status bar.
+    pub fn right_hints(&self) -> Option<&str> {
+        self.active_pane()
+            .and_then(|p| p.status_bar.right_hints.as_deref())
+    }
 }
 
 // ---------------------------------------------------------------------------

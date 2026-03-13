@@ -179,6 +179,9 @@ pub struct BloomEditor {
     pub(crate) picker_state: Option<ActivePicker>,
 
     pub(crate) quick_capture: Option<QuickCaptureState>,
+    pub(crate) date_picker_state: Option<DatePickerState>,
+    pub(crate) last_viewed_journal_date: Option<chrono::NaiveDate>,
+    pub(crate) in_journal_mode: bool,
     pub(crate) notifications: Vec<render::Notification>,
     pub(crate) notification_history: Vec<render::Notification>,
     pub(crate) wizard: Option<SetupWizardState>,
@@ -396,6 +399,11 @@ pub(crate) struct QuickCaptureState {
     pub(crate) cursor_pos: usize,
 }
 
+pub(crate) struct DatePickerState {
+    pub(crate) selected_date: chrono::NaiveDate,
+    pub(crate) purpose: keymap::dispatch::DatePickerPurpose,
+}
+
 // ---------------------------------------------------------------------------
 // BloomEditor — core impl (new, channels, small helpers)
 // ---------------------------------------------------------------------------
@@ -423,6 +431,9 @@ impl BloomEditor {
             picker_state: None,
 
             quick_capture: None,
+            date_picker_state: None,
+            last_viewed_journal_date: None,
+            in_journal_mode: false,
             notifications: Vec::new(),
             notification_history: Vec::new(),
             wizard: None,
@@ -1658,7 +1669,7 @@ mod tests {
         editor.handle_key(KeyEvent::char('f')); // f (action)
                                                 // Picker should now be open
         assert!(editor.picker_state.is_some());
-        assert_eq!(editor.picker_state.as_ref().unwrap().title, "Find Page");
+        assert_eq!(editor.picker_state.as_ref().unwrap().title, "Find File");
         let frame = editor.render(80, 24);
         assert!(frame.picker.is_some());
     }
@@ -2110,13 +2121,13 @@ mod tests {
         format!("---\nid: {id}\ntitle: \"Test Page\"\ncreated: 2026-01-01\ntags: []\n---\n\n")
     }
 
-    // UC-01: Open today's journal via SPC j j
+    // UC-01: Open today's journal via SPC j t
     #[test]
     fn test_uc01_open_journal() {
         let (mut editor, _dir) = editor_with_vault(&[]);
         editor.handle_key(KeyEvent::char(' '));
         editor.handle_key(KeyEvent::char('j'));
-        editor.handle_key(KeyEvent::char('j'));
+        editor.handle_key(KeyEvent::char('t'));
 
         let page = editor.active_page();
         assert!(page.is_some(), "journal should be open");

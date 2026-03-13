@@ -59,6 +59,7 @@ impl BloomEditor {
                 inline_menu: None,
                 which_key: None,
                 date_picker: None,
+                context_strip: None,
                 dialog: None,
                 notifications: Vec::new(),
                 scrolloff: self.config.scrolloff,
@@ -190,9 +191,26 @@ impl BloomEditor {
                         indexing: self.indexing,
                     })
                 };
+                let show_jrnl = is_active
+                    && self.in_journal_mode
+                    && matches!(content, render::StatusBarContent::Normal(_));
                 render::StatusBarFrame {
                     content,
-                    mode: mode_str.to_string(),
+                    mode: if show_jrnl {
+                        "JRNL".to_string()
+                    } else {
+                        mode_str.to_string()
+                    },
+                    mode_style: if show_jrnl {
+                        Some("accent_yellow".to_string())
+                    } else {
+                        None
+                    },
+                    right_hints: if show_jrnl {
+                        Some("↵:calendar  SPC j p/n".to_string())
+                    } else {
+                        None
+                    },
                 }
             } else {
                 // Inactive pane: just title
@@ -208,6 +226,8 @@ impl BloomEditor {
                         indexing: self.indexing,
                     }),
                     mode: mode_str.to_string(),
+                    mode_style: None,
+                    right_hints: None,
                 }
             };
 
@@ -606,7 +626,8 @@ impl BloomEditor {
                     }
                 }
             }, // which_key
-            date_picker: None,
+            date_picker: self.build_date_picker_frame(),
+            context_strip: self.build_context_strip(),
             dialog: match &self.active_dialog {
                 Some(ActiveDialog::FileChanged { path, selected, .. }) => {
                     let filename = path
@@ -631,6 +652,97 @@ impl BloomEditor {
                 .collect(),
             scrolloff: self.config.scrolloff,
         }
+    }
+
+    /// Build context strip for journal day-hopping (3-line temporal nav panel).
+    fn build_context_strip(&self) -> Option<render::ContextStripFrame> {
+        if !self.in_journal_mode {
+            return None;
+        }
+        let journal = self.journal.as_ref()?;
+        let store = self.note_store.as_ref()?;
+        let current = self.last_viewed_journal_date?;
+
+        let fmt_date = |d: chrono::NaiveDate| -> String {
+            format!(
+                "◆ {} {}",
+                d.format("%b %-d"),
+                d.format("%a"),
+            )
+        };
+
+        let prev = journal.prev_date(current, store);
+        let next = journal.next_date(current, store);
+
+        Some(render::ContextStripFrame {
+            prev_label: prev.map(&fmt_date),
+            current_label: fmt_date(current),
+            next_label: next.map(&fmt_date),
+            has_content: true,
+        })
+    }
+
+    /// Build the date picker / calendar frame from current state.
+    fn build_date_picker_frame(&self) -> Option<render::DatePickerFrame> {
+        use chrono::{Datelike, NaiveDate};
+        let dp = self.date_picker_state.as_ref()?;
+        let selected = dp.selected_date;
+        let today = journal::Journal::today();
+        let year = selected.year();
+        let month = selected.month();
+
+        // Build month grid (weeks × 7 days, Monday-start ISO)
+        let first = NaiveDate::from_ymd_opt(year, month, 1)?;
+        let first_weekday = first.weekday().num_days_from_monday(); // Mon=0..Sun=6
+
+        let days_in_month = if month == 12 {
+            NaiveDate::from_ymd_opt(year + 1, 1, 1)
+        } else {
+            NaiveDate::from_ymd_opt(year, month + 1, 1)
+        }
+        .map(|d| d.pred_opt().map(|p| p.day()).unwrap_or(28))
+        .unwrap_or(28);
+
+        let mut month_view: Vec<Vec<Option<u32>>> = Vec::new();
+        let mut week: Vec<Option<u32>> = vec![None; first_weekday as usize];
+        for day in 1..=days_in_month {
+            week.push(Some(day));
+            if week.len() == 7 {
+                month_view.push(week);
+                week = Vec::new();
+            }
+        }
+        if !week.is_empty() {
+            while week.len() < 7 {
+                week.push(None);
+            }
+            month_view.push(week);
+        }
+
+        // Find journal days in this month
+        let journal_days = if let (Some(journal), Some(store)) =
+            (&self.journal, &self.note_store)
+        {
+            journal
+                .all_dates(store)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|d| d.year() == year && d.month() == month)
+                .map(|d| d.day())
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        Some(render::DatePickerFrame {
+            selected_date: selected,
+            month_view,
+            prompt: "Journal Calendar".to_string(),
+            journal_days,
+            today,
+            year,
+            month,
+        })
     }
 
     fn build_page_history_pane_frame(
@@ -698,6 +810,16 @@ impl BloomEditor {
                 "HISTORY".to_string()
             } else {
                 mode_str.to_string()
+            },
+            mode_style: if is_active {
+                Some("accent_yellow".to_string())
+            } else {
+                None
+            },
+            right_hints: if is_active {
+                Some("d:diff  r:restore  ↵:list".to_string())
+            } else {
+                None
             },
         };
 

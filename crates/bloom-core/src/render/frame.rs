@@ -24,6 +24,7 @@ pub struct RenderFrame {
     pub inline_menu: Option<InlineMenuFrame>,
     pub which_key: Option<WhichKeyFrame>,
     pub date_picker: Option<DatePickerFrame>,
+    pub context_strip: Option<ContextStripFrame>,
     pub dialog: Option<DialogFrame>,
     pub notifications: Vec<Notification>,
     pub scrolloff: usize,
@@ -219,6 +220,31 @@ pub struct DatePickerFrame {
     pub selected_date: NaiveDate,
     pub month_view: Vec<Vec<Option<u32>>>,
     pub prompt: String,
+    /// Days in the current month that have journal entries (shown with ◆).
+    pub journal_days: Vec<u32>,
+    /// Today's date for highlighting.
+    pub today: NaiveDate,
+    /// Year and month being displayed.
+    pub year: i32,
+    pub month: u32,
+}
+
+// ---------------------------------------------------------------------------
+// Context Strip (temporal navigation panel — 3 lines above status bar)
+// ---------------------------------------------------------------------------
+
+/// A reusable 3-line strip showing a selected item plus its neighbors.
+/// Used for journal day-hopping, page history, and day activity.
+#[derive(Serialize)]
+pub struct ContextStripFrame {
+    /// Previous item label (faded). None if at boundary.
+    pub prev_label: Option<String>,
+    /// Current (selected) item label (bold/highlighted).
+    pub current_label: String,
+    /// Next item label (faded). None if at boundary.
+    pub next_label: Option<String>,
+    /// Whether the selected day has content (shown with ◆).
+    pub has_content: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -296,6 +322,10 @@ pub enum CursorShape {
 pub struct StatusBarFrame {
     pub content: StatusBarContent,
     pub mode: String,
+    /// Override mode background color (e.g., "accent_yellow" for temporal modes).
+    pub mode_style: Option<String>,
+    /// Right-aligned hint text (e.g., "↵:calendar  SPC j p/n").
+    pub right_hints: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -359,6 +389,8 @@ impl Default for StatusBarFrame {
                 indexing: false,
             }),
             mode: String::from("NORMAL"),
+            mode_style: None,
+            right_hints: None,
         }
     }
 }

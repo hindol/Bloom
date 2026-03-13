@@ -201,20 +201,24 @@ pub fn default_tree() -> WhichKeyTree {
     let mut tree = WhichKeyTree::new();
 
     // Files
-    tree.register("f f", "Find page", "find_page".into());
+    tree.register("f f", "Find file", "find_page".into());
     tree.register("f r", "Rename page", "rename_page".into());
     tree.register("f D", "Delete page", "delete_page".into());
+
+    // Pages
+    tree.register("p p", "Find page", "find_pages_only".into());
 
     // Buffers
     tree.register("b b", "Switch buffer", "switch_buffer".into());
     tree.register("b d", "Close buffer", "close_buffer".into());
 
     // Journal
-    tree.register("j j", "Journal today", "journal_today".into());
+    tree.register("j j", "Journal picker", "journal_picker".into());
+    tree.register("j t", "Journal today", "journal_today".into());
     tree.register("j p", "Journal previous", "journal_prev".into());
     tree.register("j n", "Journal next", "journal_next".into());
-    tree.register("j a", "Journal append", "journal_append".into());
-    tree.register("j t", "Journal task", "journal_task".into());
+    tree.register("j a", "Quick append", "journal_append".into());
+    tree.register("j c", "Journal calendar", "journal_calendar".into());
 
     // Search
     tree.register("s s", "Search", "search".into());
@@ -282,11 +286,15 @@ pub fn default_tree() -> WhichKeyTree {
     tree.register("T t", "Theme selector", "theme_selector".into());
     tree.register("T m", "Toggle MCP", "toggle_mcp".into());
 
+    // Tasks (checkbox actions)
+    tree.register("x a", "Append task", "journal_task".into());
+
     // Help / Meta
     tree.register("?", "All commands", "all_commands".into());
 
     // Set descriptive group labels
     tree.set_group_label("f", "files");
+    tree.set_group_label("p", "pages");
     tree.set_group_label("b", "buffers");
     tree.set_group_label("j", "journal");
     tree.set_group_label("s", "search");
@@ -299,6 +307,7 @@ pub fn default_tree() -> WhichKeyTree {
     tree.set_group_label("T", "toggles");
     tree.set_group_label("i", "insert");
     tree.set_group_label("t", "tags");
+    tree.set_group_label("x", "tasks");
 
     tree
 }

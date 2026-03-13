@@ -43,6 +43,11 @@ impl BloomEditor {
             return self.handle_picker_key(&key);
         }
 
+        // If date picker / calendar is open
+        if self.date_picker_state.is_some() {
+            return self.handle_date_picker_key(&key);
+        }
+
         // If quick capture is open
         if self.quick_capture.is_some() {
             return self.handle_quick_capture_key(&key);
@@ -271,6 +276,28 @@ impl BloomEditor {
                         let _ = tx.send(index::indexer::IndexRequest::FullRebuild);
                         self.indexing = true;
                     }
+                }
+                keymap::dispatch::Action::QuickCapture(kind) => {
+                    self.quick_capture = Some(QuickCaptureState {
+                        kind,
+                        input: String::new(),
+                        cursor_pos: 0,
+                    });
+                }
+                keymap::dispatch::Action::SubmitQuickCapture(kind, text) => {
+                    if !text.is_empty() {
+                        self.submit_quick_capture(&kind, &text);
+                    }
+                }
+                keymap::dispatch::Action::CancelQuickCapture => {
+                    // State already cleared in handle_quick_capture_key
+                }
+                keymap::dispatch::Action::OpenDatePicker(purpose) => {
+                    let today = journal::Journal::today();
+                    self.date_picker_state = Some(DatePickerState {
+                        selected_date: self.last_viewed_journal_date.unwrap_or(today),
+                        purpose,
+                    });
                 }
                 // Pass through to TUI: Quit, Save, and others
                 _ => {
@@ -527,7 +554,7 @@ impl BloomEditor {
             }
             KeyCode::Enter => {
                 if let Some(qc) = self.quick_capture.take() {
-                    vec![keymap::dispatch::Action::SubmitQuickCapture(qc.input)]
+                    vec![keymap::dispatch::Action::SubmitQuickCapture(qc.kind, qc.input)]
                 } else {
                     vec![]
                 }
@@ -544,6 +571,98 @@ impl BloomEditor {
                     if qc.cursor_pos > 0 {
                         qc.input.pop();
                         qc.cursor_pos -= 1;
+                    }
+                }
+                vec![keymap::dispatch::Action::Noop]
+            }
+            _ => vec![keymap::dispatch::Action::Noop],
+        }
+    }
+
+    pub(crate) fn handle_date_picker_key(
+        &mut self,
+        key: &types::KeyEvent,
+    ) -> Vec<keymap::dispatch::Action> {
+        use chrono::{Datelike, Duration, NaiveDate};
+        use types::KeyCode;
+
+        let Some(dp) = &mut self.date_picker_state else {
+            return vec![];
+        };
+
+        match &key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.date_picker_state = None;
+                vec![keymap::dispatch::Action::Noop]
+            }
+            // h/l: prev/next day
+            KeyCode::Char('h') | KeyCode::Left => {
+                dp.selected_date = dp.selected_date - Duration::days(1);
+                vec![keymap::dispatch::Action::Noop]
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                dp.selected_date = dp.selected_date + Duration::days(1);
+                vec![keymap::dispatch::Action::Noop]
+            }
+            // j/k: next/prev week
+            KeyCode::Char('j') | KeyCode::Down => {
+                dp.selected_date = dp.selected_date + Duration::weeks(1);
+                vec![keymap::dispatch::Action::Noop]
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                dp.selected_date = dp.selected_date - Duration::weeks(1);
+                vec![keymap::dispatch::Action::Noop]
+            }
+            // H/L: prev/next month
+            KeyCode::Char('H') => {
+                let d = dp.selected_date;
+                dp.selected_date =
+                    NaiveDate::from_ymd_opt(d.year(), d.month(), 1)
+                        .and_then(|first| first.pred_opt())
+                        .and_then(|prev_last| {
+                            NaiveDate::from_ymd_opt(
+                                prev_last.year(),
+                                prev_last.month(),
+                                d.day().min(prev_last.day()),
+                            )
+                        })
+                        .unwrap_or(d);
+                vec![keymap::dispatch::Action::Noop]
+            }
+            KeyCode::Char('L') => {
+                let d = dp.selected_date;
+                let next_month = if d.month() == 12 {
+                    NaiveDate::from_ymd_opt(d.year() + 1, 1, 1)
+                } else {
+                    NaiveDate::from_ymd_opt(d.year(), d.month() + 1, 1)
+                };
+                dp.selected_date = next_month
+                    .and_then(|first| {
+                        let last_day = (first + Duration::days(31)).with_day(1)?.pred_opt()?;
+                        NaiveDate::from_ymd_opt(first.year(), first.month(), d.day().min(last_day.day()))
+                    })
+                    .unwrap_or(d);
+                vec![keymap::dispatch::Action::Noop]
+            }
+            // Enter: open journal for selected day (if it exists)
+            KeyCode::Enter => {
+                let date = dp.selected_date;
+                let is_journal = matches!(
+                    dp.purpose,
+                    keymap::dispatch::DatePickerPurpose::JumpToJournal
+                );
+                self.date_picker_state = None;
+                if is_journal {
+                    if let Some(journal) = &self.journal {
+                        let path = journal.path_for_date(date);
+                        if path.exists() {
+                            let title = date.format("%Y-%m-%d").to_string();
+                            let content = std::fs::read_to_string(&path).unwrap_or_default();
+                            let id = crate::uuid::generate_hex_id();
+                            self.open_page_with_content(&id, &title, &path, &content);
+                            self.last_viewed_journal_date = Some(date);
+                            self.in_journal_mode = true;
+                        }
                     }
                 }
                 vec![keymap::dispatch::Action::Noop]

@@ -30,7 +30,7 @@ pub enum Action {
     PickerInput(PickerInputAction),
 
     QuickCapture(QuickCaptureKind),
-    SubmitQuickCapture(String),
+    SubmitQuickCapture(QuickCaptureKind, String),
     CancelQuickCapture,
 
     SplitWindow(SplitDirection),
@@ -79,6 +79,7 @@ pub struct MotionResult {
 #[derive(Debug, Clone)]
 pub enum PickerKind {
     FindPage,
+    PagesOnly,
     SwitchBuffer,
     Search,
     Journal,
@@ -250,7 +251,7 @@ impl KeymapDispatcher {
             KeyCode::Esc => vec![Action::CancelQuickCapture],
             KeyCode::Enter if key.modifiers.ctrl => {
                 // Ctrl+Enter submits (content managed by caller)
-                vec![Action::SubmitQuickCapture(String::new())]
+                vec![Action::SubmitQuickCapture(QuickCaptureKind::Note, String::new())]
             }
             _ => vec![],
         }

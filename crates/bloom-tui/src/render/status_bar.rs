@@ -10,7 +10,7 @@ pub(super) fn draw_status_bar_slot(
 ) -> Option<(u16, u16)> {
     match &sb.content {
         StatusBarContent::Normal(status) => {
-            draw_normal_status(f, area, &sb.mode, status, theme);
+            draw_normal_status(f, area, sb, status, theme);
             None
         }
         StatusBarContent::CommandLine(cmd) => {
@@ -58,12 +58,22 @@ pub(super) fn draw_status_bar_slot(
 fn draw_normal_status(
     f: &mut Frame,
     area: Rect,
-    mode: &str,
+    sb: &StatusBarFrame,
     status: &bloom_core::render::NormalStatus,
     theme: &TuiTheme,
 ) {
-    let bar_bg = theme.highlight();
-    let base_style = theme.status_bar_style(mode, true);
+    let mode = &sb.mode;
+    let bar_bg = if sb.mode_style.as_deref() == Some("accent_yellow") {
+        theme.accent_yellow()
+    } else {
+        theme.highlight()
+    };
+    let base_style = if sb.mode_style.is_some() {
+        // Temporal mode: dark text on colored background
+        RStyle::default().fg(theme.background()).bg(bar_bg)
+    } else {
+        theme.status_bar_style(mode, true)
+    };
     let width = area.width as usize;
 
     // Fill background
@@ -76,7 +86,19 @@ fn draw_normal_status(
     let mut right_spans: Vec<Span> = Vec::new();
     right_spans.push(Span::raw(" "));
 
-    if let Some(reg) = status.recording_macro {
+    if let Some(hints) = &sb.right_hints {
+        // Temporal mode: show key hints instead of position/thread indicators
+        let hint_style = RStyle::default()
+            .fg(if sb.mode_style.is_some() {
+                theme.background()
+            } else {
+                theme.faded()
+            })
+            .bg(bar_bg);
+        right_spans.push(Span::styled(hints.as_str(), hint_style));
+        right_spans.push(Span::styled("  ", RStyle::default().bg(bar_bg)));
+    } else {
+        if let Some(reg) = status.recording_macro {
         // Macro: accent_red — recording state, visually distinct
         let macro_style = RStyle::default().fg(theme.accent_red()).bg(bar_bg);
         right_spans.push(Span::styled(format!("@{reg}"), macro_style));
@@ -127,6 +149,7 @@ fn draw_normal_status(
         pos_style,
     ));
     right_spans.push(Span::styled("  ", RStyle::default().bg(bar_bg)));
+    } // end of else (non-hint right side)
 
     let right_width: usize = right_spans.iter().map(|s| s.content.width()).sum();
 

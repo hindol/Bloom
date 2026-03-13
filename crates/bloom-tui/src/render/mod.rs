@@ -1,3 +1,5 @@
+mod calendar;
+mod context_strip;
 mod dialog;
 mod inline_menu;
 mod notifications;
@@ -75,7 +77,15 @@ pub fn draw(
         which_key::draw_which_key(f, wk_rect, wk, theme);
     }
 
+    // Context strip (journal day-hopping, temporal navigation)
+    if let Some(strip) = &frame.context_strip {
+        context_strip::draw_context_strip(f, pane_area, strip, theme);
+    }
+
     // Overlays — drawn after panes, so their set_cursor_position() wins.
+    if let Some(dp) = &frame.date_picker {
+        calendar::draw_calendar(f, area, dp, theme);
+    }
     if let Some(menu) = &frame.inline_menu {
         inline_menu::draw_inline_menu(f, area, menu, theme);
     }

@@ -12,6 +12,7 @@ pub(crate) fn picker_kind_key(kind: &keymap::dispatch::PickerKind) -> String {
     use keymap::dispatch::PickerKind;
     match kind {
         PickerKind::FindPage => "find_page".into(),
+        PickerKind::PagesOnly => "pages_only".into(),
         PickerKind::SwitchBuffer => "switch_buffer".into(),
         PickerKind::Search => "search".into(),
         PickerKind::Journal => "journal".into(),
@@ -30,9 +31,14 @@ impl BloomEditor {
         use keymap::dispatch::PickerKind;
         let (title, status_noun, items) = match &kind {
             PickerKind::FindPage => (
+                "Find File".to_string(),
+                "files".to_string(),
+                self.collect_page_items(),
+            ),
+            PickerKind::PagesOnly => (
                 "Find Page".to_string(),
                 "pages".to_string(),
-                self.collect_page_items(),
+                self.collect_pages_only_items(),
             ),
             PickerKind::SwitchBuffer => {
                 let items: Vec<GenericPickerItem> = self
@@ -328,6 +334,18 @@ impl BloomEditor {
             }
         }
         Vec::new()
+    }
+
+    /// Collect only pages/ items (exclude journal/).
+    pub(crate) fn collect_pages_only_items(&self) -> Vec<GenericPickerItem> {
+        self.collect_page_items()
+            .into_iter()
+            .filter(|item| {
+                // Exclude journal entries: they have labels matching YYYY-MM-DD
+                !item.label.starts_with("20")
+                    || chrono::NaiveDate::parse_from_str(&item.label, "%Y-%m-%d").is_err()
+            })
+            .collect()
     }
 
     pub(crate) fn collect_journal_items(&self) -> Vec<GenericPickerItem> {
@@ -679,7 +697,7 @@ impl BloomEditor {
     ) {
         use keymap::dispatch::PickerKind;
         match kind {
-            PickerKind::FindPage | PickerKind::Journal => {
+            PickerKind::FindPage | PickerKind::PagesOnly | PickerKind::Journal => {
                 // item.id is either a PageId hex (from index) or a full path (disk fallback).
                 // Try index lookup first, then fall back to treating id as a path.
                 let (path, content, title) =

@@ -40,6 +40,9 @@ impl BloomEditor {
             "find_page" => vec![keymap::dispatch::Action::OpenPicker(
                 keymap::dispatch::PickerKind::FindPage,
             )],
+            "find_pages_only" => vec![keymap::dispatch::Action::OpenPicker(
+                keymap::dispatch::PickerKind::PagesOnly,
+            )],
             "switch_buffer" => vec![keymap::dispatch::Action::OpenPicker(
                 keymap::dispatch::PickerKind::SwitchBuffer,
             )],
@@ -51,8 +54,15 @@ impl BloomEditor {
             )],
             "journal_today" => {
                 self.open_journal_today();
+                self.in_journal_mode = true;
                 vec![keymap::dispatch::Action::Noop]
             }
+            "journal_picker" => vec![keymap::dispatch::Action::OpenPicker(
+                keymap::dispatch::PickerKind::Journal,
+            )],
+            "journal_calendar" => vec![keymap::dispatch::Action::OpenDatePicker(
+                keymap::dispatch::DatePickerPurpose::JumpToJournal,
+            )],
             "journal_append" => vec![keymap::dispatch::Action::QuickCapture(
                 keymap::dispatch::QuickCaptureKind::Note,
             )],
