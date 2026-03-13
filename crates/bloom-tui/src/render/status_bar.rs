@@ -63,15 +63,17 @@ fn draw_normal_status(
     theme: &TuiTheme,
 ) {
     let mode = &sb.mode;
-    let bar_bg = if sb.mode_style.as_deref() == Some("accent_yellow") {
-        theme.accent_yellow()
-    } else {
-        theme.highlight()
-    };
+    let bar_bg = theme.highlight();
 
     // Mode badge gets its own colored background; the rest of the bar uses bar_bg.
-    let mode_badge_style = if sb.mode_style.is_some() {
-        // Temporal mode: dark text on accent background
+    let mode_badge_style = if sb.mode_style.as_deref() == Some("accent_yellow") {
+        // Temporal mode: dark text on accent background (badge only)
+        RStyle::default()
+            .fg(theme.background())
+            .bg(theme.accent_yellow())
+            .add_modifier(Modifier::BOLD)
+    } else if sb.mode_style.is_some() {
+        // Other custom mode styles
         RStyle::default()
             .fg(theme.background())
             .bg(bar_bg)
@@ -94,13 +96,8 @@ fn draw_normal_status(
     right_spans.push(Span::raw(" "));
 
     if let Some(hints) = &sb.right_hints {
-        // Temporal mode: show key hints instead of position/thread indicators
         let hint_style = RStyle::default()
-            .fg(if sb.mode_style.is_some() {
-                theme.background()
-            } else {
-                theme.faded()
-            })
+            .fg(theme.faded())
             .bg(bar_bg);
         right_spans.push(Span::styled(hints.as_str(), hint_style));
         right_spans.push(Span::styled("  ", RStyle::default().bg(bar_bg)));
