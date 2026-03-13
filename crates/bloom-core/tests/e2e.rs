@@ -1862,31 +1862,32 @@ fn lv02_agenda_opens() {
     assert_eq!(screen.title(), "Agenda", "should show Agenda buffer");
 }
 
-// LV-03: View closes on Esc
+// LV-03: View closes via :q (like any buffer)
 #[test]
-fn lv03_view_closes_on_esc() {
+fn lv03_view_closes_on_quit() {
     let vault = TestVault::new().page("Test").build();
     let mut sim = SimInput::with_vault(vault);
 
     sim.keys("SPC a a");
     assert_eq!(sim.screen(80, 24).title(), "Agenda");
 
-    sim.keys("<Esc>");
-    // Should return to previous page (not Agenda)
-    assert_ne!(sim.screen(80, 24).title(), "Agenda", "Esc should close the view");
+    sim.keys(":");
+    sim.type_text("q");
+    sim.keys("Enter");
+    assert_ne!(sim.screen(80, 24).title(), "Agenda", ":q should close the view buffer");
 }
 
-// LV-04: View closes on q
+// LV-04: View closes via SPC b d (like any buffer)
 #[test]
-fn lv04_view_closes_on_q() {
+fn lv04_view_closes_on_bd() {
     let vault = TestVault::new().page("Test").build();
     let mut sim = SimInput::with_vault(vault);
 
     sim.keys("SPC a a");
     assert_eq!(sim.screen(80, 24).title(), "Agenda");
 
-    sim.keys("q");
-    assert_ne!(sim.screen(80, 24).title(), "Agenda", "q should close the view");
+    sim.keys("SPC b d");
+    assert_ne!(sim.screen(80, 24).title(), "Agenda", "SPC b d should close the view buffer");
 }
 
 // LV-05: SPC v l opens the views list picker

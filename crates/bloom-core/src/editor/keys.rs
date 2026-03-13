@@ -1018,6 +1018,30 @@ impl BloomEditor {
     /// Close the active buffer. Opens journal or scratch if it was the last buffer.
     pub(crate) fn close_active_buffer(&mut self) {
         if let Some(page_id) = self.active_page().cloned() {
+            // If this is a view buffer, clean up the view state
+            if let Some(vs) = &self.active_view {
+                if vs.buffer_id.as_ref() == Some(&page_id) {
+                    let prev = vs.previous_page.clone();
+                    self.active_view = None;
+                    // After closing, restore the previous page if available
+                    self.buffer_mgr.close(&page_id);
+                    if let Some(prev_id) = prev {
+                        if self.buffer_mgr.is_open(&prev_id) {
+                            self.set_active_page(Some(prev_id));
+                            return;
+                        }
+                    }
+                    // Fall through to normal next-buffer logic
+                    if let Some(next) = self.buffer_mgr.open_buffers().first() {
+                        self.set_active_page(Some(next.page_id.clone()));
+                        self.set_cursor(0);
+                    } else {
+                        self.open_journal_today();
+                    }
+                    return;
+                }
+            }
+            // Normal buffer close
             // Prune this page's persisted undo tree.
             if let Some(tx) = &self.indexer_tx {
                 let _ = tx.send(index::indexer::IndexRequest::PruneUndoPages(vec![
@@ -1483,14 +1507,11 @@ impl BloomEditor {
             }
         }
 
-        // Named view mode: only intercept q (close) and Enter (jump to source).
-        // All other keys pass through to normal Vim on the read-only buffer.
-        match &key.code {
-            types::KeyCode::Char('q') | types::KeyCode::Esc => {
-                self.close_active_view();
-                vec![keymap::dispatch::Action::Noop]
-            }
-            types::KeyCode::Enter => {
+        // Named view: only intercept Enter in Normal mode (jump to source).
+        // Everything else passes through to Vim — the buffer is read-only
+        // so mutations are silently dropped. Close via :q or SPC b d.
+        if matches!(self.vim_state.mode(), bloom_vim::Mode::Normal) {
+            if let types::KeyCode::Enter = &key.code {
                 let cursor_line = self.cursor_position().0;
                 let source = view_state.row_map.get(cursor_line).cloned();
                 if let Some(RowSource::Source {
@@ -1517,10 +1538,10 @@ impl BloomEditor {
                         }
                     }
                 }
-                vec![keymap::dispatch::Action::Noop]
+                return vec![keymap::dispatch::Action::Noop];
             }
-            _ => vec![],  // Empty = pass through to normal Vim handling
         }
+        vec![] // Pass through to Vim
     }
 
     /// Close the active view and restore the previous page.

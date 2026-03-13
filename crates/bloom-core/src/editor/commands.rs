@@ -329,8 +329,14 @@ impl BloomEditor {
             return vec![keymap::dispatch::Action::Noop];
         }
         match trimmed {
-            "q" | "quit" => vec![keymap::dispatch::Action::Quit],
-            "q!" | "quit!" => vec![keymap::dispatch::Action::Quit],
+            "q" | "quit" => {
+                self.close_active_buffer();
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "q!" | "quit!" => {
+                self.close_active_buffer();
+                vec![keymap::dispatch::Action::Noop]
+            }
             "w" | "write" => vec![keymap::dispatch::Action::Save],
             "wq" | "x" => vec![
                 keymap::dispatch::Action::Save,
