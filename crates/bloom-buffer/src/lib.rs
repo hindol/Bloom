@@ -14,80 +14,52 @@ pub use edit::EditOp;
 pub use rope::Buffer;
 pub use undo::{UndoNodeInfo, UndoTree};
 
-/// Read-only buffer trait — the base interface for both mutable and immutable buffers.
+/// A frozen, read-only wrapper around a `Buffer`.
 ///
-/// Provides access to text content, line iteration, cursor state, and metadata.
-/// `Buffer` implements this (with full rope + undo), and `StaticBuffer` implements
-/// it as a lightweight read-only container for views, logs, and other non-editable content.
-pub trait ReadBuffer {
-    fn text_string(&self) -> String;
-    fn len_chars(&self) -> usize;
-    fn len_lines(&self) -> usize;
-    fn line_text(&self, idx: usize) -> String;
-    fn is_dirty(&self) -> bool;
-    fn is_read_only(&self) -> bool;
-}
+/// Exposes only read methods — no insert, delete, replace, undo, or cursor mutation.
+/// Same rope internally, same rendering path, compile-time enforcement.
+/// Created via `Buffer::freeze()`, reversed via `ReadOnly::thaw()`.
+pub struct ReadOnly<T>(T);
 
-/// A lightweight read-only buffer backed by a simple string.
-/// Used for view results, log viewer, and other non-editable content.
-pub struct StaticBuffer {
-    content: String,
-    lines: Vec<String>,
-}
-
-impl StaticBuffer {
-    pub fn new(content: &str) -> Self {
-        let lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
-        Self {
-            content: content.to_string(),
-            lines,
-        }
+impl ReadOnly<Buffer> {
+    pub fn text(&self) -> &ropey::Rope {
+        self.0.text()
     }
 
-    pub fn lines(&self) -> &[String] {
-        &self.lines
+    pub fn len_chars(&self) -> usize {
+        self.0.len_chars()
     }
-}
 
-impl ReadBuffer for StaticBuffer {
-    fn text_string(&self) -> String {
-        self.content.clone()
+    pub fn len_lines(&self) -> usize {
+        self.0.len_lines()
     }
-    fn len_chars(&self) -> usize {
-        self.content.len()
+
+    pub fn line(&self, idx: usize) -> ropey::RopeSlice<'_> {
+        self.0.line(idx)
     }
-    fn len_lines(&self) -> usize {
-        self.lines.len()
+
+    pub fn cursor(&self, idx: usize) -> usize {
+        self.0.cursor(idx)
     }
-    fn line_text(&self, idx: usize) -> String {
-        self.lines.get(idx).cloned().unwrap_or_default()
+
+    pub fn is_dirty(&self) -> bool {
+        false // frozen buffers are never dirty
     }
-    fn is_dirty(&self) -> bool {
-        false
+
+    pub fn find_text(&self, needle: &str) -> Vec<std::ops::Range<usize>> {
+        self.0.find_text(needle)
     }
-    fn is_read_only(&self) -> bool {
-        true
+
+    /// Thaw back to a mutable buffer (e.g., if the user wants to edit).
+    pub fn thaw(self) -> Buffer {
+        self.0
     }
 }
 
-impl ReadBuffer for Buffer {
-    fn text_string(&self) -> String {
-        self.text().to_string()
-    }
-    fn len_chars(&self) -> usize {
-        self.text().len_chars()
-    }
-    fn len_lines(&self) -> usize {
-        self.text().len_lines()
-    }
-    fn line_text(&self, idx: usize) -> String {
-        self.line(idx).to_string()
-    }
-    fn is_dirty(&self) -> bool {
-        self.is_dirty()
-    }
-    fn is_read_only(&self) -> bool {
-        false
+impl Buffer {
+    /// Freeze this buffer into a read-only wrapper.
+    pub fn freeze(self) -> ReadOnly<Buffer> {
+        ReadOnly(self)
     }
 }
 

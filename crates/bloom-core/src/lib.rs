@@ -39,54 +39,50 @@ use bloom_md::parser::traits::DocumentParser;
 ///
 /// Each buffer is paired with [`BufferInfo`] metadata (title, path, dirty flag).
 /// The editor opens, closes, and reloads buffers through this manager.
-/// Either a mutable rope-backed buffer or a lightweight read-only buffer.
+/// Either a mutable rope-backed buffer or a frozen read-only wrapper.
 pub enum BufferSlot {
     Mutable(bloom_buffer::Buffer),
-    ReadOnly(bloom_buffer::StaticBuffer),
+    Frozen(bloom_buffer::ReadOnly<bloom_buffer::Buffer>),
 }
 
 impl BufferSlot {
     pub fn len_lines(&self) -> usize {
-        use bloom_buffer::ReadBuffer;
         match self {
             BufferSlot::Mutable(b) => b.len_lines(),
-            BufferSlot::ReadOnly(b) => b.len_lines(),
+            BufferSlot::Frozen(b) => b.len_lines(),
         }
     }
 
     pub fn len_chars(&self) -> usize {
-        use bloom_buffer::ReadBuffer;
         match self {
             BufferSlot::Mutable(b) => b.len_chars(),
-            BufferSlot::ReadOnly(b) => b.len_chars(),
+            BufferSlot::Frozen(b) => b.len_chars(),
         }
     }
 
     pub fn line_text(&self, idx: usize) -> String {
-        use bloom_buffer::ReadBuffer;
         match self {
             BufferSlot::Mutable(b) => b.line(idx).to_string(),
-            BufferSlot::ReadOnly(b) => b.line_text(idx),
+            BufferSlot::Frozen(b) => b.line(idx).to_string(),
         }
     }
 
     pub fn text_string(&self) -> String {
-        use bloom_buffer::ReadBuffer;
         match self {
             BufferSlot::Mutable(b) => b.text().to_string(),
-            BufferSlot::ReadOnly(b) => b.text_string(),
+            BufferSlot::Frozen(b) => b.text().to_string(),
         }
     }
 
     pub fn is_dirty(&self) -> bool {
         match self {
             BufferSlot::Mutable(b) => b.is_dirty(),
-            BufferSlot::ReadOnly(_) => false,
+            BufferSlot::Frozen(_) => false,
         }
     }
 
     pub fn is_read_only(&self) -> bool {
-        matches!(self, BufferSlot::ReadOnly(_))
+        matches!(self, BufferSlot::Frozen(_))
     }
 }
 
@@ -137,7 +133,7 @@ impl BufferManager {
         });
         match &mut self.buffers.get_mut(&key).unwrap().0 {
             BufferSlot::Mutable(buf) => buf,
-            BufferSlot::ReadOnly(_) => panic!("open() called on a read-only buffer"),
+            BufferSlot::Frozen(_) => panic!("open() called on a read-only buffer"),
         }
     }
 
@@ -145,7 +141,7 @@ impl BufferManager {
     pub fn get(&self, page_id: &types::PageId) -> Option<&bloom_buffer::Buffer> {
         self.buffers.get(&page_id.to_hex()).and_then(|(slot, _)| match slot {
             BufferSlot::Mutable(buf) => Some(buf),
-            BufferSlot::ReadOnly(_) => None,
+            BufferSlot::Frozen(_) => None,
         })
     }
 
@@ -156,7 +152,7 @@ impl BufferManager {
     ) -> Option<(&bloom_buffer::Buffer, &BufferInfo)> {
         self.buffers.get(&page_id.to_hex()).and_then(|(slot, info)| match slot {
             BufferSlot::Mutable(buf) => Some((buf, info)),
-            BufferSlot::ReadOnly(_) => None,
+            BufferSlot::Frozen(_) => None,
         })
     }
 
@@ -164,14 +160,14 @@ impl BufferManager {
     pub fn get_mut(&mut self, page_id: &types::PageId) -> Option<&mut bloom_buffer::Buffer> {
         self.buffers.get_mut(&page_id.to_hex()).and_then(|(slot, _)| match slot {
             BufferSlot::Mutable(buf) => Some(buf),
-            BufferSlot::ReadOnly(_) => None,
+            BufferSlot::Frozen(_) => None,
         })
     }
 
-    /// Get a StaticBuffer reference (read-only buffers only).
-    pub fn get_static(&self, page_id: &types::PageId) -> Option<&bloom_buffer::StaticBuffer> {
+    /// Get a frozen (read-only) buffer reference.
+    pub fn get_frozen(&self, page_id: &types::PageId) -> Option<&bloom_buffer::ReadOnly<bloom_buffer::Buffer>> {
         self.buffers.get(&page_id.to_hex()).and_then(|(slot, _)| match slot {
-            BufferSlot::ReadOnly(buf) => Some(buf),
+            BufferSlot::Frozen(buf) => Some(buf),
             BufferSlot::Mutable(_) => None,
         })
     }
@@ -185,7 +181,7 @@ impl BufferManager {
         self.buffers.remove(&page_id.to_hex());
     }
 
-    /// Open or replace a buffer as read-only (StaticBuffer).
+    /// Open or replace a buffer as read-only (frozen).
     pub fn open_read_only(
         &mut self,
         page_id: &types::PageId,
@@ -193,7 +189,7 @@ impl BufferManager {
         content: &str,
     ) {
         let key = page_id.to_hex();
-        let buf = bloom_buffer::StaticBuffer::new(content);
+        let buf = bloom_buffer::Buffer::from_text(content).freeze();
         let info = BufferInfo {
             page_id: page_id.clone(),
             title: title.to_string(),
@@ -201,13 +197,13 @@ impl BufferManager {
             dirty: false,
             last_focused: Instant::now(),
         };
-        self.buffers.insert(key, (BufferSlot::ReadOnly(buf), info));
+        self.buffers.insert(key, (BufferSlot::Frozen(buf), info));
     }
 
     pub fn is_read_only(&self, page_id: &types::PageId) -> bool {
         self.buffers
             .get(&page_id.to_hex())
-            .map(|(slot, _)| matches!(slot, BufferSlot::ReadOnly(_)))
+            .map(|(slot, _)| matches!(slot, BufferSlot::Frozen(_)))
             .unwrap_or(false)
     }
 
@@ -234,8 +230,8 @@ impl BufferManager {
                 BufferSlot::Mutable(buf) => {
                     *buf = bloom_buffer::Buffer::from_text(content);
                 }
-                BufferSlot::ReadOnly(buf) => {
-                    *buf = bloom_buffer::StaticBuffer::new(content);
+                BufferSlot::Frozen(buf) => {
+                    *buf = bloom_buffer::Buffer::from_text(content).freeze();
                 }
             }
         }
