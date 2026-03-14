@@ -36,6 +36,8 @@ pub fn auto_align_page(buf: &mut Buffer) {
             if has_timestamp {
                 align_timestamp_block(buf, start, i);
             }
+            // Also align block IDs (^xxxxx) within the list block
+            align_block_ids_in_range(buf, start, i);
         } else if is_table_line(&lines[i]) {
             let start = i;
             while i < lines.len() && is_table_line(&lines[i]) {
@@ -75,6 +77,7 @@ pub fn auto_align_block(buf: &mut Buffer, cursor_line: usize) {
         if has_timestamp {
             align_timestamp_block(buf, start, end);
         }
+        align_block_ids_in_range(buf, start, end);
     } else if is_table_line(cursor_text) {
         let (start, end) = find_block_bounds(&lines, cursor_line, is_table_line);
         align_table_block(buf, start, end);
@@ -181,13 +184,13 @@ fn align_timestamp_block(buf: &mut Buffer, start: usize, end: usize) {
         .max()
         .unwrap_or(0);
 
-    // Only proceed if at least one line has a timestamp
-    let has_any_at = parsed.iter().any(|p| p.has_at);
-    if max_width == 0 || !has_any_at {
-        return;
-    }
+    // Only pad timestamps if at least TWO lines have them.
+    // A single timestamped line just gets unnecessary whitespace.
+    // But ALWAYS relocate post-@ tags (canonical form: text [tags] @timestamps).
+    let at_count = parsed.iter().filter(|p| p.has_at).count();
+    let do_padding = at_count >= 2 && max_width > 0;
 
-    let align_col = max_width + 1;
+    let align_col = if do_padding { max_width + 1 } else { 0 };
 
     // Apply edits (bottom to top to preserve line indices)
     for (i, p) in parsed.iter().enumerate().rev() {
@@ -196,14 +199,24 @@ fn align_timestamp_block(buf: &mut Buffer, start: usize, end: usize) {
         let old_trimmed = old_line.trim_end_matches('\n');
 
         let new_line = if p.has_at {
-            let padding = align_col.saturating_sub(p.text_before_at.width());
-            format!(
-                "{}{}{}{}",
-                p.text_before_at,
-                " ".repeat(padding),
-                p.at_and_after,
-                p.block_id_suffix,
-            )
+            if do_padding {
+                let padding = align_col.saturating_sub(p.text_before_at.width());
+                format!(
+                    "{}{}{}{}",
+                    p.text_before_at,
+                    " ".repeat(padding),
+                    p.at_and_after,
+                    p.block_id_suffix,
+                )
+            } else {
+                // No padding, but still apply tag relocation
+                format!(
+                    "{} {}{}",
+                    p.text_before_at,
+                    p.at_and_after,
+                    p.block_id_suffix,
+                )
+            }
         } else {
             format!("{}{}", p.text_before_at, p.block_id_suffix)
         };
@@ -236,6 +249,70 @@ fn split_block_id(line: &str) -> (&str, &str) {
         }
     }
     (line, "")
+}
+
+/// Align block IDs (^xxxxx) to a common column within a list block.
+/// Only aligns if at least 2 lines have block IDs.
+fn align_block_ids_in_range(buf: &mut Buffer, start: usize, end: usize) {
+    // Re-read lines (buffer may have shifted from timestamp alignment)
+    let lines: Vec<String> = (start..end).map(|i| buf.line(i).to_string()).collect();
+
+    struct IdLine {
+        content: String,  // line content without block ID
+        block_id: String, // " ^xxxxx" or ""
+    }
+
+    let mut parsed: Vec<IdLine> = Vec::new();
+    let mut id_count = 0;
+    for line in &lines {
+        let trimmed = line.trim_end_matches('\n');
+        let (content, bid) = split_block_id(trimmed);
+        if !bid.is_empty() {
+            id_count += 1;
+        }
+        parsed.push(IdLine {
+            content: content.to_string(),
+            block_id: bid.to_string(),
+        });
+    }
+
+    // Only align if at least 2 lines have block IDs
+    if id_count < 2 {
+        return;
+    }
+
+    // Compute alignment column from max content width (only lines with IDs)
+    let max_width = parsed
+        .iter()
+        .filter(|p| !p.block_id.is_empty())
+        .map(|p| p.content.width())
+        .max()
+        .unwrap_or(0);
+
+    if max_width == 0 {
+        return;
+    }
+
+    let align_col = max_width + 1;
+
+    // Apply edits (bottom to top)
+    for (i, p) in parsed.iter().enumerate().rev() {
+        if p.block_id.is_empty() {
+            continue;
+        }
+        let line_idx = start + i;
+        let old_line = buf.line(line_idx).to_string();
+        let old_trimmed = old_line.trim_end_matches('\n');
+
+        let padding = align_col.saturating_sub(p.content.width());
+        let new_line = format!("{}{}{}", p.content, " ".repeat(padding), p.block_id.trim_start());
+
+        if new_line != old_trimmed {
+            let line_start = buf.text().line_to_char(line_idx);
+            let line_end = line_start + old_trimmed.len();
+            buf.replace(line_start..line_end, &new_line);
+        }
+    }
 }
 
 /// Move #tags that appear after @timestamps to before the first @.
@@ -742,5 +819,58 @@ mod tests {
         let first = text.clone();
         auto_align_page(&mut buf);
         assert_eq!(buf.text().to_string(), first, "should be idempotent");
+    }
+
+    #[test]
+    fn test_single_timestamp_no_padding() {
+        // A single task with @due should NOT get extra whitespace
+        let input = "- [ ] Only task @due(2026-03-05)\n- Regular note\n";
+        let mut buf = Buffer::from_text(input);
+        auto_align_page(&mut buf);
+        let text = buf.text().to_string();
+        // The @due should stay right next to the text (no padding)
+        assert!(
+            !text.contains("  @due"),
+            "single timestamp should not get extra padding\n{}",
+            text
+        );
+    }
+
+    #[test]
+    fn test_block_id_alignment_in_list() {
+        let mut buf = Buffer::from_text(
+            "- Short item ^a1b2c\n\
+             - A much longer list item here ^d3e4f\n\
+             - Medium item ^g5h6i\n",
+        );
+        auto_align_page(&mut buf);
+        let text = buf.text().to_string();
+
+        // All ^block-ids should be at the same column
+        let caret_positions: Vec<usize> = text
+            .lines()
+            .filter_map(|l| l.rfind(" ^"))
+            .collect();
+        assert_eq!(caret_positions.len(), 3);
+        assert_eq!(
+            caret_positions[0], caret_positions[1],
+            "block IDs should align\n{}",
+            text
+        );
+        assert_eq!(
+            caret_positions[1], caret_positions[2],
+            "block IDs should align\n{}",
+            text
+        );
+    }
+
+    #[test]
+    fn test_single_block_id_no_padding() {
+        // A single line with a block ID should NOT get extra padding
+        let input = "- Only item ^a1b2c\n- No block id here\n";
+        let mut buf = Buffer::from_text(input);
+        auto_align_page(&mut buf);
+        let text = buf.text().to_string();
+        assert_eq!(text.lines().next().unwrap(), "- Only item ^a1b2c");
     }
 }
