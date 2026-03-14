@@ -95,6 +95,49 @@ Block IDs render as `SyntaxNoise` — faded + dim, Tier 3 (same as `**` bold mar
 | Auto-assigned on first index | Every block gets an ID when the indexer processes the page |
 | Never reused | Retired IDs in `retired_block_ids` — avoids stale references |
 
+### Retired IDs and Never-Reuse
+
+A retired ID is one that *used to exist but was deleted*. Reusing it would cause two problems:
+1. **Broken links point to wrong block.** `[[^k7m2x|old hint]]` now resolves to a completely different block.
+2. **Wrong git history.** The new block inherits the old block's commit history in `.blocks/k7m2x`.
+
+The `retired_block_ids` table caches known retired IDs for collision avoidance during generation. But the table itself lives in the index DB — which is a deletable cache.
+
+**Recovery on index rebuild — three sources, in priority order:**
+
+| Data available | Source of retired IDs | Cost |
+|---------------|----------------------|------|
+| Index DB intact | `retired_block_ids` table | Instant |
+| Index DB deleted, `.git/` intact | Scan git history: union of all `^xxxxx` ever seen − current live IDs | ~400ms for 10K pages / 18K commits |
+| Index DB deleted, `.git/` deleted | Broken link scan: `{ id \| [[^id\|...]] in any file } − { id \| ^id in any file }` | During normal file parse (free) |
+
+**Why this is watertight:**
+
+- If `.git/` survives, we recover *all* retired IDs from history. Full protection.
+- If `.git/` is also deleted, history is gone — so problem #2 (wrong git history) is impossible. Only problem #1 (broken links) remains. The broken link scan catches exactly those IDs: a link references a block that doesn't exist. Any ID found this way goes into `retired_block_ids`.
+- If neither `.git/` nor any broken links survive, the retired ID is truly forgotten. No references to it exist anywhere. Collision is harmless.
+
+**Each level of data loss has a proportional recovery mechanism. The worst case still protects against the only harmful collision scenario.**
+
+### Stale Row Cleanup
+
+When block `^k7m2x` moves from page A to page B (cut-paste), both `(k7m2x, A)` and `(k7m2x, B)` may exist in `block_ids` until page A is re-indexed. Stale rows cause `find_all_pages_by_block_id` to return pages where the block no longer exists.
+
+**Fix:** After inserting a page's block_ids during re-index, clean up stale rows:
+
+```sql
+-- After inserting block_ids for page B:
+-- For each block_id that B now owns, verify other pages still have it.
+-- (Run during incremental_update, per-page)
+DELETE FROM block_ids
+WHERE block_id = ?1 AND page_id != ?2
+  AND page_id NOT IN (
+    SELECT page_id FROM block_ids WHERE block_id = ?1 AND page_id = ?2
+  )
+```
+
+Simpler approach: during full rebuild, the entire table is wiped and re-inserted — stale rows are impossible. During incremental updates, the per-page `DELETE FROM block_ids WHERE page_id = ?` already cleans up that page's stale entries. The only window is between "block moves to B" and "A is re-indexed." This is acceptable — `MirrorEdit` to a stale target is a no-op (line not found), not data loss.
+
 ---
 
 ## Mirror Markers: `^` vs `^=`
@@ -361,8 +404,9 @@ CREATE TABLE block_ids (
 8. **`MirrorEdit` as separate message.** One-flag circular prevention.
 9. **Propagation on Insert→Normal.** Buffer is in final state. Same trigger as auto-save.
 10. **Self-healing via git.** Detection in indexer, repair on history thread.
-11. **Never reused.** Retired IDs reserved permanently.
+11. **Never reused.** Retired IDs reserved permanently. Recovered from git history or broken links on index rebuild.
 12. **No CRDT, no merge logic.** Single-user, local-first. Git is the safety net.
+13. **Stale rows are transient.** Cleaned on re-index of the source page. MirrorEdit to stale target is a no-op.
 
 ---
 
@@ -394,8 +438,9 @@ Cloud-first, CRDT-like conflict resolution. **Bloom:** local-first, synchronous 
 
 ## Open Questions
 
-1. **Self-healing profiling.** Git lookup + content match per missing ID — needs benchmarking.
+1. **Self-healing profiling.** Git lookup + content match per missing ID — needs benchmarking. Deferred until a feature requires it.
 2. **First-run write storm.** 10K file writes — fingerprint detection should suppress re-index, needs scale testing.
+3. **Git history scan performance.** Retired ID recovery from 18K commits estimated at ~400ms — needs validation on real vault.
 
 ---
 
