@@ -165,6 +165,57 @@ This keeps the buffer and its parse tree in sync — they're created, closed, an
 6. **Migrate structural queries** — link following, tag completion, heading jump use ParseTree elements.
 7. **Remove redundant parse calls** — `parse_frontmatter()` on demand → read from ParseTree.
 
+## Memory Model — Learn From Other Editors
+
+### How other editors do it
+
+| Editor | Strategy | Per-line cost | 1000-line file |
+|--------|----------|---------------|----------------|
+| **Tree-sitter** (Neovim, Zed, Helix) | Concrete syntax tree (CST), ~40 bytes/node | Varies (~3 nodes/line) | ~120KB |
+| **VS Code / Monaco** | Line-end tokenizer state (tiny) + on-demand token cache for visible lines | 4 bytes state + ~100 bytes cached spans (visible only) | ~9KB |
+| **Bloom (proposed)** | Line-end context + viewport span cache | Same as VS Code | ~9KB |
+
+### The key insight
+
+**Don't cache spans for the entire file.** Cache two things:
+
+1. **Line-end context** — the state flowing from line N to line N+1 (`in_code_block`, `in_frontmatter`). Tiny: ~4 bytes per line, stored for ALL lines. This is what makes incremental invalidation work — if an edit doesn't change the line-end context, no cascade.
+
+2. **Viewport span cache** — the rendered `Vec<StyledSpan>` for currently visible lines (~50). Re-computed on scroll. At ~10µs per `highlight_line()` call, re-highlighting 50 lines on scroll costs 500µs — imperceptible.
+
+### Memory budget
+
+```
+Line-end contexts:  1000 lines × 4 bytes  =    4 KB
+Viewport spans:       50 lines × 100 bytes =    5 KB
+Structural elements:  on-demand (from full parse on save) = 0 KB in steady state
+─────────────────────────────────────────────────────
+Total per buffer:                              ~9 KB
+```
+
+Compare: a 1000-line Markdown file is ~25KB of raw text. The parse cache is ~36% of the text size. Acceptable.
+
+### What this changes in the design
+
+The `LineState` struct from the proposal above should be split:
+
+```rust
+/// Stored for ALL lines — enables incremental context propagation.
+struct LineEndContext {
+    in_code_block: bool,
+    in_frontmatter: bool,
+    code_fence_lang: Option<SmallString>,  // ~12 bytes with SSO
+}
+
+/// Stored for VISIBLE lines only — evicted on scroll.
+struct CachedSpans {
+    line_idx: usize,
+    spans: Vec<StyledSpan>,
+}
+```
+
+The `LineElements` (links, tags, tasks) are NOT cached per-line. They come from the full `Document` parse on save (already stored in the SQLite index). Live queries use the index. The ParseTree doesn't duplicate structural data.
+
 ---
 
 ## Open Questions
@@ -175,4 +226,4 @@ This keeps the buffer and its parse tree in sync — they're created, closed, an
 
 3. **Thread safety.** ParseTree is accessed by the render path (read) and the edit path (write). Both are on the UI thread currently, so no issue. If we ever move rendering to a separate thread, the ParseTree would need to be behind an Arc<RwLock> or double-buffered.
 
-4. **Memory cost.** Each LineState holds spans + elements. For a 1000-line file with ~5 spans per line, that's ~5000 small structs. Estimate: ~100KB per buffer. Acceptable.
+4. **Memory cost.** ~9KB per buffer (line-end contexts + viewport span cache). See Memory Model section below.
