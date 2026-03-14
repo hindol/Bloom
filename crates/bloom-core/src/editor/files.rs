@@ -19,8 +19,8 @@ impl BloomEditor {
             let _ = tx.send(history::HistoryRequest::FileDirty);
         }
 
-        if let Some(page_id) = self.buffer_mgr.find_by_path(&wc.path).cloned() {
-            if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+        if let Some(page_id) = self.writer.buffers_mut().find_by_path(&wc.path).cloned() {
+            if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
                 if buf.is_dirty() {
                     buf.mark_clean();
                     let filename = wc
@@ -65,7 +65,7 @@ impl BloomEditor {
 
         let mut visual_changed = false;
 
-        if let Some(page_id) = self.buffer_mgr.find_by_path(&path).cloned() {
+        if let Some(page_id) = self.writer.buffers_mut().find_by_path(&path).cloned() {
             let is_own_write = if let Some((recorded_mtime, recorded_size)) =
                 self.last_write_fingerprints.remove(&path)
             {
@@ -82,16 +82,16 @@ impl BloomEditor {
                 // Fingerprint matched — already marked clean in handle_write_complete
                 tracing::debug!(path = %path.display(), "self-write detected, skipping reload");
             } else if let Ok(disk_content) = std::fs::read_to_string(&path) {
-                let buf_content = self.buffer_mgr.get(&page_id).map(|b| b.text().to_string());
+                let buf_content = self.writer.buffers_mut().get(&page_id).map(|b| b.text().to_string());
                 if buf_content.as_deref() == Some(disk_content.as_str()) {
-                    if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                    if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
                         if buf.is_dirty() {
                             buf.mark_clean();
                             visual_changed = true;
                         }
                     }
                 } else {
-                    let is_dirty = self.buffer_mgr.get(&page_id).is_some_and(|b| b.is_dirty());
+                    let is_dirty = self.writer.buffers_mut().get(&page_id).is_some_and(|b| b.is_dirty());
                     if is_dirty {
                         self.active_dialog = Some(ActiveDialog::FileChanged {
                             page_id,
@@ -100,7 +100,7 @@ impl BloomEditor {
                         });
                         visual_changed = true;
                     } else {
-                        self.buffer_mgr.reload(&page_id, &disk_content);
+                        self.writer.buffers_mut().reload(&page_id, &disk_content);
                         self.set_cursor(0);
                         visual_changed = true;
                     }
@@ -146,7 +146,7 @@ impl BloomEditor {
         tracing::debug!(page = %page_id.to_hex(), "save_page called");
         // Skip pseudo-paths like [scratch].
         let is_pseudo = self
-            .buffer_mgr
+            .writer.buffers_mut()
             .open_buffers()
             .iter()
             .find(|b| b.page_id == *page_id)
@@ -157,7 +157,7 @@ impl BloomEditor {
 
         // Extract content and path.
         let (content, path) = {
-            let Some((buf, info)) = self.buffer_mgr.get_with_info(page_id) else {
+            let Some((buf, info)) = self.writer.buffers_mut().get_with_info(page_id) else {
                 return;
             };
             if !buf.is_dirty() {
@@ -172,7 +172,7 @@ impl BloomEditor {
         } else {
             // No DiskWriter (tests, pre-init). Inline atomic write.
             if bloom_store::disk_writer::atomic_write(&path, &content).is_ok() {
-                if let Some(buf) = self.buffer_mgr.get_mut(page_id) {
+                if let Some(buf) = self.writer.buffers_mut().get_mut(page_id) {
                     buf.mark_clean();
                 }
             }
@@ -196,20 +196,20 @@ impl BloomEditor {
 
         // Only assign block IDs to Markdown files.
         let is_md = self
-            .buffer_mgr
+            .writer.buffers_mut()
             .open_buffers()
             .iter()
             .find(|b| b.page_id == *page_id)
             .is_some_and(|info| {
                 info.path
                     .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+                    .is_some_and(|ext: &std::ffi::OsStr| ext.eq_ignore_ascii_case("md"))
             });
         if !is_md {
             return false;
         }
 
-        let Some(buf) = self.buffer_mgr.get(page_id) else {
+        let Some(buf) = self.writer.buffers_mut().get(page_id) else {
             return false;
         };
         let text = buf.text().to_string();
@@ -219,7 +219,7 @@ impl BloomEditor {
             return false;
         }
 
-        let Some(buf) = self.buffer_mgr.get_mut(page_id) else {
+        let Some(buf) = self.writer.buffers_mut().get_mut(page_id) else {
             return false;
         };
 

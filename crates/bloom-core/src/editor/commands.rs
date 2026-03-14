@@ -143,7 +143,7 @@ impl BloomEditor {
             )],
             "add_tag" => {
                 if let Some(page_id) = self.active_page().cloned() {
-                    if let Some(buf) = self.buffer_mgr.get(&page_id) {
+                    if let Some(buf) = self.writer.buffers_mut().get(&page_id) {
                         let text = buf.text().to_string();
                         if let Some(_fm) = self.parser.parse_frontmatter(&text) {
                             // Prompt would be ideal, but for now insert a placeholder tag
@@ -156,7 +156,7 @@ impl BloomEditor {
             }
             "remove_tag" => {
                 if let Some(page_id) = self.active_page().cloned() {
-                    if let Some(buf) = self.buffer_mgr.get(&page_id) {
+                    if let Some(buf) = self.writer.buffers_mut().get(&page_id) {
                         let text = buf.text().to_string();
                         if let Some(fm) = self.parser.parse_frontmatter(&text) {
                             if !fm.tags.is_empty() {
@@ -504,7 +504,7 @@ impl BloomEditor {
                     format_view_result(&result, today_date);
 
                 let id = crate::uuid::generate_hex_id();
-                self.buffer_mgr
+                self.writer.buffers_mut()
                     .open_read_only(&id, &view_state.name, &content);
                 self.set_active_page(Some(id.clone()));
                 self.set_cursor(0);
@@ -514,7 +514,7 @@ impl BloomEditor {
             Err(err) => {
                 view_state.error = Some(err.clone());
                 let id = crate::uuid::generate_hex_id();
-                self.buffer_mgr
+                self.writer.buffers_mut()
                     .open_read_only(&id, &view_state.name, &format!("Error: {err}"));
                 self.set_active_page(Some(id.clone()));
                 view_state.buffer_id = Some(id);

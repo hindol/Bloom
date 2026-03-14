@@ -254,6 +254,41 @@ impl BufferManager {
 }
 
 // ---------------------------------------------------------------------------
+// BufferWriter — single mutation authority for all buffers
+// ---------------------------------------------------------------------------
+
+/// Centralizes all buffer mutations behind a single `apply()` method.
+/// Owns the BufferManager. Read access via `buffers()` / `buffers_mut()`.
+/// This is the Elm-inspired "update" function — all mutations flow through here.
+pub struct BufferWriter {
+    buffer_mgr: BufferManager,
+}
+
+impl BufferWriter {
+    pub fn new() -> Self {
+        Self {
+            buffer_mgr: BufferManager::new(),
+        }
+    }
+
+    /// Read-only access to the buffer manager (for rendering, Vim motion computation, etc.)
+    pub fn buffers(&self) -> &BufferManager {
+        &self.buffer_mgr
+    }
+
+    /// Mutable access to the buffer manager (transitional — will be replaced by apply() messages).
+    pub fn buffers_mut(&mut self) -> &mut BufferManager {
+        &mut self.buffer_mgr
+    }
+}
+
+impl Default for BufferWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Channel bundle for event-driven TUI loop
 // ---------------------------------------------------------------------------
 
@@ -282,7 +317,7 @@ pub struct EditorChannels {
 /// using [`channels`](Self::channels) to multiplex background events.
 pub struct BloomEditor {
     pub config: config::Config,
-    pub(crate) buffer_mgr: BufferManager,
+    pub(crate) writer: BufferWriter,
     pub(crate) vim_state: bloom_vim::VimState,
     pub(crate) window_mgr: window::WindowManager,
     pub(crate) which_key_tree: which_key::WhichKeyTree,
@@ -589,7 +624,7 @@ impl BloomEditor {
             _timeline: timeline::Timeline::new(),
             _refactorer: refactor::Refactor::new(),
             note_store: None,
-            buffer_mgr: BufferManager::new(),
+            writer: BufferWriter::new(),
             picker_state: None,
 
             quick_capture: None,
@@ -638,7 +673,7 @@ impl BloomEditor {
 
     pub(crate) fn cursor(&self) -> usize {
         if let Some(page_id) = self.active_page() {
-            if let Some(buf) = self.buffer_mgr.get(page_id) {
+            if let Some(buf) = self.writer.buffers().get(page_id) {
                 return buf.cursor(0);
             }
         }
@@ -648,7 +683,7 @@ impl BloomEditor {
 
     pub(crate) fn set_cursor(&mut self, pos: usize) {
         if let Some(page_id) = self.active_page().cloned() {
-            self.buffer_mgr.set_cursor(&page_id, pos);
+            self.writer.buffers_mut().set_cursor(&page_id, pos);
         } else {
             tracing::error!(pos, "set_cursor: no active page!");
         }
@@ -711,7 +746,7 @@ impl BloomEditor {
     /// Get the text content of the active buffer (for testing).
     pub fn active_buffer_text(&self) -> Option<String> {
         let page_id = self.active_page()?;
-        let buf = self.buffer_mgr.get(page_id)?;
+        let buf = self.writer.buffers().get(page_id)?;
         Some(buf.text().to_string())
     }
 
@@ -844,7 +879,7 @@ impl BloomEditor {
 
         // Restore the content into the active buffer (undo-able).
         if let Some(page_id) = self.active_page().cloned() {
-            if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+            if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
                 let len = buf.len_chars();
                 buf.replace(0..len, &content);
                 self.push_notification(
@@ -894,7 +929,7 @@ impl BloomEditor {
             return;
         };
         let cursor = self.cursor();
-        let Some(buf) = self.buffer_mgr.get_mut(&page_id) else {
+        let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) else {
             return;
         };
         buf.insert(cursor, text);
@@ -995,7 +1030,7 @@ impl BloomEditor {
     pub fn close_buffer(&mut self, _pane: types::PaneId) -> Result<(), error::BloomError> {
         if let Some(page_id) = self.active_page().cloned() {
             self.set_active_page(None);
-            self.buffer_mgr.close(&page_id);
+            self.writer.buffers_mut().close(&page_id);
         }
         Ok(())
     }
@@ -1022,13 +1057,13 @@ impl BloomEditor {
             .filter_map(|(pane_id, state)| {
                 let page_id = state.page_id.as_ref()?;
                 let path = self
-                    .buffer_mgr
+                    .writer.buffers()
                     .open_buffers()
                     .iter()
                     .find(|b| b.page_id == *page_id)?
                     .path
                     .clone();
-                let (cursor_line, cursor_col) = if let Some(buf) = self.buffer_mgr.get(page_id) {
+                let (cursor_line, cursor_col) = if let Some(buf) = self.writer.buffers().get(page_id) {
                     let rope = buf.text();
                     let len = rope.len_chars();
                     let cursor_pos = buf.cursor(0);
@@ -1063,8 +1098,8 @@ impl BloomEditor {
         // Persist undo trees via the indexer thread (which owns the write connection).
         if let Some(indexer_tx) = &self.indexer_tx {
             let mut undo_data = Vec::new();
-            for info in self.buffer_mgr.open_buffers() {
-                if let Some(buf) = self.buffer_mgr.get(&info.page_id) {
+            for info in self.writer.buffers().open_buffers() {
+                if let Some(buf) = self.writer.buffers().get(&info.page_id) {
                     let page_hex = info.page_id.to_hex();
                     undo_data.push(buf.undo_tree().to_persist_data(&page_hex));
                 }
@@ -1170,7 +1205,7 @@ impl BloomEditor {
                             );
                             tracing::info!(page = %page_hex, "undo tree extended with external change");
                         }
-                        if let Some(buf) = self.buffer_mgr.get_mut(&id) {
+                        if let Some(buf) = self.writer.buffers_mut().get_mut(&id) {
                             buf.set_undo_tree(tree);
                             tracing::debug!(page = %page_hex, "undo tree restored");
                         }
@@ -1183,7 +1218,7 @@ impl BloomEditor {
             }
 
             // Restore cursor position and scroll offset
-            if let Some(buf) = self.buffer_mgr.get(&id) {
+            if let Some(buf) = self.writer.buffers().get(&id) {
                 let rope = buf.text();
                 if buf_state.cursor_line < rope.len_lines() {
                     let line_start = rope.line_to_char(buf_state.cursor_line);

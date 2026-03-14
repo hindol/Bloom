@@ -42,7 +42,7 @@ impl BloomEditor {
             ),
             PickerKind::SwitchBuffer => {
                 let items: Vec<GenericPickerItem> = self
-                    .buffer_mgr
+                    .writer.buffers_mut()
                     .open_buffers()
                     .iter()
                     .map(|info| GenericPickerItem {
@@ -751,7 +751,7 @@ impl BloomEditor {
                         self.open_page_with_content(&id, &title, &path, &content);
                         // Jump cursor to the matching line
                         if let Some(page_id) = self.active_page().cloned() {
-                            if let Some(buf) = self.buffer_mgr.get(&page_id) {
+                            if let Some(buf) = self.writer.buffers_mut().get(&page_id) {
                                 let target_char = buf
                                     .text()
                                     .line_to_char(line_num.min(buf.len_lines().saturating_sub(1)));
@@ -802,7 +802,7 @@ impl BloomEditor {
             }
             PickerKind::InlineLink => {
                 if let Some(page_id) = self.active_page().cloned() {
-                    if self.buffer_mgr.get(&page_id).is_some() {
+                    if self.writer.buffers_mut().get(&page_id).is_some() {
                         let link_text = format!("[[{}|{}]]", item.id, item.label);
                         self.insert_text_at_cursor(&link_text);
                     }

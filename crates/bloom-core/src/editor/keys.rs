@@ -138,7 +138,7 @@ impl BloomEditor {
         // Vim processing — works for both mutable and frozen (read-only) buffers.
         let buf_for_vim = self
             .active_page()
-            .and_then(|id| self.buffer_mgr.get(id));
+            .and_then(|id| self.writer.buffers().get(id));
         let empty_buf = bloom_buffer::Buffer::from_text("");
         let buf = buf_for_vim.unwrap_or(&empty_buf);
         {
@@ -164,7 +164,7 @@ impl BloomEditor {
     /// Skipped for read-only buffers (views, logs).
     fn autosave_if_dirty(&mut self) {
         if let Some(page_id) = self.active_page().cloned() {
-            if !self.buffer_mgr.is_read_only(&page_id) {
+            if !self.writer.buffers_mut().is_read_only(&page_id) {
                 self.save_page(&page_id);
             }
         }
@@ -257,7 +257,7 @@ impl BloomEditor {
                 }
                 keymap::dispatch::Action::Undo => {
                     if let Some(page_id) = self.active_page().cloned() {
-                        if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                        if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
                             buf.undo();
                             let len = buf.len_chars();
                             if self.cursor() > len {
@@ -268,7 +268,7 @@ impl BloomEditor {
                 }
                 keymap::dispatch::Action::Redo => {
                     if let Some(page_id) = self.active_page().cloned() {
-                        if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                        if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
                             buf.redo();
                             let len = buf.len_chars();
                             if self.cursor() > len {
@@ -531,7 +531,7 @@ impl BloomEditor {
                             if selected == 0 {
                                 // Reload from disk
                                 if let Ok(content) = std::fs::read_to_string(&path) {
-                                    self.buffer_mgr.reload(&page_id, &content);
+                                    self.writer.buffers_mut().reload(&page_id, &content);
                                     self.set_cursor(0);
                                 }
                             }
@@ -656,7 +656,7 @@ impl BloomEditor {
                 let previews: Vec<types::PageId> = dp.preview_buffers.clone();
                 self.date_picker_state = None;
                 for pid in &previews {
-                    self.buffer_mgr.close(pid);
+                    self.writer.buffers_mut().close(pid);
                 }
                 if let Some(page_id) = original {
                     self.set_active_page(Some(page_id));
@@ -723,7 +723,7 @@ impl BloomEditor {
                 self.date_picker_state = None;
                 for pid in &previews {
                     if current_page.as_ref() != Some(pid) {
-                        self.buffer_mgr.close(pid);
+                        self.writer.buffers_mut().close(pid);
                     }
                 }
                 self.last_viewed_journal_date = Some(date);
@@ -902,7 +902,7 @@ impl BloomEditor {
             return;
         };
         let cursor = self.cursor();
-        let Some(buf) = self.buffer_mgr.get_mut(&page_id) else {
+        let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) else {
             return;
         };
         let rope = buf.text();
@@ -938,7 +938,7 @@ impl BloomEditor {
         if let Some(idx) = &self.index {
             if let Some(meta) = idx.find_page_by_title("Agenda") {
                 // Already open in a buffer?
-                if self.buffer_mgr.get(&meta.id).is_some() {
+                if self.writer.buffers_mut().get(&meta.id).is_some() {
                     self.set_active_page(Some(meta.id.clone()));
                     return;
                 }
@@ -984,18 +984,18 @@ impl BloomEditor {
     #[allow(dead_code)]
     pub(crate) fn toggle_task_in_page(&mut self, page_id: &types::PageId, line: usize) {
         // Ensure the page is loaded in a buffer
-        let needs_load = self.buffer_mgr.get(page_id).is_none();
+        let needs_load = self.writer.buffers_mut().get(page_id).is_none();
         if needs_load {
             if let Some(idx) = &self.index {
                 if let Some(meta) = idx.find_page_by_id(page_id) {
                     if let Ok(content) = std::fs::read_to_string(&meta.path) {
-                        self.buffer_mgr
+                        self.writer.buffers_mut()
                             .open(page_id, &meta.title, &meta.path, &content);
                     }
                 }
             }
         }
-        let Some(buf) = self.buffer_mgr.get_mut(page_id) else {
+        let Some(buf) = self.writer.buffers_mut().get_mut(page_id) else {
             return;
         };
         let rope = buf.text();
@@ -1026,15 +1026,15 @@ impl BloomEditor {
                     let prev = vs.previous_page.clone();
                     self.active_view = None;
                     // After closing, restore the previous page if available
-                    self.buffer_mgr.close(&page_id);
+                    self.writer.buffers_mut().close(&page_id);
                     if let Some(prev_id) = prev {
-                        if self.buffer_mgr.is_open(&prev_id) {
+                        if self.writer.buffers_mut().is_open(&prev_id) {
                             self.set_active_page(Some(prev_id));
                             return;
                         }
                     }
                     // Fall through to normal next-buffer logic
-                    if let Some(next) = self.buffer_mgr.open_buffers().first() {
+                    if let Some(next) = self.writer.buffers().open_buffers().first() {
                         self.set_active_page(Some(next.page_id.clone()));
                         self.set_cursor(0);
                     } else {
@@ -1051,8 +1051,8 @@ impl BloomEditor {
                 ]));
             }
             self.set_active_page(None);
-            self.buffer_mgr.close(&page_id);
-            if let Some(next) = self.buffer_mgr.open_buffers().first() {
+            self.writer.buffers_mut().close(&page_id);
+            if let Some(next) = self.writer.buffers().open_buffers().first() {
                 self.set_active_page(Some(next.page_id.clone()));
                 self.set_cursor(0);
             } else {
@@ -1070,7 +1070,7 @@ impl BloomEditor {
         // Navigation, search, Visual mode, Command mode all pass through.
         let is_ro = self
             .active_page()
-            .map(|id| self.buffer_mgr.is_read_only(id))
+            .map(|id| self.writer.buffers().is_read_only(id))
             .unwrap_or(false);
         if is_ro {
             match &action {
@@ -1093,7 +1093,7 @@ impl BloomEditor {
                 self.pending_since = None;
                 self.which_key_visible = false;
                 if let Some(page_id) = self.active_page().cloned() {
-                    if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                    if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
                         if edit.replacement.is_empty() {
                             buf.delete(edit.range.clone());
                         } else if edit.range.is_empty() {
@@ -1121,7 +1121,7 @@ impl BloomEditor {
 
                 // Debug: log cursor movement for diagnosing past-EOF bug
                 if let Some(page_id) = self.active_page() {
-                    if let Some(buf) = self.buffer_mgr.get(page_id) {
+                    if let Some(buf) = self.writer.buffers().get(page_id) {
                         let len = buf.text().len_chars();
                         let lines = buf.text().len_lines();
                         let old_cur = buf.cursor(0);
@@ -1159,15 +1159,15 @@ impl BloomEditor {
                 // Edit group lifecycle: begin on Insert entry, end on Insert exit
                 if matches!(mode, bloom_vim::Mode::Insert) {
                     if let Some(page_id) = self.active_page().cloned() {
-                        if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                        if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
                             buf.begin_edit_group();
                         }
                     }
                 } else if matches!(mode, bloom_vim::Mode::Normal) {
                     // Leaving Insert (or Visual, Command) → close any open group
                     if let Some(page_id) = self.active_page().cloned() {
-                        let is_ro = self.buffer_mgr.is_read_only(&page_id);
-                        if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                        let is_ro = self.writer.buffers_mut().is_read_only(&page_id);
+                        if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
                             buf.end_edit_group();
                         }
                         // Skip block IDs and alignment for read-only buffers
@@ -1179,13 +1179,13 @@ impl BloomEditor {
                     if was_insert {
                         let is_ro = self
                             .active_page()
-                            .map(|id| self.buffer_mgr.is_read_only(id))
+                            .map(|id| self.writer.buffers().is_read_only(id))
                             .unwrap_or(true);
                         if !is_ro {
                             match self.config.auto_align {
                                 config::AutoAlignMode::Page => {
                                     if let Some(page_id) = self.active_page().cloned() {
-                                        if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                                        if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
                                             align::auto_align_page(buf);
                                         }
                                     }
@@ -1193,7 +1193,7 @@ impl BloomEditor {
                                 config::AutoAlignMode::Block => {
                                     let cursor_line = self.cursor_position().0;
                                     if let Some(page_id) = self.active_page().cloned() {
-                                        if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                                        if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
                                             align::auto_align_block(buf, cursor_line);
                                         }
                                     }
@@ -1215,7 +1215,7 @@ impl BloomEditor {
             bloom_vim::VimAction::Unhandled => vec![keymap::dispatch::Action::Noop],
             bloom_vim::VimAction::RestoreCheckpoint => {
                 if let Some(page_id) = self.active_page().cloned() {
-                    if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                    if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
                         buf.restore_edit_group_checkpoint();
                         self.set_cursor(0);
                     }
@@ -1348,7 +1348,7 @@ impl BloomEditor {
         let Some(page_id) = self.active_page().cloned() else {
             return;
         };
-        let Some(buf) = self.buffer_mgr.get(&page_id) else {
+        let Some(buf) = self.writer.buffers_mut().get(&page_id) else {
             return;
         };
         let rope = buf.text();
@@ -1412,7 +1412,7 @@ impl BloomEditor {
 
         let cursor = self.cursor();
 
-        let Some(buf) = self.buffer_mgr.get_mut(&page_id) else {
+        let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) else {
             return;
         };
 
@@ -1446,7 +1446,7 @@ impl BloomEditor {
     ) -> Vec<render::InlineMenuItem> {
         // Extract query text from the buffer (text between trigger_pos and cursor).
         let query = if let Some(page_id) = self.active_page() {
-            if let Some(buf) = self.buffer_mgr.get(page_id) {
+            if let Some(buf) = self.writer.buffers().get(page_id) {
                 let rope = buf.text();
                 let end = self.cursor().min(rope.len_chars());
                 let start = ic.trigger_pos.min(end);
@@ -1552,7 +1552,7 @@ impl BloomEditor {
     fn close_active_view(&mut self) {
         if let Some(vs) = self.active_view.take() {
             if let Some(buf_id) = &vs.buffer_id {
-                self.buffer_mgr.close(buf_id);
+                self.writer.buffers_mut().close(buf_id);
             }
             if let Some(prev) = vs.previous_page {
                 self.set_active_page(Some(prev));
@@ -1575,7 +1575,7 @@ impl BloomEditor {
                 if let Some(vs) = self.active_view.as_mut() {
                     // Close old preview buffer if any
                     if let Some(old_id) = vs.buffer_id.take() {
-                        self.buffer_mgr.close(&old_id);
+                        self.writer.buffers_mut().close(&old_id);
                     }
                 }
                 let mut vs = self.active_view.take().unwrap();

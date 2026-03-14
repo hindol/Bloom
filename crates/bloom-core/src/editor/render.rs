@@ -113,16 +113,16 @@ impl BloomEditor {
                 continue;
             }
 
-            let (title, dirty, visible_lines, pane_cursor_line, pane_cursor_col, scroll_offset) =
+            let (title, dirty, visible_lines, pane_cursor_line, pane_cursor_col, scroll_offset): (String, bool, Vec<_>, usize, usize, usize) =
                 if let Some(ps) = pane_state {
                     if let Some(page_id) = &ps.page_id {
-                        if let Some(buf) = self.buffer_mgr.get(page_id) {
+                        if let Some(buf) = self.writer.buffers().get(page_id) {
                             let title = self
-                                .buffer_mgr
+                                .writer.buffers()
                                 .info(page_id)
                                 .map(|i| i.title.clone())
                                 .unwrap_or_default();
-                            let dirty = !self.buffer_mgr.is_read_only(page_id) && buf.is_dirty();
+                            let dirty = !self.writer.buffers().is_read_only(page_id) && buf.is_dirty();
                             let lines = self.render_buffer_lines_with_viewport(buf, &ps.viewport);
                             let (cl, cc) =
                                 Self::cursor_position_for(buf.cursor(0), buf, &self.vim_state);
@@ -306,7 +306,7 @@ impl BloomEditor {
                         }
                         // 2. Try in-memory buffer (already open pages — free)
                         if let Some(page_id) = types::PageId::from_hex(&item.id) {
-                            if let Some(buf) = self.buffer_mgr.get(&page_id) {
+                            if let Some(buf) = self.writer.buffers_mut().get(&page_id) {
                                 let text = buf.text();
                                 let lines: Vec<_> =
                                     text.lines().take(20).map(|l| l.to_string()).collect();
@@ -835,7 +835,7 @@ impl BloomEditor {
         let page_title = self
             .active_page()
             .and_then(|id| {
-                self.buffer_mgr
+                self.writer.buffers()
                     .open_buffers()
                     .iter()
                     .find(|b| b.page_id == *id)
@@ -1025,7 +1025,7 @@ impl BloomEditor {
 
     pub(crate) fn cursor_position(&self) -> (usize, usize) {
         if let Some(page_id) = self.active_page() {
-            if let Some(buf) = self.buffer_mgr.get(page_id) {
+            if let Some(buf) = self.writer.buffers().get(page_id) {
                 return Self::cursor_position_for(self.cursor(), buf, &self.vim_state);
             }
         }

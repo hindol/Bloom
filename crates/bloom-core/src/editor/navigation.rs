@@ -60,7 +60,7 @@ impl BloomEditor {
         path: &std::path::Path,
         content: &str,
     ) {
-        self.buffer_mgr.open(id, title, path, content);
+        self.writer.buffers_mut().open(id, title, path, content);
         self.set_active_page(Some(id.clone()));
         self.set_cursor(0);
         // Record access for frecency scoring
@@ -144,7 +144,7 @@ impl BloomEditor {
         let Some(page_id) = self.active_page().cloned() else {
             return;
         };
-        let Some(buf) = self.buffer_mgr.get(&page_id) else {
+        let Some(buf) = self.writer.buffers().get(&page_id) else {
             return;
         };
         let rope = buf.text();
@@ -203,8 +203,8 @@ impl BloomEditor {
     /// Yank a `[[id|title]]` link to the current page.
     pub(crate) fn yank_link_to_current_page(&self) -> Option<String> {
         let page_id = self.active_page()?;
-        let _buf = self.buffer_mgr.get(page_id)?;
-        let buffers = self.buffer_mgr.open_buffers();
+        let _buf = self.writer.buffers().get(page_id)?;
+        let buffers = self.writer.buffers().open_buffers();
         let info = buffers.iter().find(|b| b.page_id == *page_id)?;
         Some(format!("[[{}|{}]]", page_id.to_hex(), info.title))
     }
@@ -212,7 +212,7 @@ impl BloomEditor {
     /// Yank a `[[^block_id|]]` block link for the block at the cursor.
     pub(crate) fn yank_link_to_current_block(&self) -> Option<String> {
         let page_id = self.active_page()?;
-        let buf = self.buffer_mgr.get(page_id)?;
+        let buf = self.writer.buffers().get(page_id)?;
         let rope = buf.text();
         let len = rope.len_chars();
         if len == 0 {
@@ -248,7 +248,7 @@ impl BloomEditor {
             .last_viewed_journal_date
             .or_else(|| {
                 self.active_page()
-                    .and_then(|id| self.buffer_mgr.get(id))
+                    .and_then(|id| self.writer.buffers().get(id))
                     .and_then(|buf| {
                         let text = buf.text().to_string();
                         self.parser
