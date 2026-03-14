@@ -65,7 +65,7 @@ impl BloomEditor {
 
         let mut visual_changed = false;
 
-        if let Some(page_id) = self.writer.buffers_mut().find_by_path(&path).cloned() {
+        if let Some(page_id) = self.writer.buffers().find_by_path(&path).cloned() {
             let is_own_write = if let Some((recorded_mtime, recorded_size)) =
                 self.last_write_fingerprints.remove(&path)
             {
@@ -100,7 +100,10 @@ impl BloomEditor {
                         });
                         visual_changed = true;
                     } else {
-                        self.writer.buffers_mut().reload(&page_id, &disk_content);
+                        self.writer.apply(crate::BufferMessage::Reload {
+                            page_id: page_id.clone(),
+                            content: disk_content,
+                        });
                         self.set_cursor(0);
                         visual_changed = true;
                     }
@@ -157,7 +160,7 @@ impl BloomEditor {
 
         // Extract content and path.
         let (content, path) = {
-            let Some((buf, info)) = self.writer.buffers_mut().get_with_info(page_id) else {
+            let Some((buf, info)) = self.writer.buffers().get_with_info(page_id) else {
                 return;
             };
             if !buf.is_dirty() {
@@ -194,7 +197,7 @@ impl BloomEditor {
 
         // Only assign block IDs to Markdown files.
         let is_md = self
-            .writer.buffers_mut()
+            .writer.buffers()
             .open_buffers()
             .iter()
             .find(|b| b.page_id == *page_id)
@@ -207,7 +210,7 @@ impl BloomEditor {
             return false;
         }
 
-        let Some(buf) = self.writer.buffers_mut().get(page_id) else {
+        let Some(buf) = self.writer.buffers().get(page_id) else {
             return false;
         };
         let text = buf.text().to_string();

@@ -60,7 +60,12 @@ impl BloomEditor {
         path: &std::path::Path,
         content: &str,
     ) {
-        self.writer.buffers_mut().open(id, title, path, content);
+        self.writer.apply(crate::BufferMessage::Open {
+            page_id: id.clone(),
+            title: title.to_string(),
+            path: path.to_path_buf(),
+            content: content.to_string(),
+        });
         self.set_active_page(Some(id.clone()));
         self.set_cursor(0);
         // Record access for frecency scoring

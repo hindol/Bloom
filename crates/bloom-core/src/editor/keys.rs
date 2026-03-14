@@ -164,7 +164,7 @@ impl BloomEditor {
     /// Skipped for read-only buffers (views, logs).
     fn autosave_if_dirty(&mut self) {
         if let Some(page_id) = self.active_page().cloned() {
-            if !self.writer.buffers_mut().is_read_only(&page_id) {
+            if !self.writer.buffers().is_read_only(&page_id) {
                 self.save_page(&page_id);
             }
         }
@@ -533,7 +533,10 @@ impl BloomEditor {
                             if selected == 0 {
                                 // Reload from disk
                                 if let Ok(content) = std::fs::read_to_string(&path) {
-                                    self.writer.buffers_mut().reload(&page_id, &content);
+                                    self.writer.apply(crate::BufferMessage::Reload {
+                                        page_id: page_id.clone(),
+                                        content,
+                                    });
                                     self.set_cursor(0);
                                 }
                             }
@@ -658,7 +661,9 @@ impl BloomEditor {
                 let previews: Vec<types::PageId> = dp.preview_buffers.clone();
                 self.date_picker_state = None;
                 for pid in &previews {
-                    self.writer.buffers_mut().close(pid);
+                    self.writer.apply(crate::BufferMessage::Close {
+                        page_id: pid.clone(),
+                    });
                 }
                 if let Some(page_id) = original {
                     self.set_active_page(Some(page_id));
@@ -725,7 +730,9 @@ impl BloomEditor {
                 self.date_picker_state = None;
                 for pid in &previews {
                     if current_page.as_ref() != Some(pid) {
-                        self.writer.buffers_mut().close(pid);
+                        self.writer.apply(crate::BufferMessage::Close {
+                            page_id: pid.clone(),
+                        });
                     }
                 }
                 self.last_viewed_journal_date = Some(date);
@@ -950,7 +957,7 @@ impl BloomEditor {
         if let Some(idx) = &self.index {
             if let Some(meta) = idx.find_page_by_title("Agenda") {
                 // Already open in a buffer?
-                if self.writer.buffers_mut().get(&meta.id).is_some() {
+                if self.writer.buffers().get(&meta.id).is_some() {
                     self.set_active_page(Some(meta.id.clone()));
                     return;
                 }
@@ -1001,8 +1008,12 @@ impl BloomEditor {
             if let Some(idx) = &self.index {
                 if let Some(meta) = idx.find_page_by_id(page_id) {
                     if let Ok(content) = std::fs::read_to_string(&meta.path) {
-                        self.writer.buffers_mut()
-                            .open(page_id, &meta.title, &meta.path, &content);
+                        self.writer.apply(crate::BufferMessage::Open {
+                            page_id: page_id.clone(),
+                            title: meta.title.clone(),
+                            path: meta.path.clone(),
+                            content,
+                        });
                     }
                 }
             }
@@ -1048,9 +1059,11 @@ impl BloomEditor {
                     let prev = vs.previous_page.clone();
                     self.active_view = None;
                     // After closing, restore the previous page if available
-                    self.writer.buffers_mut().close(&page_id);
+                    self.writer.apply(crate::BufferMessage::Close {
+                        page_id: page_id.clone(),
+                    });
                     if let Some(prev_id) = prev {
-                        if self.writer.buffers_mut().is_open(&prev_id) {
+                        if self.writer.buffers().is_open(&prev_id) {
                             self.set_active_page(Some(prev_id));
                             return;
                         }
@@ -1073,7 +1086,9 @@ impl BloomEditor {
                 ]));
             }
             self.set_active_page(None);
-            self.writer.buffers_mut().close(&page_id);
+            self.writer.apply(crate::BufferMessage::Close {
+                page_id: page_id.clone(),
+            });
             if let Some(next) = self.writer.buffers().open_buffers().first() {
                 self.set_active_page(Some(next.page_id.clone()));
                 self.set_cursor(0);
@@ -1199,17 +1214,18 @@ impl BloomEditor {
                             match self.config.auto_align {
                                 config::AutoAlignMode::Page => {
                                     if let Some(page_id) = self.active_page().cloned() {
-                                        if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
-                                            align::auto_align_page(buf);
-                                        }
+                                        self.writer.apply(crate::BufferMessage::AlignPage {
+                                            page_id,
+                                        });
                                     }
                                 }
                                 config::AutoAlignMode::Block => {
                                     let cursor_line = self.cursor_position().0;
                                     if let Some(page_id) = self.active_page().cloned() {
-                                        if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
-                                            align::auto_align_block(buf, cursor_line);
-                                        }
+                                        self.writer.apply(crate::BufferMessage::AlignBlock {
+                                            page_id,
+                                            cursor_line,
+                                        });
                                     }
                                 }
                                 config::AutoAlignMode::None => {}
@@ -1362,7 +1378,7 @@ impl BloomEditor {
         let Some(page_id) = self.active_page().cloned() else {
             return;
         };
-        let Some(buf) = self.writer.buffers_mut().get(&page_id) else {
+        let Some(buf) = self.writer.buffers().get(&page_id) else {
             return;
         };
         let rope = buf.text();
@@ -1583,7 +1599,9 @@ impl BloomEditor {
     fn close_active_view(&mut self) {
         if let Some(vs) = self.active_view.take() {
             if let Some(buf_id) = &vs.buffer_id {
-                self.writer.buffers_mut().close(buf_id);
+                self.writer.apply(crate::BufferMessage::Close {
+                    page_id: buf_id.clone(),
+                });
             }
             if let Some(prev) = vs.previous_page {
                 self.set_active_page(Some(prev));
@@ -1612,7 +1630,12 @@ impl BloomEditor {
                         .map(|r| r.join(&meta.path))
                         .unwrap_or_else(|| meta.path.clone());
                     if let Ok(content) = std::fs::read_to_string(&full) {
-                        self.writer.buffers_mut().open(&pid, &meta.title, &full, &content);
+                        self.writer.apply(crate::BufferMessage::Open {
+                            page_id: pid.clone(),
+                            title: meta.title.clone(),
+                            path: full.clone(),
+                            content,
+                        });
                     }
                 }
             }
@@ -1673,9 +1696,12 @@ impl BloomEditor {
                     let need_load = self.writer.buffers().get(&meta.id).is_none();
                     if need_load {
                         if let Ok(content) = std::fs::read_to_string(&full) {
-                            self.writer
-                                .buffers_mut()
-                                .open(&meta.id, &meta.title, &full, &content);
+                            self.writer.apply(crate::BufferMessage::Open {
+                                page_id: meta.id.clone(),
+                                title: meta.title.clone(),
+                                path: full.clone(),
+                                content,
+                            });
                         }
                     }
                     if let Some(buf) = self.writer.buffers_mut().get_mut(&meta.id) {
@@ -1694,7 +1720,9 @@ impl BloomEditor {
         // Re-render the view with fresh results
         if let Some(vs) = self.active_view.as_mut() {
             if let Some(buf_id) = vs.buffer_id.take() {
-                self.writer.buffers_mut().close(&buf_id);
+                self.writer.apply(crate::BufferMessage::Close {
+                    page_id: buf_id.clone(),
+                });
             }
         }
         let mut vs = self.active_view.take().unwrap();
@@ -1717,7 +1745,9 @@ impl BloomEditor {
                 if let Some(vs) = self.active_view.as_mut() {
                     // Close old preview buffer if any
                     if let Some(old_id) = vs.buffer_id.take() {
-                        self.writer.buffers_mut().close(&old_id);
+                        self.writer.apply(crate::BufferMessage::Close {
+                            page_id: old_id.clone(),
+                        });
                     }
                 }
                 let mut vs = self.active_view.take().unwrap();

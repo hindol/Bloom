@@ -77,7 +77,7 @@ impl BloomEditor {
         }
 
         // Open buffers
-        let buf_count = self.writer.buffers_mut().open_buffers().len();
+        let buf_count = self.writer.buffers().open_buffers().len();
         parts.push(format!("{buf_count} open buffers"));
 
         let message = parts.join("  ·  ");
@@ -104,7 +104,11 @@ impl BloomEditor {
         }
         let content = lines.join("\n");
         let id = crate::uuid::generate_hex_id();
-        self.writer.buffers_mut().open_read_only(&id, "[messages]", &content);
+        self.writer.apply(crate::BufferMessage::OpenReadOnly {
+            page_id: id.clone(),
+            title: "[messages]".to_string(),
+            content,
+        });
         self.set_active_page(Some(id));
         self.set_cursor(0);
     }
@@ -118,10 +122,14 @@ impl BloomEditor {
             if let Ok(raw) = std::fs::read_to_string(&path) {
                 let content = format_log_lines(&raw);
                 let id = crate::uuid::generate_hex_id();
-                self.writer.buffers_mut().open_read_only(&id, "[log]", &content);
+                self.writer.apply(crate::BufferMessage::OpenReadOnly {
+                    page_id: id.clone(),
+                    title: "[log]".to_string(),
+                    content,
+                });
                 self.set_active_page(Some(id.clone()));
                 // Scroll to the last line
-                if let Some(buf) = self.writer.buffers_mut().get(&id) {
+                if let Some(buf) = self.writer.buffers().get(&id) {
                     let len = buf.len_chars();
                     self.set_cursor(len);
                 }

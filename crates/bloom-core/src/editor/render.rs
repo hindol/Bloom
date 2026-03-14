@@ -306,7 +306,7 @@ impl BloomEditor {
                         }
                         // 2. Try in-memory buffer (already open pages — free)
                         if let Some(page_id) = types::PageId::from_hex(&item.id) {
-                            if let Some(buf) = self.writer.buffers_mut().get(&page_id) {
+                            if let Some(buf) = self.writer.buffers().get(&page_id) {
                                 let text = buf.text();
                                 let lines: Vec<_> =
                                     text.lines().take(20).map(|l| l.to_string()).collect();

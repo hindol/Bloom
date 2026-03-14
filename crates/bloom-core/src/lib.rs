@@ -289,10 +289,24 @@ pub enum BufferMessage {
     SetCursor { page_id: types::PageId, pos: usize },
     /// Set selection anchor.
     SetAnchor { page_id: types::PageId, anchor: Option<usize> },
+    /// Close/remove a buffer from the manager.
+    Close { page_id: types::PageId },
+    /// Open a new mutable buffer (or reuse existing).
+    Open { page_id: types::PageId, title: String, path: std::path::PathBuf, content: String },
+    /// Open a read-only (frozen) buffer.
+    OpenReadOnly { page_id: types::PageId, title: String, content: String },
+    /// Reload buffer content from string (external change).
+    Reload { page_id: types::PageId, content: String },
+    /// Run auto-alignment on entire page.
+    AlignPage { page_id: types::PageId },
+    /// Run auto-alignment on specific block.
+    AlignBlock { page_id: types::PageId, cursor_line: usize },
+    /// Ensure block IDs are assigned.
+    EnsureBlockIds { page_id: types::PageId },
 }
 
 /// Centralizes all buffer mutations behind a single `apply()` method.
-/// Owns the BufferManager. Read access via `buffers()` / `buffers_mut()`.
+/// Owns the BufferManager. Read access via `buffers()`. Internal mutations via `buffers_mut()` (private).
 pub struct BufferWriter {
     buffer_mgr: BufferManager,
     /// Block-level event callbacks. Views register to be notified when specific blocks change.
@@ -312,8 +326,9 @@ impl BufferWriter {
         &self.buffer_mgr
     }
 
-    /// Mutable access to the buffer manager (transitional — will be replaced by apply() messages).
-    pub fn buffers_mut(&mut self) -> &mut BufferManager {
+    /// Internal mutable access to the buffer manager (for legitimate buffer mutations).
+    /// External code should use apply() messages instead.
+    pub(crate) fn buffers_mut(&mut self) -> &mut BufferManager {
         &mut self.buffer_mgr
     }
 
@@ -407,6 +422,42 @@ impl BufferWriter {
                 } else {
                     false
                 }
+            }
+            BufferMessage::Close { page_id } => {
+                self.buffer_mgr.close(&page_id);
+                true
+            }
+            BufferMessage::Open { page_id, title, path, content } => {
+                self.buffer_mgr.open(&page_id, &title, &path, &content);
+                true
+            }
+            BufferMessage::OpenReadOnly { page_id, title, content } => {
+                self.buffer_mgr.open_read_only(&page_id, &title, &content);
+                true
+            }
+            BufferMessage::Reload { page_id, content } => {
+                self.buffer_mgr.reload(&page_id, &content);
+                true
+            }
+            BufferMessage::AlignPage { page_id } => {
+                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                    crate::align::auto_align_page(buf);
+                    true
+                } else {
+                    false
+                }
+            }
+            BufferMessage::AlignBlock { page_id, cursor_line } => {
+                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                    crate::align::auto_align_block(buf, cursor_line);
+                    true
+                } else {
+                    false
+                }
+            }
+            BufferMessage::EnsureBlockIds { page_id: _ } => {
+                // Block ID assignment needs the index — return false, handled by BloomEditor
+                false
             }
         }
     }
@@ -1160,7 +1211,9 @@ impl BloomEditor {
     pub fn close_buffer(&mut self, _pane: types::PaneId) -> Result<(), error::BloomError> {
         if let Some(page_id) = self.active_page().cloned() {
             self.set_active_page(None);
-            self.writer.buffers_mut().close(&page_id);
+            self.writer.apply(crate::BufferMessage::Close {
+                page_id: page_id.clone(),
+            });
         }
         Ok(())
     }
