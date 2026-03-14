@@ -497,17 +497,17 @@ Mirroring should be discoverable but never intrusive. The user copies a block, B
 
 ### Gutter indicator
 
-When a line has `^=`, the gutter shows a subtle mirror marker alongside the line number:
+When a line has `^=`, the gutter shows a subtle mirror marker to the left of the line number:
 
 ```
- 42    - [ ] Solo task ^k7m2x
- 43 =  - [ ] Mirrored task @due(2026-03-15) ^=abc01
- 44    - Some notes
- 45 =  - [ ] Another mirror ^=def02
- 46    ## Heading
+   42  - [ ] Solo task ^k7m2x
+=  43  - [ ] Mirrored task @due(2026-03-15) ^=abc01
+   44  - Some notes
+=  45  - [ ] Another mirror ^=def02
+   46  ## Heading
 ```
 
-The `=` appears after the line number, in faded styling (same as the line number itself). It echoes the `=` in the `^=` marker — same symbol, same meaning: "this block has peers."
+The `=` sits in a 1-character column at the far left edge, before line numbers. Clear separation from content — same position where editors show git diff markers or breakpoints. It echoes the `=` in the `^=` marker: same symbol, same meaning: "this block has peers."
 
 Line numbers are never replaced or hidden. The `=` is additive — a narrow extra column that only occupies space when mirrors exist in the visible viewport. If no `^=` lines are visible, the column collapses.
 
