@@ -491,6 +491,105 @@ Cloud-first, CRDT-like conflict resolution. **Bloom:** local-first, synchronous 
 
 ---
 
+## Mirror UX
+
+Mirroring should be discoverable but never intrusive. The user copies a block, Bloom handles the rest. Three signals: a gutter indicator, a status bar hint, and keybindings that activate only on mirrored lines.
+
+### Gutter indicator
+
+When a line has `^=`, the gutter shows `=` instead of the line number:
+
+```
+  1  - [ ] Solo task ^k7m2x
+  =  - [ ] Mirrored task @due(2026-03-15) ^=abc01
+  3  - Some notes
+  =  - [ ] Another mirror ^=def02
+  5  ## Heading
+```
+
+Why `=` and not an emoji: monospace compatibility, no font dependency, visually consistent with the `^=` marker itself. The `=` in the gutter echoes the `=` in the ID — same symbol, same meaning: "this block has peers."
+
+On non-mirrored lines, the line number renders as normal. The `=` only appears when `^=` is present on that buffer line.
+
+### Status bar hint
+
+When the cursor sits on a `^=` line, the status bar right side shows mirror context:
+
+```
+NORMAL  page-title.md  42:15                  🪞 3 pages · SPC m: mirror
+```
+
+- `🪞 3 pages` — mirror count from the index (`find_all_pages_by_block_id`)
+- `SPC m: mirror` — hint that the mirror menu is available
+- Disappears instantly when cursor moves to a non-`^=` line
+
+When the cursor is on a solo `^` line or a line without a block ID, the right hints show nothing (or journal hints if in JRNL mode — existing behavior).
+
+### Keybindings: `SPC m` (mirror menu)
+
+The `SPC m` prefix activates only when the cursor is on a `^=` line. On non-mirror lines, `SPC m` shows a notification: "Not on a mirrored block."
+
+| Key | Action | Description |
+|-----|--------|-------------|
+| `SPC m s` | Sever mirror | Replace `^=xxxxx` with a new `^yyyyy`. This block becomes independent. Other mirrors keep their `^=xxxxx`. If only two mirrors existed, the remaining one is demoted to `^xxxxx` on next index. |
+| `SPC m g` | Go to mirror | Picker showing all pages that share this block ID. Enter jumps to the mirror in that page at the exact line. |
+| `SPC m i` | Mirror info | Notification listing all pages and line numbers for this block ID. Quick glance without leaving the current page. |
+
+#### Sever mechanics
+
+```
+Before (page A and B mirror ^=abc01):
+  Page A: - [ ] Shared task ^=abc01
+  Page B: - [ ] Shared task ^=abc01
+
+User on page A, cursor on the task line, presses SPC m s:
+  → Generate new ID: ^xyz99
+  → Replace in page A: - [ ] Shared task ^xyz99
+  → Save page A
+  → On next index: B has ^=abc01 alone → demote to ^abc01
+  → A has ^xyz99 (solo, new block)
+
+After:
+  Page A: - [ ] Shared task ^xyz99    (independent)
+  Page B: - [ ] Shared task ^abc01    (independent, demoted from ^=)
+```
+
+The content is now identical but the blocks are independent. Future edits to A won't propagate to B.
+
+#### Go to mirror picker
+
+```
+┌─ Mirrors of ^abc01 ────────────────────┐
+│ > Text Editor Theory.md       line 42  │
+│   Rust Programming.md         line 15  │
+│   Weekly Review.md            line 88  │
+└────────────────────────────────────────┘
+```
+
+Standard fuzzy picker. Enter opens the selected page and jumps to the line. The current page is shown but not highlighted as the default — the user wants to go *elsewhere*.
+
+### Notification on mirror creation
+
+When the indexer promotes `^` → `^=` (duplicate block detected), show a transient notification:
+
+```
+🪞 Block ^abc01 mirrored in 2 pages
+```
+
+This makes the mirroring event visible. The user didn't ask for mirroring explicitly — they just copy-pasted. The notification confirms Bloom detected it and will keep copies in sync.
+
+### Notification on mirror propagation
+
+When `propagate_mirror_edit` fires (Insert→Normal on a `^=` line), show:
+
+```
+🪞 Updated 2 mirrors
+```
+
+Brief confirmation that the edit propagated. Same transient notification style as "✓ Saved filename.md".
+
+---
+
 ## Open Questions
 
 1. **Self-healing profiling.** Git lookup + content match per missing ID — needs benchmarking. Deferred until a feature requires it.
