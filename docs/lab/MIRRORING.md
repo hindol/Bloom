@@ -178,169 +178,208 @@ Current propagation is line-level (one block = one line). Multi-line blocks (par
 
 ---
 
-## Stress Test: Editable Views via Block Mirroring
+## Stress Test: Editable Agenda via Block Mirroring
 
-> **Premise:** BQL returns blocks with IDs. If we make saved views editable, edits flow back to source pages through the mirroring pipeline. Journal view = mirrored blocks. Toggle is already trivial. Does this generalize?
+> **Premise:** BQL returns task blocks with IDs. The Agenda view is a collection of tasks from across the vault. If we make it editable, edits on a task line propagate back to the source page via block ID. Toggle is already trivial. Can we generalize to free-text editing?
+
+### The user workflow
+
+```
+1. SPC a a → open Agenda
+2. j/k to navigate tasks
+3. x to toggle (already works)
+4. i to edit task text inline → "fix typo, change description"
+5. f@ ci( to change due date → propagates to source
+6. Esc → propagate, re-render
+```
+
+No context-switch to the source page. Edit where you see it.
 
 ### How it would work
 
 ```
-User opens Agenda view (BQL: tasks | where not done | sort due)
-  → query returns rows with (page_id, line, block_id, text)
-  → view renders as mutable buffer (not frozen)
-  → row_map maps each buffer line → source (page_id, line, block_id)
-  → user edits a line in the view
-  → reverse-map: find source page + line from row_map
-  → apply(Edit) to source buffer
-  → apply(MirrorEdit) to all other mirrors
-  → view re-renders from fresh query
-```
-
-### Showstopper 1: Projection mismatch
-
-The view reformats content. Source and view lines are structurally different:
-
-```
-Source:  - [ ] Review the ropey API @due(2026-03-10) ^k7m2x
-View:    [ ] Review the ropey API  @due(2026-03-10)  (Rust Programming)
-```
-
-Differences:
-- View strips `- ` list prefix
-- View strips `^block_id` suffix
-- View adds `  (page_title)` suffix
-- View normalizes whitespace around `@due`
-
-**If the user edits the view line and we write it back to source, we corrupt the source.** The list prefix is gone. The block ID is gone. The page title suffix is foreign content. There is no clean reverse-mapping from the projected form back to source.
-
-**Mitigation:** Render source lines verbatim in the view. But then the view loses its formatted presentation — it's just a list of raw markdown lines. The whole point of a view is formatted projection.
-
-**Conclusion: Free-text editing of formatted views is fundamentally broken.** The projection is lossy and non-invertible.
-
-### Showstopper 2: Row map invalidation
-
-`row_map[line_index]` maps buffer lines to source. Any edit that adds or removes lines shifts all subsequent indices:
-
-```
-Before:  row_map[5] = Source { page_id: A, line: 42 }
-User does `dd` on line 3
-After:   row_map[5] still points to the OLD line 5's source
-         but buffer line 5 now shows what was line 6
-```
-
-Every line add/delete silently corrupts the mapping. Propagation writes the wrong content to the wrong source line. Data loss.
-
-**Mitigation:** Re-build row_map after every edit. But this requires re-running the BQL query and re-rendering — at which point we've replaced the buffer content, losing the user's cursor, scroll, and in-progress edit.
-
-**Alternative:** Use block IDs embedded in line text for identity instead of positional mapping. Parse `^xxxxx` from the edited line to find the source. This works but requires block IDs to survive in the view text (back to "render verbatim" problem from Showstopper 1).
-
-### Problem 3: New content has no home
-
-User presses `o` (Vim: open line below) in the view. A new empty line appears. Where does it go?
-
-- No page_id in the row_map for this line
-- No block ID
-- Which source file should own it?
-- If it's a journal view spanning 7 days, which day's file?
-
-Heuristic: inherit the source page from the line above. But what if the cursor is on a section header? Or between sections from different pages?
-
-**Conclusion:** New line insertion in views is undefined without explicit routing rules.
-
-### Problem 4: Undo incoherence
-
-```
-1. User edits task in view → propagates to source page A
-2. User presses `u` (undo) in view → view buffer reverts
-3. Source page A still has the edit
-4. View and source are now out of sync
-```
-
-To fix: undo must also propagate to source. But `BufferMessage::Undo` operates on a single buffer. We'd need a "transaction undo" that reverts the view buffer AND the source buffer AND all mirrors atomically. This is CRDT territory — exactly what we decided not to build.
-
-**Mitigation:** Re-render view from scratch after undo (re-query). User loses their cursor position. Acceptable? Probably not for frequent undo/redo cycles.
-
-### Problem 5: Stale view during concurrent edits
-
-User has source page in pane 1, view in pane 2:
-
-```
-1. User adds a new task line in pane 1 (source)
-2. Source buffer now has different line numbers
-3. View's row_map still points to old line numbers
-4. User toggles a task in pane 2 (view)
-5. row_map[cursor_line].line is now WRONG
-6. Toggle hits the wrong line in source
-```
-
-Without event bus subscriptions (not wired yet), the view has no way to know the source changed. Even with the event bus, a full re-render on every source edit makes the view jumpy and unpredictable.
-
----
-
-### What DOES work: Structured edits on read-only views
-
-The existing toggle (`x` key) works perfectly because it:
-
-1. **Reads from source, not the view.** It loads the source buffer, finds the line, flips the checkbox there.
-2. **Re-renders the entire view afterward.** Fresh query, fresh row_map, no stale state.
-3. **Is a bounded transformation.** Toggle knows exactly what to change — one character (`[ ]` ↔ `[x]`). No projection-reversal needed.
-
-This pattern generalizes to other **structured edits**:
-
-| Structured edit | What it changes in source |
-|----------------|---------------------------|
-| Toggle task (`x`) | `[ ]` ↔ `[x]` — already works |
-| Set due date (`d`) | Replace `@due(...)` or append it |
-| Add tag (`t`) | Append `#tag` to the line |
-| Remove tag (`T`) | Remove `#tag` from the line |
-| Set priority (`p`) | Replace `@priority(...)` |
-| Snooze (`s`) | Update `@due(...)` to tomorrow/next week |
-| Move to page (`m`) | Cut block from source, paste into target |
-
-Each is a well-defined transformation on the **source line**, not the view line. The view re-renders after each operation. No projection reversal, no row_map invalidation, no undo incoherence.
-
-**This is the correct path for BQL views.** Expand the set of structured edits rather than making the buffer freely editable.
-
----
-
-### What about Journal specifically?
-
-The journal use case is different from general BQL views because:
-
-1. **Content IS raw markdown.** A journal "today" view shows task lines verbatim — there's no lossy projection.
-2. **Single source page.** Today's journal entries all live in one file. New lines have an obvious home.
-3. **Block IDs are present.** Every list item has a `^xxxxx` suffix.
-
-This means a **journal mirror document** could work:
-
-```
-Virtual document (not a query result):
+Agenda buffer (mutable, not frozen):
   - [ ] Review the ropey API @due(2026-03-10) ^k7m2x
   - [ ] Fix parser bug @due(2026-03-12) ^a3b4c
-  - Morning standup notes ^p9q8r
+  - [x] Ship v2.0 @due(2026-03-14) ^b5c6d
+
+User edits line 1, changes "ropey" to "ropey + petgraph"
+  → on Insert→Normal transition (Esc):
+  → parse ^k7m2x from the edited line
+  → find_all_pages_by_block_id("k7m2x") → [(page A, line 42)]
+  → read source line from page A, line 42
+  → replace source line with the edited line via MirrorEdit
+  → save page A
+  → re-render Agenda from fresh BQL query
+  → restore cursor to line containing ^k7m2x
 ```
 
-Each line is verbatim from the journal page. Block IDs provide identity. Edits propagate via block ID lookup (not positional row_map). New lines go to today's journal page.
-
-**But this is NOT an "editable BQL view."** It's a separate concept — a **virtual page** that concatenates blocks from source pages. It bypasses BQL entirely. The rendering is verbatim (no projection), the identity is block-ID-based (not positional), and the source routing is explicit (today's journal page).
+**Key difference from general views:** Render verbatim source lines (with `- [ ]`, `@due(...)`, `^block_id`). No lossy projection. The buffer IS the source content.
 
 ---
 
-### Decision Matrix
+### What works
 
-| Approach | Projection problem | Row map problem | New content | Undo | Complexity |
-|----------|-------------------|-----------------|-------------|------|------------|
-| **Free-text editable views** | 🔴 Showstopper | 🔴 Showstopper | 🔴 Undefined | 🔴 Incoherent | High |
-| **Structured edits on read-only views** | ✅ N/A (reads source) | ✅ N/A (re-renders) | ✅ N/A | ✅ N/A (atomic) | Low |
-| **Journal mirror document** | ✅ Verbatim lines | ✅ Block-ID identity | 🟡 Route to today | 🟡 Per-buffer undo | Medium |
+#### ✅ Block-ID identity for propagation
 
-### Recommendation
+Every task has a `^xxxxx` suffix. After editing, parse the block ID from the line. Look up source page via index. Replace source line with MirrorEdit. This is exactly what toggle does — generalized to any within-line edit.
 
-1. **BQL views:** Stay read-only. Expand structured edits (toggle, set date, add tag, snooze, move). Re-render after each. This is clean, predictable, already proven by toggle.
+No positional row_map needed for propagation. Block ID is the stable identity across re-renders.
 
-2. **Journal:** Build a separate virtual/mirror page concept. Not a BQL query result. Verbatim source lines with block-ID-based propagation. This is the right abstraction for "editable collection of blocks from known source pages."
+#### ✅ Propagation on Insert→Normal transition
 
-3. **Don't conflate the two.** The insight "BQL returns block IDs, so views could be editable" is appealing but the projection mismatch makes it fundamentally unsound for free-text editing. The correct generalization is: BQL provides the *query*, structured edits provide the *mutations*, and the view re-renders between operations.
+Auto-save is already deferred during Insert mode. Same trigger: when user presses Esc, the edit group ends, propagation fires. The line is in its final form (not mid-keystroke). Clean.
+
+#### ✅ Cursor preservation across re-render
+
+After propagation, the view re-renders (fresh BQL query). Find the line containing the same `^block_id`. Restore cursor row and column. Block IDs are unique — O(n) scan of the new buffer.
+
+#### ✅ Undo drives propagation
+
+View buffer has its own undo stack. Undo in view → view line reverts → on next propagation trigger, the reverted line propagates to source via MirrorEdit. Source stays in sync. The user's mental model: "I'm editing in the Agenda, undo works in the Agenda."
+
+#### ✅ Toggle is a special case of this
+
+Current toggle: intercept `x`, read source, flip checkbox, MirrorEdit mirrors, re-render. Editable Agenda: user edits anything, Esc triggers propagation, MirrorEdit mirrors, re-render. Same pipeline, toggle becomes just another edit.
+
+---
+
+### What's hard
+
+#### 🟡 Section headers in the buffer
+
+Current Agenda has section headers ("Overdue", "Today · Mar 14", "Upcoming") as buffer lines. If the buffer is mutable, the user can edit/delete them.
+
+**Option A — Virtual decorations.** Headers are not in the buffer. The TUI injects them at render time based on `@due` values in the task lines. Buffer contains only task lines.
+
+- Pro: No header-editing problem. Buffer is a clean list of tasks.
+- Con: Requires new TUI infrastructure (virtual lines injected during render). We don't have this yet. ~100 lines of new code.
+
+**Option B — Protected regions.** Headers stay in the buffer. Edits on header lines are silently dropped (same mechanism as read-only filter in `translate_vim_action`).
+
+- Pro: No TUI changes. Reuses existing read-only filtering.
+- Con: Vim cursor can land on headers but can't edit them. `dd` on a header does nothing. `j` from last task skips to next section. Partial-Vim feel.
+
+**Option C — Ignorable headers.** Headers stay in the buffer. Edits on headers are allowed but never propagated (no block ID → nothing to propagate). On re-render, headers are rebuilt from scratch.
+
+- Pro: Simplest implementation. Headers are ephemeral decorations that happen to be in the buffer.
+- Con: User can type gibberish into a header. On next re-render it's replaced. Weird but harmless.
+
+**Recommendation: Option A** (virtual decorations) is cleanest. If too expensive, **Option C** is pragmatic — a header edit that vanishes on re-render is acceptable UX.
+
+#### 🟡 Cross-line Vim commands
+
+A mutable buffer means ALL Vim commands work. Some are problematic:
+
+| Command | What it does | Problem |
+|---------|-------------|---------|
+| `dd` | Delete line | Deletes task from view. Should it delete from source? |
+| `o` / `O` | Open line below/above | New empty line — no source page, no block ID |
+| `J` | Join lines | Merges two tasks into one — breaks both source lines |
+| `p` / `P` | Paste | Pastes arbitrary content — no block ID, no source mapping |
+
+**Option A — Restrict cross-line commands.** Filter in `translate_vim_action`: allow within-line mutations (i, a, c, r, s, R), block structural changes (dd, o, O, J, p, P, D, C that cross lines). Bloom-vim already has this filtering infrastructure for read-only buffers.
+
+- Pro: Prevents all structural corruption.
+- Con: Violates "full standard Vim grammar" (GOALS.md). Users expect `dd` to work. Some will hit it instinctively and be confused by silent failure.
+
+**Option B — Give cross-line commands Agenda semantics.**
+
+| Command | Agenda semantic |
+|---------|----------------|
+| `dd` | Remove task from Agenda (mark done? delete from source? configurable) |
+| `o` | Quick capture — prompt for text, create new task in today's journal |
+| `p` | Paste a task line — route to "current section's" source page |
+| `J` | Blocked (silent no-op) — merging tasks is never correct |
+
+- Pro: Every command does something meaningful. Vim users get muscle memory compatibility.
+- Con: `dd` = mark done is a semantic leap. `o` = quick capture is magical. These need learning.
+
+**Option C — Block cross-line, provide alternatives.**
+
+| Vim command | Blocked | Alternative |
+|-------------|---------|-------------|
+| `dd` | Yes | `x` to toggle done, or `D` to archive |
+| `o` | Yes | `SPC x a` for quick capture |
+| `J` | Yes | — |
+| `p` | Yes | — |
+
+- Pro: Clear, honest. Commands that don't make sense don't pretend to work.
+- Con: Still violates full Vim grammar.
+
+**Recommendation: Option B** if we commit to editable Agenda. It's the most Vim-native. But it requires careful design of what each command means in Agenda context.
+
+#### 🟡 @due change moves the task between sections
+
+User changes `@due(2026-03-10)` to `@due(2026-03-20)` on a task in the "Overdue" section. After propagation and re-render, the task moves to "Upcoming." The cursor follows (by block ID). This is correct behavior but potentially surprising — the line "jumps" to a different part of the view.
+
+Mitigation: Brief notification — "Task moved to Upcoming." This is a feature, not a bug.
+
+#### 🟡 Stale Agenda when source changes in another pane
+
+User edits source page in pane 1 (adds/removes tasks). Agenda in pane 2 doesn't know. If user then edits a task in the stale Agenda, propagation writes based on the old block ID → still correct (block ID identity, not line position). But the Agenda display is out of date.
+
+Fix: Event bus subscription. Source `Edit` on a task block → `BlockChanged` → Agenda re-renders. This is exactly what the event bus was designed for. Currently not wired, but the infrastructure exists.
+
+Without event bus: Agenda is stale until the user explicitly re-opens it (SPC a a). Acceptable for v1.
+
+---
+
+### What breaks
+
+#### 🔴 Lines without block IDs
+
+If a task line somehow lacks a `^xxxxx` (malformed, or from a file that hasn't had `EnsureBlockIds` run), there's no identity for propagation. An edit on this line would have nowhere to go.
+
+Mitigation: Filter out tasks without block IDs from the Agenda. Or assign block IDs at query time (trigger `EnsureBlockIds` on source pages when the Agenda loads). The latter is cleaner — it's a pre-condition for the editable Agenda to open.
+
+#### 🔴 Multi-user editing (future)
+
+If Bloom ever supports multi-user (shared vaults), editable Agenda creates conflicts. Two users editing the same task in their respective Agendas. Last-write-wins via MirrorEdit is not sufficient — the second user's edit silently overwrites the first's.
+
+Not a problem today (single-user app). But worth noting as a constraint on future architecture.
+
+---
+
+### Comparison: Structured edits vs Editable Agenda
+
+| Dimension | Structured edits (current path) | Editable Agenda |
+|-----------|-------------------------------|----------------|
+| **Toggle task** | `x` key — works today | Same (or just edit the checkbox) |
+| **Edit task text** | Enter → jump to source → edit → come back | Edit inline, Esc to propagate |
+| **Change due date** | `d` key → mini-prompt (not built) | Edit `@due(...)` inline with Vim motions |
+| **Add tag** | `t` key → mini-prompt (not built) | Type `#tag` inline with Vim motions |
+| **Vim grammar** | Full — buffer is read-only, all navigation works | Partial — cross-line commands restricted or re-semanticized |
+| **Undo** | N/A — structured edits are atomic | Works but diverges from source undo stack |
+| **Section headers** | In buffer, read-only — not a problem | Need virtual decorations or protection |
+| **Implementation cost** | ~50 lines per structured edit | ~200-300 lines (virtual headers, edit filter, propagation) |
+| **Risk** | Low — proven by toggle | Medium — partial Vim, undo coherence, re-render jank |
+
+### Where each wins
+
+**Structured edits win when:** The operation is bounded and well-defined (toggle, set date, add tag). The user doesn't need to think about buffer mechanics. The view stays clean and predictable.
+
+**Editable Agenda wins when:** The user wants to do something unanticipated — fix a typo, reword a task, reorganize inline. These are the "long tail" of edits that structured commands can't cover without a command for every possible transformation.
+
+### A hybrid path
+
+They're not mutually exclusive:
+
+1. **Phase 1:** Expand structured edits on read-only Agenda — `x` toggle (done), `d` set date, `t` add tag, `s` snooze. Low risk, immediate value.
+
+2. **Phase 2:** Make Agenda editable with verbatim rendering. Structured edit keys still work as shortcuts. Full Vim editing also works for the long tail. Requires virtual section headers and cross-line command handling.
+
+Phase 1 is valuable on its own. Phase 2 is additive — it doesn't obsolete Phase 1, it builds on it.
+
+---
+
+### Verdict
+
+The editable Agenda via block mirroring **holds under stress for within-line editing.** Block-ID identity solves the propagation problem cleanly. Propagation on Esc is a natural trigger. Cursor preservation by block ID works.
+
+The hard problems are **at the edges:** section headers, cross-line commands, undo coherence. These are solvable but add complexity. None are showstoppers for the Agenda specifically (unlike the general "editable formatted view" case, which IS fundamentally broken due to projection mismatch).
+
+**Recommended path:** Phase 1 structured edits → Phase 2 editable Agenda. The architecture supports both. Don't skip Phase 1 — it's lower risk and delivers value while we validate the Phase 2 design.
 
 ---
 
