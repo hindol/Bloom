@@ -197,24 +197,38 @@ No context-switch to the source page. Edit where you see it.
 
 ### How it would work
 
-```
-Agenda buffer (mutable, not frozen):
-  - [ ] Review the ropey API @due(2026-03-10) ^k7m2x
-  - [ ] Fix parser bug @due(2026-03-12) ^a3b4c
-  - [x] Ship v2.0 @due(2026-03-14) ^b5c6d
+**BQL returns flat rows. No `group` clause.** Grouping is a view concern — the Agenda renderer buckets tasks into regions based on `@due` values.
 
-User edits line 1, changes "ropey" to "ropey + petgraph"
+```
+BQL query: tasks | where not done | sort due
+
+Returns flat rows:
+  (page_id, line, block_id, text, due, done)
+  (page_id, line, block_id, text, due, done)
+  ...
+
+Agenda renderer groups into target regions:
+  ┌─── Overdue ───────────────────────────┐
+  │ - [ ] Review ropey API ^k7m2x         │ ← editable
+  │ - [ ] Fix parser bug ^a3b4c           │ ← editable
+  ├─── Today · Mar 14 ────────────────────┤
+  │ - [ ] Ship v2.0 ^b5c6d               │ ← editable
+  ├─── Upcoming ──────────────────────────┤
+  │ - [ ] Plan Q2 goals ^e7f8g           │ ← editable
+  └───────────────────────────────────────┘
+```
+
+Each **target region** is a section of the buffer bounded by fence lines. Task lines within a region are editable. Fences are structural.
+
+```
+User edits line, changes "ropey" to "ropey + petgraph"
   → on Insert→Normal transition (Esc):
   → parse ^k7m2x from the edited line
   → find_all_pages_by_block_id("k7m2x") → [(page A, line 42)]
-  → read source line from page A, line 42
   → replace source line with the edited line via MirrorEdit
   → save page A
-  → re-render Agenda from fresh BQL query
-  → restore cursor to line containing ^k7m2x
+  → refresh: re-query, rebuild regions, restore cursor to ^k7m2x
 ```
-
-**Key difference from general views:** Render verbatim source lines (with `- [ ]`, `@due(...)`, `^block_id`). No lossy projection. The buffer IS the source content.
 
 ---
 
@@ -246,74 +260,69 @@ Current toggle: intercept `x`, read source, flip checkbox, MirrorEdit mirrors, r
 
 ### What's hard
 
-#### 🟡 Section headers in the buffer
+#### 🟡 Target regions and fence lines
 
-Current Agenda has section headers ("Overdue", "Today · Mar 14", "Upcoming") as buffer lines. If the buffer is mutable, the user can edit/delete them.
+The Agenda buffer has two kinds of content: **task lines** (editable, have block IDs) and **fence lines** (structural, computed from `@due` values). These are fundamentally different and the buffer must know which is which.
 
-**Option A — Virtual decorations.** Headers are not in the buffer. The TUI injects them at render time based on `@due` values in the task lines. Buffer contains only task lines.
+**Design: Fence lines are buffer lines rebuilt on every refresh.**
 
-- Pro: No header-editing problem. Buffer is a clean list of tasks.
-- Con: Requires new TUI infrastructure (virtual lines injected during render). We don't have this yet. ~100 lines of new code.
+```
+Buffer content (what's in the rope):
+  ── Overdue ──                     ← fence line (no block ID)
+  - [ ] Review ropey API ^k7m2x    ← task line (has block ID)
+  - [ ] Fix parser bug ^a3b4c      ← task line
+                                    ← fence line (blank separator)
+  ── Today · Mar 14 ──             ← fence line
+  - [ ] Ship v2.0 ^b5c6d          ← task line
+```
 
-**Option B — Protected regions.** Headers stay in the buffer. Edits on header lines are silently dropped (same mechanism as read-only filter in `translate_vim_action`).
+**Rules:**
+1. Lines with `^xxxxx` = task lines. Editable. Propagate on Esc.
+2. Lines without block ID = fence lines. Non-propagating. Rebuilt on refresh.
+3. If user edits a fence line → no propagation happens (no block ID). On next refresh, the fence is rebuilt correctly. Harmless.
+4. If user deletes a fence line (`dd`) → same: rebuilt on refresh. Tasks above and below are still correct because identity is block-ID, not position.
 
-- Pro: No TUI changes. Reuses existing read-only filtering.
-- Con: Vim cursor can land on headers but can't edit them. `dd` on a header does nothing. `j` from last task skips to next section. Partial-Vim feel.
+**Refresh cycle:**
 
-**Option C — Ignorable headers.** Headers stay in the buffer. Edits on headers are allowed but never propagated (no block ID → nothing to propagate). On re-render, headers are rebuilt from scratch.
+```
+Refresh:
+  1. Record cursor block ID (parse ^xxxxx from current line)
+  2. Re-run BQL query
+  3. Group results by due-date category → build regions
+  4. Render: fence + tasks + fence + tasks + ...
+  5. Find line containing cursor block ID → restore cursor (row, col)
+```
 
-- Pro: Simplest implementation. Headers are ephemeral decorations that happen to be in the buffer.
-- Con: User can type gibberish into a header. On next re-render it's replaced. Weird but harmless.
+**When to refresh:**
+- After propagation (Esc in Normal mode after an edit)
+- After structured edit (toggle, set date, etc.)
+- After event bus notification (source changed in another pane)
+- NOT during Insert mode (buffer is stable while user types)
 
-**Recommendation: Option A** (virtual decorations) is cleanest. If too expensive, **Option C** is pragmatic — a header edit that vanishes on re-render is acceptable UX.
+**Key insight:** Fence lines are ephemeral. They exist in the buffer for cursor navigation (j/k moves through them) but carry no identity. They're rebuilt from scratch on every refresh. This means the buffer doesn't need "protected regions" or "virtual decorations" — fences are just lines that happen to not have block IDs. The propagation logic naturally ignores them.
+
+**This replaces BQL `group`.** The grouping logic lives in the Agenda renderer, not the query language. BQL stays simple (flat rows). The view groups by due-date category, tags, page, or whatever the view type requires.
 
 #### 🟡 Cross-line Vim commands
 
-A mutable buffer means ALL Vim commands work. Some are problematic:
+A mutable buffer means ALL Vim commands work. Some need Agenda-specific semantics:
 
-| Command | What it does | Problem |
-|---------|-------------|---------|
-| `dd` | Delete line | Deletes task from view. Should it delete from source? |
-| `o` / `O` | Open line below/above | New empty line — no source page, no block ID |
-| `J` | Join lines | Merges two tasks into one — breaks both source lines |
-| `p` / `P` | Paste | Pastes arbitrary content — no block ID, no source mapping |
+| Command | What it does | Agenda semantic |
+|---------|-------------|----------------|
+| `dd` | Delete line | On task line: mark done (toggle `[x]`), task disappears on refresh. On fence line: no-op (rebuilt on refresh). |
+| `o` / `O` | Open line below/above | Quick capture — new task routed to today's journal page. Gets a block ID on save. |
+| `J` | Join lines | No-op — merging two tasks into one line is never correct. |
+| `p` / `P` | Paste | If pasted text has a `^block_id` → mirror. If not → new task, route to today's journal. |
 
-**Option A — Restrict cross-line commands.** Filter in `translate_vim_action`: allow within-line mutations (i, a, c, r, s, R), block structural changes (dd, o, O, J, p, P, D, C that cross lines). Bloom-vim already has this filtering infrastructure for read-only buffers.
+The key insight: **cross-line commands don't corrupt the Agenda because the refresh cycle rebuilds the structure.** `dd` on a fence line? Rebuilt on refresh. `o` inserts a new line? It either gets a block ID (and becomes a real task) or is swept away on refresh.
 
-- Pro: Prevents all structural corruption.
-- Con: Violates "full standard Vim grammar" (GOALS.md). Users expect `dd` to work. Some will hit it instinctively and be confused by silent failure.
+The question is whether these semantics feel natural or magical. `dd` = mark done is a semantic leap, but in an Agenda context it's defensible — you're removing a task from your todo list. `o` = new task is useful. `J` = blocked is correct.
 
-**Option B — Give cross-line commands Agenda semantics.**
+#### 🟡 @due change moves the task between regions
 
-| Command | Agenda semantic |
-|---------|----------------|
-| `dd` | Remove task from Agenda (mark done? delete from source? configurable) |
-| `o` | Quick capture — prompt for text, create new task in today's journal |
-| `p` | Paste a task line — route to "current section's" source page |
-| `J` | Blocked (silent no-op) — merging tasks is never correct |
+User changes `@due(2026-03-10)` to `@due(2026-03-20)` on a task in the "Overdue" region. After propagation and refresh, the task moves to "Upcoming." The cursor follows (by block ID). The fence lines are rebuilt to reflect the new grouping.
 
-- Pro: Every command does something meaningful. Vim users get muscle memory compatibility.
-- Con: `dd` = mark done is a semantic leap. `o` = quick capture is magical. These need learning.
-
-**Option C — Block cross-line, provide alternatives.**
-
-| Vim command | Blocked | Alternative |
-|-------------|---------|-------------|
-| `dd` | Yes | `x` to toggle done, or `D` to archive |
-| `o` | Yes | `SPC x a` for quick capture |
-| `J` | Yes | — |
-| `p` | Yes | — |
-
-- Pro: Clear, honest. Commands that don't make sense don't pretend to work.
-- Con: Still violates full Vim grammar.
-
-**Recommendation: Option B** if we commit to editable Agenda. It's the most Vim-native. But it requires careful design of what each command means in Agenda context.
-
-#### 🟡 @due change moves the task between sections
-
-User changes `@due(2026-03-10)` to `@due(2026-03-20)` on a task in the "Overdue" section. After propagation and re-render, the task moves to "Upcoming." The cursor follows (by block ID). This is correct behavior but potentially surprising — the line "jumps" to a different part of the view.
-
-Mitigation: Brief notification — "Task moved to Upcoming." This is a feature, not a bug.
+This is correct behavior but potentially surprising — the line "jumps" to a different part of the view. Mitigation: brief notification — "Task moved to Upcoming." This is a feature, not a bug.
 
 #### 🟡 Stale Agenda when source changes in another pane
 
@@ -325,61 +334,67 @@ Without event bus: Agenda is stale until the user explicitly re-opens it (SPC a 
 
 ---
 
-### What breaks
+### Pre-conditions
 
-#### 🔴 Lines without block IDs
+#### Tasks must have block IDs
 
-If a task line somehow lacks a `^xxxxx` (malformed, or from a file that hasn't had `EnsureBlockIds` run), there's no identity for propagation. An edit on this line would have nowhere to go.
+If a task line lacks a `^xxxxx` (from a file that hasn't had `EnsureBlockIds` run), there's no identity for propagation. An edit on this line would have nowhere to go.
 
-Mitigation: Filter out tasks without block IDs from the Agenda. Or assign block IDs at query time (trigger `EnsureBlockIds` on source pages when the Agenda loads). The latter is cleaner — it's a pre-condition for the editable Agenda to open.
+Solution: `EnsureBlockIds` runs on all source pages when the Agenda opens. This is already a post-save hook for edited pages — extend it to run on Agenda load for all pages in the query result. Cost: one pass over each source buffer, skipping lines that already have IDs. Typically ~0ms (IDs already present).
 
-#### 🔴 Multi-user editing (future)
+#### Single-user assumption
 
-If Bloom ever supports multi-user (shared vaults), editable Agenda creates conflicts. Two users editing the same task in their respective Agendas. Last-write-wins via MirrorEdit is not sufficient — the second user's edit silently overwrites the first's.
+If Bloom ever supports multi-user (shared vaults), editable Agenda creates conflicts. Two users editing the same task simultaneously. Last-write-wins via MirrorEdit is not sufficient.
 
-Not a problem today (single-user app). But worth noting as a constraint on future architecture.
+Not a problem today (single-user app). Worth noting as a future constraint.
 
 ---
 
 ### Comparison: Structured edits vs Editable Agenda
 
-| Dimension | Structured edits (current path) | Editable Agenda |
-|-----------|-------------------------------|----------------|
-| **Toggle task** | `x` key — works today | Same (or just edit the checkbox) |
+| Dimension | Structured edits (current path) | Editable Agenda (target regions) |
+|-----------|-------------------------------|----------------------------------|
+| **Toggle task** | `x` key — works today | Same (or `dd` = mark done) |
 | **Edit task text** | Enter → jump to source → edit → come back | Edit inline, Esc to propagate |
 | **Change due date** | `d` key → mini-prompt (not built) | Edit `@due(...)` inline with Vim motions |
 | **Add tag** | `t` key → mini-prompt (not built) | Type `#tag` inline with Vim motions |
-| **Vim grammar** | Full — buffer is read-only, all navigation works | Partial — cross-line commands restricted or re-semanticized |
-| **Undo** | N/A — structured edits are atomic | Works but diverges from source undo stack |
-| **Section headers** | In buffer, read-only — not a problem | Need virtual decorations or protection |
-| **Implementation cost** | ~50 lines per structured edit | ~200-300 lines (virtual headers, edit filter, propagation) |
-| **Risk** | Low — proven by toggle | Medium — partial Vim, undo coherence, re-render jank |
+| **New task** | SPC x a (quick capture) | `o` routes to today's journal |
+| **Vim grammar** | Full — buffer is read-only, all navigation works | Within-line: full. Cross-line: Agenda semantics. |
+| **Section headers** | In buffer, read-only — not a problem | Fence lines — ephemeral, rebuilt on refresh |
+| **Undo** | N/A — structured edits are atomic | Works via view undo → propagation |
+| **BQL** | Returns flat rows, view formats | Returns flat rows, view groups into regions |
+| **Implementation cost** | ~50 lines per structured edit | ~200 lines (fence rebuild, propagation, cursor restore) |
+| **Risk** | Low — proven by toggle | Medium — cross-line semantics, undo coherence |
 
 ### Where each wins
 
 **Structured edits win when:** The operation is bounded and well-defined (toggle, set date, add tag). The user doesn't need to think about buffer mechanics. The view stays clean and predictable.
 
-**Editable Agenda wins when:** The user wants to do something unanticipated — fix a typo, reword a task, reorganize inline. These are the "long tail" of edits that structured commands can't cover without a command for every possible transformation.
+**Editable Agenda wins when:** The user wants to do something unanticipated — fix a typo, reword a task, add inline notes. These are the "long tail" of edits that structured commands can't cover. The target region model makes this safe: block-ID identity for propagation, fence lines rebuilt on refresh, cursor restored by block ID.
 
 ### A hybrid path
 
 They're not mutually exclusive:
 
-1. **Phase 1:** Expand structured edits on read-only Agenda — `x` toggle (done), `d` set date, `t` add tag, `s` snooze. Low risk, immediate value.
+1. **Phase 1:** Structured edits on read-only Agenda — `x` toggle (done), `d` set date, `t` add tag, `s` snooze. Low risk, immediate value.
 
-2. **Phase 2:** Make Agenda editable with verbatim rendering. Structured edit keys still work as shortcuts. Full Vim editing also works for the long tail. Requires virtual section headers and cross-line command handling.
+2. **Phase 2:** Editable Agenda with target regions. Verbatim task lines + ephemeral fence lines. Structured edit keys still work as shortcuts. Inline Vim editing for everything else. Propagation on Insert→Normal. Refresh rebuilds regions. ~200 lines.
 
-Phase 1 is valuable on its own. Phase 2 is additive — it doesn't obsolete Phase 1, it builds on it.
+Phase 1 is valuable on its own. Phase 2 is additive — structured edit keys become convenient shortcuts for common operations that also work via inline editing.
 
 ---
 
 ### Verdict
 
-The editable Agenda via block mirroring **holds under stress for within-line editing.** Block-ID identity solves the propagation problem cleanly. Propagation on Esc is a natural trigger. Cursor preservation by block ID works.
+The editable Agenda via block mirroring **holds under stress.** The target region model solves the section header problem cleanly: fence lines are ephemeral buffer lines without block IDs, rebuilt on every refresh. Task lines are verbatim source content with block IDs, propagated via MirrorEdit on Esc.
 
-The hard problems are **at the edges:** section headers, cross-line commands, undo coherence. These are solvable but add complexity. None are showstoppers for the Agenda specifically (unlike the general "editable formatted view" case, which IS fundamentally broken due to projection mismatch).
+**The model is: flat BQL query → view groups into target regions → buffer has fence lines + task lines → edits propagate by block ID → refresh rebuilds regions, restores cursor by block ID.**
 
-**Recommended path:** Phase 1 structured edits → Phase 2 editable Agenda. The architecture supports both. Don't skip Phase 1 — it's lower risk and delivers value while we validate the Phase 2 design.
+The hard problems (cross-line semantics, undo coherence) are design choices, not blockers. `dd` = mark done and `o` = quick capture are defensible Agenda semantics.
+
+BQL `group` clause can be dropped. Grouping is a view-level concern — different views group differently (by due date, by tag, by page). The query returns flat rows. The renderer knows how to bucket them.
+
+**Recommended path:** Phase 1 structured edits → Phase 2 editable Agenda with target regions. Phase 1 keys become shortcuts in Phase 2.
 
 ---
 
