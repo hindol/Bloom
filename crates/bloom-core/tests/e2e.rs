@@ -2059,3 +2059,26 @@ fn vim_o_at_eof_with_trailing_newline() {
         line_before, line_after,
     );
 }
+
+// Toggle task from Agenda view
+#[test]
+fn agenda_toggle_task() {
+    let vault = TestVault::new()
+        .page("Tasks")
+        .with_content("- [ ] First task @due(2026-03-01)\n- [ ] Second task @due(2026-03-02)\n")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // Open agenda
+    sim.keys("SPC a a");
+    assert_eq!(sim.screen(80, 24).title(), "Agenda");
+
+    // Move to a task line and toggle with x
+    sim.keys("j"); // move down (might be on a header)
+    sim.keys("j");
+    sim.keys("x"); // toggle
+
+    // The view should have refreshed
+    let screen = sim.screen(80, 24);
+    assert_eq!(screen.title(), "Agenda", "should still be in Agenda after toggle");
+}

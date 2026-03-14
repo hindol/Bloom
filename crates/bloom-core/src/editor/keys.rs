@@ -1619,6 +1619,8 @@ impl BloomEditor {
         }
 
         // Find the line and flip the checkbox
+        let mut toggled_new_text: Option<String> = None;
+        let mut block_id_on_line: Option<String> = None;
         if let Some(buf) = self.writer.buffers_mut().get_mut(&pid) {
             let line_count = buf.len_lines();
             if *line < line_count {
@@ -1634,11 +1636,60 @@ impl BloomEditor {
                 let old_trimmed = line_text.trim_end_matches('\n');
                 let new_trimmed = new_text.trim_end_matches('\n');
                 buf.replace(line_start..line_start + old_trimmed.len(), new_trimmed);
+                toggled_new_text = Some(new_trimmed.to_string());
+                // Extract block ID from the line (^xxxxx at end)
+                if let Some(caret_pos) = old_trimmed.rfind(" ^") {
+                    let suffix = &old_trimmed[caret_pos + 2..];
+                    if suffix.len() == 5
+                        && suffix
+                            .chars()
+                            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                    {
+                        block_id_on_line = Some(suffix.to_string());
+                    }
+                }
             }
         }
 
         // Save the source page
         self.save_page(&pid);
+
+        // Mirror propagation: if the toggled line has a block ID, find all other
+        // pages containing that block and update the line there too.
+        if let (Some(new_text), Some(bid)) = (&toggled_new_text, &block_id_on_line) {
+            if let Some(idx) = &self.index {
+                let block = types::BlockId(bid.clone());
+                let mirrors = idx.find_all_pages_by_block_id(&block);
+                for (meta, mirror_line) in &mirrors {
+                    if meta.id == pid {
+                        continue; // skip the source page itself
+                    }
+                    // Load mirror page, replace the line
+                    let full = self
+                        .vault_root
+                        .as_ref()
+                        .map(|r| r.join(&meta.path))
+                        .unwrap_or_else(|| meta.path.clone());
+                    let need_load = self.writer.buffers().get(&meta.id).is_none();
+                    if need_load {
+                        if let Ok(content) = std::fs::read_to_string(&full) {
+                            self.writer
+                                .buffers_mut()
+                                .open(&meta.id, &meta.title, &full, &content);
+                        }
+                    }
+                    if let Some(buf) = self.writer.buffers_mut().get_mut(&meta.id) {
+                        if *mirror_line < buf.len_lines() {
+                            let old_line = buf.line(*mirror_line).to_string();
+                            let old_trimmed = old_line.trim_end_matches('\n');
+                            let ls = buf.text().line_to_char(*mirror_line);
+                            buf.replace(ls..ls + old_trimmed.len(), new_text);
+                        }
+                    }
+                    self.save_page(&meta.id);
+                }
+            }
+        }
 
         // Re-render the view with fresh results
         if let Some(vs) = self.active_view.as_mut() {

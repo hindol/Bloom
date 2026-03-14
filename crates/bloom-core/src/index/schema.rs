@@ -46,12 +46,14 @@ pub(crate) fn create_tables(conn: &Connection) -> Result<(), BloomError> {
         );
 
         CREATE TABLE IF NOT EXISTS block_ids (
-            block_id TEXT PRIMARY KEY,
+            block_id TEXT NOT NULL,
             page_id TEXT NOT NULL,
             line INTEGER NOT NULL,
+            PRIMARY KEY (block_id, page_id),
             FOREIGN KEY (page_id) REFERENCES pages(id)
         );
         CREATE INDEX IF NOT EXISTS idx_block_ids_page ON block_ids(page_id);
+        CREATE INDEX IF NOT EXISTS idx_block_ids_block ON block_ids(block_id);
 
         -- Retired block IDs are never reused. Survives index rebuilds.
         CREATE TABLE IF NOT EXISTS retired_block_ids (

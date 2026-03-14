@@ -100,13 +100,13 @@ impl Index {
             .ok()
     }
 
-    /// Look up a block ID → (page, line). Uses the block_ids PK for O(log N).
+    /// Look up a block ID → (page, line). Returns the first match.
     pub fn find_page_by_block_id(&self, block_id: &BlockId) -> Option<(PageMeta, usize)> {
         self.conn
             .prepare(
                 "SELECT p.id, p.title, p.created, p.path, b.line \
                  FROM block_ids b JOIN pages p ON p.id = b.page_id \
-                 WHERE b.block_id = ?1",
+                 WHERE b.block_id = ?1 LIMIT 1",
             )
             .ok()?
             .query_row(rusqlite::params![block_id.0], |row| {
@@ -120,6 +120,35 @@ impl Index {
                 Ok((meta, line as usize))
             })
             .ok()
+    }
+
+    /// Find ALL pages containing a block ID (for mirror propagation).
+    pub fn find_all_pages_by_block_id(&self, block_id: &BlockId) -> Vec<(PageMeta, usize)> {
+        let mut stmt = match self.conn.prepare(
+            "SELECT p.id, p.title, p.created, p.path, b.line \
+             FROM block_ids b JOIN pages p ON p.id = b.page_id \
+             WHERE b.block_id = ?1",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let rows = match stmt.query_map(rusqlite::params![block_id.0], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        }) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        rows.filter_map(|r| {
+            let (id, title, created, path, line) = r.ok()?;
+            Some((self.row_to_page_meta(&id, &title, &created, &path), line as usize))
+        })
+        .collect()
     }
 
     pub fn find_page_fuzzy(&self, query: &str) -> Vec<PageMeta> {
