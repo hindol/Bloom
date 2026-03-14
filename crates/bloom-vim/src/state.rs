@@ -640,9 +640,13 @@ impl VimState {
                 let (insert_pos, replacement, cursor_after) = if next_line_start == rope.len_chars()
                     && (rope.len_chars() == 0 || rope.char(rope.len_chars() - 1) != '\n')
                 {
-                    // Last line has no trailing newline — insert \n + \n
+                    // Last line has no trailing newline — insert \n
+                    (next_line_start, "\n".to_string(), next_line_start + 1)
+                } else if next_line_start == rope.len_chars() {
+                    // At end of buffer (last line has trailing \n) — cursor after the new \n
                     (next_line_start, "\n".to_string(), next_line_start + 1)
                 } else {
+                    // Mid-file — cursor at start of the new empty line
                     (next_line_start, "\n".to_string(), next_line_start)
                 };
                 VimAction::Composite(vec![

@@ -2030,3 +2030,32 @@ fn agenda_cursor_moves_with_j() {
         );
     }
 }
+
+// Regression: 'o' at end of file with trailing newline places cursor on new line
+#[test]
+fn vim_o_at_eof_with_trailing_newline() {
+    let vault = TestVault::new()
+        .page("Test")
+        .with_content("first line\nsecond line\n")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC p p");
+    sim.keys("Enter");
+
+    // Go to last line
+    sim.keys("G");
+    let (line_before, _) = sim.screen(80, 24).cursor();
+
+    // Press o — open new line below
+    sim.keys("o");
+    let screen = sim.screen(80, 24);
+    assert_eq!(screen.mode(), "INSERT");
+
+    let (line_after, _) = screen.cursor();
+    assert!(
+        line_after > line_before,
+        "cursor should move to the new line below (before={}, after={})",
+        line_before, line_after,
+    );
+}
