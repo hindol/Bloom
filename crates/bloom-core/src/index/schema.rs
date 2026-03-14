@@ -49,6 +49,7 @@ pub(crate) fn create_tables(conn: &Connection) -> Result<(), BloomError> {
             block_id TEXT NOT NULL,
             page_id TEXT NOT NULL,
             line INTEGER NOT NULL,
+            is_mirror INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (block_id, page_id),
             FOREIGN KEY (page_id) REFERENCES pages(id)
         );
@@ -99,5 +100,12 @@ pub(crate) fn create_tables(conn: &Connection) -> Result<(), BloomError> {
         );
         ",
     )
-    .map_err(|e| BloomError::IndexError(e.to_string()))
+    .map_err(|e| BloomError::IndexError(e.to_string()))?;
+
+    // Migration: add is_mirror column if missing (existing databases).
+    let _ = conn.execute_batch(
+        "ALTER TABLE block_ids ADD COLUMN is_mirror INTEGER NOT NULL DEFAULT 0",
+    );
+
+    Ok(())
 }

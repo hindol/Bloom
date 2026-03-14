@@ -184,10 +184,15 @@ pub fn tagged_vault() -> TestVault {
 /// Owns the editor and provides methods to send keys and inspect state.
 pub struct SimInput {
     pub editor: BloomEditor,
-    _vault: Option<TestVault>,
+    vault: Option<TestVault>,
 }
 
 impl SimInput {
+    /// Access the vault root (if a vault was provided).
+    pub fn vault_root(&self) -> Option<&Path> {
+        self.vault.as_ref().map(|v| v.root())
+    }
+
     /// Create a SimInput with an empty scratch buffer (no vault).
     pub fn new() -> Self {
         let config = Config::defaults();
@@ -201,7 +206,7 @@ impl SimInput {
         );
         Self {
             editor,
-            _vault: None,
+            vault: None,
         }
     }
 
@@ -218,7 +223,7 @@ impl SimInput {
         );
         Self {
             editor,
-            _vault: None,
+            vault: None,
         }
     }
 
@@ -244,7 +249,7 @@ impl SimInput {
 
         Self {
             editor,
-            _vault: Some(vault),
+            vault: Some(vault),
         }
     }
 

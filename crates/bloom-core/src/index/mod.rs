@@ -80,7 +80,8 @@ pub struct IndexEntry {
     pub links: Vec<LinkTarget>,
     pub tags: Vec<TagName>,
     pub tasks: Vec<Task>,
-    pub block_ids: Vec<(BlockId, usize)>,
+    /// `(block_id, line, is_mirror)` — is_mirror is true for `^=` markers.
+    pub block_ids: Vec<(BlockId, usize, bool)>,
     pub block_links: Vec<(BlockId, String)>,
 }
 
@@ -318,7 +319,7 @@ mod tests {
     fn test_find_page_by_block_id() {
         let mut idx = Index::open_in_memory().unwrap();
         let mut entry = make_entry("aabbccdd", "Test Page", "content", &[]);
-        entry.block_ids = vec![(BlockId("k7m2x".into()), 5), (BlockId("p3a9f".into()), 10)];
+        entry.block_ids = vec![(BlockId("k7m2x".into()), 5, false), (BlockId("p3a9f".into()), 10, false)];
         idx.index_page(&entry).unwrap();
 
         let result = idx.find_page_by_block_id(&BlockId("k7m2x".into()));
@@ -343,7 +344,7 @@ mod tests {
         let mut idx = Index::open_in_memory().unwrap();
         // Page with a block
         let mut target = make_entry("aabbccdd", "Target", "content", &[]);
-        target.block_ids = vec![(BlockId("k7m2x".into()), 3)];
+        target.block_ids = vec![(BlockId("k7m2x".into()), 3, false)];
         idx.index_page(&target).unwrap();
 
         // Page that links to the block

@@ -273,10 +273,10 @@ fn insert_page_data_no_fts(
         .map_err(|e| BloomError::IndexError(e.to_string()))?;
     }
 
-    for (block_id, line) in &entry.block_ids {
+    for (block_id, line, is_mirror) in &entry.block_ids {
         conn.execute(
-            "INSERT OR REPLACE INTO block_ids (block_id, page_id, line) VALUES (?1, ?2, ?3)",
-            rusqlite::params![block_id.0, page_id, *line as i64],
+            "INSERT OR REPLACE INTO block_ids (block_id, page_id, line, is_mirror) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![block_id.0, page_id, *line as i64, *is_mirror as i64],
         )
         .map_err(|e| BloomError::IndexError(e.to_string()))?;
     }
@@ -339,10 +339,10 @@ fn insert_page_data(
         .map_err(|e| BloomError::IndexError(e.to_string()))?;
     }
 
-    for (block_id, line) in &entry.block_ids {
+    for (block_id, line, is_mirror) in &entry.block_ids {
         conn.execute(
-            "INSERT OR REPLACE INTO block_ids (block_id, page_id, line) VALUES (?1, ?2, ?3)",
-            rusqlite::params![block_id.0, page_id, *line as i64],
+            "INSERT OR REPLACE INTO block_ids (block_id, page_id, line, is_mirror) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![block_id.0, page_id, *line as i64, *is_mirror as i64],
         )
         .map_err(|e| BloomError::IndexError(e.to_string()))?;
     }

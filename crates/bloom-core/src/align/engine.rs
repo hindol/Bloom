@@ -108,8 +108,13 @@ fn find_block_bounds(lines: &[String], cursor: usize, pred: fn(&str) -> bool) ->
 /// Split trailing ` ^xxxxx` block ID from line content.
 fn split_block_id(line: &str) -> (&str, &str) {
     if let Some(pos) = line.rfind(" ^") {
-        let suffix = &line[pos + 2..];
-        if suffix.len() == 5 && suffix.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        let after_caret = &line[pos + 2..];
+        // Handle both ^xxxxx and ^=xxxxx
+        let id_part = after_caret.strip_prefix('=').unwrap_or(after_caret);
+        if id_part.len() == 5
+            && id_part
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
         {
             return (&line[..pos], &line[pos..]);
         }

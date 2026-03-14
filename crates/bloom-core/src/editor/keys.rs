@@ -1672,9 +1672,10 @@ impl BloomEditor {
                 let new_trimmed = new_text.trim_end_matches('\n');
                 buf.replace(line_start..line_start + old_trimmed.len(), new_trimmed);
                 toggled_new_text = Some(new_trimmed.to_string());
-                // Extract block ID from the line (^xxxxx at end)
+                // Extract block ID from the line (^xxxxx or ^=xxxxx at end)
                 if let Some(caret_pos) = old_trimmed.rfind(" ^") {
-                    let suffix = &old_trimmed[caret_pos + 2..];
+                    let after_caret = &old_trimmed[caret_pos + 2..];
+                    let suffix = after_caret.strip_prefix('=').unwrap_or(after_caret);
                     if suffix.len() == 5
                         && suffix
                             .chars()

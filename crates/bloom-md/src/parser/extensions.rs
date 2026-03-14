@@ -104,7 +104,13 @@ pub fn parse_block_id(line: &str, line_number: usize) -> Option<ParsedBlockId> {
     let trimmed = line.trim_end();
     // Must be preceded by a space (or be the entire line)
     if let Some(pos) = trimmed.rfind(" ^") {
-        let id_str = &trimmed[pos + 2..];
+        let after_caret = &trimmed[pos + 2..];
+        // Check for ^= mirror marker
+        let (id_str, is_mirror) = if let Some(rest) = after_caret.strip_prefix('=') {
+            (rest, true)
+        } else {
+            (after_caret, false)
+        };
         if !id_str.is_empty()
             && id_str
                 .chars()
@@ -113,19 +119,26 @@ pub fn parse_block_id(line: &str, line_number: usize) -> Option<ParsedBlockId> {
             return Some(ParsedBlockId {
                 id: BlockId(id_str.to_string()),
                 line: line_number,
+                is_mirror,
             });
         }
     }
-    // Line that is solely ^block-id
+    // Line that is solely ^block-id or ^=block-id
     if let Some(rest) = trimmed.strip_prefix('^') {
-        if !rest.is_empty()
-            && rest
+        let (id_str, is_mirror) = if let Some(r) = rest.strip_prefix('=') {
+            (r, true)
+        } else {
+            (rest, false)
+        };
+        if !id_str.is_empty()
+            && id_str
                 .chars()
                 .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
         {
             return Some(ParsedBlockId {
-                id: BlockId(rest.to_string()),
+                id: BlockId(id_str.to_string()),
                 line: line_number,
+                is_mirror,
             });
         }
     }

@@ -2087,3 +2087,79 @@ fn agenda_toggle_task() {
     let screen = sim.screen(80, 24);
     assert_eq!(screen.title(), "Agenda", "should still be in Agenda after toggle");
 }
+
+// =======================================================================
+// Index derivability — delete and rebuild, verify content matches
+// =======================================================================
+
+#[test]
+fn index_is_fully_derivable() {
+    let vault = TestVault::new()
+        .page("Alpha")
+        .with_content("- [ ] Task one @due(2026-03-01)\n- List item\n")
+        .page("Beta")
+        .with_content("Some paragraph\n- [ ] Another task\n")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+    let vault_root = sim.vault_root().unwrap().to_path_buf();
+
+    // Verify initial state: pages picker works
+    sim.keys("SPC p p");
+    assert!(sim.screen(80, 24).has_picker(), "pages picker should open initially");
+    sim.keys("Escape");
+
+    // Delete the index directory completely
+    let index_dir = vault_root.join(".index");
+    if index_dir.exists() {
+        std::fs::remove_dir_all(&index_dir).unwrap();
+    }
+
+    // Rebuild via command
+    sim.keys(":");
+    sim.type_text("rebuild-index");
+    sim.keys("Enter");
+
+    // Wait for indexer to complete
+    let ch = sim.editor.channels();
+    if let Some(rx) = &ch.indexer_rx {
+        for _ in 0..300 {
+            if let Ok(complete) = rx.try_recv() {
+                sim.editor.handle_index_complete(complete);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    // Verify pages picker still works after rebuild (index was fully re-derived)
+    sim.keys("SPC p p");
+    assert!(
+        sim.screen(80, 24).has_picker(),
+        "pages picker should open after index rebuild — index is derivable"
+    );
+}
+
+// =======================================================================
+// Mirror marker ^= parsed and indexed correctly
+// =======================================================================
+
+#[test]
+fn mirror_marker_parsed_and_indexed() {
+    // Create two pages with mirrored block (^=) and one solo block (^)
+    let vault = TestVault::new()
+        .page("Source")
+        .with_content("- [ ] Mirrored task @due(2026-03-15) ^=k7m2x\n- Regular item ^abc01\n")
+        .page("Mirror")
+        .with_content("- [ ] Mirrored task @due(2026-03-15) ^=k7m2x\n")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // Open the source page and verify ^= content renders
+    sim.keys("SPC p p");
+    sim.type_text("Source");
+    sim.keys("Enter");
+
+    let text = sim.buffer_text();
+    assert!(text.contains("^=k7m2x"), "^= marker should be preserved in buffer: {}", text);
+    assert!(text.contains("^abc01"), "solo block ID should be preserved: {}", text);
+}

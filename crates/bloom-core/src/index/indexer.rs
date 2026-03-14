@@ -558,10 +558,10 @@ fn parse_paths(
                     line: t.line,
                 })
                 .collect();
-            let block_ids: Vec<(BlockId, usize)> = doc
+            let block_ids: Vec<(BlockId, usize, bool)> = doc
                 .block_ids
                 .iter()
-                .map(|b| (b.id.clone(), b.line))
+                .map(|b| (b.id.clone(), b.line, b.is_mirror))
                 .collect();
             let block_links: Vec<(BlockId, String)> = doc
                 .block_links

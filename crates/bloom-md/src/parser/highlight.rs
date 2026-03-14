@@ -40,7 +40,7 @@ pub fn highlight_line(line: &str, context: &LineContext) -> Vec<StyledSpan> {
                     && after_caret
                         .trim_end()
                         .chars()
-                        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+                        .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '=')
                 {
                     let abs_caret = level + 1 + caret_rel;
                     let block_end = line.trim_end().len();
@@ -405,14 +405,14 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
             }
         }
 
-        // Block ID ^id at end of line (after space)
+        // Block ID ^id or ^=id at end of line (after space)
         if bytes[i] == b'^' && (i == 0 || bytes[i - 1] == b' ') {
             let rest = &line[i + 1..];
             if !rest.is_empty()
                 && rest
                     .trim_end()
                     .chars()
-                    .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+                    .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '=')
             {
                 let block_end = line.trim_end().len();
                 flush_normal(normal_start, i, spans);

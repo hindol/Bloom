@@ -84,6 +84,8 @@ pub struct ParsedTimestamp {
 pub struct ParsedBlockId {
     pub id: BlockId,
     pub line: usize,
+    /// `true` if the marker was `^=xxxxx` (mirrored block with peers).
+    pub is_mirror: bool,
 }
 
 /// A content block identified during parsing, for block ID assignment.
