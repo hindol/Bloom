@@ -497,23 +497,19 @@ Mirroring should be discoverable but never intrusive. The user copies a block, B
 
 ### Gutter indicator
 
-When a line has `^=`, the gutter shows a subtle mirror marker to the left of the line number:
+Mirrored lines have their line number rendered in a distinct color instead of the default faded:
 
 ```
-   42  - [ ] Solo task ^k7m2x
-=  43  - [ ] Mirrored task @due(2026-03-15) ^=abc01
-   44  - Some notes
-=  45  - [ ] Another mirror ^=def02
-   46  ## Heading
+ 42  - [ ] Solo task ^k7m2x                           ← normal (faded line number)
+ 43  - [ ] Mirrored task @due(2026-03-15) ^=abc01     ← salient line number
+ 44  - Some notes                                      ← normal
+ 45  - [ ] Another mirror ^=def02                      ← salient line number
+ 46  ## Heading                                        ← normal
 ```
 
-The `=` sits in a 1-character column at the far left edge, before line numbers. Clear separation from content — same position where editors show git diff markers or breakpoints. It echoes the `=` in the `^=` marker: same symbol, same meaning: "this block has peers."
+No extra column, no layout shift. The line number color is the only change. `salient` (the palette slot used for H2 headings) provides enough contrast to be noticeable during scanning without competing with content. On the cursor line (which already has a different background), the colored number is even more visible.
 
-Line numbers are never replaced or hidden. The `=` is additive — a narrow extra column that only occupies space when mirrors exist in the visible viewport. If no `^=` lines are visible, the column collapses.
-
-**Theming:** The indicator uses the existing `faded` palette slot (Tier 2 — contextual, recedes but readable). No new palette slot needed. This follows the semantic theming principle: the indicator is a relationship hint, same weight as line numbers and blockquote markers.
-
-The `^=` text in the buffer renders identically to `^` — both use `BlockId` / `BlockIdCaret` styles (Tier 2). The mirror/solo distinction lives in the gutter and status bar, not in the text styling. Adding a separate color for `^=` would violate "same semantic tier → same style."
+**Theming:** Uses the existing `salient` palette slot. No new slots needed. The TUI gutter renderer checks `is_mirror` on the buffer line's block ID and picks `salient` instead of `faded` for the line number style.
 
 ### Status bar hint
 
