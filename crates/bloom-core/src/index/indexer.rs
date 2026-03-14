@@ -398,6 +398,9 @@ fn run_incremental(
         .collect();
     index.set_fingerprints_batch(&fp_batch);
 
+    // Phase 4: Mirror promotion/demotion
+    apply_mirror_markers(vault_root, index);
+
     let write_ms = t_write.elapsed().as_millis() as u64;
     let total_ms = t_total.elapsed().as_millis() as u64;
 
@@ -473,6 +476,9 @@ fn run_batch(
         }
     }
 
+    // Mirror promotion/demotion
+    apply_mirror_markers(vault_root, index);
+
     let write_ms = t_write.elapsed().as_millis() as u64;
     let total_ms = t_total.elapsed().as_millis() as u64;
 
@@ -492,6 +498,107 @@ fn run_batch(
         },
         error: None,
     })
+}
+
+/// Promote solo blocks (^) to mirrored (^=) and demote orphaned mirrors (^=) back to (^).
+/// Rewrites files on disk and updates the index.
+fn apply_mirror_markers(vault_root: &Path, index: &mut Index) {
+    // Promotions: ^ → ^= (block appears in multiple pages but not marked as mirror)
+    let promotions = index.find_blocks_needing_promotion();
+    // Demotions: ^= → ^ (block only in one page but still marked as mirror)
+    let demotions = index.find_blocks_needing_demotion();
+
+    if promotions.is_empty() && demotions.is_empty() {
+        return;
+    }
+
+    // Group actions by file path to batch file writes
+    let mut file_actions: std::collections::HashMap<PathBuf, Vec<(&str, &str, usize)>> =
+        std::collections::HashMap::new();
+    for action in &promotions {
+        file_actions
+            .entry(action.path.clone())
+            .or_default()
+            .push(("promote", &action.block_id, action.line));
+    }
+    for action in &demotions {
+        file_actions
+            .entry(action.path.clone())
+            .or_default()
+            .push(("demote", &action.block_id, action.line));
+    }
+
+    let mut files_modified = 0;
+    for (rel_path, actions) in &file_actions {
+        let full = vault_root.join(rel_path);
+        let content = match std::fs::read_to_string(&full) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+        let mut changed = false;
+
+        for (kind, block_id, line_idx) in actions {
+            if *line_idx >= lines.len() {
+                continue;
+            }
+            let line = &lines[*line_idx];
+            let solo_marker = format!(" ^{}", block_id);
+            let mirror_marker = format!(" ^={}", block_id);
+
+            match *kind {
+                "promote" if line.ends_with(&solo_marker) => {
+                    let new_line =
+                        format!("{}{}", &line[..line.len() - solo_marker.len()], mirror_marker);
+                    lines[*line_idx] = new_line;
+                    changed = true;
+                }
+                "demote" if line.ends_with(&mirror_marker) => {
+                    let new_line =
+                        format!("{}{}", &line[..line.len() - mirror_marker.len()], solo_marker);
+                    lines[*line_idx] = new_line;
+                    changed = true;
+                }
+                _ => {} // line changed since indexing — skip
+            }
+        }
+
+        if changed {
+            let has_trailing = content.ends_with('\n');
+            let sep = if content.contains("\r\n") { "\r\n" } else { "\n" };
+            let mut out = lines.join(sep);
+            if has_trailing {
+                out.push_str(sep);
+            }
+            if bloom_store::disk_writer::atomic_write(&full, &out).is_ok() {
+                files_modified += 1;
+            }
+        }
+    }
+
+    if files_modified > 0 {
+        tracing::info!(
+            promotions = promotions.len(),
+            demotions = demotions.len(),
+            files_modified,
+            "mirror markers updated"
+        );
+
+        // Update is_mirror flags in the index to match the files
+        for action in &promotions {
+            let _ = index.connection().execute(
+                "UPDATE block_ids SET is_mirror = 1 WHERE block_id = ?1 AND page_id = ?2",
+                rusqlite::params![action.block_id, action.page_id],
+            );
+        }
+        for action in &demotions {
+            let _ = index.connection().execute(
+                "UPDATE block_ids SET is_mirror = 0 WHERE block_id = ?1 AND page_id = ?2",
+                rusqlite::params![action.block_id, action.page_id],
+            );
+        }
+    }
 }
 
 /// Read and parse a set of relative paths into IndexEntry objects.

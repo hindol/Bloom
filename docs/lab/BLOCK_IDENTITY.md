@@ -367,15 +367,20 @@ CREATE TABLE block_ids (
 | Component | Status |
 |-----------|--------|
 | Parser (`parse_block_id`) | ✅ Recognizes `^=xxxxx` → `is_mirror: true` |
+| Centralized line parsing (`parse_line`) | ✅ `LineElements` struct, `extract_link_at_col` |
 | Index (`block_ids` table) | ✅ `is_mirror` column, ALTER TABLE migration |
 | Highlighter | ✅ Styles `^=` same as `^` (SyntaxNoise) |
-| Align engine (`split_block_id`) | ✅ Handles `^=xxxxx` |
-| Toggle handler | ✅ Extracts block ID from `^=xxxxx` |
+| Align engine (`split_block_id`) | ✅ Delegates to `LineElements::split_block_id` |
+| Toggle handler | ✅ Uses `parse_block_id()` from parser |
 | ID generation | ✅ 5-char base36, collision check |
 | Toggle mirroring | ✅ Full propagation pipeline |
-| General text mirroring | ❌ ~30 lines to wire in `apply()` |
-| Promotion / demotion | ❌ Not yet wired |
-| Self-healing | ❌ Future (runs on history thread) |
+| Retired ID detection | ✅ Old vs new comparison on re-index |
+| Retired ID recovery (broken links) | ✅ On rebuild, scan block_links for orphaned targets |
+| Stale row cleanup | ✅ Solo blocks cleaned on re-index |
+| `^` → `^=` promotion | ✅ Automatic on index, rewrites files |
+| `^=` → `^` demotion | ✅ Automatic on index, rewrites files |
+| General text mirroring | ❌ ~30 lines to wire in post-edit hook |
+| Self-healing | ❌ Deferred (git-based repair pipeline) |
 
 ---
 

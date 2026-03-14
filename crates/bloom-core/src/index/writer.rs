@@ -88,6 +88,12 @@ impl Index {
             "rebuild write phase breakdown"
         );
 
+        // Phase C: derive retired IDs from broken block links
+        let retired = retire_from_broken_links(&tx).unwrap_or(0);
+        if retired > 0 {
+            tracing::info!(retired, "retired block IDs recovered from broken links");
+        }
+
         tx.commit()
             .map_err(|e| BloomError::IndexError(e.to_string()))?;
         Ok(stats)
@@ -114,6 +120,7 @@ impl Index {
                 )
                 .ok();
             if let Some(pid) = page_id {
+                retire_missing_block_ids(&tx, &pid, &[])?;
                 remove_page_data(&tx, &pid)?;
             }
             tx.execute(
@@ -132,8 +139,16 @@ impl Index {
         // Upsert changed pages
         for entry in changed {
             let page_id = entry.meta.id.to_hex();
+            // Detect missing block IDs before wiping old data
+            let new_ids: Vec<&str> = entry.block_ids.iter().map(|(id, _, _)| id.0.as_str()).collect();
+            retire_missing_block_ids(&tx, &page_id, &new_ids)?;
             remove_page_data(&tx, &page_id)?;
             insert_page_data(&tx, &page_id, entry)?;
+            // Clean stale rows: if this page now owns a block_id that also
+            // appears in another page, the other page's row may be stale.
+            // We only clean if the other page was NOT in this batch (it will
+            // handle its own cleanup).
+            clean_stale_block_ids(&tx, &page_id, entry)?;
             stats.pages += 1;
             stats.links += entry.links.len();
             stats.tags += entry.tags.len();
@@ -391,4 +406,83 @@ fn extract_task_dates(task: &Task) -> (Option<String>, Option<String>) {
         }
     }
     (due, start)
+}
+
+/// Compare old block IDs in the index with the new set from a re-parsed page.
+/// Any IDs that disappeared are inserted into `retired_block_ids`.
+fn retire_missing_block_ids(
+    conn: &rusqlite::Connection,
+    page_id: &str,
+    new_ids: &[&str],
+) -> Result<(), BloomError> {
+    let mut stmt = conn
+        .prepare("SELECT block_id FROM block_ids WHERE page_id = ?1")
+        .map_err(|e| BloomError::IndexError(e.to_string()))?;
+    let old_ids: Vec<String> = stmt
+        .query_map(rusqlite::params![page_id], |row| row.get(0))
+        .map_err(|e| BloomError::IndexError(e.to_string()))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let now = chrono::Local::now().to_rfc3339();
+    for old_id in &old_ids {
+        if !new_ids.contains(&old_id.as_str()) {
+            // Check if this ID still exists in another page (cross-page move, not deletion)
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM block_ids WHERE block_id = ?1 AND page_id != ?2",
+                    rusqlite::params![old_id, page_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            if count == 0 {
+                // ID is truly gone from the vault — retire it
+                let _ = conn.execute(
+                    "INSERT OR IGNORE INTO retired_block_ids (block_id, retired_at) VALUES (?1, ?2)",
+                    rusqlite::params![old_id, now],
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// After inserting block_ids for a page, clean up stale rows where the same
+/// block_id appears in other pages that no longer contain it.
+/// Only cleans rows for block_ids that this page now owns.
+fn clean_stale_block_ids(
+    conn: &rusqlite::Connection,
+    page_id: &str,
+    entry: &IndexEntry,
+) -> Result<(), BloomError> {
+    // For solo blocks (not mirrored), there should be exactly one row.
+    // Delete any other page's claim to the same block_id.
+    for (block_id, _, is_mirror) in &entry.block_ids {
+        if !is_mirror {
+            conn.execute(
+                "DELETE FROM block_ids WHERE block_id = ?1 AND page_id != ?2",
+                rusqlite::params![block_id.0, page_id],
+            )
+            .map_err(|e| BloomError::IndexError(e.to_string()))?;
+        }
+    }
+    Ok(())
+}
+
+/// During full rebuild, derive retired IDs from broken links:
+/// block_links that reference IDs not in block_ids.
+pub(crate) fn retire_from_broken_links(conn: &rusqlite::Connection) -> Result<usize, BloomError> {
+    let now = chrono::Local::now().to_rfc3339();
+    let count = conn
+        .execute(
+            "INSERT OR IGNORE INTO retired_block_ids (block_id, retired_at)
+             SELECT DISTINCT bl.to_block_id, ?1
+             FROM block_links bl
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM block_ids bi WHERE bi.block_id = bl.to_block_id
+             )",
+            rusqlite::params![now],
+        )
+        .map_err(|e| BloomError::IndexError(e.to_string()))?;
+    Ok(count)
 }

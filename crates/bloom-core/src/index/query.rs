@@ -633,3 +633,68 @@ impl Index {
             .unwrap_or(0.0)
     }
 }
+
+// --- Mirror promotion / demotion queries ---
+
+/// Block IDs that appear in multiple pages but aren't marked ^= yet.
+/// Returns (block_id, page_id, path) tuples needing ^ → ^= promotion.
+pub(crate) struct MirrorAction {
+    pub block_id: String,
+    pub page_id: String,
+    pub path: PathBuf,
+    pub line: usize,
+}
+
+impl Index {
+    /// Find block IDs that appear in >1 page with is_mirror = 0.
+    /// These need promotion from ^ to ^=.
+    pub(crate) fn find_blocks_needing_promotion(&self) -> Vec<MirrorAction> {
+        let sql = "
+            SELECT b.block_id, b.page_id, p.path, b.line
+            FROM block_ids b
+            JOIN pages p ON p.id = b.page_id
+            WHERE b.is_mirror = 0
+              AND (SELECT COUNT(*) FROM block_ids b2 WHERE b2.block_id = b.block_id) > 1
+        ";
+        let mut stmt = match self.conn.prepare(sql) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        stmt.query_map([], |row| {
+            Ok(MirrorAction {
+                block_id: row.get(0)?,
+                page_id: row.get(1)?,
+                path: PathBuf::from(row.get::<_, String>(2)?),
+                line: row.get::<_, i64>(3)? as usize,
+            })
+        })
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
+    }
+
+    /// Find block IDs in only 1 page but marked is_mirror = 1.
+    /// These need demotion from ^= to ^.
+    pub(crate) fn find_blocks_needing_demotion(&self) -> Vec<MirrorAction> {
+        let sql = "
+            SELECT b.block_id, b.page_id, p.path, b.line
+            FROM block_ids b
+            JOIN pages p ON p.id = b.page_id
+            WHERE b.is_mirror = 1
+              AND (SELECT COUNT(*) FROM block_ids b2 WHERE b2.block_id = b.block_id) = 1
+        ";
+        let mut stmt = match self.conn.prepare(sql) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        stmt.query_map([], |row| {
+            Ok(MirrorAction {
+                block_id: row.get(0)?,
+                page_id: row.get(1)?,
+                path: PathBuf::from(row.get::<_, String>(2)?),
+                line: row.get::<_, i64>(3)? as usize,
+            })
+        })
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
+    }
+}

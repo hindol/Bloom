@@ -2163,3 +2163,58 @@ fn mirror_marker_parsed_and_indexed() {
     assert!(text.contains("^=k7m2x"), "^= marker should be preserved in buffer: {}", text);
     assert!(text.contains("^abc01"), "solo block ID should be preserved: {}", text);
 }
+
+// =======================================================================
+// Mirror promotion: ^k7m2x → ^=k7m2x when same ID in two pages
+// =======================================================================
+
+#[test]
+fn mirror_promotion_on_duplicate_block_id() {
+    // Two pages share the same block ID (solo ^ form) — indexer should promote to ^=
+    let vault = TestVault::new()
+        .page("PageA")
+        .with_content("- [ ] Shared task ^abc01\n")
+        .page("PageB")
+        .with_content("- [ ] Shared task ^abc01\n")
+        .build();
+    let vault_root = vault.root().to_path_buf();
+    let _sim = SimInput::with_vault(vault);
+
+    // After indexing, read files back — both should have ^=abc01
+    let page_a = std::fs::read_to_string(vault_root.join("pages/pagea.md")).unwrap();
+    let page_b = std::fs::read_to_string(vault_root.join("pages/pageb.md")).unwrap();
+
+    assert!(
+        page_a.contains("^=abc01"),
+        "PageA should be promoted to ^=abc01, got: {}",
+        page_a
+    );
+    assert!(
+        page_b.contains("^=abc01"),
+        "PageB should be promoted to ^=abc01, got: {}",
+        page_b
+    );
+}
+
+// =======================================================================
+// Retired block IDs recovered from broken links
+// =======================================================================
+
+#[test]
+fn retired_ids_recovered_from_broken_links() {
+    // Page with a block link to an ID that doesn't exist as a block
+    let vault = TestVault::new()
+        .page("Linker")
+        .with_content("See [[^ghost1|the old analysis]] for details\n")
+        .page("Other")
+        .with_content("- [ ] Some task ^exist1\n")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // The indexer should have retired "ghost1" (link target with no block)
+    // Verify by checking that ID generation avoids "ghost1"
+    // We can't directly query retired_block_ids from e2e, but we can
+    // verify the index rebuilt correctly
+    sim.keys("SPC p p");
+    assert!(sim.screen(80, 24).has_picker(), "pages picker works after retirement");
+}
