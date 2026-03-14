@@ -136,7 +136,7 @@ Full block mirroring (MIRRORING.md) was parked because of 4 problems. The unifie
 | **Silent file modification** | Mirroring is opt-in per block (user pastes a block with its ID into another file). Transient notification on mirror sync. |
 | **Last-write-wins race** | Single-threaded writer — all mutations serialized. No race condition. |
 
-**One remaining edge case:** User edits the same mirrored line in two panes simultaneously. Mitigation: skip mirror if the target buffer's cursor is on the mirrored block (the user is actively editing there — their version wins on next save).
+**One remaining edge case:** User edits the same mirrored line in two panes simultaneously. Resolution: use the existing "file changed" dialog — "Block `^k7m2x` changed in `tasks.md`. Reload or keep your version?" Same UX the user already knows from external file changes. No CRDT — simple, predictable, local-first.
 
 **Mirror mechanics in the writer:**
 ```
