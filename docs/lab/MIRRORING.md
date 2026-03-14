@@ -1,57 +1,92 @@
 # Block Mirroring 🪞
 
 > Same block, same ID, real content in multiple files — kept in sync via the BufferWriter.
-> Status: **Architecture ready, partially active.** Task toggle mirroring works end-to-end.
-> General text mirroring requires ~30 lines of wiring.
+> Status: **Architecture ready, partially active.** Toggle mirroring works end-to-end.
 
 ---
 
 ## The Idea
 
-A block `^k7m2x` exists as real text in multiple files. Not a reference, not transclusion — the actual content is duplicated. Bloom keeps copies in sync: edit one, all other copies update. Both files are equal co-owners.
+A block `^k7m2x` exists as real text in multiple files. Not a reference, not transclusion — the actual content is duplicated. Bloom keeps copies in sync: edit one, all other copies update. All copies are equal co-owners.
 
 ```markdown
 pages/Text Editor Theory.md:
-  - [ ] Review the ropey API @due(2026-03-10) ^k7m2x
+  - [ ] Review the ropey API @due(2026-03-10) ^=k7m2x
 
 pages/Rust Programming.md:
-  - [ ] Review the ropey API @due(2026-03-10) ^k7m2x
+  - [ ] Review the ropey API @due(2026-03-10) ^=k7m2x
 ```
 
-Toggle the task in a view or any pane → all copies update synchronously.
+Edit the task in either file → the other updates synchronously.
 
 ---
 
-## What's Built
+## Mirror Markers: `^` vs `^=`
 
-### Database schema
+Block IDs have two forms:
 
-The `block_ids` table uses a **composite primary key** `(block_id, page_id)`, allowing the same block to appear in multiple pages:
-
-```sql
-CREATE TABLE block_ids (
-    block_id TEXT NOT NULL,
-    page_id  TEXT NOT NULL,
-    line     INTEGER NOT NULL,
-    PRIMARY KEY (block_id, page_id)
-);
-CREATE INDEX idx_block_ids_page  ON block_ids(page_id);
-CREATE INDEX idx_block_ids_block ON block_ids(block_id);
+```
+^k7m2x    → solo block (exists in one file only)
+^=k7m2x   → mirrored block (peers exist in other files)
 ```
 
-`retired_block_ids` ensures deleted IDs are never reused. `block_links` tracks `[[^block_id|hint]]` references separately from content mirrors.
+The `=` means "I have peers" — not "I am a copy." All `^=` instances are equal co-owners. There is no primary/secondary distinction.
 
-### Mirror lookup
+**The marker lives in the file content.** The index derives mirror relationships from it. Delete the index, rebuild from files — all mirror relationships are preserved. Files are always the source of truth.
 
-```rust
-Index::find_all_pages_by_block_id(&BlockId) -> Vec<(PageMeta, line)>
+### Lifecycle
+
+```
+1. Block created in one file             → ^k7m2x  (solo)
+2. User copies block to a second file    → Bloom promotes BOTH to ^=k7m2x
+3. Three files mirror the same block     → all three have ^=k7m2x
+4. User deletes from one file            → two ^=k7m2x remain
+5. User deletes from a second file       → Bloom demotes survivor to ^k7m2x
 ```
 
-One query, returns every page that contains the block and the line number. This is the foundation for all propagation.
+### Promotion / demotion
 
-### BufferMessage — Edit vs MirrorEdit
+Runs as part of `EnsureBlockIds` (post-save hook, already exists):
 
-The `BufferMessage` enum has two edit variants:
+```
+For each block_id on this page:
+  mirror_count = index.count_pages_for_block(block_id)
+  if mirror_count > 1 and marker is ^:
+    rewrite to ^= in this page
+    queue MirrorEdit to promote ^ → ^= in other pages
+  if mirror_count == 1 and marker is ^=:
+    demote to ^ in this page
+```
+
+Promotion is deferred during Insert mode (same as auto-save). The `^` → `^=` rewrite is a post-Insert-mode operation.
+
+### Collision detection
+
+When the indexer sees two `^` entries (not `^=`) for the same block ID:
+
+- **Content matches** → auto-promote both to `^=` (user created a mirror)
+- **Content differs** → **collision.** Notify user. Do not promote. Do not propagate.
+
+Resolution: user renames one ID (Bloom provides a "Reassign block ID" command) or manually adds `=` to declare them mirrors despite different content.
+
+A `^` entry alongside existing `^=` entries follows the same rule: compare content with any `^=` peer. Match → auto-promote. Mismatch → collision.
+
+---
+
+## Sync Mechanism
+
+**Synchronous in-memory propagation via BufferWriter.** No file watchers, no last-write-wins races.
+
+1. User edits `^=k7m2x` in page A.
+2. `BufferWriter::apply(Edit)` mutates page A's buffer.
+3. Writer queries the index: which other pages have `^=k7m2x`?
+4. For each page B: load into buffer if needed, `apply(MirrorEdit)` — same rope operation, no events.
+5. Auto-save writes all modified pages to disk.
+6. Git commits capture the state.
+
+All mutations happen in-memory through the single-threaded BufferWriter. No file watcher races, no dirty-buffer prompts.
+
+### Edit vs MirrorEdit
 
 ```rust
 Edit {
@@ -62,33 +97,53 @@ MirrorEdit {
 }
 ```
 
-`Edit` is the normal user-initiated mutation. `MirrorEdit` is identical in its rope operation but **does NOT emit `BlockChanged` events and does NOT trigger further mirror propagation.** This single distinction prevents circular notification loops. One flag, checked in one place.
+`Edit` is user-initiated. `MirrorEdit` is propagation. The distinction:
+- `Edit` → emits `BlockChanged` events
+- `MirrorEdit` → no events, no further propagation → prevents circular loops
+
+One flag, checked in one place. This is the single mechanism that prevents infinite loops.
+
+### Propagation trigger
+
+Propagation fires on **Insert→Normal transition** (Esc). During Insert mode, the buffer is in a transient state — partial words, uncommitted edits. Propagation waits for the final content, same as auto-save.
 
 ```
-User edits ^k7m2x in page A
-  → writer.apply(Edit { page_id: A, ... })
-  → mutate A's buffer ✅
-  → emit BlockChanged("k7m2x") → views refresh
-  → index lookup: which other pages contain ^k7m2x?
-  → for each target page B:
-      → writer.apply(MirrorEdit { page_id: B, ... })  ← no events, no cascade
-      → mark dirty → queue save
+User enters Insert mode → BeginEditGroup
+User types keystrokes  → Edit messages (buffer mutates, no propagation)
+User presses Esc        → EndEditGroup → propagation fires ONCE with final content
 ```
 
-### Task toggle mirroring (active)
+---
 
-`handle_view_toggle_task()` in `keys.rs` implements full mirror propagation for task toggles:
+## What's Built
 
-1. Load source page into buffer (if not already open)
-2. Flip the checkbox (`- [ ]` ↔ `- [x]`)
-3. Extract block ID from the toggled line
-4. Query `find_all_pages_by_block_id()`
-5. For each mirror page: load buffer, replace the line, save
-6. Re-render the view with fresh results
+### Database schema
 
-This is the proof-of-concept for the full mirroring pipeline. It works end-to-end today.
+```sql
+CREATE TABLE block_ids (
+    block_id  TEXT NOT NULL,
+    page_id   TEXT NOT NULL,
+    line      INTEGER NOT NULL,
+    is_mirror BOOLEAN NOT NULL DEFAULT FALSE,  -- TRUE for ^=
+    PRIMARY KEY (block_id, page_id)
+);
+CREATE INDEX idx_block_ids_page  ON block_ids(page_id);
+CREATE INDEX idx_block_ids_block ON block_ids(block_id);
+```
 
-### Event bus (wired, not yet subscribed)
+`is_mirror` is derived from the `=` prefix in the file content. Fully rebuildable.
+
+`retired_block_ids` ensures deleted IDs are never reused. `block_links` tracks `[[^block_id|hint]]` references separately from content mirrors.
+
+### Mirror lookup
+
+```rust
+Index::find_all_pages_by_block_id(&BlockId) -> Vec<(PageMeta, line)>
+```
+
+One query, returns every page containing the block and its line number.
+
+### BufferWriter
 
 ```rust
 pub struct BufferWriter {
@@ -97,390 +152,201 @@ pub struct BufferWriter {
 }
 ```
 
-The event bus exists on `BufferWriter`. Views would register watchers for block IDs in their result set. When `Edit` (not `MirrorEdit`) touches a watched block, callbacks fire and views re-query. Currently the HashMap is empty — views re-render on explicit actions (toggle, Enter) rather than subscribing to events.
+The event bus exists on BufferWriter. When `Edit` (not `MirrorEdit`) touches a watched block, callbacks fire.
+
+### Toggle mirroring (active)
+
+Full mirror propagation for checkbox toggles:
+
+1. Load source page into buffer
+2. Flip `- [ ]` ↔ `- [x]`
+3. Extract block ID from the toggled line
+4. Query `find_all_pages_by_block_id()`
+5. For each mirror page: load, replace line, save
+
+This is the proof-of-concept for the full pipeline.
+
+### General text mirroring (not yet wired)
+
+Same pipeline as toggle, generalized to any within-line edit:
+
+1. Detect which block was edited (parse `^=xxxxx` from the edited line)
+2. Propagate the full line to mirror pages via `MirrorEdit`
+3. Queue saves for mirror targets
+
+~30 lines in `BufferWriter::apply()`. Architecture is ready; this is wiring.
 
 ---
 
-## Sync Mechanism
+## Stress Test: `^=` Design
 
-**Synchronous in-memory propagation via BufferWriter.** No file watchers, no last-write-wins races.
+### ✅ Scenario 1: Create mirror
 
-1. User edits `^k7m2x` in buffer A (or toggles via a view).
-2. `BufferWriter::apply(Edit)` mutates buffer A.
-3. Writer queries the index: which other pages contain `^k7m2x`?
-4. For each page B: load into buffer if needed, `apply(MirrorEdit)` — same rope op, no events.
-5. Auto-save writes both A and B to disk.
-6. Git commits capture the state.
+```
+Page A: "- [ ] Review ropey ^k7m2x"         (solo)
+User copies line to page B → saves
+Indexer: two ^ entries, content matches → promote both to ^=
+Result: both pages have ^=k7m2x, mirror active
+```
 
-This is fundamentally different from the original "patch files on disk" design. All mutations happen in-memory through the single-threaded BufferWriter. No file watcher races, no dirty-buffer prompts, no fingerprint-based loop detection.
+### ✅ Scenario 2: Edit propagation
+
+```
+A and B both have ^=k7m2x
+User edits A → Esc → propagation fires
+MirrorEdit B with new content → both in sync
+No content comparison needed — ^= is trusted
+```
+
+### ✅ Scenario 3: Delete mirror (demotion)
+
+```
+A and B both have ^=k7m2x
+User deletes the line from B → saves
+Indexer: only (k7m2x, A) remains → demote A to ^k7m2x
+```
+
+### ✅ Scenario 4: Collision (different content, same ID)
+
+```
+Page A: "- [ ] Review ropey ^k7m2x"
+External editor adds "- Buy groceries ^k7m2x" to page C
+Indexer: two ^ entries, content differs → COLLISION
+User notified. No promotion. No propagation.
+```
+
+### ✅ Scenario 5: Collision alongside existing mirror
+
+```
+A and B have ^=k7m2x (active mirror)
+External editor adds "- Buy groceries ^k7m2x" to page C
+Propagation from A: finds ^= entries only → B. C has ^, not ^= → untouched.
+Indexer: C has ^ with different content → collision flagged.
+Existing mirror continues working. Collision isolated.
+```
+
+### ✅ Scenario 6: Indexer race during propagation (THE critical race)
+
+```
+A and B both have ^=k7m2x
+User edits A → auto-save writes A to disk
+Indexer triggers → reads A (new content), reads B (old content)
+Content of A ≠ content of B — temporary divergence!
+
+BUT: both have ^= → they are declared mirrors → no collision check.
+Indexer trusts the marker.
+
+MirrorEdit updates B moments later → content matches again.
+```
+
+**This is the scenario that broke content-comparison approaches.** The `^=` marker survives temporary divergence. The indexer never misinterprets a mid-propagation state as a collision.
+
+### 🟡 Scenario 7: Three-way promotion race
+
+```
+Page A: ^k7m2x (solo)
+User copies to B → saves (two ^ entries)
+External editor simultaneously copies to C
+
+Indexer processes B first → A and B promoted to ^=
+Indexer processes C → C has ^, A and B have ^=
+Compare C content with ^= peers → matches → auto-promote C to ^=
+```
+
+Works if content matches. If content differs, C is flagged as collision.
+
+### ✅ Scenario 8: Manual `^=` without peers
+
+```
+User types "- [ ] New task ^=k7m2x" (no other pages have this ID)
+Indexer: mirror_count == 1 but marker is ^=
+EnsureBlockIds: demote to ^k7m2x
+```
+
+Self-correcting.
+
+### 🟡 Scenario 9: User manually removes `=` from a mirror
+
+```
+A and B both have ^=k7m2x
+User edits A: changes ^=k7m2x to ^k7m2x
+Indexer: A has ^, B has ^= — mixed state
+Content matches → re-promote A to ^= (treat as accidental edit)
+Content differs → flag for user resolution
+```
+
+### 🟡 Scenario 10: External editor changes mirrored content
+
+```
+A, B, C all have ^=k7m2x with matching content
+External editor changes C's content (keeps ^=)
+User edits A → propagation fires
+MirrorEdit B → ✅ (content was in sync)
+MirrorEdit C → overwrites external editor's changes
+```
+
+**Defensible:** `^=` means "keep me synced." The external editor left the marker intact. If they didn't want sync, they should have removed the `=`. Bloom trusts inline markers.
+
+### ✅ Scenario 11: Promotion during active editing
+
+```
+User is editing page A in Insert mode
+Promotion wants to rewrite ^k7m2x → ^=k7m2x
+```
+
+Deferred. Promotion runs in `EnsureBlockIds`, a post-save hook. Auto-save is deferred during Insert mode. Promotion happens after Normal mode transition.
+
+### ✅ Scenario 12: Rapid successive edits
+
+```
+A and B both have ^=k7m2x
+User types 20 keystrokes in Insert mode → no propagation
+User presses Esc → ONE propagation with final content
+B gets one MirrorEdit, one save
+```
 
 ---
 
-## What Works
-
-| Scenario | Behaviour |
-|----------|-----------|
-| Toggle task in view, mirrors exist | All copies updated synchronously. View re-renders. |
-| Mirror page not open | BufferWriter loads it, applies MirrorEdit, saves, closes. |
-| Mirror page open in another pane | Buffer mutated in place. Pane renders updated content on next frame. |
-| Circular propagation | Impossible — `MirrorEdit` does not emit events or trigger further mirrors. |
-| Block in N pages | Source edit + N−1 MirrorEdits. All synchronous, single-threaded. |
-| Undo after mirror sync | Undo reverts the local buffer only. Mirror targets keep their version. Next edit re-propagates. |
-| Delete block from one file | Mirror count decreases in index. Remaining copies keep their content. No cascading delete. |
-| Recovery | Git has every intermediate state. |
-
----
-
-## What's Not Built Yet
-
-### General text mirroring
-
-Task toggle mirroring works because the mutation is simple (flip `[ ]` / `[x]`). General text mirroring — edit any character on a mirrored line, propagate the new line to all copies — requires:
-
-1. **Detect which block was edited.** After `apply(Edit)`, determine the block ID on the edited line. The line number is in the Edit message; scanning for `^xxxxx` at end-of-line is O(1).
-
-2. **Propagate the full line.** Query mirrors, replace the corresponding line in each target buffer via `MirrorEdit`. ~20 lines in the `Edit` handler of `apply()`.
-
-3. **Queue saves.** Mark mirror targets dirty so auto-save picks them up.
-
-Estimated: ~30 lines in `BufferWriter::apply()`. The architecture is ready; this is wiring.
-
-### Event bus subscriptions
-
-Views don't subscribe to `BlockChanged` events yet. They re-render on explicit user actions. Wiring this would let views update live when a mirrored block changes in another pane.
-
-### Multi-line blocks
-
-Current propagation is line-level (one block = one line). Multi-line blocks (paragraphs, list trees) would need a block boundary parser to determine where the block starts and ends. Not needed for task mirroring (tasks are single-line) but required for general content mirroring.
-
----
-
-## Design Decisions (from UNIFIED_BUFFER.md)
+## Design Decisions
 
 | Decision | Rationale |
 |----------|-----------|
-| In-memory sync, not file patching | BufferWriter owns all buffers. Synchronous mutation eliminates file watcher races and dirty-buffer prompts. |
-| `MirrorEdit` as separate variant | One-flag circular prevention. Cleaner than fingerprint-based disk detection. |
-| Single-threaded writer | All mutations serialized. No concurrent-edit races. Industry standard (VS Code, Neovim, Helix). |
-| Event bus is block-level only | Pickers use snapshots (ephemeral). Only long-lived views need live updates. One event type (`BlockChanged`), one subscriber type (views). |
-| No CRDT, no merge logic | Local-first, single-user. Last edit wins. Git is the safety net. |
+| `^=` marker in file content | Files are source of truth. Index is derivable. Survives rebuild. |
+| `^=` is symmetric (no owner/copy) | All copies are equal co-owners. `=` means "peers exist." |
+| Content comparison only at promotion | `^` + `^` detected → compare once. After `^=`, trust the marker. |
+| In-memory sync, not file patching | BufferWriter owns all buffers. No file watcher races. |
+| `MirrorEdit` as separate message | One-flag circular prevention. No events, no re-trigger. |
+| Single-threaded writer | All mutations serialized. No concurrent-edit races. |
+| Propagation on Insert→Normal | Buffer is in final state. Same trigger as auto-save. |
+| No CRDT, no merge logic | Local-first, single-user. Git is the safety net. |
 
 ---
 
-## Remaining UX Questions
+## Pre-conditions
 
-| Question | Current thinking |
-|----------|-----------------|
-| Should mirroring be opt-in per block? | Yes — user pastes a block preserving its `^id` into another file. Indexer detects the duplicate. No explicit "mirror this" command needed. |
-| What happens when both panes edit the same mirrored block? | Last `apply(Edit)` wins. MirrorEdit overwrites the other pane's in-progress text. Acceptable for single-user — you'd have to be editing the same line in two panes simultaneously. |
-| Should there be a mirror indicator in the gutter? | Nice to have. Index can report mirror count per block ID. Display `🪞2` in gutter for blocks mirrored in 2+ pages. |
-| When is mirroring the wrong abstraction? | Block in 10+ files suggests tags + views. Mirroring is for 2–3 page cross-references. Bloom should suggest views when mirror count is high. |
+### Block IDs required
 
----
+Every block participating in mirroring must have a block ID. `EnsureBlockIds` runs as a post-save hook and assigns IDs to blocks that lack them.
 
-## Stress Test: Editable Agenda via Block Mirroring
+### Single-user assumption
 
-> **Premise:** BQL returns task blocks with IDs. The Agenda view is a collection of tasks from across the vault. If we make it editable, edits on a task line propagate back to the source page via block ID. Toggle is already trivial. Can we generalize to free-text editing?
-
-### The user workflow
-
-```
-1. SPC a a → open Agenda
-2. j/k to navigate tasks
-3. x to toggle (already works)
-4. i to edit task text inline → "fix typo, change description"
-5. f@ ci( to change due date → propagates to source
-6. Esc → propagate, re-render
-```
-
-No context-switch to the source page. Edit where you see it.
-
-### How it would work
-
-**BQL returns flat rows. No `group` clause.** Grouping is a view concern — the Agenda renderer buckets tasks into regions based on `@due` values.
-
-```
-BQL query: tasks | where not done | sort due
-
-Returns flat rows:
-  (page_id, line, block_id, text, due, done)
-  (page_id, line, block_id, text, due, done)
-  ...
-
-Agenda renderer groups into target regions:
-  ┌─── Overdue ───────────────────────────┐
-  │ - [ ] Review ropey API ^k7m2x         │ ← editable
-  │ - [ ] Fix parser bug ^a3b4c           │ ← editable
-  ├─── Today · Mar 14 ────────────────────┤
-  │ - [ ] Ship v2.0 ^b5c6d               │ ← editable
-  ├─── Upcoming ──────────────────────────┤
-  │ - [ ] Plan Q2 goals ^e7f8g           │ ← editable
-  └───────────────────────────────────────┘
-```
-
-Each **target region** is a section of the buffer bounded by fence lines. Task lines within a region are editable. Fences are structural.
-
-```
-User edits line, changes "ropey" to "ropey + petgraph"
-  → on Insert→Normal transition (Esc):
-  → parse ^k7m2x from the edited line
-  → find_all_pages_by_block_id("k7m2x") → [(page A, line 42)]
-  → replace source line with the edited line via MirrorEdit
-  → save page A
-  → refresh: re-query, rebuild regions, restore cursor to ^k7m2x
-```
+Bloom is a single-user, local-first app. Two users editing the same mirrored block simultaneously is not supported. If shared vaults are ever added, mirroring would need conflict resolution beyond last-write-wins.
 
 ---
 
-### What works
-
-#### ✅ Block-ID identity for propagation
-
-Every task has a `^xxxxx` suffix. After editing, parse the block ID from the line. Look up source page via index. Replace source line with MirrorEdit. This is exactly what toggle does — generalized to any within-line edit.
-
-No positional row_map needed for propagation. Block ID is the stable identity across re-renders.
-
-#### ✅ Propagation on Insert→Normal transition
-
-Auto-save is already deferred during Insert mode. Same trigger: when user presses Esc, the edit group ends, propagation fires. The line is in its final form (not mid-keystroke). Clean.
-
-#### ✅ Cursor preservation across re-render
-
-After propagation, the view re-renders (fresh BQL query). Find the line containing the same `^block_id`. Restore cursor row and column. Block IDs are unique — O(n) scan of the new buffer.
-
-#### ✅ Undo drives propagation
-
-View buffer has its own undo stack. Undo in view → view line reverts → on next propagation trigger, the reverted line propagates to source via MirrorEdit. Source stays in sync. The user's mental model: "I'm editing in the Agenda, undo works in the Agenda."
-
-#### ✅ Toggle is a special case of this
-
-Current toggle: intercept `x`, read source, flip checkbox, MirrorEdit mirrors, re-render. Editable Agenda: user edits anything, Esc triggers propagation, MirrorEdit mirrors, re-render. Same pipeline, toggle becomes just another edit.
-
----
-
-### What's hard
-
-#### 🟡 Target regions and fence lines
-
-The Agenda buffer has two kinds of content: **task lines** (editable, have block IDs) and **fence lines** (structural, computed from `@due` values). These are fundamentally different and the buffer must know which is which.
-
-**Design: Fence lines are buffer lines rebuilt on every refresh.**
-
-```
-Buffer content (what's in the rope):
-  ── Overdue ──                     ← fence line (no block ID)
-  - [ ] Review ropey API ^k7m2x    ← task line (has block ID)
-  - [ ] Fix parser bug ^a3b4c      ← task line
-                                    ← fence line (blank separator)
-  ── Today · Mar 14 ──             ← fence line
-  - [ ] Ship v2.0 ^b5c6d          ← task line
-```
-
-**Rules:**
-1. Lines with `^xxxxx` = task lines. Editable. Propagate on Esc.
-2. Lines without block ID = fence lines. Non-propagating. Rebuilt on refresh.
-3. If user edits a fence line → no propagation happens (no block ID). On next refresh, the fence is rebuilt correctly. Harmless.
-4. If user deletes a fence line (`dd`) → same: rebuilt on refresh. Tasks above and below are still correct because identity is block-ID, not position.
-
-**Refresh cycle:**
-
-```
-Refresh:
-  1. Record cursor block ID (parse ^xxxxx from current line)
-  2. Re-run BQL query
-  3. Group results by due-date category → build regions
-  4. Render: fence + tasks + fence + tasks + ...
-  5. Find line containing cursor block ID → restore cursor (row, col)
-```
-
-**When to refresh:**
-- After propagation (Esc in Normal mode after an edit)
-- After structured edit (toggle, set date, etc.)
-- After event bus notification (source changed in another pane)
-- NOT during Insert mode (buffer is stable while user types)
-
-**Key insight:** Fence lines are ephemeral. They exist in the buffer for cursor navigation (j/k moves through them) but carry no identity. They're rebuilt from scratch on every refresh. This means the buffer doesn't need "protected regions" or "virtual decorations" — fences are just lines that happen to not have block IDs. The propagation logic naturally ignores them.
-
-**This replaces BQL `group`.** The grouping logic lives in the Agenda renderer, not the query language. BQL stays simple (flat rows). The view groups by due-date category, tags, page, or whatever the view type requires.
-
-#### 🟡 Cross-line Vim commands
-
-A mutable buffer means ALL Vim commands work. Some need Agenda-specific semantics:
-
-| Command | What it does | Agenda semantic |
-|---------|-------------|----------------|
-| `dd` | Delete line | On task line: mark done (toggle `[x]`), task disappears on refresh. On fence line: no-op (rebuilt on refresh). |
-| `o` / `O` | Open line below/above | Quick capture — new task routed to today's journal page. Gets a block ID on save. |
-| `J` | Join lines | No-op — merging two tasks into one line is never correct. |
-| `p` / `P` | Paste | If pasted text has a `^block_id` → mirror. If not → new task, route to today's journal. |
-
-The key insight: **cross-line commands don't corrupt the Agenda because the refresh cycle rebuilds the structure.** `dd` on a fence line? Rebuilt on refresh. `o` inserts a new line? It either gets a block ID (and becomes a real task) or is swept away on refresh.
-
-The question is whether these semantics feel natural or magical. `dd` = mark done is a semantic leap, but in an Agenda context it's defensible — you're removing a task from your todo list. `o` = new task is useful. `J` = blocked is correct.
-
-#### 🟡 @due change moves the task between regions
-
-User changes `@due(2026-03-10)` to `@due(2026-03-20)` on a task in the "Overdue" region. After propagation and refresh, the task moves to "Upcoming." The cursor follows (by block ID). The fence lines are rebuilt to reflect the new grouping.
-
-This is correct behavior but potentially surprising — the line "jumps" to a different part of the view. Mitigation: brief notification — "Task moved to Upcoming." This is a feature, not a bug.
-
-#### 🟡 Stale Agenda when source changes in another pane
-
-User edits source page in pane 1 (adds/removes tasks). Agenda in pane 2 doesn't know. If user then edits a task in the stale Agenda, propagation writes based on the old block ID → still correct (block ID identity, not line position). But the Agenda display is out of date.
-
-Fix: Event bus subscription. Source `Edit` on a task block → `BlockChanged` → Agenda re-renders. This is exactly what the event bus was designed for. Currently not wired, but the infrastructure exists.
-
-Without event bus: Agenda is stale until the user explicitly re-opens it (SPC a a). Acceptable for v1.
-
----
-
-### Pre-conditions
-
-#### Tasks must have block IDs
-
-If a task line lacks a `^xxxxx` (from a file that hasn't had `EnsureBlockIds` run), there's no identity for propagation. An edit on this line would have nowhere to go.
-
-Solution: `EnsureBlockIds` runs on all source pages when the Agenda opens. This is already a post-save hook for edited pages — extend it to run on Agenda load for all pages in the query result. Cost: one pass over each source buffer, skipping lines that already have IDs. Typically ~0ms (IDs already present).
-
-#### Single-user assumption
-
-If Bloom ever supports multi-user (shared vaults), editable Agenda creates conflicts. Two users editing the same task simultaneously. Last-write-wins via MirrorEdit is not sufficient.
-
-Not a problem today (single-user app). Worth noting as a future constraint.
-
----
-
-### Agenda keybindings (Doom Emacs / evil-org-agenda inspired)
-
-Following Doom Emacs conventions where possible. All keys operate on the task at cursor, through the source, then refresh the view.
-
-#### Task actions
-
-| Key | Action | Doom equivalent | Notes |
-|-----|--------|----------------|-------|
-| `t` | Toggle done | `t` (toggle TODO) | Flip `[ ]` ↔ `[x]` in source. Currently `x` — migrate to `t`. |
-| `d` | Set due date | `d` (set deadline) | Mini-prompt. Sets/replaces `@due(...)` in source line. |
-| `s` | Snooze | `s` (schedule) | Quick-set: `s` = tomorrow, `ss` = next week, `sd` = pick date. |
-| `H` | Due date earlier | `H` (date earlier) | Shift `@due` by −1 day. Repeat: `HH` = −2 days. |
-| `L` | Due date later | `L` (date later) | Shift `@due` by +1 day. Repeat: `LL` = +2 days. |
-
-#### Metadata
-
-| Key | Action | Doom equivalent | Notes |
-|-----|--------|----------------|-------|
-| `+` | Add tag | `:` (set tags) | Mini-prompt with tag completion from index. |
-| `-` | Remove tag | — | Mini-prompt listing tags on this task. |
-| `r` | Refile | `r` (refile) | Move task to another page. Picker for target. |
-
-#### Navigation
-
-| Key | Action | Doom equivalent | Notes |
-|-----|--------|----------------|-------|
-| `RET` | Jump to source | `RET` (goto) | Opens source page at task line. Already implemented. |
-| `.` | Go to today | `.` (go to today) | Scroll to Today section in the Agenda. |
-| `gr` | Refresh | `gr` (refresh) | Re-run BQL query, rebuild view. |
-| `q` | Close view | `q` (quit) | `:q` already works. `q` in Normal mode as shortcut. |
-
-#### Bulk (future)
-
-| Key | Action | Doom equivalent | Notes |
-|-----|--------|----------------|-------|
-| `m` | Mark entry | `m` (mark) | Visual indicator on marked tasks. |
-| `x` | Execute on marks | `x` (bulk execute) | Apply action (toggle, refile, etc.) to all marked. |
-| `u` | Unmark | `u` (unmark) | Clear mark on current entry. |
-| `U` | Unmark all | `M U` (remove all marks) | Clear all marks. |
-
-#### Not adopted (Org-specific, no Bloom equivalent)
-
-| Doom key | Org function | Why skipped |
-|----------|-------------|-------------|
-| `I` / `O` | Clock in/out | No time tracking in Bloom. |
-| `ce` | Set effort | No effort estimates in Bloom. |
-| `J` / `K` | Priority up/down | `@priority` not implemented yet. Add when needed. |
-| `$` | Archive | No archive concept. Done tasks filtered by views. |
-| `F` | Follow mode | Live preview of source — nice to have, not essential. |
-
-#### Migration note
-
-Current `x` = toggle task. Doom convention: `t` = toggle, `x` = bulk execute. Migrate toggle from `x` to `t`. This frees `x` for future bulk operations and aligns with the Org muscle memory that many users will have.
-
----
-
-### Comparison: Structured edits vs Editable Agenda
-
-| Dimension | Structured edits (current path) | Editable Agenda (target regions) |
-|-----------|-------------------------------|----------------------------------|
-| **Toggle task** | `t` key (Doom convention) | Same (or `dd` = mark done) |
-| **Edit task text** | Enter → jump to source → edit → come back | Edit inline, Esc to propagate |
-| **Change due date** | `d` key → mini-prompt | Edit `@due(...)` inline with Vim motions |
-| **Shift due date** | `H` / `L` (earlier / later) | Same |
-| **Add tag** | `+` key → mini-prompt | Type `#tag` inline |
-| **Snooze** | `s` = tomorrow, `ss` = next week | Same |
-| **New task** | SPC x a (quick capture) | `o` routes to today's journal |
-| **Vim grammar** | Full — buffer is read-only, all navigation works | Within-line: full. Cross-line: Agenda semantics. |
-| **Section headers** | In buffer, read-only — not a problem | Fence lines — ephemeral, rebuilt on refresh |
-| **Undo** | N/A — structured edits are atomic | Works via view undo → propagation |
-| **BQL** | Returns flat rows, view formats | Returns flat rows, view groups into regions |
-| **Implementation cost** | ~50 lines per structured edit | ~200 lines (fence rebuild, propagation, cursor restore) |
-| **Risk** | Low — proven by toggle | Medium — cross-line semantics, undo coherence |
-
-### Where each wins
-
-**Structured edits win when:** The operation is bounded and well-defined (toggle, set date, add tag). The user doesn't need to think about buffer mechanics. The view stays clean and predictable.
-
-**Editable Agenda wins when:** The user wants to do something unanticipated — fix a typo, reword a task, add inline notes. These are the "long tail" of edits that structured commands can't cover. The target region model makes this safe: block-ID identity for propagation, fence lines rebuilt on refresh, cursor restored by block ID.
-
-### Decision: Keep views read-only, expand structured edits
-
-**BQL views and editable mirroring are separate concerns.** Mixing them conflates a query surface (derived, read-only, regenerated) with a mutation surface (identity-tracked, propagated). Org mode's 20+ year track record validates this separation — the Agenda is read-only + structured commands, not a free-text editor.
-
-The stress test above shows editable Agenda is *technically feasible* with target regions and block-ID identity. But feasibility ≠ correctness. The right path:
-
-1. **BQL views stay read-only.** They are query results. Source always wins. Structured edits (`x` toggle, `d` set date, `t` add tag, `s` snooze) operate on the source through the view, then the view re-renders. Same pattern as Org Agenda commands.
-
-2. **Block mirroring is a separate feature.** Same block ID in multiple files, kept in sync via MirrorEdit. This is file-to-file propagation, not view-to-source. The architecture is ready (MirrorEdit, composite PK, find_all_pages_by_block_id). Wire it when a clear use case demands it.
-
-3. **Drop BQL `group` clause.** Grouping (Overdue/Today/Upcoming) is a view-level concern — different views group differently. BQL returns flat rows. The renderer buckets them.
-
-**Prior art:** Org Agenda uses `org-marker` text properties (positional, break on reorg) for structured commands. Our block IDs are stronger (content-embedded, survive reorg) but we use them for the same purpose: identity for structured edits, not free-text propagation.
-
----
-
 ## Prior Art
-
-### Org mode Agenda
-
-The Agenda buffer is **read-only + structured commands.** Each line carries an `org-marker` text property — a live `(buffer, char-position)` reference to the source `.org` file. Commands operate on the source through the agenda:
-
-| Command | What it does |
-|---------|-------------|
-| `t` | Toggle TODO state in source file |
-| `C-c C-s` | Schedule/reschedule in source file |
-| `C-c C-d` | Set deadline in source file |
-| `C-k` | Kill subtree in source file |
-| `TAB` / `RET` | Jump to source location |
-
-After each command, `org-agenda-change-all-lines` refreshes the affected agenda lines. The user never edits the agenda buffer directly. 20+ years of validation.
-
-**Limitation:** `org-marker` is positional (buffer + char offset). If the source file is reorganized externally, markers break. Bloom's block IDs are content-embedded (`^xxxxx` in the text itself) — they survive reorganization, file moves, and even copy-paste across files.
-
-### Org Babel (source → results)
-
-Code blocks (`#+BEGIN_SRC`) produce results blocks (`#+RESULTS:`). Results are **always regenerated from source** — manual edits to results are overwritten on re-evaluation. "Source always wins."
-
-This is the same principle as BQL views: the query is the source of truth, the view is derived. Editing the derived output and reverse-mapping it to source is not supported — and not attempted.
 
 ### Notion synced blocks
 
-Notion's "synced blocks" duplicate a block across pages. Edit one copy, all copies update. Implementation: centralized server, real-time sync, CRDT-like conflict resolution. The synced block has a single canonical ID; all instances are "pointers" rendered inline.
+Notion duplicates a block across pages with a centralized server and CRDT-like conflict resolution. The synced block has a single canonical ID; all instances are rendered inline.
 
-**Difference from Bloom:** Notion is cloud-first with a sync server. Bloom is local-first with no server. Our MirrorEdit is synchronous in-memory propagation on a single thread — simpler, no conflicts possible in single-user.
+**Difference:** Notion is cloud-first with a sync server. Bloom is local-first with no server. MirrorEdit is synchronous in-memory propagation — simpler, no conflicts in single-user.
 
 ### Roam Research / Logseq block references
 
-Both use `((block-id))` syntax to embed a reference to a block. The reference renders the block content inline but edits to the reference are **not** propagated — you must edit the source block. This is a read-only transclusion, not mirroring.
+Both use `((block-id))` syntax to embed a reference to a block. The reference renders content inline but is **read-only** — edits don't propagate. This is transclusion, not mirroring.
 
-**Bloom's approach:** Block links (`[[^block_id|hint]]`) serve the same read-only reference role. Block mirroring (same `^id` in multiple files) goes further — both copies are equal co-owners, edits propagate via MirrorEdit. But we keep this separate from BQL views.
+**Bloom's approach:** Block links (`[[^block_id|hint]]`) serve the read-only reference role. Block mirroring (`^=`) goes further — all copies are editable, edits propagate via MirrorEdit.
 
 ---
 
@@ -489,4 +355,3 @@ Both use `((block-id))` syntax to embed a reference to a block. The reference re
 - [UNIFIED_BUFFER.md](UNIFIED_BUFFER.md) — BufferWriter architecture, MirrorEdit design, event bus
 - [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md) — vault-scoped block IDs that make mirroring possible
 - [TIME_TRAVEL.md](TIME_TRAVEL.md) — git history as the safety net
-- [LIVE_VIEWS.md](LIVE_VIEWS.md) — BQL views as the read-only alternative for cross-context visibility
