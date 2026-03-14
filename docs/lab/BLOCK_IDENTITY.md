@@ -429,7 +429,7 @@ CREATE TABLE block_ids (
 | Stale row cleanup | ✅ Solo blocks cleaned on re-index |
 | `^` → `^=` promotion | ✅ Automatic on index, rewrites files |
 | `^=` → `^` demotion | ✅ Automatic on index, rewrites files |
-| General text mirroring | ❌ ~30 lines to wire in post-edit hook |
+| General text mirroring | ✅ Propagates edited `^=` line to all peers on Esc |
 | Self-healing | ❌ Deferred (git-based repair pipeline) |
 
 ---

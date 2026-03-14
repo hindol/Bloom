@@ -1209,9 +1209,13 @@ impl BloomEditor {
                     if let Some(page_id) = self.active_page().cloned() {
                         let is_ro = self.writer.buffers().is_read_only(&page_id);
                         self.writer.apply(crate::BufferMessage::EndEditGroup { page_id: page_id.clone() });
-                        // Skip block IDs and alignment for read-only buffers
+                        // Skip block IDs, mirroring, and alignment for read-only buffers
                         if !is_ro {
                             self.ensure_block_ids(&page_id);
+                            // Mirror propagation: if cursor line has ^=, propagate to peers
+                            if was_insert {
+                                self.propagate_mirror_edit(&page_id);
+                            }
                         }
                     }
                     // Auto-align only on Insert→Normal transition, skip for read-only
@@ -1618,6 +1622,63 @@ impl BloomEditor {
             if let Some(prev) = vs.previous_page {
                 self.set_active_page(Some(prev));
             }
+        }
+    }
+
+    /// After Insert→Normal, if the cursor line has a `^=` mirror marker,
+    /// propagate the full line to all mirror peers via MirrorEdit.
+    fn propagate_mirror_edit(&mut self, page_id: &types::PageId) {
+        let cursor_line = self.cursor_position().0;
+        let (line_text, block_id) = {
+            let Some(buf) = self.writer.buffers().get(page_id) else {
+                return;
+            };
+            if cursor_line >= buf.len_lines() {
+                return;
+            }
+            let line_text = buf.line(cursor_line).to_string();
+            let bid = bloom_md::parser::extensions::parse_block_id(&line_text, cursor_line);
+            match bid {
+                Some(b) if b.is_mirror => (line_text, b.id.0),
+                _ => return, // not a mirror line — nothing to propagate
+            }
+        };
+
+        let Some(idx) = &self.index else { return };
+        let mirrors = idx.find_all_pages_by_block_id(&types::BlockId(block_id));
+        let new_trimmed = line_text.trim_end_matches('\n');
+
+        for (meta, mirror_line) in &mirrors {
+            if meta.id == *page_id {
+                continue; // skip the source page
+            }
+            // Load mirror page into buffer if needed
+            let need_load = self.writer.buffers().get(&meta.id).is_none();
+            if need_load {
+                let full = self
+                    .vault_root
+                    .as_ref()
+                    .map(|r| r.join(&meta.path))
+                    .unwrap_or_else(|| meta.path.clone());
+                if let Ok(content) = std::fs::read_to_string(&full) {
+                    self.writer.apply(crate::BufferMessage::Open {
+                        page_id: meta.id.clone(),
+                        title: meta.title.clone(),
+                        path: full,
+                        content,
+                    });
+                }
+            }
+            // Replace the mirror line
+            if let Some(buf) = self.writer.buffers_mut().get_mut(&meta.id) {
+                if *mirror_line < buf.len_lines() {
+                    let old_line = buf.line(*mirror_line).to_string();
+                    let old_trimmed = old_line.trim_end_matches('\n');
+                    let ls = buf.text().line_to_char(*mirror_line);
+                    buf.replace(ls..ls + old_trimmed.len(), new_trimmed);
+                }
+            }
+            self.save_page(&meta.id);
         }
     }
 
