@@ -127,13 +127,35 @@ One code path. No in-memory vs on-disk distinction.
 
 ## How This Relates to Mirroring
 
-Full block mirroring (MIRRORING.md) was parked because bidirectional sync across files is complex. The unified buffer model makes it simpler:
+Full block mirroring (MIRRORING.md) was parked because of 4 problems. The unified buffer model solves all of them:
 
-- Mirroring becomes: "when block `^k7m2x` is edited in any buffer, the writer finds all other buffers containing that block ID and applies the same edit."
-- The writer is the single mutation authority — no race conditions.
-- The file watcher is no longer needed for sync — the writer already knows which files changed.
+| Original problem | Solution |
+|---|---|
+| **Dirty-buffer prompt on mirror sync** | Writer updates both buffers synchronously before save. Self-write detection suppresses file watcher events. No prompt. |
+| **Cascading undos** | Mirror is one event → one propagation. Each buffer has an independent undo tree. Undo in source → mirror propagates reverted content. Undo in target → target diverges until next source save. |
+| **Silent file modification** | Mirroring is opt-in per block (user pastes a block with its ID into another file). Transient notification on mirror sync. |
+| **Last-write-wins race** | Single-threaded writer — all mutations serialized. No race condition. |
 
-This doesn't mean we should implement mirroring, but the architecture makes it feasible with minimal complexity.
+**One remaining edge case:** User edits the same mirrored line in two panes simultaneously. Mitigation: skip mirror if the target buffer's cursor is on the mirrored block (the user is actively editing there — their version wins on next save).
+
+**Mirror mechanics in the writer:**
+```
+writer.apply(Edit { page: tasks.md, block: k7m2x, ... })
+  → mutate tasks.md buffer
+  → index lookup: which other pages contain ^k7m2x?
+  → for each target page:
+      → skip if target cursor is on this block
+      → find line with ^k7m2x → replace with new content
+      → mark dirty → queue WriteRequest
+  → emit BlockChanged("k7m2x") → views refresh
+```
+
+**Mirror lifecycle:**
+- **Created:** User pastes a block preserving its `^id` into another file. Indexer detects duplicate block ID.
+- **Active:** Edits propagate via writer. Both files are equal co-owners.
+- **Broken:** Block deleted from one file — other copies become independent. No cascading delete.
+
+This doesn't mean we should implement mirroring immediately, but the architecture makes it feasible with ~50 lines in the writer's apply() method.
 
 ---
 
