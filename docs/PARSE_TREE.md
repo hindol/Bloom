@@ -1,7 +1,7 @@
 # Parse Tree Architecture
 
 > Persistent, incrementally-updated parse trees for each buffer.
-> Eliminates redundant parsing, enables fast semantic queries.
+> Enables instant semantic queries; rendering is already fast enough without caching.
 
 ---
 
@@ -15,15 +15,25 @@
 | `parse()` | On save, on index | Full document → `Document` (sections, links, tags, tasks) | Consumed by indexer, discarded |
 | `parse_frontmatter()` | On demand (open, navigate, picker) | YAML frontmatter → `Frontmatter` | Used once, discarded |
 
-### Problems
+### What's fast enough (benchmarked)
 
-1. **Redundant highlighting.** `highlight_line()` is called ~50× per frame at ~60fps = 3000 calls/second. Each call re-tokenizes the same line from scratch. If the buffer hasn't changed, all of this is wasted work.
+| Operation | Time | Per frame (60fps) |
+|-----------|------|--------------------|
+| `highlight_line()` — 1 line | **0.4µs** | — |
+| 50-line viewport highlight | **16µs** | 0.1% of 16ms budget |
+| Full document parse (1000 lines) | **741µs** | 4.6% of budget |
 
-2. **Context scanning.** `highlight_line()` takes a `LineContext { in_code_block, in_frontmatter }`. The renderer computes this by scanning from the top of the visible range. Editing line 500 requires scanning 500 lines to determine if you're inside a code fence.
+*Measured on Apple Silicon, release build.*
 
-3. **No live semantic data.** Features like "jump to heading," "validate link targets," or "find all tags on this page" require re-parsing the entire buffer. The indexer has this data (in SQLite) but it's stale until the next save+index cycle.
+At 50 lines × 60fps, total highlighting cost is **1.2ms/second** — negligible. The uncached rendering path is fast enough. Span caching would save ~16µs per frame, which is not worth the complexity.
 
-4. **Parse/highlight mismatch.** `parse()` produces a `Document` (structural), `highlight_line()` produces `Vec<StyledSpan>` (visual). These are separate parsers with no shared state. A bug in one doesn't show in the other.
+### What's NOT fast enough
+
+1. **Context scanning is O(N).** `highlight_line()` takes a `LineContext { in_code_block, in_frontmatter }`. The renderer computes this by scanning from line 0 (or the top of the visible range). Editing line 500 in a code-fence-heavy file requires scanning all preceding lines. Today this is cheap because code fences are rare in notes, but it's architecturally fragile.
+
+2. **No live semantic data.** "Jump to heading," "validate link targets," "find all tags on this page" require a full re-parse (~741µs). The indexer has this data in SQLite but it's stale until the next save+index cycle. For interactive features (autocomplete, go-to-definition), 741µs per query adds up.
+
+3. **Parse/highlight mismatch.** `parse()` produces a `Document` (structural), `highlight_line()` produces `Vec<StyledSpan>` (visual). These are separate code paths with no shared state. A bug in one doesn't show in the other.
 
 ### Parser Capabilities
 
@@ -144,50 +154,42 @@ This keeps the buffer and its parse tree in sync — they're created, closed, an
 
 ## What This Enables
 
+The primary value is **instant semantic queries**, not rendering performance.
+
 | Feature | Before | After |
 |---------|--------|-------|
-| Syntax highlighting | 3000 parse calls/sec | 0 (cached spans, re-parse on edit only) |
-| "Jump to heading" | Re-parse entire buffer | Scan `parse_tree.elements` — O(n) over cached data |
+| "Jump to heading" | Re-parse entire buffer (741µs) | Scan cached elements — O(n) over pre-built data |
 | "All links on page" | Re-parse entire buffer | Collect from cached `LineElements` |
-| "Am I in a code block?" | Scan from line 0 | Read `context_out` from previous line — O(1) |
-| Link validation | Wait for indexer | Immediate from cached elements |
-| Tag completion | Query SQLite | Collect from cached elements (for current buffer) |
+| "Am I in a code block?" | Scan from line 0 — O(N) | Read `context_out` from previous line — O(1) |
+| Link validation | Wait for indexer (save cycle) | Immediate from cached elements |
+| Tag completion | Query SQLite (stale until save) | Collect from cached elements (always fresh) |
+| Syntax highlighting | 16µs/frame (fast enough) | ~0µs if cached (marginal improvement) |
 
 ---
 
 ## Implementation Plan
 
-1. **Define `ParseTree` and `LineState` structs** in bloom-md (or bloom-core).
-2. **Build initial ParseTree** on buffer open (full parse, populate all LineStates).
+Priority order based on benchmarks:
+
+### P1 — Structural element cache (when features need it)
+Build a persistent `ParseTree` that caches structural elements (headings, links, tags, tasks, block IDs) per line. Incrementally update on edit. This is the gate for: jump-to-heading, inline link validation, tag completion, and live structural queries.
+
+### P2 — Line-end context cache (nice to have)
+Store line-end context (`in_code_block`, `in_frontmatter`) for all lines. Eliminates O(N) context scan. Low urgency — code fences are rare in notes and the scan is fast — but it's architecturally clean and a prerequisite for proper incremental invalidation.
+
+### P3 — Viewport span cache (not needed)
+Cache rendered `Vec<StyledSpan>` for visible lines. Would save ~16µs per frame. **Not worth the complexity.** Only reconsider if profiling shows highlight cost growing (e.g., complex syntax extensions, very wide lines).
+
+### Steps (for P1 + P2)
+
+1. **Define `ParseTree` and `LineEndContext` structs** in bloom-md (or bloom-core).
+2. **Build initial ParseTree** on buffer open (full parse, populate all line states).
 3. **Wire incremental invalidation** in `BufferWriter::apply(Edit)` — mark dirty range.
-4. **Lazy re-parse in render** — re-parse dirty lines, update LineState, clear dirty.
-5. **Migrate highlight path** — render reads `parse_tree.spans()` instead of calling `highlight_line()`.
-6. **Migrate structural queries** — link following, tag completion, heading jump use ParseTree elements.
-7. **Remove redundant parse calls** — `parse_frontmatter()` on demand → read from ParseTree.
+4. **Context propagation** — if line N's context_out changes, cascade until stable.
+5. **Migrate structural queries** — link following, tag completion, heading jump use ParseTree elements.
+6. **Remove redundant parse calls** — `parse_frontmatter()` on demand → read from ParseTree.
 
-## Performance — Measured, Not Estimated
-
-Benchmarked on Apple Silicon, release build:
-
-| Operation | Time | Per frame (60fps) |
-|-----------|------|--------------------|
-| `highlight_line()` — 1 line | **0.4µs** | — |
-| 50-line viewport highlight | **16µs** | 0.1% of 16ms budget |
-| Full document parse (1000 lines) | **741µs** | 4.6% of budget |
-
-**Current parsing is already sub-millisecond for the viewport.** At 50 lines × 60fps, total highlighting cost is 1.2ms/second. This means:
-
-- **The parse tree cache is NOT needed for rendering performance.** The uncached path is fast enough.
-- **The parse tree IS needed for semantic queries** — jump to heading, find all links, validate link targets, tag completion from current buffer. These currently require a full re-parse (~741µs) or waiting for the indexer.
-- **The line-end context cache is still valuable** — it eliminates the O(N) context scan from line 0 to determine `in_code_block` at the cursor position.
-
-### Revised priority
-
-| Feature | Value | Urgency |
-|---------|-------|---------|
-| Viewport span cache | Low — 16µs is fine uncached | Not needed |
-| Line-end context cache | Medium — eliminates O(N) scan | Nice to have |
-| Structural element cache | High — enables instant semantic queries | When features need it |
+Step 5 is the payoff. Steps 1–4 are infrastructure. Don't build 1–4 until a feature in step 5 is needed.
 
 ---
 
@@ -248,8 +250,8 @@ The `LineElements` (links, tags, tasks) are NOT cached per-line. They come from 
 
 1. **Where does ParseTree live?** Alongside BufferSlot in BufferWriter (parallel HashMap) or bundled into a `ManagedBuffer` struct? Bundled is cleaner but requires changing BufferManager's storage type.
 
-2. **Frozen buffers.** Read-only view buffers don't need incremental re-parse (content never changes). Build the ParseTree once on freeze and never invalidate. Simple.
+2. **Frozen buffers.** Read-only view buffers don't need incremental re-parse (content never changes). Build the ParseTree once on freeze and never invalidate.
 
-3. **Thread safety.** ParseTree is accessed by the render path (read) and the edit path (write). Both are on the UI thread currently, so no issue. If we ever move rendering to a separate thread, the ParseTree would need to be behind an Arc<RwLock> or double-buffered.
+3. **Thread safety.** ParseTree is accessed by the render path (read) and the edit path (write). Both are on the UI thread currently, so no issue. If we ever move rendering to a separate thread, the ParseTree would need to be behind an `Arc<RwLock>` or double-buffered.
 
-4. **Memory cost.** ~9KB per buffer (line-end contexts + viewport span cache). See Memory Model section below.
+4. **When to build.** Don't build the parse tree infrastructure until a concrete feature needs it (jump-to-heading, inline link validation, tag completion). The rendering path is already fast enough without it.
