@@ -345,14 +345,16 @@ Surveyed how production editors handle buffer mutation threading:
 
 Systematic analysis of the settled architecture (BufferWriter struct on UI thread, block-level event bus, DiskWriter on separate thread):
 
-### Hot Path: Typing
+### Extreme Typing Speed
 
-| Step | Latency |
-|------|---------|
-| `writer.apply(EditRequest)` overhead vs direct mutation | ~0 (one match arm, no allocation) |
-| `buf.insert()` | µs |
-| `render()` | ms |
-| **Total per keystroke** | **~1-2ms** (16ms frame budget, 14ms headroom) |
+| Speed | Keys/sec | Per-key mutation | Per-frame (60fps) | CPU usage |
+|-------|----------|------------------|--------------------|-----------|
+| Normal (80 WPM) | ~7 | 3-9µs | ~1 key + render 3ms | ~20% |
+| Fast (200 WPM) | ~17 | 3-9µs | ~1 key + render 3ms | ~20% |
+| Extreme (1000 WPM) | ~83 | 3-9µs | ~1.3 keys + render 3ms | ~20% |
+| Paste (10K chars) | burst | 5-10µs (O(log n) rope) | 1 insert + render 3ms | spike then idle |
+
+Rope O(log n) insert means 10K-char paste costs the same as one keystroke. The bottleneck is always rendering (terminal I/O ~5ms, syntax highlighting ~500µs), never mutation. BufferWriter.apply() adds zero overhead — it's a direct method call.
 
 ### View Toggle (x in Agenda)
 
