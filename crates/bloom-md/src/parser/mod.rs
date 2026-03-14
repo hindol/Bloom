@@ -13,3 +13,6 @@ pub mod traits;
 
 pub use markdown::BloomMarkdownParser;
 pub use traits::*;
+
+// Re-export line-level parsing API for callers outside bloom-md.
+pub use extensions::{extract_link_at_col, parse_line, LineElements};

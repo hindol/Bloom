@@ -7,50 +7,8 @@
 use crate::*;
 use bloom_md::parser::traits::DocumentParser;
 
-/// Extract the link target from a `[[...]]` pattern at the given column.
-/// Returns either a page ID hex string or `^block_id` for block links.
-pub(crate) fn extract_link_at_col(line: &str, col: usize) -> Option<String> {
-    let byte_col = line
-        .char_indices()
-        .nth(col)
-        .map(|(i, _)| i)
-        .unwrap_or(line.len());
-    let bytes = line.as_bytes();
-    let len = bytes.len();
-    if byte_col >= len {
-        return None;
-    }
-
-    // Search backwards for [[
-    let mut start = None;
-    let mut i = byte_col.min(len.saturating_sub(1));
-    while i > 0 {
-        if i > 0 && bytes[i - 1] == b'[' && bytes[i] == b'[' {
-            start = Some(i + 1);
-            break;
-        }
-        // If we hit ]], we're not inside a link
-        if i > 0 && bytes[i - 1] == b']' && bytes[i] == b']' {
-            return None;
-        }
-        i -= 1;
-    }
-    let content_start = start?;
-
-    // Search forward for ]]
-    let mut j = content_start;
-    while j + 1 < len {
-        if bytes[j] == b']' && bytes[j + 1] == b']' {
-            let content = &line[content_start..j];
-            let target = content.split('|').next().unwrap_or(content);
-            // Block-only link: [[^block_id|text]] → return "^block_id"
-            // Page link: [[page_id|text]] → return "page_id"
-            return Some(target.to_string());
-        }
-        j += 1;
-    }
-    None
-}
+/// Re-export from parser — single source of truth for link-at-cursor extraction.
+pub(crate) use bloom_md::parser::extract_link_at_col;
 
 impl BloomEditor {
     pub fn open_page_with_content(

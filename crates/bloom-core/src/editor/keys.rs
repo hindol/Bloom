@@ -1672,17 +1672,9 @@ impl BloomEditor {
                 let new_trimmed = new_text.trim_end_matches('\n');
                 buf.replace(line_start..line_start + old_trimmed.len(), new_trimmed);
                 toggled_new_text = Some(new_trimmed.to_string());
-                // Extract block ID from the line (^xxxxx or ^=xxxxx at end)
-                if let Some(caret_pos) = old_trimmed.rfind(" ^") {
-                    let after_caret = &old_trimmed[caret_pos + 2..];
-                    let suffix = after_caret.strip_prefix('=').unwrap_or(after_caret);
-                    if suffix.len() == 5
-                        && suffix
-                            .chars()
-                            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
-                    {
-                        block_id_on_line = Some(suffix.to_string());
-                    }
+                // Extract block ID via parser
+                if let Some(bid) = bloom_md::parser::extensions::parse_block_id(old_trimmed, *line) {
+                    block_id_on_line = Some(bid.id.0);
                 }
             }
         }

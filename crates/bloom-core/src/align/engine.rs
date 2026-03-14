@@ -1,4 +1,5 @@
 use bloom_buffer::Buffer;
+use bloom_md::parser::extensions::LineElements;
 use unicode_width::UnicodeWidthStr;
 
 // ===========================================================================
@@ -107,27 +108,12 @@ fn find_block_bounds(lines: &[String], cursor: usize, pred: fn(&str) -> bool) ->
 
 /// Split trailing ` ^xxxxx` block ID from line content.
 fn split_block_id(line: &str) -> (&str, &str) {
-    if let Some(pos) = line.rfind(" ^") {
-        let after_caret = &line[pos + 2..];
-        // Handle both ^xxxxx and ^=xxxxx
-        let id_part = after_caret.strip_prefix('=').unwrap_or(after_caret);
-        if id_part.len() == 5
-            && id_part
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
-        {
-            return (&line[..pos], &line[pos..]);
-        }
-    }
-    (line, "")
+    LineElements::split_block_id(line)
 }
 
 /// Find the byte position of the first `@due(`, `@start(`, or `@at(`.
 fn find_first_timestamp(line: &str) -> Option<usize> {
-    ["@due(", "@start(", "@at("]
-        .iter()
-        .filter_map(|p| line.find(p))
-        .min()
+    LineElements::first_timestamp_pos(line)
 }
 
 /// Move #tags that appear after @timestamps to before the first @.

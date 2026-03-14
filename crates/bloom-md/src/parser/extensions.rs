@@ -336,6 +336,121 @@ pub fn parse_task(line: &str, line_number: usize) -> Option<ParsedTask> {
     })
 }
 
+// ===========================================================================
+// Unified per-line parse
+// ===========================================================================
+
+/// Structural elements extracted from a single line.
+#[derive(Debug, Clone, Default)]
+pub struct LineElements {
+    pub links: Vec<ParsedLink>,
+    pub block_links: Vec<ParsedBlockLink>,
+    pub tags: Vec<ParsedTag>,
+    pub timestamps: Vec<ParsedTimestamp>,
+    pub task: Option<ParsedTask>,
+    pub block_id: Option<ParsedBlockId>,
+}
+
+impl LineElements {
+    /// True if the line is a task (`- [ ]` or `- [x]`).
+    pub fn is_task(&self) -> bool {
+        self.task.is_some()
+    }
+
+    /// True if the line starts with `- ` (task or plain list item).
+    pub fn is_list_item(line: &str) -> bool {
+        line.trim_start().starts_with("- ")
+    }
+
+    /// The block ID string (without `^` or `^=` prefix), if present.
+    pub fn block_id_str(&self) -> Option<&str> {
+        self.block_id.as_ref().map(|b| b.id.0.as_str())
+    }
+
+    /// Split line text into `(content, block_id_suffix)`.
+    /// `block_id_suffix` includes the leading ` ^` or ` ^=`, e.g. `" ^k7m2x"`.
+    /// Returns `(line, "")` if no block ID.
+    pub fn split_block_id(line: &str) -> (&str, &str) {
+        if let Some(pos) = line.rfind(" ^") {
+            let after_caret = &line[pos + 2..];
+            let id_part = after_caret.strip_prefix('=').unwrap_or(after_caret);
+            if id_part.len() == 5
+                && id_part
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+            {
+                return (&line[..pos], &line[pos..]);
+            }
+        }
+        (line, "")
+    }
+
+    /// Find the byte position of the first `@due(`, `@start(`, or `@at(`.
+    pub fn first_timestamp_pos(line: &str) -> Option<usize> {
+        ["@due(", "@start(", "@at("]
+            .iter()
+            .filter_map(|p| line.find(p))
+            .min()
+    }
+}
+
+/// Parse all structural elements from a single line.
+/// One call replaces scattered manual parsing of block IDs, tasks,
+/// timestamps, tags, and links.
+pub fn parse_line(line: &str, line_number: usize) -> LineElements {
+    let (links, block_links) = parse_links(line, line_number);
+    LineElements {
+        links,
+        block_links,
+        tags: parse_tags(line, line_number),
+        timestamps: parse_timestamps(line, line_number),
+        task: parse_task(line, line_number),
+        block_id: parse_block_id(line, line_number),
+    }
+}
+
+/// Extract the link target from a `[[...]]` pattern at the given column.
+/// Returns either a page ID hex string or `^block_id` for block links.
+pub fn extract_link_at_col(line: &str, col: usize) -> Option<String> {
+    let byte_col = line
+        .char_indices()
+        .nth(col)
+        .map(|(i, _)| i)
+        .unwrap_or(line.len());
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    if byte_col >= len {
+        return None;
+    }
+
+    // Search backwards for [[
+    let mut start = None;
+    let mut i = byte_col.min(len.saturating_sub(1));
+    while i > 0 {
+        if i > 0 && bytes[i - 1] == b'[' && bytes[i] == b'[' {
+            start = Some(i + 1);
+            break;
+        }
+        if i > 0 && bytes[i - 1] == b']' && bytes[i] == b']' {
+            return None;
+        }
+        i -= 1;
+    }
+    let content_start = start?;
+
+    // Search forward for ]]
+    let mut j = content_start;
+    while j + 1 < len {
+        if bytes[j] == b']' && bytes[j + 1] == b']' {
+            let content = &line[content_start..j];
+            let target = content.split('|').next().unwrap_or(content);
+            return Some(target.to_string());
+        }
+        j += 1;
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
