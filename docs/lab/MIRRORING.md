@@ -372,29 +372,19 @@ Not a problem today (single-user app). Worth noting as a future constraint.
 
 **Editable Agenda wins when:** The user wants to do something unanticipated — fix a typo, reword a task, add inline notes. These are the "long tail" of edits that structured commands can't cover. The target region model makes this safe: block-ID identity for propagation, fence lines rebuilt on refresh, cursor restored by block ID.
 
-### A hybrid path
+### Decision: Keep views read-only, expand structured edits
 
-They're not mutually exclusive:
+**BQL views and editable mirroring are separate concerns.** Mixing them conflates a query surface (derived, read-only, regenerated) with a mutation surface (identity-tracked, propagated). Org mode's 20+ year track record validates this separation — the Agenda is read-only + structured commands, not a free-text editor.
 
-1. **Phase 1:** Structured edits on read-only Agenda — `x` toggle (done), `d` set date, `t` add tag, `s` snooze. Low risk, immediate value.
+The stress test above shows editable Agenda is *technically feasible* with target regions and block-ID identity. But feasibility ≠ correctness. The right path:
 
-2. **Phase 2:** Editable Agenda with target regions. Verbatim task lines + ephemeral fence lines. Structured edit keys still work as shortcuts. Inline Vim editing for everything else. Propagation on Insert→Normal. Refresh rebuilds regions. ~200 lines.
+1. **BQL views stay read-only.** They are query results. Source always wins. Structured edits (`x` toggle, `d` set date, `t` add tag, `s` snooze) operate on the source through the view, then the view re-renders. Same pattern as Org Agenda commands.
 
-Phase 1 is valuable on its own. Phase 2 is additive — structured edit keys become convenient shortcuts for common operations that also work via inline editing.
+2. **Block mirroring is a separate feature.** Same block ID in multiple files, kept in sync via MirrorEdit. This is file-to-file propagation, not view-to-source. The architecture is ready (MirrorEdit, composite PK, find_all_pages_by_block_id). Wire it when a clear use case demands it.
 
----
+3. **Drop BQL `group` clause.** Grouping (Overdue/Today/Upcoming) is a view-level concern — different views group differently. BQL returns flat rows. The renderer buckets them.
 
-### Verdict
-
-The editable Agenda via block mirroring **holds under stress.** The target region model solves the section header problem cleanly: fence lines are ephemeral buffer lines without block IDs, rebuilt on every refresh. Task lines are verbatim source content with block IDs, propagated via MirrorEdit on Esc.
-
-**The model is: flat BQL query → view groups into target regions → buffer has fence lines + task lines → edits propagate by block ID → refresh rebuilds regions, restores cursor by block ID.**
-
-The hard problems (cross-line semantics, undo coherence) are design choices, not blockers. `dd` = mark done and `o` = quick capture are defensible Agenda semantics.
-
-BQL `group` clause can be dropped. Grouping is a view-level concern — different views group differently (by due date, by tag, by page). The query returns flat rows. The renderer knows how to bucket them.
-
-**Recommended path:** Phase 1 structured edits → Phase 2 editable Agenda with target regions. Phase 1 keys become shortcuts in Phase 2.
+**Prior art:** Org Agenda uses `org-marker` text properties (positional, break on reorg) for structured commands. Our block IDs are stronger (content-embedded, survive reorg) but we use them for the same purpose: identity for structured edits, not free-text propagation.
 
 ---
 
