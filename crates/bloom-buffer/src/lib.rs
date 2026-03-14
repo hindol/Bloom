@@ -65,6 +65,7 @@ impl ReadOnly<Buffer> {
     /// Access inner buffer mutably for cursor positioning.
     /// Cursor is a viewport concern — not a content mutation.
     pub fn set_cursor(&mut self, idx: usize, pos: usize) {
+        self.0.ensure_cursors(idx + 1);
         self.0.set_cursor(idx, pos);
     }
 }

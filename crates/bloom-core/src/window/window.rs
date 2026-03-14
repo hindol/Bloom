@@ -43,6 +43,8 @@ pub enum PaneKind {
 pub struct PaneState {
     pub page_id: Option<PageId>,
     pub viewport: Viewport,
+    /// Index into the buffer's cursor vec. Each pane gets its own cursor.
+    pub cursor_idx: usize,
 }
 
 impl Clone for PaneState {
@@ -50,6 +52,7 @@ impl Clone for PaneState {
         Self {
             page_id: self.page_id.clone(),
             viewport: Viewport::new(self.viewport.height, self.viewport.width),
+            cursor_idx: self.cursor_idx,
         }
     }
 }
@@ -314,6 +317,7 @@ impl WindowManager {
             PaneState {
                 page_id: None,
                 viewport: Viewport::new(24, 80),
+                cursor_idx: 0,
             },
         );
         Self {
@@ -378,7 +382,9 @@ impl WindowManager {
         self.pane_kinds.insert(new_pane, PaneKind::Editor);
 
         // Clone active pane's state for the new pane (Vim :vsplit behavior)
-        if let Some(state) = self.pane_states.get(&self.active).cloned() {
+        if let Some(mut state) = self.pane_states.get(&self.active).cloned() {
+            // New pane gets its own cursor index so cursors move independently
+            state.cursor_idx = new_pane.0 as usize;
             self.pane_states.insert(new_pane, state);
         } else {
             self.pane_states.insert(
@@ -386,6 +392,7 @@ impl WindowManager {
                 PaneState {
                     page_id: None,
                     viewport: Viewport::new(24, 80),
+                    cursor_idx: 0,
                 },
             );
         }
@@ -702,6 +709,7 @@ impl WindowManager {
                 PaneState {
                     page_id: None,
                     viewport: Viewport::new(24, 80),
+                    cursor_idx: 0,
                 },
             );
             self.pane_kinds.insert(id, PaneKind::Editor);

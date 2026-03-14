@@ -935,6 +935,7 @@ impl BloomEditor {
                 range: bracket_start..bracket_start + 3,
                 replacement: "[x]".to_string(),
                 cursor_after: cursor,
+                cursor_idx: self.active_cursor_idx(),
             });
         } else if trimmed.starts_with("- [x] ") || trimmed.starts_with("- [X] ") {
             // Checked → unchecked
@@ -944,6 +945,7 @@ impl BloomEditor {
                 range: bracket_start..bracket_start + 3,
                 replacement: "[ ]".to_string(),
                 cursor_after: cursor,
+                cursor_idx: self.active_cursor_idx(),
             });
         }
     }
@@ -1038,6 +1040,7 @@ impl BloomEditor {
                 range: bracket_start..bracket_start + 3,
                 replacement: "[x]".to_string(),
                 cursor_after: bracket_start + 3,
+                cursor_idx: self.active_cursor_idx(),
             });
         } else if trimmed.starts_with("- [x] ") || trimmed.starts_with("- [X] ") {
             let bracket_start = line_start + indent + 2;
@@ -1046,6 +1049,7 @@ impl BloomEditor {
                 range: bracket_start..bracket_start + 3,
                 replacement: "[ ]".to_string(),
                 cursor_after: bracket_start + 3,
+                cursor_idx: self.active_cursor_idx(),
             });
         }
     }
@@ -1135,6 +1139,7 @@ impl BloomEditor {
                         range: edit.range.clone(),
                         replacement: edit.replacement.clone(),
                         cursor_after: edit.cursor_after,
+                        cursor_idx: self.active_cursor_idx(),
                     });
                 }
                 // Check for inline completion triggers after an edit in Insert mode
@@ -1457,6 +1462,7 @@ impl BloomEditor {
                     range: start..cursor,
                     replacement,
                     cursor_after: new_cursor,
+                    cursor_idx: self.active_cursor_idx(),
                 });
             }
             InlineCompletionKind::Tag => {
@@ -1469,6 +1475,7 @@ impl BloomEditor {
                     range: start..cursor,
                     replacement,
                     cursor_after: new_cursor,
+                    cursor_idx: self.active_cursor_idx(),
                 });
             }
         }

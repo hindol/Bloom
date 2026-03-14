@@ -245,10 +245,23 @@ impl BufferManager {
     }
 
     /// Set cursor position on any buffer (mutable or frozen).
-    /// Cursor movement is a viewport concern, not a content mutation.
     pub fn set_cursor(&mut self, page_id: &types::PageId, pos: usize) {
+        self.set_cursor_idx(page_id, 0, pos);
+    }
+
+    /// Set cursor position for a specific cursor index (per-pane cursors).
+    pub fn set_cursor_idx(&mut self, page_id: &types::PageId, idx: usize, pos: usize) {
         if let Some((slot, _)) = self.buffers.get_mut(&page_id.to_hex()) {
-            slot.set_cursor(0, pos);
+            // Ensure the buffer has enough cursors
+            match slot {
+                BufferSlot::Mutable(buf) => {
+                    buf.ensure_cursors(idx + 1);
+                    buf.set_cursor(idx, pos);
+                }
+                BufferSlot::Frozen(ro) => {
+                    ro.set_cursor(idx, pos);
+                }
+            }
         }
     }
 }
@@ -265,6 +278,8 @@ pub enum BufferMessage {
         range: std::ops::Range<usize>,
         replacement: String,
         cursor_after: usize,
+        /// Which cursor to position after the edit (pane-specific).
+        cursor_idx: usize,
     },
     /// Mirror-propagated edit — same as Edit but does NOT trigger further
     /// mirror propagation or BlockChanged events. Prevents circular notifications.
@@ -336,7 +351,7 @@ impl BufferWriter {
     /// Returns true if the mutation was applied (buffer exists and is mutable).
     pub fn apply(&mut self, msg: BufferMessage) -> bool {
         match msg {
-            BufferMessage::Edit { page_id, range, replacement, cursor_after } => {
+            BufferMessage::Edit { page_id, range, replacement, cursor_after, cursor_idx } => {
                 if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                     if replacement.is_empty() && !range.is_empty() {
                         buf.delete(range);
@@ -345,7 +360,8 @@ impl BufferWriter {
                     } else {
                         buf.replace(range, &replacement);
                     }
-                    buf.set_cursor(0, cursor_after);
+                    buf.ensure_cursors(cursor_idx + 1);
+                    buf.set_cursor(cursor_idx, cursor_after);
                     true
                 } else {
                     false
@@ -853,9 +869,10 @@ impl BloomEditor {
     // -----------------------------------------------------------------------
 
     pub(crate) fn cursor(&self) -> usize {
+        let cidx = self.active_cursor_idx();
         if let Some(page_id) = self.active_page() {
             if let Some(buf) = self.writer.buffers().get(page_id) {
-                return buf.cursor(0);
+                return buf.cursor(cidx);
             }
         }
         tracing::warn!("cursor() called with no active page/buffer — returning 0");
@@ -863,11 +880,20 @@ impl BloomEditor {
     }
 
     pub(crate) fn set_cursor(&mut self, pos: usize) {
+        let cidx = self.active_cursor_idx();
         if let Some(page_id) = self.active_page().cloned() {
-            self.writer.apply(crate::BufferMessage::SetCursor { page_id, pos });
+            self.writer.buffers_mut().set_cursor_idx(&page_id, cidx, pos);
         } else {
             tracing::error!(pos, "set_cursor: no active page!");
         }
+    }
+
+    /// Get the cursor index for the active pane.
+    fn active_cursor_idx(&self) -> usize {
+        self.window_mgr
+            .pane_state(self.window_mgr.active_pane())
+            .map(|s| s.cursor_idx)
+            .unwrap_or(0)
     }
 
     pub(crate) fn active_page(&self) -> Option<&types::PageId> {

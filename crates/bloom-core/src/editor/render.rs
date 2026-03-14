@@ -125,7 +125,7 @@ impl BloomEditor {
                             let dirty = !self.writer.buffers().is_read_only(page_id) && buf.is_dirty();
                             let lines = self.render_buffer_lines_with_viewport(buf, &ps.viewport);
                             let (cl, cc) =
-                                Self::cursor_position_for(buf.cursor(0), buf, &self.vim_state);
+                                Self::cursor_position_for(buf.cursor(ps.cursor_idx), buf, &self.vim_state);
                             (
                                 title,
                                 dirty,
