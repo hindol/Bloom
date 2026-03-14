@@ -127,7 +127,7 @@ One code path. No in-memory vs on-disk distinction.
 
 ## How This Relates to Mirroring
 
-Full block mirroring (MIRRORING.md) was parked because of 4 problems. The unified buffer model solves all of them:
+Full block mirroring (BLOCK_IDENTITY.md § Mirror Markers) was parked because of 4 problems. The unified buffer model solves all of them:
 
 | Original problem | Solution |
 |---|---|
@@ -405,6 +405,6 @@ Rope O(log n) insert means 10K-char paste costs the same as one keystroke. The b
 ## References
 
 - [ARCHITECTURE.md](../ARCHITECTURE.md) — current threading model
-- [MIRRORING.md](MIRRORING.md) — block mirroring (parked, enabled by this architecture)
+- [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md) — block identity and mirroring (enabled by this architecture)
 - [GOALS.md G17](../GOALS.md) — MCP background buffers and eviction
 - Elm Architecture: https://guide.elm-lang.org/architecture/
