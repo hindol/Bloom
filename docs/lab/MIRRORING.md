@@ -178,6 +178,172 @@ Current propagation is line-level (one block = one line). Multi-line blocks (par
 
 ---
 
+## Stress Test: Editable Views via Block Mirroring
+
+> **Premise:** BQL returns blocks with IDs. If we make saved views editable, edits flow back to source pages through the mirroring pipeline. Journal view = mirrored blocks. Toggle is already trivial. Does this generalize?
+
+### How it would work
+
+```
+User opens Agenda view (BQL: tasks | where not done | sort due)
+  → query returns rows with (page_id, line, block_id, text)
+  → view renders as mutable buffer (not frozen)
+  → row_map maps each buffer line → source (page_id, line, block_id)
+  → user edits a line in the view
+  → reverse-map: find source page + line from row_map
+  → apply(Edit) to source buffer
+  → apply(MirrorEdit) to all other mirrors
+  → view re-renders from fresh query
+```
+
+### Showstopper 1: Projection mismatch
+
+The view reformats content. Source and view lines are structurally different:
+
+```
+Source:  - [ ] Review the ropey API @due(2026-03-10) ^k7m2x
+View:    [ ] Review the ropey API  @due(2026-03-10)  (Rust Programming)
+```
+
+Differences:
+- View strips `- ` list prefix
+- View strips `^block_id` suffix
+- View adds `  (page_title)` suffix
+- View normalizes whitespace around `@due`
+
+**If the user edits the view line and we write it back to source, we corrupt the source.** The list prefix is gone. The block ID is gone. The page title suffix is foreign content. There is no clean reverse-mapping from the projected form back to source.
+
+**Mitigation:** Render source lines verbatim in the view. But then the view loses its formatted presentation — it's just a list of raw markdown lines. The whole point of a view is formatted projection.
+
+**Conclusion: Free-text editing of formatted views is fundamentally broken.** The projection is lossy and non-invertible.
+
+### Showstopper 2: Row map invalidation
+
+`row_map[line_index]` maps buffer lines to source. Any edit that adds or removes lines shifts all subsequent indices:
+
+```
+Before:  row_map[5] = Source { page_id: A, line: 42 }
+User does `dd` on line 3
+After:   row_map[5] still points to the OLD line 5's source
+         but buffer line 5 now shows what was line 6
+```
+
+Every line add/delete silently corrupts the mapping. Propagation writes the wrong content to the wrong source line. Data loss.
+
+**Mitigation:** Re-build row_map after every edit. But this requires re-running the BQL query and re-rendering — at which point we've replaced the buffer content, losing the user's cursor, scroll, and in-progress edit.
+
+**Alternative:** Use block IDs embedded in line text for identity instead of positional mapping. Parse `^xxxxx` from the edited line to find the source. This works but requires block IDs to survive in the view text (back to "render verbatim" problem from Showstopper 1).
+
+### Problem 3: New content has no home
+
+User presses `o` (Vim: open line below) in the view. A new empty line appears. Where does it go?
+
+- No page_id in the row_map for this line
+- No block ID
+- Which source file should own it?
+- If it's a journal view spanning 7 days, which day's file?
+
+Heuristic: inherit the source page from the line above. But what if the cursor is on a section header? Or between sections from different pages?
+
+**Conclusion:** New line insertion in views is undefined without explicit routing rules.
+
+### Problem 4: Undo incoherence
+
+```
+1. User edits task in view → propagates to source page A
+2. User presses `u` (undo) in view → view buffer reverts
+3. Source page A still has the edit
+4. View and source are now out of sync
+```
+
+To fix: undo must also propagate to source. But `BufferMessage::Undo` operates on a single buffer. We'd need a "transaction undo" that reverts the view buffer AND the source buffer AND all mirrors atomically. This is CRDT territory — exactly what we decided not to build.
+
+**Mitigation:** Re-render view from scratch after undo (re-query). User loses their cursor position. Acceptable? Probably not for frequent undo/redo cycles.
+
+### Problem 5: Stale view during concurrent edits
+
+User has source page in pane 1, view in pane 2:
+
+```
+1. User adds a new task line in pane 1 (source)
+2. Source buffer now has different line numbers
+3. View's row_map still points to old line numbers
+4. User toggles a task in pane 2 (view)
+5. row_map[cursor_line].line is now WRONG
+6. Toggle hits the wrong line in source
+```
+
+Without event bus subscriptions (not wired yet), the view has no way to know the source changed. Even with the event bus, a full re-render on every source edit makes the view jumpy and unpredictable.
+
+---
+
+### What DOES work: Structured edits on read-only views
+
+The existing toggle (`x` key) works perfectly because it:
+
+1. **Reads from source, not the view.** It loads the source buffer, finds the line, flips the checkbox there.
+2. **Re-renders the entire view afterward.** Fresh query, fresh row_map, no stale state.
+3. **Is a bounded transformation.** Toggle knows exactly what to change — one character (`[ ]` ↔ `[x]`). No projection-reversal needed.
+
+This pattern generalizes to other **structured edits**:
+
+| Structured edit | What it changes in source |
+|----------------|---------------------------|
+| Toggle task (`x`) | `[ ]` ↔ `[x]` — already works |
+| Set due date (`d`) | Replace `@due(...)` or append it |
+| Add tag (`t`) | Append `#tag` to the line |
+| Remove tag (`T`) | Remove `#tag` from the line |
+| Set priority (`p`) | Replace `@priority(...)` |
+| Snooze (`s`) | Update `@due(...)` to tomorrow/next week |
+| Move to page (`m`) | Cut block from source, paste into target |
+
+Each is a well-defined transformation on the **source line**, not the view line. The view re-renders after each operation. No projection reversal, no row_map invalidation, no undo incoherence.
+
+**This is the correct path for BQL views.** Expand the set of structured edits rather than making the buffer freely editable.
+
+---
+
+### What about Journal specifically?
+
+The journal use case is different from general BQL views because:
+
+1. **Content IS raw markdown.** A journal "today" view shows task lines verbatim — there's no lossy projection.
+2. **Single source page.** Today's journal entries all live in one file. New lines have an obvious home.
+3. **Block IDs are present.** Every list item has a `^xxxxx` suffix.
+
+This means a **journal mirror document** could work:
+
+```
+Virtual document (not a query result):
+  - [ ] Review the ropey API @due(2026-03-10) ^k7m2x
+  - [ ] Fix parser bug @due(2026-03-12) ^a3b4c
+  - Morning standup notes ^p9q8r
+```
+
+Each line is verbatim from the journal page. Block IDs provide identity. Edits propagate via block ID lookup (not positional row_map). New lines go to today's journal page.
+
+**But this is NOT an "editable BQL view."** It's a separate concept — a **virtual page** that concatenates blocks from source pages. It bypasses BQL entirely. The rendering is verbatim (no projection), the identity is block-ID-based (not positional), and the source routing is explicit (today's journal page).
+
+---
+
+### Decision Matrix
+
+| Approach | Projection problem | Row map problem | New content | Undo | Complexity |
+|----------|-------------------|-----------------|-------------|------|------------|
+| **Free-text editable views** | 🔴 Showstopper | 🔴 Showstopper | 🔴 Undefined | 🔴 Incoherent | High |
+| **Structured edits on read-only views** | ✅ N/A (reads source) | ✅ N/A (re-renders) | ✅ N/A | ✅ N/A (atomic) | Low |
+| **Journal mirror document** | ✅ Verbatim lines | ✅ Block-ID identity | 🟡 Route to today | 🟡 Per-buffer undo | Medium |
+
+### Recommendation
+
+1. **BQL views:** Stay read-only. Expand structured edits (toggle, set date, add tag, snooze, move). Re-render after each. This is clean, predictable, already proven by toggle.
+
+2. **Journal:** Build a separate virtual/mirror page concept. Not a BQL query result. Verbatim source lines with block-ID-based propagation. This is the right abstraction for "editable collection of blocks from known source pages."
+
+3. **Don't conflate the two.** The insight "BQL returns block IDs, so views could be editable" is appealing but the projection mismatch makes it fundamentally unsound for free-text editing. The correct generalization is: BQL provides the *query*, structured edits provide the *mutations*, and the view re-renders between operations.
+
+---
+
 ## References
 
 - [UNIFIED_BUFFER.md](UNIFIED_BUFFER.md) — BufferWriter architecture, MirrorEdit design, event bus
