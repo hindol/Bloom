@@ -266,6 +266,13 @@ pub enum BufferMessage {
         replacement: String,
         cursor_after: usize,
     },
+    /// Mirror-propagated edit — same as Edit but does NOT trigger further
+    /// mirror propagation or BlockChanged events. Prevents circular notifications.
+    MirrorEdit {
+        page_id: types::PageId,
+        range: std::ops::Range<usize>,
+        replacement: String,
+    },
     /// Toggle a task checkbox by block ID (resolves page via index).
     ToggleTask { block_id: String },
     /// Undo last edit.
@@ -324,6 +331,21 @@ impl BufferWriter {
                         buf.replace(range, &replacement);
                     }
                     buf.set_cursor(0, cursor_after);
+                    true
+                } else {
+                    false
+                }
+            }
+            BufferMessage::MirrorEdit { page_id, range, replacement } => {
+                // Same as Edit but no event bus emission, no further mirror propagation.
+                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                    if replacement.is_empty() && !range.is_empty() {
+                        buf.delete(range);
+                    } else if range.is_empty() {
+                        buf.insert(range.start, &replacement);
+                    } else {
+                        buf.replace(range, &replacement);
+                    }
                     true
                 } else {
                     false

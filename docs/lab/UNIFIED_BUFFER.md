@@ -142,13 +142,15 @@ Full block mirroring (MIRRORING.md) was parked because of 4 problems. The unifie
 ```
 writer.apply(Edit { page: tasks.md, block: k7m2x, ... })
   → mutate tasks.md buffer
+  → emit BlockChanged("k7m2x") → views refresh
   → index lookup: which other pages contain ^k7m2x?
   → for each target page:
       → skip if target cursor is on this block
-      → find line with ^k7m2x → replace with new content
+      → writer.apply(MirrorEdit { ... })  ← does NOT emit events or re-trigger mirrors
       → mark dirty → queue WriteRequest
-  → emit BlockChanged("k7m2x") → views refresh
 ```
+
+**Circular prevention:** `MirrorEdit` is a separate message variant from `Edit`. It applies the same rope mutation but does NOT emit `BlockChanged` and does NOT trigger further mirror propagation. This is the single mechanism that prevents infinite loops. One flag, checked in one place.
 
 **Mirror lifecycle:**
 - **Created:** User pastes a block preserving its `^id` into another file. Indexer detects duplicate block ID.
