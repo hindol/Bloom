@@ -160,9 +160,14 @@ impl BloomEditor {
         }
     }
 
-    /// Assign block IDs and save if the active buffer is dirty.
-    /// Skipped for read-only buffers (views, logs).
+    /// Save if the active buffer is dirty.
+    /// Skipped during Insert mode (mid-edit, partial state) and for read-only buffers.
+    /// Autosave fires naturally when Insert→Normal transition completes
+    /// (after edit group close, block IDs, and alignment).
     fn autosave_if_dirty(&mut self) {
+        if matches!(self.vim_state.mode(), bloom_vim::Mode::Insert) {
+            return; // Don't save mid-edit
+        }
         if let Some(page_id) = self.active_page().cloned() {
             if !self.writer.buffers().is_read_only(&page_id) {
                 self.save_page(&page_id);
