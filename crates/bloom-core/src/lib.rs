@@ -257,6 +257,31 @@ impl BufferManager {
 // BufferWriter — single mutation authority for all buffers
 // ---------------------------------------------------------------------------
 
+/// Messages that mutate buffer state.
+pub enum BufferMessage {
+    /// Insert/delete/replace text in a buffer.
+    Edit {
+        page_id: types::PageId,
+        range: std::ops::Range<usize>,
+        replacement: String,
+        cursor_after: usize,
+    },
+    /// Undo last edit.
+    Undo { page_id: types::PageId },
+    /// Redo last undo.
+    Redo { page_id: types::PageId },
+    /// Mark buffer as clean (after successful disk write).
+    MarkClean { page_id: types::PageId },
+    /// Begin an edit group (for atomic undo).
+    BeginEditGroup { page_id: types::PageId },
+    /// End an edit group.
+    EndEditGroup { page_id: types::PageId },
+    /// Set cursor position.
+    SetCursor { page_id: types::PageId, pos: usize },
+    /// Set selection anchor.
+    SetAnchor { page_id: types::PageId, anchor: Option<usize> },
+}
+
 /// Centralizes all buffer mutations behind a single `apply()` method.
 /// Owns the BufferManager. Read access via `buffers()` / `buffers_mut()`.
 /// This is the Elm-inspired "update" function — all mutations flow through here.
@@ -279,6 +304,80 @@ impl BufferWriter {
     /// Mutable access to the buffer manager (transitional — will be replaced by apply() messages).
     pub fn buffers_mut(&mut self) -> &mut BufferManager {
         &mut self.buffer_mgr
+    }
+
+    /// Apply a mutation message to the appropriate buffer.
+    /// Returns true if the mutation was applied (buffer exists and is mutable).
+    pub fn apply(&mut self, msg: BufferMessage) -> bool {
+        match msg {
+            BufferMessage::Edit { page_id, range, replacement, cursor_after } => {
+                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                    if replacement.is_empty() && !range.is_empty() {
+                        buf.delete(range);
+                    } else if range.is_empty() {
+                        buf.insert(range.start, &replacement);
+                    } else {
+                        buf.replace(range, &replacement);
+                    }
+                    buf.set_cursor(0, cursor_after);
+                    true
+                } else {
+                    false
+                }
+            }
+            BufferMessage::Undo { page_id } => {
+                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                    buf.undo();
+                    true
+                } else {
+                    false
+                }
+            }
+            BufferMessage::Redo { page_id } => {
+                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                    buf.redo();
+                    true
+                } else {
+                    false
+                }
+            }
+            BufferMessage::MarkClean { page_id } => {
+                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                    buf.mark_clean();
+                    true
+                } else {
+                    false
+                }
+            }
+            BufferMessage::BeginEditGroup { page_id } => {
+                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                    buf.begin_edit_group();
+                    true
+                } else {
+                    false
+                }
+            }
+            BufferMessage::EndEditGroup { page_id } => {
+                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                    buf.end_edit_group();
+                    true
+                } else {
+                    false
+                }
+            }
+            BufferMessage::SetCursor { page_id, pos } => {
+                self.buffer_mgr.set_cursor(&page_id, pos);
+                true
+            }
+            BufferMessage::SetAnchor { page_id, anchor } => {
+                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
+                    buf.set_anchor(0, anchor);
+                    true
+                } else {
+                    false
+                }
+            }
+        }
     }
 }
 
@@ -683,7 +782,7 @@ impl BloomEditor {
 
     pub(crate) fn set_cursor(&mut self, pos: usize) {
         if let Some(page_id) = self.active_page().cloned() {
-            self.writer.buffers_mut().set_cursor(&page_id, pos);
+            self.writer.apply(crate::BufferMessage::SetCursor { page_id, pos });
         } else {
             tracing::error!(pos, "set_cursor: no active page!");
         }
@@ -1311,7 +1410,7 @@ mod tests {
         editor.handle_key(KeyEvent::char('i')); // enter insert mode
         editor.handle_key(KeyEvent::char('H'));
         editor.handle_key(KeyEvent::char('i'));
-        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let buf = editor.writer.buffers().get(&id).unwrap();
         assert_eq!(buf.text().to_string(), "Hi");
     }
 
@@ -1326,7 +1425,7 @@ mod tests {
         editor.handle_key(KeyEvent::char('a'));
         editor.handle_key(KeyEvent::enter());
         editor.handle_key(KeyEvent::char('b'));
-        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let buf = editor.writer.buffers().get(&id).unwrap();
         assert_eq!(buf.text().to_string(), "a\nb");
     }
 
@@ -1341,7 +1440,7 @@ mod tests {
         editor.handle_key(KeyEvent::char('a'));
         editor.handle_key(KeyEvent::char('b'));
         editor.handle_key(KeyEvent::backspace());
-        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let buf = editor.writer.buffers().get(&id).unwrap();
         assert_eq!(buf.text().to_string(), "a");
     }
 
@@ -1364,7 +1463,7 @@ mod tests {
         });
         // Type 'c' — should appear after "ab"
         editor.handle_key(KeyEvent::char('c'));
-        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let buf = editor.writer.buffers().get(&id).unwrap();
         assert_eq!(buf.text().to_string(), "abc");
         // Still in insert mode
         let frame = editor.render(80, 24);
@@ -1391,7 +1490,7 @@ mod tests {
         assert_eq!(frame.panes[0].cursor.column, 0);
         // Type on the new line
         editor.handle_key(KeyEvent::char('!'));
-        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let buf = editor.writer.buffers().get(&id).unwrap();
         let text = buf.text().to_string();
         assert_eq!(text, "hello\n!\nworld\n");
     }
@@ -1414,7 +1513,7 @@ mod tests {
         assert_eq!(frame.panes[0].cursor.line, 0);
         assert_eq!(frame.panes[0].cursor.column, 0);
         editor.handle_key(KeyEvent::char('!'));
-        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let buf = editor.writer.buffers().get(&id).unwrap();
         let text = buf.text().to_string();
         assert_eq!(text, "!\nhello\nworld\n");
     }
@@ -1432,7 +1531,7 @@ mod tests {
         assert_eq!(frame.panes[0].cursor.line, 1);
         assert_eq!(frame.panes[0].cursor.column, 0);
         editor.handle_key(KeyEvent::char('!'));
-        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let buf = editor.writer.buffers().get(&id).unwrap();
         let text = buf.text().to_string();
         assert_eq!(text, "hello\n!");
     }
@@ -1510,7 +1609,7 @@ mod tests {
 
         // Buffer should be "abc"
         let buf = editor
-            .buffer_mgr
+            .writer.buffers()
             .get(&editor.active_page().cloned().unwrap())
             .unwrap();
         assert_eq!(buf.text().to_string(), "abc");
@@ -1518,7 +1617,7 @@ mod tests {
         // One undo should revert the entire insert session
         editor.handle_key(KeyEvent::char('u'));
         let buf = editor
-            .buffer_mgr
+            .writer.buffers()
             .get(&editor.active_page().cloned().unwrap())
             .unwrap();
         assert_eq!(buf.text().to_string(), "");
@@ -2034,11 +2133,11 @@ mod tests {
         editor.handle_key(KeyEvent::char('i'));
         editor.handle_key(KeyEvent::char('X'));
         editor.handle_key(KeyEvent::esc());
-        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let buf = editor.writer.buffers().get(&id).unwrap();
         assert_eq!(buf.text().to_string(), "Xhello");
         // Undo
         editor.handle_key(KeyEvent::char('u'));
-        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let buf = editor.writer.buffers().get(&id).unwrap();
         assert_eq!(buf.text().to_string(), "hello");
     }
 
@@ -2053,11 +2152,11 @@ mod tests {
         editor.handle_key(KeyEvent::char('X'));
         editor.handle_key(KeyEvent::esc());
         editor.handle_key(KeyEvent::char('u')); // undo
-        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let buf = editor.writer.buffers().get(&id).unwrap();
         assert_eq!(buf.text().to_string(), "hello");
         // Redo
         editor.handle_key(KeyEvent::ctrl('r'));
-        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let buf = editor.writer.buffers().get(&id).unwrap();
         assert_eq!(buf.text().to_string(), "Xhello");
     }
 
@@ -2401,7 +2500,7 @@ mod tests {
         editor.handle_key(KeyEvent::char('d'));
         editor.handle_key(KeyEvent::char('w'));
 
-        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let buf = editor.writer.buffers().get(&id).unwrap();
         assert_eq!(buf.text().to_string(), "world");
     }
 
@@ -2425,7 +2524,7 @@ mod tests {
 
         // Undo "b"
         editor.handle_key(KeyEvent::char('u'));
-        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let buf = editor.writer.buffers().get(&id).unwrap();
         assert_eq!(buf.text().to_string(), "a");
 
         // Now insert "c" — this creates a branch
@@ -2433,7 +2532,7 @@ mod tests {
         editor.handle_key(KeyEvent::char('c'));
         editor.handle_key(KeyEvent::esc());
 
-        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let buf = editor.writer.buffers().get(&id).unwrap();
         let text = buf.text().to_string();
         assert!(text.contains('c'), "branch edit should be present: {text}");
 
@@ -2461,7 +2560,7 @@ mod tests {
         );
 
         // Verify the initial content has unchecked and checked tasks
-        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let buf = editor.writer.buffers().get(&id).unwrap();
         let text = buf.text().to_string();
         assert!(
             text.contains("- [ ] buy milk"),
@@ -2479,7 +2578,7 @@ mod tests {
         editor.handle_key(KeyEvent::char('r')); // replace mode
         editor.handle_key(KeyEvent::char('x')); // replace space with x
 
-        let buf = editor.buffer_mgr.get(&id).unwrap();
+        let buf = editor.writer.buffers().get(&id).unwrap();
         let result = buf.text().to_string();
         assert!(
             result.contains("- [x] buy milk"),

@@ -257,8 +257,9 @@ impl BloomEditor {
                 }
                 keymap::dispatch::Action::Undo => {
                     if let Some(page_id) = self.active_page().cloned() {
-                        if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
-                            buf.undo();
+                        self.writer.apply(crate::BufferMessage::Undo { page_id: page_id.clone() });
+                        // Fix cursor bounds after undo
+                        if let Some(buf) = self.writer.buffers().get(&page_id) {
                             let len = buf.len_chars();
                             if self.cursor() > len {
                                 self.set_cursor(len.saturating_sub(1));
@@ -268,8 +269,9 @@ impl BloomEditor {
                 }
                 keymap::dispatch::Action::Redo => {
                     if let Some(page_id) = self.active_page().cloned() {
-                        if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
-                            buf.redo();
+                        self.writer.apply(crate::BufferMessage::Redo { page_id: page_id.clone() });
+                        // Fix cursor bounds after redo
+                        if let Some(buf) = self.writer.buffers().get(&page_id) {
                             let len = buf.len_chars();
                             if self.cursor() > len {
                                 self.set_cursor(len.saturating_sub(1));
@@ -902,7 +904,7 @@ impl BloomEditor {
             return;
         };
         let cursor = self.cursor();
-        let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) else {
+        let Some(buf) = self.writer.buffers().get(&page_id) else {
             return;
         };
         let rope = buf.text();
@@ -921,11 +923,21 @@ impl BloomEditor {
         if trimmed.starts_with("- [ ] ") {
             // Unchecked → checked
             let bracket_start = line_start + indent + 2; // position of '['
-            buf.replace(bracket_start..bracket_start + 3, "[x]");
+            self.writer.apply(crate::BufferMessage::Edit {
+                page_id,
+                range: bracket_start..bracket_start + 3,
+                replacement: "[x]".to_string(),
+                cursor_after: cursor,
+            });
         } else if trimmed.starts_with("- [x] ") || trimmed.starts_with("- [X] ") {
             // Checked → unchecked
             let bracket_start = line_start + indent + 2;
-            buf.replace(bracket_start..bracket_start + 3, "[ ]");
+            self.writer.apply(crate::BufferMessage::Edit {
+                page_id,
+                range: bracket_start..bracket_start + 3,
+                replacement: "[ ]".to_string(),
+                cursor_after: cursor,
+            });
         }
     }
 
@@ -984,7 +996,7 @@ impl BloomEditor {
     #[allow(dead_code)]
     pub(crate) fn toggle_task_in_page(&mut self, page_id: &types::PageId, line: usize) {
         // Ensure the page is loaded in a buffer
-        let needs_load = self.writer.buffers_mut().get(page_id).is_none();
+        let needs_load = self.writer.buffers().get(page_id).is_none();
         if needs_load {
             if let Some(idx) = &self.index {
                 if let Some(meta) = idx.find_page_by_id(page_id) {
@@ -995,7 +1007,7 @@ impl BloomEditor {
                 }
             }
         }
-        let Some(buf) = self.writer.buffers_mut().get_mut(page_id) else {
+        let Some(buf) = self.writer.buffers().get(page_id) else {
             return;
         };
         let rope = buf.text();
@@ -1010,10 +1022,20 @@ impl BloomEditor {
 
         if trimmed.starts_with("- [ ] ") {
             let bracket_start = line_start + indent + 2;
-            buf.replace(bracket_start..bracket_start + 3, "[x]");
+            self.writer.apply(crate::BufferMessage::Edit {
+                page_id: page_id.clone(),
+                range: bracket_start..bracket_start + 3,
+                replacement: "[x]".to_string(),
+                cursor_after: bracket_start + 3,
+            });
         } else if trimmed.starts_with("- [x] ") || trimmed.starts_with("- [X] ") {
             let bracket_start = line_start + indent + 2;
-            buf.replace(bracket_start..bracket_start + 3, "[ ]");
+            self.writer.apply(crate::BufferMessage::Edit {
+                page_id: page_id.clone(),
+                range: bracket_start..bracket_start + 3,
+                replacement: "[ ]".to_string(),
+                cursor_after: bracket_start + 3,
+            });
         }
     }
 
@@ -1093,16 +1115,12 @@ impl BloomEditor {
                 self.pending_since = None;
                 self.which_key_visible = false;
                 if let Some(page_id) = self.active_page().cloned() {
-                    if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
-                        if edit.replacement.is_empty() {
-                            buf.delete(edit.range.clone());
-                        } else if edit.range.is_empty() {
-                            buf.insert(edit.range.start, &edit.replacement);
-                        } else {
-                            buf.replace(edit.range.clone(), &edit.replacement);
-                        }
-                        self.set_cursor(edit.cursor_after);
-                    }
+                    self.writer.apply(crate::BufferMessage::Edit {
+                        page_id: page_id.clone(),
+                        range: edit.range.clone(),
+                        replacement: edit.replacement.clone(),
+                        cursor_after: edit.cursor_after,
+                    });
                 }
                 // Check for inline completion triggers after an edit in Insert mode
                 if matches!(self.vim_state.mode(), bloom_vim::Mode::Insert) {
@@ -1159,17 +1177,13 @@ impl BloomEditor {
                 // Edit group lifecycle: begin on Insert entry, end on Insert exit
                 if matches!(mode, bloom_vim::Mode::Insert) {
                     if let Some(page_id) = self.active_page().cloned() {
-                        if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
-                            buf.begin_edit_group();
-                        }
+                        self.writer.apply(crate::BufferMessage::BeginEditGroup { page_id });
                     }
                 } else if matches!(mode, bloom_vim::Mode::Normal) {
                     // Leaving Insert (or Visual, Command) → close any open group
                     if let Some(page_id) = self.active_page().cloned() {
-                        let is_ro = self.writer.buffers_mut().is_read_only(&page_id);
-                        if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
-                            buf.end_edit_group();
-                        }
+                        let is_ro = self.writer.buffers().is_read_only(&page_id);
+                        self.writer.apply(crate::BufferMessage::EndEditGroup { page_id: page_id.clone() });
                         // Skip block IDs and alignment for read-only buffers
                         if !is_ro {
                             self.ensure_block_ids(&page_id);
@@ -1412,10 +1426,6 @@ impl BloomEditor {
 
         let cursor = self.cursor();
 
-        let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) else {
-            return;
-        };
-
         match ic.kind {
             InlineCompletionKind::Link => {
                 // Replace from [[ (trigger_pos - 2) to cursor with [[id|label]]
@@ -1426,16 +1436,24 @@ impl BloomEditor {
                     item.label
                 );
                 let new_cursor = start + replacement.len();
-                buf.replace(start..cursor, &replacement);
-                self.set_cursor(new_cursor);
+                self.writer.apply(crate::BufferMessage::Edit {
+                    page_id,
+                    range: start..cursor,
+                    replacement,
+                    cursor_after: new_cursor,
+                });
             }
             InlineCompletionKind::Tag => {
                 // Replace from # (trigger_pos - 1) to cursor with #tagname
                 let start = ic.trigger_pos.saturating_sub(1);
                 let replacement = format!("#{}", item.label);
                 let new_cursor = start + replacement.len();
-                buf.replace(start..cursor, &replacement);
-                self.set_cursor(new_cursor);
+                self.writer.apply(crate::BufferMessage::Edit {
+                    page_id,
+                    range: start..cursor,
+                    replacement,
+                    cursor_after: new_cursor,
+                });
             }
         }
     }

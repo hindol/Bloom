@@ -19,10 +19,10 @@ impl BloomEditor {
             let _ = tx.send(history::HistoryRequest::FileDirty);
         }
 
-        if let Some(page_id) = self.writer.buffers_mut().find_by_path(&wc.path).cloned() {
-            if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
+        if let Some(page_id) = self.writer.buffers().find_by_path(&wc.path).cloned() {
+            if let Some(buf) = self.writer.buffers().get(&page_id) {
                 if buf.is_dirty() {
-                    buf.mark_clean();
+                    self.writer.apply(crate::BufferMessage::MarkClean { page_id: page_id.clone() });
                     let filename = wc
                         .path
                         .file_name()
@@ -82,16 +82,16 @@ impl BloomEditor {
                 // Fingerprint matched — already marked clean in handle_write_complete
                 tracing::debug!(path = %path.display(), "self-write detected, skipping reload");
             } else if let Ok(disk_content) = std::fs::read_to_string(&path) {
-                let buf_content = self.writer.buffers_mut().get(&page_id).map(|b| b.text().to_string());
+                let buf_content = self.writer.buffers().get(&page_id).map(|b| b.text().to_string());
                 if buf_content.as_deref() == Some(disk_content.as_str()) {
-                    if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
+                    if let Some(buf) = self.writer.buffers().get(&page_id) {
                         if buf.is_dirty() {
-                            buf.mark_clean();
+                            self.writer.apply(crate::BufferMessage::MarkClean { page_id: page_id.clone() });
                             visual_changed = true;
                         }
                     }
                 } else {
-                    let is_dirty = self.writer.buffers_mut().get(&page_id).is_some_and(|b| b.is_dirty());
+                    let is_dirty = self.writer.buffers().get(&page_id).is_some_and(|b| b.is_dirty());
                     if is_dirty {
                         self.active_dialog = Some(ActiveDialog::FileChanged {
                             page_id,
@@ -172,9 +172,7 @@ impl BloomEditor {
         } else {
             // No DiskWriter (tests, pre-init). Inline atomic write.
             if bloom_store::disk_writer::atomic_write(&path, &content).is_ok() {
-                if let Some(buf) = self.writer.buffers_mut().get_mut(page_id) {
-                    buf.mark_clean();
-                }
+                self.writer.apply(crate::BufferMessage::MarkClean { page_id: page_id.clone() });
             }
         }
     }
