@@ -350,14 +350,72 @@ Not a problem today (single-user app). Worth noting as a future constraint.
 
 ---
 
+### Agenda keybindings (Doom Emacs / evil-org-agenda inspired)
+
+Following Doom Emacs conventions where possible. All keys operate on the task at cursor, through the source, then refresh the view.
+
+#### Task actions
+
+| Key | Action | Doom equivalent | Notes |
+|-----|--------|----------------|-------|
+| `t` | Toggle done | `t` (toggle TODO) | Flip `[ ]` ↔ `[x]` in source. Currently `x` — migrate to `t`. |
+| `d` | Set due date | `d` (set deadline) | Mini-prompt. Sets/replaces `@due(...)` in source line. |
+| `s` | Snooze | `s` (schedule) | Quick-set: `s` = tomorrow, `ss` = next week, `sd` = pick date. |
+| `H` | Due date earlier | `H` (date earlier) | Shift `@due` by −1 day. Repeat: `HH` = −2 days. |
+| `L` | Due date later | `L` (date later) | Shift `@due` by +1 day. Repeat: `LL` = +2 days. |
+
+#### Metadata
+
+| Key | Action | Doom equivalent | Notes |
+|-----|--------|----------------|-------|
+| `+` | Add tag | `:` (set tags) | Mini-prompt with tag completion from index. |
+| `-` | Remove tag | — | Mini-prompt listing tags on this task. |
+| `r` | Refile | `r` (refile) | Move task to another page. Picker for target. |
+
+#### Navigation
+
+| Key | Action | Doom equivalent | Notes |
+|-----|--------|----------------|-------|
+| `RET` | Jump to source | `RET` (goto) | Opens source page at task line. Already implemented. |
+| `.` | Go to today | `.` (go to today) | Scroll to Today section in the Agenda. |
+| `gr` | Refresh | `gr` (refresh) | Re-run BQL query, rebuild view. |
+| `q` | Close view | `q` (quit) | `:q` already works. `q` in Normal mode as shortcut. |
+
+#### Bulk (future)
+
+| Key | Action | Doom equivalent | Notes |
+|-----|--------|----------------|-------|
+| `m` | Mark entry | `m` (mark) | Visual indicator on marked tasks. |
+| `x` | Execute on marks | `x` (bulk execute) | Apply action (toggle, refile, etc.) to all marked. |
+| `u` | Unmark | `u` (unmark) | Clear mark on current entry. |
+| `U` | Unmark all | `M U` (remove all marks) | Clear all marks. |
+
+#### Not adopted (Org-specific, no Bloom equivalent)
+
+| Doom key | Org function | Why skipped |
+|----------|-------------|-------------|
+| `I` / `O` | Clock in/out | No time tracking in Bloom. |
+| `ce` | Set effort | No effort estimates in Bloom. |
+| `J` / `K` | Priority up/down | `@priority` not implemented yet. Add when needed. |
+| `$` | Archive | No archive concept. Done tasks filtered by views. |
+| `F` | Follow mode | Live preview of source — nice to have, not essential. |
+
+#### Migration note
+
+Current `x` = toggle task. Doom convention: `t` = toggle, `x` = bulk execute. Migrate toggle from `x` to `t`. This frees `x` for future bulk operations and aligns with the Org muscle memory that many users will have.
+
+---
+
 ### Comparison: Structured edits vs Editable Agenda
 
 | Dimension | Structured edits (current path) | Editable Agenda (target regions) |
 |-----------|-------------------------------|----------------------------------|
-| **Toggle task** | `x` key — works today | Same (or `dd` = mark done) |
+| **Toggle task** | `t` key (Doom convention) | Same (or `dd` = mark done) |
 | **Edit task text** | Enter → jump to source → edit → come back | Edit inline, Esc to propagate |
-| **Change due date** | `d` key → mini-prompt (not built) | Edit `@due(...)` inline with Vim motions |
-| **Add tag** | `t` key → mini-prompt (not built) | Type `#tag` inline with Vim motions |
+| **Change due date** | `d` key → mini-prompt | Edit `@due(...)` inline with Vim motions |
+| **Shift due date** | `H` / `L` (earlier / later) | Same |
+| **Add tag** | `+` key → mini-prompt | Type `#tag` inline |
+| **Snooze** | `s` = tomorrow, `ss` = next week | Same |
 | **New task** | SPC x a (quick capture) | `o` routes to today's journal |
 | **Vim grammar** | Full — buffer is read-only, all navigation works | Within-line: full. Cross-line: Agenda semantics. |
 | **Section headers** | In buffer, read-only — not a problem | Fence lines — ephemeral, rebuilt on refresh |
