@@ -266,6 +266,8 @@ pub enum BufferMessage {
         replacement: String,
         cursor_after: usize,
     },
+    /// Toggle a task checkbox by block ID (resolves page via index).
+    ToggleTask { block_id: String },
     /// Undo last edit.
     Undo { page_id: types::PageId },
     /// Redo last undo.
@@ -284,15 +286,17 @@ pub enum BufferMessage {
 
 /// Centralizes all buffer mutations behind a single `apply()` method.
 /// Owns the BufferManager. Read access via `buffers()` / `buffers_mut()`.
-/// This is the Elm-inspired "update" function — all mutations flow through here.
 pub struct BufferWriter {
     buffer_mgr: BufferManager,
+    /// Block-level event callbacks. Views register to be notified when specific blocks change.
+    block_watchers: std::collections::HashMap<String, Vec<Box<dyn Fn() + Send>>>,
 }
 
 impl BufferWriter {
     pub fn new() -> Self {
         Self {
             buffer_mgr: BufferManager::new(),
+            block_watchers: std::collections::HashMap::new(),
         }
     }
 
@@ -324,6 +328,11 @@ impl BufferWriter {
                 } else {
                     false
                 }
+            }
+            BufferMessage::ToggleTask { .. } => {
+                // Handled at BloomEditor level (needs index access).
+                // See BloomEditor::handle_view_toggle_task().
+                false
             }
             BufferMessage::Undo { page_id } => {
                 if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {

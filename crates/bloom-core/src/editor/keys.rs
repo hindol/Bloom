@@ -1533,34 +1533,47 @@ impl BloomEditor {
         // Everything else passes through to Vim — the buffer is read-only
         // so mutations are silently dropped. Close via :q or SPC b d.
         if matches!(self.vim_state.mode(), bloom_vim::Mode::Normal) {
-            if let types::KeyCode::Enter = &key.code {
-                let cursor_line = self.cursor_position().0;
-                let source = view_state.row_map.get(cursor_line).cloned();
-                if let Some(RowSource::Source {
-                    page_id,
-                    page_title,
-                    line,
-                    ..
-                }) = source
-                {
-                    self.close_active_view();
-                    if let Some(pid) = types::PageId::from_hex(&page_id) {
-                        if let Some(idx) = &self.index {
-                            if let Some(meta) = idx.find_page_by_id(&pid) {
-                                let full = self
-                                    .vault_root
-                                    .as_ref()
-                                    .map(|r| r.join(&meta.path))
-                                    .unwrap_or_else(|| meta.path.clone());
-                                if let Ok(content) = std::fs::read_to_string(&full) {
-                                    self.open_page_with_content(&pid, &page_title, &full, &content);
-                                    self.set_cursor(line);
+            match &key.code {
+                types::KeyCode::Enter => {
+                    let cursor_line = self.cursor_position().0;
+                    let source = view_state.row_map.get(cursor_line).cloned();
+                    if let Some(RowSource::Source {
+                        page_id,
+                        page_title,
+                        line,
+                        ..
+                    }) = source
+                    {
+                        self.close_active_view();
+                        if let Some(pid) = types::PageId::from_hex(&page_id) {
+                            if let Some(idx) = &self.index {
+                                if let Some(meta) = idx.find_page_by_id(&pid) {
+                                    let full = self
+                                        .vault_root
+                                        .as_ref()
+                                        .map(|r| r.join(&meta.path))
+                                        .unwrap_or_else(|| meta.path.clone());
+                                    if let Ok(content) = std::fs::read_to_string(&full) {
+                                        self.open_page_with_content(
+                                            &pid, &page_title, &full, &content,
+                                        );
+                                        self.set_cursor(line);
+                                    }
                                 }
                             }
                         }
                     }
+                    return vec![keymap::dispatch::Action::Noop];
                 }
-                return vec![keymap::dispatch::Action::Noop];
+                types::KeyCode::Char('x') => {
+                    // Toggle task at cursor line via RowSource
+                    let cursor_line = self.cursor_position().0;
+                    if let Some(source) = view_state.row_map.get(cursor_line).cloned() {
+                        self.handle_view_toggle_task(&source);
+                    }
+                    return vec![keymap::dispatch::Action::Noop];
+                }
+                _ => {}
             }
         }
         vec![] // Pass through to Vim
@@ -1576,6 +1589,66 @@ impl BloomEditor {
                 self.set_active_page(Some(prev));
             }
         }
+    }
+
+    /// Toggle a task from a view by finding the source line and flipping the checkbox.
+    /// Then re-render the view buffer with fresh BQL results.
+    fn handle_view_toggle_task(&mut self, source: &RowSource) {
+        let RowSource::Source { page_id, line, .. } = source else {
+            return;
+        };
+        let Some(pid) = types::PageId::from_hex(page_id) else {
+            return;
+        };
+
+        // Load the source page into a buffer if not already open
+        let need_load = self.writer.buffers().get(&pid).is_none();
+        if need_load {
+            if let Some(idx) = &self.index {
+                if let Some(meta) = idx.find_page_by_id(&pid) {
+                    let full = self
+                        .vault_root
+                        .as_ref()
+                        .map(|r| r.join(&meta.path))
+                        .unwrap_or_else(|| meta.path.clone());
+                    if let Ok(content) = std::fs::read_to_string(&full) {
+                        self.writer.buffers_mut().open(&pid, &meta.title, &full, &content);
+                    }
+                }
+            }
+        }
+
+        // Find the line and flip the checkbox
+        if let Some(buf) = self.writer.buffers_mut().get_mut(&pid) {
+            let line_count = buf.len_lines();
+            if *line < line_count {
+                let line_text = buf.line(*line).to_string();
+                let new_text = if line_text.contains("- [ ] ") {
+                    line_text.replacen("- [ ] ", "- [x] ", 1)
+                } else if line_text.contains("- [x] ") {
+                    line_text.replacen("- [x] ", "- [ ] ", 1)
+                } else {
+                    return; // not a task line
+                };
+                let line_start = buf.text().line_to_char(*line);
+                let old_trimmed = line_text.trim_end_matches('\n');
+                let new_trimmed = new_text.trim_end_matches('\n');
+                buf.replace(line_start..line_start + old_trimmed.len(), new_trimmed);
+            }
+        }
+
+        // Save the source page
+        self.save_page(&pid);
+
+        // Re-render the view with fresh results
+        if let Some(vs) = self.active_view.as_mut() {
+            if let Some(buf_id) = vs.buffer_id.take() {
+                self.writer.buffers_mut().close(&buf_id);
+            }
+        }
+        let mut vs = self.active_view.take().unwrap();
+        self.render_view_to_buffer(&mut vs);
+        self.active_view = Some(vs);
     }
 
     fn handle_view_prompt_key(
