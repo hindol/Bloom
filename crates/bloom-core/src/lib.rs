@@ -325,6 +325,7 @@ pub enum BufferMessage {
 pub struct BufferWriter {
     buffer_mgr: BufferManager,
     /// Block-level event callbacks. Views register to be notified when specific blocks change.
+    #[allow(dead_code)] // Event bus — wired when views subscribe
     block_watchers: std::collections::HashMap<String, Vec<Box<dyn Fn() + Send>>>,
 }
 
@@ -332,7 +333,8 @@ impl BufferWriter {
     pub fn new() -> Self {
         Self {
             buffer_mgr: BufferManager::new(),
-            block_watchers: std::collections::HashMap::new(),
+            #[allow(dead_code)] // Event bus — wired when views subscribe
+    block_watchers: std::collections::HashMap::new(),
         }
     }
 
@@ -789,6 +791,7 @@ pub(crate) struct QuickCaptureState {
 
 pub(crate) struct DatePickerState {
     pub(crate) selected_date: chrono::NaiveDate,
+    #[allow(dead_code)] // Used for future date picker variants
     pub(crate) purpose: keymap::dispatch::DatePickerPurpose,
     /// Pending bracket key for [d/]d skip navigation.
     pub(crate) pending_bracket: Option<char>,

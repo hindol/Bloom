@@ -71,7 +71,7 @@ pub fn draw_view(f: &mut Frame, view: &ViewFrame, theme: &TuiTheme) {
 
     // Reserve footer
     let footer_y = inner.y + inner.height - 1;
-    let content_h = footer_y.saturating_sub(y);
+    let _content_h = footer_y.saturating_sub(y);
 
     if view.rows.is_empty() {
         f.render_widget(

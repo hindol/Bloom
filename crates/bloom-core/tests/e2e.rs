@@ -3,7 +3,7 @@
 //! Each test drives BloomEditor through key sequences and asserts on the
 //! visual output. No terminal, no GUI — runs in CI.
 
-use bloom_test_harness::{SimInput, TestScreen, TestVault, linked_vault, task_vault, tagged_vault};
+use bloom_test_harness::{SimInput, TestVault, linked_vault, task_vault, tagged_vault};
 
 // -----------------------------------------------------------------------
 // UC-01: Open today's journal
@@ -777,6 +777,7 @@ fn vim_goto_line_start_end() {
 }
 
 #[test]
+#[allow(non_snake_case)]
 fn vim_gg_and_G() {
     let mut sim = SimInput::with_content("line 1\nline 2\nline 3\nline 4\nline 5\n");
 
@@ -918,6 +919,7 @@ fn vim_x_delete_char() {
 }
 
 #[test]
+#[allow(non_snake_case)]
 fn vim_X_delete_char_before() {
     let mut sim = SimInput::with_content("hello");
     sim.keys("l"); // move to 'e'
@@ -926,6 +928,7 @@ fn vim_X_delete_char_before() {
 }
 
 #[test]
+#[allow(non_snake_case)]
 fn vim_D_delete_to_eol() {
     let mut sim = SimInput::with_content("hello world\n");
     sim.keys("w"); // move to 'world'
@@ -936,6 +939,7 @@ fn vim_D_delete_to_eol() {
 }
 
 #[test]
+#[allow(non_snake_case)]
 fn vim_C_change_to_eol() {
     let mut sim = SimInput::with_content("hello world\n");
     sim.keys("w"); // move to 'world'
@@ -968,6 +972,7 @@ fn vim_cc_change_line() {
 }
 
 #[test]
+#[allow(non_snake_case)]
 fn vim_J_join_lines() {
     let mut sim = SimInput::with_content("hello\nworld\n");
     sim.keys("J");
@@ -1988,9 +1993,9 @@ fn view_buffer_vim_navigation() {
     assert_eq!(screen.title(), "Agenda");
 
     // j should move cursor down (not be blocked)
-    let (line_before, _) = screen.cursor();
+    let (_line_before, _) = screen.cursor();
     sim.keys("j");
-    let (line_after, _) = sim.screen(80, 24).cursor();
+    let (_line_after, _) = sim.screen(80, 24).cursor();
     // Cursor should have moved (if there's content) or stayed (if empty)
     // The key point: no crash, no error, key was processed
     assert_eq!(sim.screen(80, 24).mode(), "NORMAL");
