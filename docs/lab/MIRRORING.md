@@ -387,6 +387,44 @@ The stress test above shows editable Agenda is *technically feasible* with targe
 **Prior art:** Org Agenda uses `org-marker` text properties (positional, break on reorg) for structured commands. Our block IDs are stronger (content-embedded, survive reorg) but we use them for the same purpose: identity for structured edits, not free-text propagation.
 
 ---
+
+## Prior Art
+
+### Org mode Agenda
+
+The Agenda buffer is **read-only + structured commands.** Each line carries an `org-marker` text property — a live `(buffer, char-position)` reference to the source `.org` file. Commands operate on the source through the agenda:
+
+| Command | What it does |
+|---------|-------------|
+| `t` | Toggle TODO state in source file |
+| `C-c C-s` | Schedule/reschedule in source file |
+| `C-c C-d` | Set deadline in source file |
+| `C-k` | Kill subtree in source file |
+| `TAB` / `RET` | Jump to source location |
+
+After each command, `org-agenda-change-all-lines` refreshes the affected agenda lines. The user never edits the agenda buffer directly. 20+ years of validation.
+
+**Limitation:** `org-marker` is positional (buffer + char offset). If the source file is reorganized externally, markers break. Bloom's block IDs are content-embedded (`^xxxxx` in the text itself) — they survive reorganization, file moves, and even copy-paste across files.
+
+### Org Babel (source → results)
+
+Code blocks (`#+BEGIN_SRC`) produce results blocks (`#+RESULTS:`). Results are **always regenerated from source** — manual edits to results are overwritten on re-evaluation. "Source always wins."
+
+This is the same principle as BQL views: the query is the source of truth, the view is derived. Editing the derived output and reverse-mapping it to source is not supported — and not attempted.
+
+### Notion synced blocks
+
+Notion's "synced blocks" duplicate a block across pages. Edit one copy, all copies update. Implementation: centralized server, real-time sync, CRDT-like conflict resolution. The synced block has a single canonical ID; all instances are "pointers" rendered inline.
+
+**Difference from Bloom:** Notion is cloud-first with a sync server. Bloom is local-first with no server. Our MirrorEdit is synchronous in-memory propagation on a single thread — simpler, no conflicts possible in single-user.
+
+### Roam Research / Logseq block references
+
+Both use `((block-id))` syntax to embed a reference to a block. The reference renders the block content inline but edits to the reference are **not** propagated — you must edit the source block. This is a read-only transclusion, not mirroring.
+
+**Bloom's approach:** Block links (`[[^block_id|hint]]`) serve the same read-only reference role. Block mirroring (same `^id` in multiple files) goes further — both copies are equal co-owners, edits propagate via MirrorEdit. But we keep this separate from BQL views.
+
+---
 
 ## References
 
