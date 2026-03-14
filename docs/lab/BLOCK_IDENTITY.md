@@ -332,17 +332,67 @@ MirrorEdit updates B moments later → content matches again.
 
 ### 🟡 Scenario 7: Three-way promotion race
 
-New `^` alongside existing `^=` peers → compare content. Match → auto-promote. Mismatch → collision.
+```
+Page A: ^k7m2x (solo)
+User copies to B → saves (two ^ entries)
+External editor simultaneously copies to C
 
-### ✅ Scenario 8: Manual `^=` without peers → self-correcting demotion
+Indexer processes B first → A and B promoted to ^=
+Indexer processes C → C has ^, A and B have ^=
+Compare C content with ^= peers → matches → auto-promote C to ^=
+```
 
-### 🟡 Scenario 9: User removes `=` from mirror → re-promote if content matches
+Works if content matches. If content differs, C is flagged as collision.
 
-### 🟡 Scenario 10: External editor changes `^=` content → overwrite is defensible (`^=` = "keep me synced")
+### ✅ Scenario 8: Manual `^=` without peers
 
-### ✅ Scenario 11: Promotion during Insert mode → deferred
+```
+User types "- [ ] New task ^=k7m2x" (no other pages have this ID)
+Indexer: mirror_count == 1 but marker is ^=
+EnsureBlockIds: demote to ^k7m2x
+```
 
-### ✅ Scenario 12: Rapid edits → batched by Insert mode, one propagation on Esc
+Self-correcting. A `^=` with no peers is demoted to `^`.
+
+### 🟡 Scenario 9: User removes `=` from a mirror
+
+```
+A and B both have ^=k7m2x
+User edits A: changes ^=k7m2x to ^k7m2x
+Indexer: A has ^, B has ^= — mixed state
+Content matches → re-promote A to ^= (treat as accidental edit)
+Content differs → flag for user resolution
+```
+
+### 🟡 Scenario 10: External editor changes mirrored content
+
+```
+A, B, C all have ^=k7m2x with matching content
+External editor changes C's content (keeps ^=)
+User edits A → propagation fires
+MirrorEdit B → ✅ (content was in sync)
+MirrorEdit C → overwrites external editor's changes
+```
+
+**Defensible:** `^=` means "keep me synced." The external editor left the marker intact. If they didn't want sync, they should have removed the `=`. Bloom trusts inline markers.
+
+### ✅ Scenario 11: Promotion during active editing
+
+```
+User is editing page A in Insert mode
+Promotion wants to rewrite ^k7m2x → ^=k7m2x
+```
+
+Deferred. Promotion runs in `EnsureBlockIds`, a post-save hook. Auto-save is deferred during Insert mode. Promotion happens after Normal mode transition.
+
+### ✅ Scenario 12: Rapid successive edits
+
+```
+A and B both have ^=k7m2x
+User types 20 keystrokes in Insert mode → no propagation
+User presses Esc → ONE propagation with final content
+B gets one MirrorEdit, one save
+```
 
 ---
 
