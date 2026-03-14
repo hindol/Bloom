@@ -2,6 +2,56 @@
 
 All notable changes to Bloom.
 
+## 0.2.0-alpha — 2026-03-14
+
+### Features
+- **Journal redesign**: SPC j t (today), SPC j j (picker), SPC j c (calendar), [d/]d day-hopping
+- **Journal scrubber**: 3-line panel with stats, first task, separator lines, 3s auto-hide
+- **Live views**: BQL query execution with SPC v v (query prompt), SPC v l (list), SPC a a (agenda)
+- **Agenda section headers**: Overdue / Today / Upcoming based on due dates
+- **Unified buffer architecture**: BufferWriter struct, BufferMessage enum, all mutations via apply()
+- **Block mirroring**: toggle propagates to all pages containing same block ID
+- **Read-only buffers**: ReadOnly<Buffer> wrapper with freeze()/thaw(), full Vim navigation
+- **Per-pane cursors**: split panes navigate independently on the same buffer
+- **Theme live preview**: theme picker updates colors in real-time
+- **Autosave notification**: "✓ Saved filename.md" on each save
+- **Bracket motions**: [d/]d for journal, [l/]l for broken links (framework)
+- **BQL default limit**: 100 rows, configurable via max_results
+- **Doom Emacs keybindings**: SPC b k (buffer close), :q (close pane), :qa (quit app)
+
+### Bug Fixes
+- Command mode status bar no longer hidden by which-key space reservation
+- Mode badge background limited to badge only (not full status bar)
+- Auto-alignment includes non-task list items in width calculation
+- Block IDs excluded from alignment width calculation
+- Vim 'o' places cursor correctly at end of file with trailing newline
+- Which-key space reservation only for leader sequences, not Vim pending
+- Autosave deferred during Insert mode
+- Navigation works on frozen (read-only) view buffers
+
+### Improvements
+- Auto-alignment requires 2+ timestamps for padding (single = no whitespace)
+- Block IDs vertically aligned in list blocks
+- Alignment engine rewritten (876 → 677 lines, generic align_segments)
+- Index notification only on first startup, not every incremental update
+- Removed ink theme (too similar to bloom-dark), 11 themes remain
+- Status bar mode styling centralized in theme resolver
+- Zero compiler warnings across workspace
+
+### Architecture
+- BufferSlot enum: Mutable(Buffer) / Frozen(ReadOnly<Buffer>)
+- BufferWriter centralizes mutations behind apply(BufferMessage)
+- BufferMessage: Edit, MirrorEdit, ToggleTask, Open, Close, Reload, Align, etc.
+- Block-level event bus (HashMap) for view notifications
+- MirrorEdit variant prevents circular BlockChanged events
+- Per-pane cursor_idx on PaneState, Buffer::ensure_cursors()
+- Composite PK on block_ids table for mirror support
+
+### Docs
+- UNIFIED_BUFFER.md: Elm-inspired architecture, stress tests, industry survey
+- JOURNAL_REDESIGN.md: updated to match implementation with HTML mocks
+- Mirroring stress test: 5/5 problems solved by unified buffer
+
 ## 0.1.0-alpha — 2026-03-08
 
 ### Bug Fixes
