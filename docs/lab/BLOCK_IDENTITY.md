@@ -497,19 +497,21 @@ Mirroring should be discoverable but never intrusive. The user copies a block, B
 
 ### Gutter indicator
 
-Mirrored lines have their line number rendered in a distinct color instead of the default faded:
+The mirror indicator is the line number color — but only on the **cursor line**. When the cursor is on a `^=` line, its line number renders in `salient` instead of the normal cursor-line style. When the cursor moves away, the line number returns to normal `faded`. No colored numbers scattered across the viewport.
 
 ```
- 42  - [ ] Solo task ^k7m2x                           ← normal (faded line number)
- 43  - [ ] Mirrored task @due(2026-03-15) ^=abc01     ← salient line number
- 44  - Some notes                                      ← normal
- 45  - [ ] Another mirror ^=def02                      ← salient line number
- 46  ## Heading                                        ← normal
+ 42  - [ ] Solo task ^k7m2x                           ← faded line number
+ 43  - [ ] Mirrored task @due(2026-03-15) ^=abc01     ← CURSOR HERE: salient line number
+ 44  - Some notes                                      ← faded line number
+ 45  - [ ] Another mirror ^=def02                      ← faded (cursor not here)
+ 46  ## Heading                                        ← faded line number
 ```
 
-No extra column, no layout shift. The line number color is the only change. `salient` (the palette slot used for H2 headings) provides enough contrast to be noticeable during scanning without competing with content. On the cursor line (which already has a different background), the colored number is even more visible.
+This builds association: the user lands on a line, sees the colored number AND the status bar hint (`🪞 3 pages · SPC m: mirror`) simultaneously. After a few encounters, the colored number alone triggers recognition. No "mystery colors" on non-cursor lines that the user has to puzzle over.
 
-**Theming:** Uses the existing `salient` palette slot. No new slots needed. The TUI gutter renderer checks `is_mirror` on the buffer line's block ID and picks `salient` instead of `faded` for the line number style.
+**Implementation:** `RenderedLine` gains an `is_mirror: bool` flag, set from the line text during `render()` (parse `^=` — no index query). The TUI gutter renderer branches: `if is_cursor_line && is_mirror { salient } else if is_cursor_line { base_style } else { faded }`.
+
+**Theming:** Uses existing `salient` palette slot. No new slots needed.
 
 ### Status bar hint
 
