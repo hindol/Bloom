@@ -165,6 +165,32 @@ This keeps the buffer and its parse tree in sync — they're created, closed, an
 6. **Migrate structural queries** — link following, tag completion, heading jump use ParseTree elements.
 7. **Remove redundant parse calls** — `parse_frontmatter()` on demand → read from ParseTree.
 
+## Performance — Measured, Not Estimated
+
+Benchmarked on Apple Silicon, release build:
+
+| Operation | Time | Per frame (60fps) |
+|-----------|------|--------------------|
+| `highlight_line()` — 1 line | **0.4µs** | — |
+| 50-line viewport highlight | **16µs** | 0.1% of 16ms budget |
+| Full document parse (1000 lines) | **741µs** | 4.6% of budget |
+
+**Current parsing is already sub-millisecond for the viewport.** At 50 lines × 60fps, total highlighting cost is 1.2ms/second. This means:
+
+- **The parse tree cache is NOT needed for rendering performance.** The uncached path is fast enough.
+- **The parse tree IS needed for semantic queries** — jump to heading, find all links, validate link targets, tag completion from current buffer. These currently require a full re-parse (~741µs) or waiting for the indexer.
+- **The line-end context cache is still valuable** — it eliminates the O(N) context scan from line 0 to determine `in_code_block` at the cursor position.
+
+### Revised priority
+
+| Feature | Value | Urgency |
+|---------|-------|---------|
+| Viewport span cache | Low — 16µs is fine uncached | Not needed |
+| Line-end context cache | Medium — eliminates O(N) scan | Nice to have |
+| Structural element cache | High — enables instant semantic queries | When features need it |
+
+---
+
 ## Memory Model — Learn From Other Editors
 
 ### How other editors do it
