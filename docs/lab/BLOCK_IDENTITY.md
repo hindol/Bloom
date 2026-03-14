@@ -497,19 +497,23 @@ Mirroring should be discoverable but never intrusive. The user copies a block, B
 
 ### Gutter indicator
 
-When a line has `^=`, the gutter shows `=` instead of the line number:
+When a line has `^=`, the gutter shows a subtle mirror marker alongside the line number:
 
 ```
-  1  - [ ] Solo task ^k7m2x
-  =  - [ ] Mirrored task @due(2026-03-15) ^=abc01
-  3  - Some notes
-  =  - [ ] Another mirror ^=def02
-  5  ## Heading
+ 42    - [ ] Solo task ^k7m2x
+ 43 =  - [ ] Mirrored task @due(2026-03-15) ^=abc01
+ 44    - Some notes
+ 45 =  - [ ] Another mirror ^=def02
+ 46    ## Heading
 ```
 
-Why `=` and not an emoji: monospace compatibility, no font dependency, visually consistent with the `^=` marker itself. The `=` in the gutter echoes the `=` in the ID — same symbol, same meaning: "this block has peers."
+The `=` appears after the line number, in faded styling (same as the line number itself). It echoes the `=` in the `^=` marker — same symbol, same meaning: "this block has peers."
 
-On non-mirrored lines, the line number renders as normal. The `=` only appears when `^=` is present on that buffer line.
+Line numbers are never replaced or hidden. The `=` is additive — a narrow extra column that only occupies space when mirrors exist in the visible viewport. If no `^=` lines are visible, the column collapses.
+
+**Theming:** The indicator uses the existing `faded` palette slot (Tier 2 — contextual, recedes but readable). No new palette slot needed. This follows the semantic theming principle: the indicator is a relationship hint, same weight as line numbers and blockquote markers.
+
+The `^=` text in the buffer renders identically to `^` — both use `BlockId` / `BlockIdCaret` styles (Tier 2). The mirror/solo distinction lives in the gutter and status bar, not in the text styling. Adding a separate color for `^=` would violate "same semantic tier → same style."
 
 ### Status bar hint
 
