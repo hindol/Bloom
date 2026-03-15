@@ -535,10 +535,12 @@ impl VimState {
         match op {
             Operator::Delete => {
                 self.yank_range(buffer, range);
+                let new_len = buffer.len_chars() - (range.end - range.start);
+                let cursor = range.start.min(new_len.saturating_sub(1));
                 VimAction::Edit(EditOp {
                     range: range.clone(),
                     replacement: String::new(),
-                    cursor_after: range.start,
+                    cursor_after: cursor,
                 })
             }
             Operator::Change => {
@@ -726,6 +728,30 @@ impl VimState {
                 } else {
                     VimAction::Unhandled
                 }
+            }
+            StandaloneCmd::JoinLines => {
+                // Join current line with next: replace newline (+ leading whitespace) with a space
+                let line_idx = buffer.text().char_to_line(cursor);
+                if line_idx + 1 >= buffer.len_lines() {
+                    return VimAction::Unhandled; // no next line to join
+                }
+                let line_end = buffer.text().line_to_char(line_idx + 1);
+                // Find start of content on next line (skip whitespace)
+                let next_line = buffer.line(line_idx + 1).to_string();
+                let trimmed = next_line.trim_start();
+                let ws_len = next_line.len() - trimmed.len();
+                // Delete from end of current line content to start of next line content
+                // Current line may have trailing whitespace — find last non-ws char
+                let curr_line = buffer.line(line_idx).to_string();
+                let curr_trimmed_len = curr_line.trim_end_matches(['\n', '\r', ' ', '\t']).len();
+                let curr_line_start = buffer.text().line_to_char(line_idx);
+                let delete_from = curr_line_start + curr_trimmed_len;
+                let delete_to = line_end + ws_len;
+                VimAction::Edit(EditOp {
+                    range: delete_from..delete_to,
+                    replacement: " ".to_string(),
+                    cursor_after: delete_from,
+                })
             }
             StandaloneCmd::ReplaceChar(ch) => {
                 if cursor < buffer.len_chars() {

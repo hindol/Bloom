@@ -978,8 +978,9 @@ fn vim_J_join_lines() {
     sim.keys("J");
     let text = sim.buffer_text();
     assert!(
-        text.contains("hello world") || text.contains("hello\nworld"),
-        "J should join lines: '{text}'"
+        text.contains("hello world"),
+        "J should join lines with space: '{}'",
+        text.replace('\n', "\\n")
     );
 }
 
@@ -2336,4 +2337,195 @@ fn mirror_propagation_two_panes() {
         "Source task should have exactly one block ID, got: {}",
         source_task_line
     );
+}
+
+// =======================================================================
+// Cursor landing: where does the cursor go after mutations?
+// =======================================================================
+
+// dd on middle line → cursor stays on same line number (now next line's content)
+#[test]
+fn cursor_after_dd_middle_line() {
+    let mut sim = SimInput::with_content("aaa\nbbb\nccc");
+    sim.keys("j"); // line 1 (bbb)
+    let (line_before, _) = sim.screen(80, 24).cursor();
+    assert_eq!(line_before, 1, "cursor should be on line 1");
+
+    sim.keys("dd"); // delete bbb
+    let text = sim.buffer_text();
+    assert!(!text.contains("bbb"), "bbb should be deleted");
+
+    let (line_after, _) = sim.screen(80, 24).cursor();
+    assert_eq!(line_after, 1, "cursor should stay on line 1 (now ccc)");
+    assert_eq!(sim.screen(80, 24).line_text(1), "ccc", "line 1 should now be ccc");
+}
+
+// dd on last line → cursor moves up to new last line
+#[test]
+fn cursor_after_dd_last_line() {
+    let mut sim = SimInput::with_content("aaa\nbbb\nccc");
+    sim.keys("G"); // last line (ccc)
+    sim.keys("dd"); // delete ccc
+    let text = sim.buffer_text();
+    assert!(!text.contains("ccc"), "ccc should be deleted");
+    let (line_after, _) = sim.screen(80, 24).cursor();
+    assert!(
+        line_after <= 1,
+        "cursor should be on line 0 or 1 after deleting last line, got {}",
+        line_after
+    );
+}
+
+// dd on first line → cursor stays on line 0 (now next line's content)
+#[test]
+fn cursor_after_dd_first_line() {
+    let mut sim = SimInput::with_content("aaa\nbbb\nccc");
+    sim.keys("dd"); // delete aaa
+    let text = sim.buffer_text();
+    assert!(!text.contains("aaa"), "aaa should be deleted");
+
+    let (line_after, _) = sim.screen(80, 24).cursor();
+    assert_eq!(line_after, 0, "cursor should be on line 0");
+    assert_eq!(sim.screen(80, 24).line_text(0), "bbb", "line 0 should now be bbb");
+}
+
+// dd on only line → cursor stays on line 0 with empty content
+#[test]
+fn cursor_after_dd_only_line() {
+    let mut sim = SimInput::with_content("only line");
+    sim.keys("dd");
+    let (line_after, _) = sim.screen(80, 24).cursor();
+    assert_eq!(line_after, 0, "cursor should be on line 0");
+}
+
+// D (delete to EOL) → cursor stays on same line, moves to last char
+#[test]
+fn cursor_after_big_d() {
+    let mut sim = SimInput::with_content("hello world");
+    sim.keys("w"); // on 'w' of 'world'
+    sim.keys("D"); // delete 'world'
+    let text = sim.buffer_text();
+    assert!(text.contains("hello"), "hello should remain");
+    assert!(!text.contains("world"), "world should be deleted");
+    let (line, col) = sim.screen(80, 24).cursor();
+    assert_eq!(line, 0, "cursor on line 0");
+    assert!(col <= 5, "cursor should be at or before end of 'hello', got col {}", col);
+}
+
+// x on last char of line → cursor moves left
+#[test]
+fn cursor_after_x_at_eol() {
+    let mut sim = SimInput::with_content("abc");
+    sim.keys("$"); // on 'c'
+    sim.keys("x"); // delete 'c'
+    let text = sim.buffer_text();
+    assert_eq!(text.trim(), "ab", "c should be deleted");
+    let (_, col) = sim.screen(80, 24).cursor();
+    assert_eq!(col, 1, "cursor should be on 'b' (last char) at col 1");
+}
+
+// o (open below) → cursor on new empty line below
+#[test]
+fn cursor_after_open_below() {
+    let mut sim = SimInput::with_content("aaa\nbbb");
+    // cursor on line 0 (aaa)
+    sim.keys("o"); // open line below, enters Insert
+    sim.keys("<Esc>");
+    let (line, _) = sim.screen(80, 24).cursor();
+    assert_eq!(line, 1, "cursor should be on new line 1 (between aaa and bbb)");
+}
+
+// O (open above) → cursor on new empty line above
+#[test]
+fn cursor_after_open_above() {
+    let mut sim = SimInput::with_content("aaa\nbbb");
+    sim.keys("j"); // line 1 (bbb)
+    sim.keys("O"); // open line above, enters Insert
+    sim.keys("<Esc>");
+    let (line, _) = sim.screen(80, 24).cursor();
+    assert_eq!(line, 1, "cursor should be on new line 1 (between aaa and bbb)");
+}
+
+// J (join lines) → cursor at join point
+#[test]
+fn cursor_after_join() {
+    let mut sim = SimInput::with_content("aaa\nbbb");
+    sim.keys("J"); // join: "aaa bbb"
+    let text = sim.buffer_text();
+    assert!(
+        text.contains("aaa bbb"),
+        "J should join lines with space, got: '{}'",
+        text.replace('\n', "\\n")
+    );
+    let (line, col) = sim.screen(80, 24).cursor();
+    assert_eq!(line, 0, "cursor on line 0");
+    assert!(col >= 3, "cursor at join point (col {})", col);
+}
+
+// p (paste below) → cursor on pasted text
+#[test]
+fn cursor_after_paste_line() {
+    let mut sim = SimInput::with_content("aaa\nbbb\nccc");
+    sim.keys("dd"); // yank+delete aaa
+    sim.keys("p"); // paste below current line
+    let text = sim.buffer_text();
+    // Verify aaa was pasted back
+    assert!(text.contains("aaa"), "aaa should be pasted back, got: {}", text);
+    let (line, _) = sim.screen(80, 24).cursor();
+    // Vim: p pastes below, cursor goes to pasted line
+    assert!(line < 10, "cursor should be on a valid line, got {}", line);
+}
+
+// gg → cursor on first line
+#[test]
+fn cursor_after_gg() {
+    let mut sim = SimInput::with_content("aaa\nbbb\nccc");
+    sim.keys("G"); // go to last line
+    sim.keys("gg"); // go to first line
+    let (line, _) = sim.screen(80, 24).cursor();
+    assert_eq!(line, 0, "gg should go to line 0");
+}
+
+// G → cursor on last line
+#[test]
+fn cursor_after_big_g() {
+    let mut sim = SimInput::with_content("aaa\nbbb\nccc");
+    sim.keys("G");
+    let (line, _) = sim.screen(80, 24).cursor();
+    assert_eq!(line, 2, "G should go to last line (line 2)");
+}
+
+// u (undo) → cursor restored to pre-edit position
+#[test]
+fn cursor_after_undo_insert() {
+    let mut sim = SimInput::with_content("hello");
+    sim.keys("A");
+    sim.type_text(" world");
+    sim.keys("<Esc>");
+    let (_, col_after_edit) = sim.screen(80, 24).cursor();
+    assert!(col_after_edit > 4, "cursor should be past 'hello' after edit");
+
+    sim.keys("u"); // undo — should restore "hello" and cursor near end
+    let text = sim.buffer_text();
+    assert_eq!(text.trim(), "hello", "undo should revert text");
+    let (_, col_after_undo) = sim.screen(80, 24).cursor();
+    assert!(
+        col_after_undo >= 3,
+        "cursor should be restored near pre-edit position, got col {}",
+        col_after_undo
+    );
+}
+
+// 2dd → deletes two lines, cursor on next remaining line
+#[test]
+fn cursor_after_count_dd() {
+    let mut sim = SimInput::with_content("aaa\nbbb\nccc\nddd");
+    sim.keys("j"); // line 1 (bbb)
+    sim.keys("2dd"); // delete bbb and ccc
+    let text = sim.buffer_text();
+    assert!(!text.contains("bbb"), "bbb deleted");
+    assert!(!text.contains("ccc"), "ccc deleted");
+    let (line, _) = sim.screen(80, 24).cursor();
+    assert_eq!(line, 1, "cursor on line 1 (now ddd)");
+    assert_eq!(sim.screen(80, 24).line_text(1), "ddd");
 }

@@ -48,6 +48,12 @@ impl UndoTree {
         self.current
     }
 
+    /// Update the cursor position on the current node.
+    /// Called at begin_edit_group so that undoing TO this node restores the cursor.
+    pub fn update_current_cursor(&mut self, cursor_pos: usize) {
+        self.nodes[self.current as usize].cursor_pos = cursor_pos;
+    }
+
     /// Get the content of the current node as a string (for comparison).
     pub fn current_snapshot_string(&self) -> String {
         self.nodes[self.current as usize].snapshot.to_string()

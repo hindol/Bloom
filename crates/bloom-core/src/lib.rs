@@ -363,7 +363,10 @@ impl BufferWriter {
                         buf.replace(range, &replacement);
                     }
                     buf.ensure_cursors(cursor_idx + 1);
-                    buf.set_cursor(cursor_idx, cursor_after);
+                    // Clamp to buffer length (not len-1, since Insert mode
+                    // needs cursor at len_chars for appending).
+                    let max_pos = buf.len_chars();
+                    buf.set_cursor(cursor_idx, cursor_after.min(max_pos));
                     true
                 } else {
                     false

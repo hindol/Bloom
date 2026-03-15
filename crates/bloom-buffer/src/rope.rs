@@ -258,6 +258,9 @@ impl Buffer {
 
     pub fn begin_edit_group(&mut self) {
         self.edit_group_checkpoint = Some(self.rope.clone());
+        // Store current cursor on the current undo node so that undoing TO
+        // this state restores the cursor to where it was before the edit.
+        self.undo_tree.update_current_cursor(self.cursor_pos_for_undo());
     }
 
     pub fn end_edit_group(&mut self) {
