@@ -162,7 +162,7 @@ Opens the unified history timeline for the current page. Uses UUID-based lookup 
 
 **Restore:** Undo node → `buf.restore_state(node_id)`, cursor restored. Git commit → replace buffer content, creates new undo branch.
 
-### Block History (`SPC H H`)
+### Block History (`SPC H b`)
 
 Filters history to the block under the cursor, identified by block ID.
 
@@ -184,7 +184,7 @@ Pressing `r` on any history entry copies that version's content into the current
 
 ## Day Activity
 
-A git-derived summary of vault-wide activity for any given day. Available via `SPC H c`. Separate from the journal (`SPC j c`). See [TEMPORAL_NAVIGATION.md](../TEMPORAL_NAVIGATION.md) for wireframes and UX.
+A git-derived summary of vault-wide activity for any given day. Available via `SPC H d`. Separate from the journal (`SPC j c`). See [TEMPORAL_NAVIGATION.md](../TEMPORAL_NAVIGATION.md) for wireframes and UX.
 
 ### What the Activity View Shows
 

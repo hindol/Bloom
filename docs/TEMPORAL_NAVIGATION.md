@@ -29,8 +29,8 @@ Same component, different data sources:
 |---------|---------|-------------|-------------|------|
 | **Journal** | `SPC j t`, `[d`/`]d` | Calendar days with journal files | Journal page content | JRNL |
 | **Page history** | `SPC H h` | Undo nodes (●) + git commits (○) | Page diff vs current | HIST |
-| **Block history** | `SPC H H` | Same, filtered to one block ID | Line diff vs current | HIST |
-| **Day activity** | `SPC H c` | Days with vault activity (◆) | Activity summary | DAY |
+| **Block history** | `SPC H b` | Same, filtered to one block ID | Line diff vs current | HIST |
+| **Day activity** | `SPC H d` | Days with vault activity (◆) | Activity summary | DAY |
 
 ---
 
@@ -143,7 +143,7 @@ Browse all versions of the current page. Undo tree for recent (branching), git c
 
 ---
 
-## Block History — `SPC H H`
+## Block History — `SPC H b`
 
 Same as page history, filtered to the block under the cursor (identified by block ID).
 
@@ -174,7 +174,7 @@ Same as page history, filtered to the block under the cursor (identified by bloc
 
 ---
 
-## Day Activity — `SPC H c`
+## Day Activity — `SPC H d`
 
 Vault-wide summary of what happened on any given day. Derived from git diffs.
 
@@ -243,5 +243,5 @@ The caller handles: what to show in the preview pane, what `Enter`/`r`/`d` do.
 | `[d` / `]d` | Journal | Hop to prev/next day (skips empty) |
 | `SPC j c` | Journal | Open calendar overlay |
 | `SPC H h` | Page | Open page history strip |
-| `SPC H H` | Block | Open block history strip (cursor's block) |
-| `SPC H c` | Vault | Open day activity strip |
+| `SPC H b` | Block | Open block history strip (cursor's block) |
+| `SPC H d` | Vault | Open day activity strip |
