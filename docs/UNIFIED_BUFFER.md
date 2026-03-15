@@ -1,7 +1,7 @@
 # Unified Buffer Architecture 🏗️
 
 > Elm-inspired state machine for buffer management — in-memory and on-disk as one abstraction.
-> Status: **Draft** — architectural exploration, not committed.
+> Status: **Implemented.** BufferWriter, BufferMessage, MirrorEdit, event bus, per-pane cursors all in place.
 
 ---
 
@@ -127,7 +127,7 @@ One code path. No in-memory vs on-disk distinction.
 
 ## How This Relates to Mirroring
 
-Full block mirroring (BLOCK_IDENTITY.md § Mirror Markers) was parked because of 4 problems. The unified buffer model solves all of them:
+Full block mirroring (BLOCK_IDENTITY.md § Mirror Markers) was originally parked because of 4 problems. The unified buffer model solved all of them:
 
 | Original problem | Solution |
 |---|---|
@@ -157,7 +157,7 @@ writer.apply(Edit { page: tasks.md, block: k7m2x, ... })
 - **Active:** Edits propagate via writer. Both files are equal co-owners.
 - **Broken:** Block deleted from one file — other copies become independent. No cascading delete.
 
-This doesn't mean we should implement mirroring immediately, but the architecture makes it feasible with ~50 lines in the writer's apply() method.
+Mirroring is now implemented: `^=` markers, toggle propagation, general text propagation on Insert→Normal, and mirror UX (gutter, status hint, SPC m s/g).
 
 ---
 
@@ -281,19 +281,19 @@ Systematic analysis of every interaction pattern:
 |----------|--------|-------|
 | Scroll in view while source mutates | ✅ | Different buffers — no conflict. |
 | MCP insert above cursor | ⚠️ | Cursor shifts. Existing behavior. Acceptable — MCP edits are rare during active typing. |
-| Cursor in pane state (future) | 🔮 | Cleaner separation. Each pane has own cursor. Requires bloom-buffer refactor. |
+| Cursor in pane state | ✅ | Each pane has own cursor_idx. Buffer owns multiple cursors. |
 
 ---
 
 ## Migration Path
 
-This is a gradual migration:
+Phase 2 is complete. All mutations go through `BufferWriter::apply(message)`.
 
-1. **Phase 1** (current): Direct mutation scattered across `handle_key`, `handle_file_event`, etc. `ReadOnly<Buffer>` for views. Toggle would be a direct function call.
+1. **Phase 1** (done): Direct mutation. `ReadOnly<Buffer>` for views. Toggle as a direct function call.
 
-2. **Phase 2** (target): Extract all mutation logic into a `BufferWriter` struct on the UI thread. All mutations go through `writer.apply(message)`. Event bus notifies subscribed views. Same thread, no channels — just a clean API boundary.
+2. **Phase 2** (done): `BufferWriter` struct on UI thread. `BufferMessage` enum with 18 variants. Event bus on the struct. Per-pane cursors. MirrorEdit for circular prevention.
 
-Phase 1 gives us the UX. Phase 2 gives us the architecture. No Phase 3 — synchronous is correct for single-user editors (see Industry Practice below).
+No Phase 3 — synchronous is correct for single-user editors (see Industry Practice below).
 
 ---
 
@@ -404,7 +404,7 @@ Rope O(log n) insert means 10K-char paste costs the same as one keystroke. The b
 
 ## References
 
-- [ARCHITECTURE.md](../ARCHITECTURE.md) — current threading model
-- [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md) — block identity and mirroring (enabled by this architecture)
-- [GOALS.md G17](../GOALS.md) — MCP background buffers and eviction
+- [ARCHITECTURE.md](ARCHITECTURE.md) — current threading model
+- [BLOCK_IDENTITY.md](lab/BLOCK_IDENTITY.md) — block identity and mirroring (enabled by this architecture)
+- [GOALS.md G17](GOALS.md) — MCP background buffers and eviction
 - Elm Architecture: https://guide.elm-lang.org/architecture/

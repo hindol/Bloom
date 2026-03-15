@@ -13,4 +13,3 @@ Each document captures a direction, not a commitment. Critique, contradiction, a
 | [DAY_VIEW.md](DAY_VIEW.md) | Deleted | Merged into [TIME_TRAVEL.md](TIME_TRAVEL.md) § Day Activity and [JOURNAL_REDESIGN.md](JOURNAL_REDESIGN.md) |
 | [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md) | Partial | Universal block IDs (`^xxxxx`) with `^=` mirror markers, git-powered self-healing, synchronous mirror propagation |
 | [AUTO_MERGE.md](AUTO_MERGE.md) | Draft | Three-way merge for concurrent edits — eliminate the "reload or keep?" prompt |
-| [UNIFIED_BUFFER.md](UNIFIED_BUFFER.md) | Draft | Elm-inspired state machine — in-memory and on-disk buffers as one abstraction, single writer thread |

@@ -601,7 +601,7 @@ Brief confirmation that the edit propagated. Same transient notification style a
 
 ## References
 
-- [UNIFIED_BUFFER.md](UNIFIED_BUFFER.md) — BufferWriter architecture, MirrorEdit design, event bus
+- [UNIFIED_BUFFER.md](../UNIFIED_BUFFER.md) — BufferWriter architecture, MirrorEdit design, event bus
 - [TIME_TRAVEL.md](TIME_TRAVEL.md) — git-backed history for self-healing and per-block virtual files
 - [LIVE_VIEWS.md](LIVE_VIEWS.md) — BQL result actions that depend on stable block identity
 - [EMERGENCE.md](EMERGENCE.md) — chunk identity for semantic embeddings
