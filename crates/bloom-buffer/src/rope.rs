@@ -103,6 +103,11 @@ impl Buffer {
         self.dirty = self.version != self.clean_version;
     }
 
+    /// Primary cursor position for undo snapshots.
+    fn cursor_pos_for_undo(&self) -> usize {
+        self.cursors.first().map(|c| c.position).unwrap_or(0)
+    }
+
     /// Adjust all cursors after an insertion at `at` of `len` chars.
     fn adjust_cursors_after_insert(&mut self, at: usize, len: usize) {
         for c in &mut self.cursors {
@@ -148,7 +153,7 @@ impl Buffer {
             } else {
                 format!("insert '{}...'", &text[..17])
             };
-            self.undo_tree.push(self.rope.clone(), desc);
+            self.undo_tree.push(self.rope.clone(), self.cursor_pos_for_undo(), desc);
         }
     }
 
@@ -158,7 +163,7 @@ impl Buffer {
         self.rope.remove(range);
         self.bump_version();
         if self.edit_group_checkpoint.is_none() {
-            self.undo_tree.push(self.rope.clone(), "delete".to_string());
+            self.undo_tree.push(self.rope.clone(), self.cursor_pos_for_undo(), "delete".to_string());
         }
     }
 
@@ -177,7 +182,7 @@ impl Buffer {
             } else {
                 format!("replace with '{}...'", &text[..17])
             };
-            self.undo_tree.push(self.rope.clone(), desc);
+            self.undo_tree.push(self.rope.clone(), self.cursor_pos_for_undo(), desc);
         }
     }
 
@@ -200,8 +205,13 @@ impl Buffer {
     // -- Undo/Redo --
 
     pub fn undo(&mut self) -> bool {
-        if let Some(snapshot) = self.undo_tree.undo() {
+        if let Some((snapshot, cursor_pos)) = self.undo_tree.undo() {
             self.rope = snapshot;
+            // Restore cursor, clamped to new buffer length
+            let clamped = cursor_pos.min(self.rope.len_chars().saturating_sub(1));
+            if let Some(c) = self.cursors.first_mut() {
+                c.position = clamped;
+            }
             self.bump_version();
             true
         } else {
@@ -210,8 +220,12 @@ impl Buffer {
     }
 
     pub fn redo(&mut self) -> bool {
-        if let Some(snapshot) = self.undo_tree.redo() {
+        if let Some((snapshot, cursor_pos)) = self.undo_tree.redo() {
             self.rope = snapshot;
+            let clamped = cursor_pos.min(self.rope.len_chars().saturating_sub(1));
+            if let Some(c) = self.cursors.first_mut() {
+                c.position = clamped;
+            }
             self.bump_version();
             true
         } else {
@@ -228,7 +242,12 @@ impl Buffer {
     }
 
     pub fn restore_state(&mut self, node_id: UndoNodeId) {
-        self.rope = self.undo_tree.restore(node_id);
+        let (snapshot, cursor_pos) = self.undo_tree.restore(node_id);
+        self.rope = snapshot;
+        let clamped = cursor_pos.min(self.rope.len_chars().saturating_sub(1));
+        if let Some(c) = self.cursors.first_mut() {
+            c.position = clamped;
+        }
         self.bump_version();
     }
 
@@ -245,7 +264,7 @@ impl Buffer {
         if let Some(checkpoint) = self.edit_group_checkpoint.take() {
             if self.rope != checkpoint {
                 self.undo_tree
-                    .push(self.rope.clone(), "insert session".to_string());
+                    .push(self.rope.clone(), self.cursor_pos_for_undo(), "insert session".to_string());
             }
         }
     }

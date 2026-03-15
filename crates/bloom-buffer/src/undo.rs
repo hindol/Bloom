@@ -6,6 +6,7 @@ struct UndoNode {
     parent: Option<UndoNodeId>,
     children: Vec<UndoNodeId>,
     snapshot: ropey::Rope,
+    cursor_pos: usize,
     timestamp: Instant,
     /// Epoch milliseconds — for persistence (Instant can't be serialized).
     epoch_ms: i64,
@@ -32,6 +33,7 @@ impl UndoTree {
             parent: None,
             children: Vec::new(),
             snapshot: initial_snapshot,
+            cursor_pos: 0,
             timestamp: Instant::now(),
             epoch_ms: now_epoch_ms(),
             description: String::from("initial"),
@@ -94,13 +96,14 @@ impl UndoTree {
     }
 
     /// Push a new snapshot as a child of the current node. Returns the new node's ID.
-    pub fn push(&mut self, snapshot: ropey::Rope, description: String) -> UndoNodeId {
+    pub fn push(&mut self, snapshot: ropey::Rope, cursor_pos: usize, description: String) -> UndoNodeId {
         let new_id = self.nodes.len() as UndoNodeId;
         let new_node = UndoNode {
             id: new_id,
             parent: Some(self.current),
             children: Vec::new(),
             snapshot,
+            cursor_pos,
             timestamp: Instant::now(),
             epoch_ms: now_epoch_ms(),
             description,
@@ -111,26 +114,29 @@ impl UndoTree {
         new_id
     }
 
-    /// Move to parent node. Returns the parent's rope snapshot if successful.
-    pub fn undo(&mut self) -> Option<ropey::Rope> {
+    /// Move to parent node. Returns `(rope, cursor_pos)` of the parent.
+    pub fn undo(&mut self) -> Option<(ropey::Rope, usize)> {
         let parent = self.nodes[self.current as usize].parent?;
         self.current = parent;
-        Some(self.nodes[parent as usize].snapshot.clone())
+        let node = &self.nodes[parent as usize];
+        Some((node.snapshot.clone(), node.cursor_pos))
     }
 
-    /// Move to the most recent child. Returns the child's rope snapshot if successful.
-    pub fn redo(&mut self) -> Option<ropey::Rope> {
+    /// Move to the most recent child. Returns `(rope, cursor_pos)` of the child.
+    pub fn redo(&mut self) -> Option<(ropey::Rope, usize)> {
         let children = &self.nodes[self.current as usize].children;
         let &last_child = children.last()?;
         self.current = last_child;
-        Some(self.nodes[last_child as usize].snapshot.clone())
+        let node = &self.nodes[last_child as usize];
+        Some((node.snapshot.clone(), node.cursor_pos))
     }
 
-    /// Restore to an arbitrary node. Returns that node's rope snapshot.
-    pub fn restore(&mut self, node_id: UndoNodeId) -> ropey::Rope {
+    /// Restore to an arbitrary node. Returns `(rope, cursor_pos)`.
+    pub fn restore(&mut self, node_id: UndoNodeId) -> (ropey::Rope, usize) {
         assert!((node_id as usize) < self.nodes.len(), "invalid UndoNodeId");
         self.current = node_id;
-        self.nodes[node_id as usize].snapshot.clone()
+        let node = &self.nodes[node_id as usize];
+        (node.snapshot.clone(), node.cursor_pos)
     }
 
     /// Number of nodes in the tree.
@@ -236,6 +242,7 @@ impl UndoTree {
                 parent: parent_id.map(|p| p as UndoNodeId),
                 children: Vec::new(),
                 snapshot: ropey::Rope::from_str(&content),
+                cursor_pos: 0, // Persisted trees don't store cursor; default to 0
                 timestamp: Instant::now(),
                 epoch_ms: timestamp_ms,
                 description,
@@ -304,8 +311,8 @@ mod tests {
     fn round_trip_simple_tree() {
         let conn = setup_db();
         let mut tree = UndoTree::new(ropey::Rope::from_str("initial"));
-        tree.push(ropey::Rope::from_str("after edit 1"), "edit 1".into());
-        tree.push(ropey::Rope::from_str("after edit 2"), "edit 2".into());
+        tree.push(ropey::Rope::from_str("after edit 1"), 0, "edit 1".into());
+        tree.push(ropey::Rope::from_str("after edit 2"), 0, "edit 2".into());
         tree.save_to_db(&conn, "page1").unwrap();
 
         let restored = UndoTree::load_from_db(&conn, "page1").unwrap().unwrap();
@@ -317,9 +324,9 @@ mod tests {
     fn round_trip_with_branching() {
         let conn = setup_db();
         let mut tree = UndoTree::new(ropey::Rope::from_str("root"));
-        tree.push(ropey::Rope::from_str("branch A"), "edit A".into());
+        tree.push(ropey::Rope::from_str("branch A"), 0, "edit A".into());
         tree.undo();
-        tree.push(ropey::Rope::from_str("branch B"), "edit B".into());
+        tree.push(ropey::Rope::from_str("branch B"), 0, "edit B".into());
         assert_eq!(tree.children(0).len(), 2);
 
         tree.save_to_db(&conn, "page1").unwrap();

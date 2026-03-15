@@ -1438,6 +1438,7 @@ impl BloomEditor {
                         if tree.current_snapshot_string() != content {
                             tree.push(
                                 ropey::Rope::from_str(&content),
+                                0,
                                 "external change".to_string(),
                             );
                             tracing::info!(page = %page_hex, "undo tree extended with external change");
