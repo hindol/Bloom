@@ -2529,3 +2529,102 @@ fn cursor_after_count_dd() {
     assert_eq!(line, 1, "cursor on line 1 (now ddd)");
     assert_eq!(sim.screen(80, 24).line_text(1), "ddd");
 }
+
+// =======================================================================
+// Search: / ? n N SPC *
+// =======================================================================
+
+#[test]
+fn search_forward_jumps_to_match() {
+    let mut sim = SimInput::with_content("aaa\nbbb\naaa\nccc\naaa");
+    // / opens search prompt, type "bbb", Enter
+    sim.keys("/");
+    sim.type_text("bbb");
+    sim.keys("Enter");
+    let (line, _) = sim.screen(80, 24).cursor();
+    assert_eq!(line, 1, "/ bbb should jump to line 1");
+}
+
+#[test]
+fn search_n_jumps_to_next() {
+    let mut sim = SimInput::with_content("aaa\nbbb\naaa\nbbb\nccc");
+    sim.keys("/");
+    sim.type_text("bbb");
+    sim.keys("Enter");
+    let (line1, _) = sim.screen(80, 24).cursor();
+    assert_eq!(line1, 1, "first match at line 1");
+
+    sim.keys("n"); // next match
+    let (line2, _) = sim.screen(80, 24).cursor();
+    assert_eq!(line2, 3, "n should jump to second bbb at line 3");
+}
+
+#[test]
+fn search_n_wraps_around() {
+    let mut sim = SimInput::with_content("aaa\nbbb\nccc");
+    sim.keys("/");
+    sim.type_text("bbb");
+    sim.keys("Enter");
+    // Cursor on line 1 (bbb)
+    sim.keys("n"); // should wrap to same match (only one)
+    let (line, _) = sim.screen(80, 24).cursor();
+    assert_eq!(line, 1, "n with single match should wrap to same position");
+}
+
+#[test]
+fn search_big_n_goes_backward() {
+    let mut sim = SimInput::with_content("aaa\nbbb\naaa\nbbb\nccc");
+    sim.keys("/");
+    sim.type_text("bbb");
+    sim.keys("Enter");
+    sim.keys("n"); // go to second bbb (line 3)
+    sim.keys("N"); // back to first bbb (line 1)
+    let (line, _) = sim.screen(80, 24).cursor();
+    assert_eq!(line, 1, "N should go back to first bbb at line 1");
+}
+
+#[test]
+fn search_esc_cancels_and_restores_cursor() {
+    let mut sim = SimInput::with_content("aaa\nbbb\nccc");
+    sim.keys("j"); // go to line 1
+    let (line_before, _) = sim.screen(80, 24).cursor();
+    sim.keys("/");
+    sim.type_text("ccc");
+    // Live search should have jumped cursor, but Esc cancels
+    sim.keys("<Esc>");
+    let (line_after, _) = sim.screen(80, 24).cursor();
+    assert_eq!(line_after, line_before, "Esc should restore cursor to pre-search position");
+}
+
+#[test]
+fn search_backward_with_question_mark() {
+    let mut sim = SimInput::with_content("aaa\nbbb\nccc\nbbb\nddd");
+    sim.keys("G"); // go to last line
+    sim.keys("?");
+    sim.type_text("bbb");
+    sim.keys("Enter");
+    let (line, _) = sim.screen(80, 24).cursor();
+    assert_eq!(line, 3, "? bbb from end should find last bbb at line 3");
+}
+
+#[test]
+fn spc_star_searches_word_under_cursor() {
+    let vault = TestVault::new()
+        .page("Alpha")
+        .with_content("The rope data structure\n")
+        .page("Beta")
+        .with_content("Comparing rope vs array\n")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // Open Alpha, move to "rope"
+    sim.keys("SPC p p");
+    sim.type_text("Alpha");
+    sim.keys("Enter");
+    sim.keys("w"); // move to "rope"
+
+    // SPC * should open search pre-filled with "rope"
+    sim.keys("SPC *");
+    let screen = sim.screen(80, 24);
+    assert!(screen.has_picker(), "SPC * should open search picker");
+}

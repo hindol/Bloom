@@ -136,6 +136,15 @@ impl VimState {
         self.pending.clear();
     }
 
+    /// Force the mode to an arbitrary value (used by search prompt).
+    pub fn force_mode(&mut self, mode: Mode) {
+        let is_command = matches!(mode, Mode::Command);
+        self.mode = mode;
+        if !is_command {
+            self.pending.clear();
+        }
+    }
+
     /// Get the contents of a register.
     pub fn register(&self, name: char) -> Option<&str> {
         self.registers.get(name)

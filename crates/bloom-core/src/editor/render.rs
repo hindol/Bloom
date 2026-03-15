@@ -148,11 +148,17 @@ impl BloomEditor {
             let status_bar = if is_active {
                 // Active pane: priority CommandLine > QuickCapture > Normal
                 let content = if matches!(self.vim_state.mode(), bloom_vim::Mode::Command) {
-                    let input = self.vim_state.pending_keys().to_string();
-                    let ghost_text = command_ghost_text(&input);
+                    let raw_input = self.vim_state.pending_keys().to_string();
+                    let (input, ghost_text) = if self.search_active {
+                        let prefix = if self.search_forward { "/" } else { "?" };
+                        (format!("{}{}", prefix, raw_input), None)
+                    } else {
+                        let ghost = command_ghost_text(&raw_input);
+                        (raw_input.clone(), ghost)
+                    };
                     render::StatusBarContent::CommandLine(render::CommandLineSlot {
                         input,
-                        cursor_pos: self.vim_state.pending_keys().len(),
+                        cursor_pos: self.vim_state.pending_keys().len() + if self.search_active { 1 } else { 0 },
                         ghost_text,
                         error: None,
                     })
@@ -972,7 +978,7 @@ impl BloomEditor {
             }
 
             if line_idx >= range.start {
-                let spans = self.parser.highlight_line(
+                let mut spans = self.parser.highlight_line(
                     &line_text,
                     &bloom_md::parser::traits::LineContext {
                         in_code_block,
@@ -980,6 +986,18 @@ impl BloomEditor {
                         code_fence_lang: code_fence_lang.clone(),
                     },
                 );
+                // Overlay search highlights if a search pattern is active
+                if let Some(ref pattern) = self.search_pattern {
+                    let search_spans =
+                        render::search_highlight::highlight_matches(&line_text, pattern);
+                    if !search_spans.is_empty() {
+                        spans = render::search_highlight::overlay_search_spans(
+                            &spans,
+                            &search_spans,
+                            line_text.len(),
+                        );
+                    }
+                }
                 lines.push(render::RenderedLine {
                     source: render::LineSource::Buffer(line_idx),
                     is_mirror: line_text.contains(" ^="),

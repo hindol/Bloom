@@ -50,6 +50,10 @@ impl BloomEditor {
             "search" => vec![keymap::dispatch::Action::OpenPicker(
                 keymap::dispatch::PickerKind::Search,
             )],
+            "search_word_under_cursor" => {
+                self.search_word_under_cursor();
+                vec![keymap::dispatch::Action::Noop]
+            }
             "search_tags" => vec![keymap::dispatch::Action::OpenPicker(
                 keymap::dispatch::PickerKind::Tags,
             )],
@@ -537,6 +541,47 @@ impl BloomEditor {
                 view_state.row_map = Vec::new();
             }
         }
+    }
+
+    /// SPC * — grab word under cursor, set as search pattern, open vault search.
+    fn search_word_under_cursor(&mut self) {
+        let Some(page_id) = self.active_page().cloned() else { return };
+        let Some(buf) = self.writer.buffers().get(&page_id) else { return };
+        let cursor = self.cursor();
+        let text = buf.text().to_string();
+
+        // Extract word at cursor position
+        if cursor >= text.len() {
+            return;
+        }
+        let bytes = text.as_bytes();
+        let is_word_char = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'-';
+        if !is_word_char(bytes[cursor]) {
+            return;
+        }
+        let mut start = cursor;
+        while start > 0 && is_word_char(bytes[start - 1]) {
+            start -= 1;
+        }
+        let mut end = cursor;
+        while end < bytes.len() && is_word_char(bytes[end]) {
+            end += 1;
+        }
+        let word = &text[start..end];
+        if word.is_empty() {
+            return;
+        }
+
+        // Set as in-buffer search pattern (for n/N)
+        self.search_pattern = Some(word.to_string());
+
+        // Open vault search picker pre-filled with the word
+        self.open_picker(keymap::dispatch::PickerKind::Search);
+        if let Some(ap) = &mut self.picker_state {
+            ap.query = word.to_string();
+            ap.picker.set_query(&ap.query);
+        }
+        self.refresh_search_picker();
     }
 
     /// Sever mirror: replace ^=xxxxx with a new ^yyyyy on the cursor line.

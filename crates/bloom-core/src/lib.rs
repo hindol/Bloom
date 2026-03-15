@@ -540,6 +540,17 @@ pub struct BloomEditor {
 
     pub(crate) quick_capture: Option<QuickCaptureState>,
     pub(crate) date_picker_state: Option<DatePickerState>,
+
+    // In-buffer search (/, ?, n, N)
+    /// Active search pattern (like Vim's @/ register). Set by / or ? prompt.
+    pub(crate) search_pattern: Option<String>,
+    /// Direction of the last search: true = forward (/), false = backward (?).
+    pub(crate) search_forward: bool,
+    /// Whether the search prompt is active (/ or ? on status bar).
+    pub(crate) search_active: bool,
+    /// Cursor position before search started (for Esc to restore).
+    pub(crate) search_origin: usize,
+
     pub(crate) last_viewed_journal_date: Option<chrono::NaiveDate>,
     pub(crate) in_journal_mode: bool,
     pub(crate) journal_nav_at: Option<Instant>,
@@ -857,6 +868,12 @@ impl BloomEditor {
 
             quick_capture: None,
             date_picker_state: None,
+
+            search_pattern: None,
+            search_forward: true,
+            search_active: false,
+            search_origin: 0,
+
             last_viewed_journal_date: None,
             in_journal_mode: false,
             journal_nav_at: None,

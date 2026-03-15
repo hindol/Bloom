@@ -242,6 +242,7 @@ fn build_static_tree(tree: &mut WhichKeyTree) {
 
     // Search
     tree.register("s s", "Search", "search".into());
+    tree.register("*", "Search word", "search_word_under_cursor".into());
     tree.register("s j", "Search journal", "search_journal".into());
     tree.register("s t", "Search tags", "search_tags".into());
     tree.register("s l", "Search backlinks", "search_backlinks".into());

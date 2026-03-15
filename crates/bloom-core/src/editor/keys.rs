@@ -135,6 +135,11 @@ impl BloomEditor {
             return vec![keymap::dispatch::Action::Noop];
         }
 
+        // In-buffer search prompt (/ or ?)
+        if self.search_active {
+            return self.handle_search_key(key);
+        }
+
         // Vim processing — works for both mutable and frozen (read-only) buffers.
         let buf_for_vim = self
             .active_page()
@@ -1282,6 +1287,22 @@ impl BloomEditor {
         match resolved.as_str() {
             "undo" => vec![keymap::dispatch::Action::Undo],
             "redo" => vec![keymap::dispatch::Action::Redo],
+            "search-forward" => {
+                self.begin_search(true);
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "search-backward" => {
+                self.begin_search(false);
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "next-match" => {
+                self.jump_to_match(true);
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "prev-match" => {
+                self.jump_to_match(false);
+                vec![keymap::dispatch::Action::Noop]
+            }
             "repeat" => {
                 // Dot repeat: replay the last repeatable command's keys.
                 if let Some(recorded) = self.vim_state.last_command().cloned() {
@@ -1860,6 +1881,117 @@ impl BloomEditor {
                 vec![keymap::dispatch::Action::Noop]
             }
             _ => vec![keymap::dispatch::Action::Noop],
+        }
+    }
+
+    // ── In-buffer search (/  ?  n  N) ────────────────────────────────
+
+    /// Open the search prompt. `forward`: true for `/`, false for `?`.
+    fn begin_search(&mut self, forward: bool) {
+        self.search_active = true;
+        self.search_forward = forward;
+        self.search_origin = self.cursor();
+        self.vim_state.set_command_line("");
+        self.vim_state.force_mode(bloom_vim::Mode::Command);
+    }
+
+    /// Handle keystrokes while the search prompt is active.
+    fn handle_search_key(
+        &mut self,
+        key: types::KeyEvent,
+    ) -> Vec<keymap::dispatch::Action> {
+        match key.code {
+            types::KeyCode::Esc => {
+                self.search_active = false;
+                self.set_cursor(self.search_origin);
+                self.vim_state.force_mode(bloom_vim::Mode::Normal);
+                self.vim_state.set_command_line("");
+            }
+            types::KeyCode::Enter => {
+                let pattern = self.vim_state.pending_keys().to_string();
+                self.search_active = false;
+                self.vim_state.force_mode(bloom_vim::Mode::Normal);
+                self.vim_state.set_command_line("");
+                if !pattern.is_empty() {
+                    self.search_pattern = Some(pattern);
+                    // Cursor is already at the match from live search — don't re-jump
+                }
+            }
+            types::KeyCode::Backspace => {
+                let mut text = self.vim_state.pending_keys().to_string();
+                text.pop();
+                if text.is_empty() {
+                    self.search_active = false;
+                    self.set_cursor(self.search_origin);
+                    self.vim_state.force_mode(bloom_vim::Mode::Normal);
+                    self.vim_state.set_command_line("");
+                } else {
+                    self.vim_state.set_command_line(&text);
+                    self.search_pattern = Some(text);
+                    self.jump_to_match_from(self.search_origin, self.search_forward);
+                }
+            }
+            types::KeyCode::Char(c) => {
+                let mut text = self.vim_state.pending_keys().to_string();
+                text.push(c);
+                self.vim_state.set_command_line(&text);
+                self.search_pattern = Some(text);
+                self.jump_to_match_from(self.search_origin, self.search_forward);
+            }
+            _ => {}
+        }
+        vec![keymap::dispatch::Action::Noop]
+    }
+
+    /// Jump to next (or prev) match of the active search pattern.
+    fn jump_to_match(&mut self, forward: bool) {
+        let cursor = self.cursor();
+        let origin = if forward {
+            cursor + 1
+        } else {
+            cursor.saturating_sub(1)
+        };
+        self.jump_to_match_from(origin, forward);
+    }
+
+    /// Jump to the first match from `origin` in direction, wrapping at EOF/BOF.
+    fn jump_to_match_from(&mut self, origin: usize, forward: bool) {
+        let pattern = match &self.search_pattern {
+            Some(p) if !p.is_empty() => p.clone(),
+            _ => return,
+        };
+        let Some(page_id) = self.active_page().cloned() else { return };
+        let Some(buf) = self.writer.buffers().get(&page_id) else { return };
+        let text = buf.text().to_string();
+        let text_lower = text.to_lowercase();
+        let pat_lower = pattern.to_lowercase();
+
+        let mut positions: Vec<usize> = Vec::new();
+        let mut start = 0;
+        while let Some(pos) = text_lower[start..].find(&pat_lower) {
+            positions.push(start + pos);
+            start += pos + pat_lower.len();
+        }
+
+        if positions.is_empty() {
+            return;
+        }
+
+        let target = if forward {
+            positions
+                .iter()
+                .find(|&&p| p >= origin)
+                .or(positions.first())
+        } else {
+            positions
+                .iter()
+                .rev()
+                .find(|&&p| p < origin)
+                .or(positions.last())
+        };
+
+        if let Some(&pos) = target {
+            self.set_cursor(pos);
         }
     }
 }
