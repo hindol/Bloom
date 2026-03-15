@@ -61,9 +61,19 @@ impl BloomEditor {
             s
         };
 
-        let id = crate::uuid::generate_hex_id();
-        self.open_page_with_content(&id, &title, &path, &content);
+        // Use the real page ID from frontmatter (or generate one for new files)
+        let fm = self.parser.parse_frontmatter(&content);
+        let id = fm
+            .and_then(|f| f.id)
+            .unwrap_or_else(crate::uuid::generate_hex_id);
+
+        if self.writer.buffers().is_open(&id) {
+            self.set_active_page(Some(id));
+        } else {
+            self.open_page_with_content(&id, &title, &path, &content);
+        }
         self.last_viewed_journal_date = Some(today);
+        self.in_journal_mode = true;
     }
 
     pub(crate) fn open_scratch_buffer(&mut self) {
@@ -94,7 +104,11 @@ impl BloomEditor {
             .and_then(|fm| fm.id)
             .unwrap_or_else(crate::uuid::generate_hex_id);
         let title = date.format("%Y-%m-%d").to_string();
-        self.open_page_with_content(&id, &title, &path, &content);
+        if !self.writer.buffers().is_open(&id) {
+            self.open_page_with_content(&id, &title, &path, &content);
+        } else {
+            self.set_active_page(Some(id.clone()));
+        }
         if let Some(dp) = &mut self.date_picker_state {
             if !dp.preview_buffers.contains(&id) {
                 dp.preview_buffers.push(id);
@@ -251,8 +265,15 @@ impl BloomEditor {
             s.push('\n');
             s
         };
-        let id = crate::uuid::generate_hex_id();
-        self.open_page_with_content(&id, &title, &path, &content);
+        let fm_parsed = self.parser.parse_frontmatter(&content);
+        let id = fm_parsed
+            .and_then(|f| f.id)
+            .unwrap_or_else(crate::uuid::generate_hex_id);
+        if self.writer.buffers().is_open(&id) {
+            self.set_active_page(Some(id));
+        } else {
+            self.open_page_with_content(&id, &title, &path, &content);
+        }
         self.last_viewed_journal_date = Some(target);
         self.in_journal_mode = true;
         self.journal_nav_at = Some(Instant::now());
