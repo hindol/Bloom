@@ -71,4 +71,25 @@ mod tests {
         let doc2 = parse(&with_ids);
         assert!(assign_block_ids(&with_ids, &doc2).is_none());
     }
+
+    #[test]
+    fn mirror_marker_not_double_assigned() {
+        let text = "- [ ] Task with mirror ^=mir01\n- [ ] Task without id\n";
+        let doc = parse(text);
+        // Line 0 has ^=mir01 — should be recognized as having an ID
+        assert!(
+            doc.blocks.iter().any(|b| b.last_line == 0 && b.has_id),
+            "block on line 0 should have has_id=true for ^=mir01, blocks: {:?}",
+            doc.blocks.iter().map(|b| format!("lines {}-{} has_id={}", b.first_line, b.last_line, b.has_id)).collect::<Vec<_>>()
+        );
+        // Only line 1 should need an ID assignment
+        let insertions = compute_block_id_assignments(&doc);
+        assert_eq!(
+            insertions.len(), 1,
+            "only task without ID should get assigned, got {} insertions: {:?}",
+            insertions.len(),
+            insertions.iter().map(|i| format!("line {} id={}", i.line, i.id)).collect::<Vec<_>>()
+        );
+        assert_eq!(insertions[0].line, 1, "insertion should be on line 1 (task without ID)");
+    }
 }

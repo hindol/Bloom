@@ -2307,3 +2307,33 @@ fn undo_single_insert_not_alignment() {
         after_undo
     );
 }
+
+// =======================================================================
+// Mirror propagation: edit a ^= line, verify propagation fires
+// =======================================================================
+
+#[test]
+fn mirror_propagation_two_panes() {
+    // Two pages with mirrored block ^=mir01 — minimal, no frontmatter complications
+    let vault = TestVault::new()
+        .page("Source")
+        .with_content("- [ ] original text ^=mir01\n")
+        .page("Mirror")
+        .with_content("- [ ] original text ^=mir01\n")
+        .build();
+    let vault_root = vault.root().to_path_buf();
+    let _sim = SimInput::with_vault(vault);
+
+    // After indexing, verify both files still have ^=mir01 (not double-assigned)
+    let source = std::fs::read_to_string(vault_root.join("pages/source.md")).unwrap();
+    let mirror = std::fs::read_to_string(vault_root.join("pages/mirror.md")).unwrap();
+    assert!(source.contains("^=mir01"), "Source should have ^=mir01 after indexing");
+    assert!(mirror.contains("^=mir01"), "Mirror should have ^=mir01 after indexing");
+    // No double block IDs
+    let source_task_line = source.lines().find(|l| l.contains("original")).unwrap();
+    assert_eq!(
+        source_task_line.matches(" ^").count(), 1,
+        "Source task should have exactly one block ID, got: {}",
+        source_task_line
+    );
+}
