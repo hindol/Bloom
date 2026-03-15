@@ -126,7 +126,11 @@ impl BloomEditor {
                                 .map(|i| i.title.clone())
                                 .unwrap_or_default();
                             let dirty = !self.writer.buffers().is_read_only(page_id) && buf.is_dirty();
-                            let lines = self.render_buffer_lines_with_viewport(buf, &ps.viewport);
+                            let is_md = self.writer.buffers()
+                                .info(page_id)
+                                .map(|i| i.path.extension().and_then(|e| e.to_str()) == Some("md"))
+                                .unwrap_or(true);
+                            let lines = self.render_buffer_lines_with_viewport(buf, &ps.viewport, is_md);
                             let (cl, cc) =
                                 Self::cursor_position_for(buf.cursor(ps.cursor_idx), buf, &self.vim_state);
                             (
@@ -939,6 +943,7 @@ impl BloomEditor {
         &self,
         buf: &bloom_buffer::Buffer,
         viewport: &render::Viewport,
+        is_markdown: bool,
     ) -> Vec<render::RenderedLine> {
         let range = viewport.visible_range();
         let screen_height = viewport.height;
@@ -1006,14 +1011,22 @@ impl BloomEditor {
             }
 
             if line_idx >= range.start {
-                let mut spans = self.parser.highlight_line(
-                    &line_text,
-                    &bloom_md::parser::traits::LineContext {
-                        in_code_block,
-                        in_frontmatter,
-                        code_fence_lang: code_fence_lang.clone(),
-                    },
-                );
+                let mut spans = if is_markdown {
+                    self.parser.highlight_line(
+                        &line_text,
+                        &bloom_md::parser::traits::LineContext {
+                            in_code_block,
+                            in_frontmatter,
+                            code_fence_lang: code_fence_lang.clone(),
+                        },
+                    )
+                } else {
+                    // Non-markdown: render as plain text
+                    vec![bloom_md::parser::traits::StyledSpan {
+                        range: 0..line_text.len(),
+                        style: bloom_md::parser::traits::Style::Normal,
+                    }]
+                };
                 // Overlay search highlights if a search pattern is active
                 if let Some(ref pattern) = self.search_pattern {
                     let search_spans =
