@@ -1,7 +1,8 @@
-//! Page history — `SPC H h`.
+//! Page and block history — `SPC H h` / `SPC H b`.
 //!
 //! Opens a temporal strip showing the unified history: undo tree (recent,
 //! branching) followed by git commits (older, linear). Preview shows diff.
+//! Block history filters to a single block ID.
 
 use crate::history::HistoryRequest;
 use crate::*;
@@ -76,10 +77,109 @@ impl BloomEditor {
         });
     }
 
+    /// Open block history as a temporal strip for the block under the cursor.
+    pub(crate) fn open_block_history(&mut self) {
+        let page_id = match self.active_page() {
+            Some(id) => id.clone(),
+            None => return,
+        };
+
+        let (cursor_line, _) = self.cursor_position();
+        let (block_id_str, current_line_text) = {
+            let Some(buf) = self.writer.buffers().get(&page_id) else { return };
+            if cursor_line >= buf.len_lines() { return; }
+            let line_text = buf.line(cursor_line).to_string();
+            let bid = bloom_md::parser::extensions::parse_block_id(&line_text, cursor_line);
+            match bid {
+                Some(b) => (b.id.0, line_text.trim_end_matches('\n').to_string()),
+                None => {
+                    self.push_notification(
+                        "No block ID on this line".into(),
+                        render::NotificationLevel::Warning,
+                    );
+                    return;
+                }
+            }
+        };
+
+        let block_pattern = format!("^{}", block_id_str);
+        let mirror_pattern = format!("^={}", block_id_str);
+
+        // Walk undo tree — collect versions where this block's line changed
+        let mut items: Vec<TemporalItem> = Vec::new();
+        let mut last_line_content: Option<String> = None;
+
+        if let Some(buf) = self.writer.buffers().get(&page_id) {
+            let tree = buf.undo_tree();
+            let mut node_id = tree.current();
+            let mut visited = std::collections::HashSet::new();
+            while visited.insert(node_id) {
+                let info = tree.node_info(node_id);
+                let snapshot = tree.node_snapshot_string(node_id);
+                // Find the line containing our block ID in this snapshot
+                let block_line = snapshot
+                    .lines()
+                    .find(|l| l.contains(&block_pattern) || l.contains(&mirror_pattern))
+                    .map(|l| l.to_string());
+
+                if let Some(ref line) = block_line {
+                    // Only add if content changed from the next (newer) version
+                    let changed = last_line_content.as_ref() != Some(line);
+                    if changed {
+                        let elapsed = info.timestamp.elapsed();
+                        let label = if elapsed.as_secs() < 60 {
+                            format!("{}s", elapsed.as_secs())
+                        } else if elapsed.as_secs() < 3600 {
+                            format!("{}m", elapsed.as_secs() / 60)
+                        } else {
+                            format!("{}h", elapsed.as_secs() / 3600)
+                        };
+                        items.push(TemporalItem {
+                            label,
+                            detail: Some(info.description.clone()),
+                            kind: render::StripNodeKind::UndoNode,
+                            branch_count: tree.children(node_id).len(),
+                            content: Some(line.clone()),
+                            undo_node_id: Some(node_id),
+                            git_oid: None,
+                        });
+                    }
+                    last_line_content = Some(line.clone());
+                }
+
+                match tree.parent(node_id) {
+                    Some(parent) => node_id = parent,
+                    None => break,
+                }
+            }
+        }
+        items.reverse(); // oldest first (left)
+
+        // Request git history for git-based block versions
+        let uuid_hex = page_id.to_hex();
+        if let Some(tx) = &self.history_tx {
+            let _ = tx.send(HistoryRequest::PageHistory {
+                uuid: uuid_hex,
+                limit: 50,
+            });
+        }
+
+        let selected = items.len().saturating_sub(1);
+
+        self.temporal_strip = Some(TemporalStripState {
+            mode: render::TemporalMode::BlockHistory,
+            items,
+            selected,
+            compact: true,
+            page_id,
+            current_content: current_line_text,
+        });
+    }
+
     /// Append git history entries to the temporal strip when they arrive.
     pub(crate) fn append_git_history(&mut self, entries: &[history::PageHistoryEntry]) {
         let Some(ts) = &mut self.temporal_strip else { return };
-        if !matches!(ts.mode, render::TemporalMode::PageHistory) {
+        if !matches!(ts.mode, render::TemporalMode::PageHistory | render::TemporalMode::BlockHistory) {
             return;
         }
 
@@ -152,25 +252,41 @@ impl BloomEditor {
 
     /// Restore the selected temporal item to the buffer.
     fn temporal_strip_restore(&mut self) {
-        let (content, undo_node_id, page_id) = {
+        let (content, undo_node_id, page_id, mode) = {
             let Some(ts) = &self.temporal_strip else { return };
             let Some(item) = ts.items.get(ts.selected) else { return };
-            (item.content.clone(), item.undo_node_id, ts.page_id.clone())
+            (item.content.clone(), item.undo_node_id, ts.page_id.clone(), ts.mode)
         };
 
-        if let Some(node_id) = undo_node_id {
-            // Restore from undo tree (preserves branching)
-            if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
-                buf.restore_state(node_id);
+        match mode {
+            render::TemporalMode::PageHistory => {
+                if let Some(node_id) = undo_node_id {
+                    if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
+                        buf.restore_state(node_id);
+                    }
+                } else if let Some(content) = content {
+                    self.writer.apply(crate::BufferMessage::Reload {
+                        page_id: page_id.clone(),
+                        content,
+                    });
+                } else {
+                    return;
+                }
             }
-        } else if let Some(content) = content {
-            // Restore from git (replaces buffer content)
-            self.writer.apply(crate::BufferMessage::Reload {
-                page_id: page_id.clone(),
-                content,
-            });
-        } else {
-            return;
+            render::TemporalMode::BlockHistory => {
+                // Block restore: replace only the line containing the block ID
+                let Some(new_line) = content else { return };
+                let (cursor_line, _) = self.cursor_position();
+                if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
+                    if cursor_line < buf.len_lines() {
+                        let old_line = buf.line(cursor_line).to_string();
+                        let old_trimmed = old_line.trim_end_matches('\n');
+                        let ls = buf.text().line_to_char(cursor_line);
+                        buf.replace(ls..ls + old_trimmed.len(), &new_line);
+                    }
+                }
+            }
+            render::TemporalMode::DayActivity => return,
         }
 
         self.temporal_strip = None;

@@ -2859,3 +2859,46 @@ fn history_restore_changes_buffer() {
         text
     );
 }
+
+// =======================================================================
+// Block history: SPC H b on a block with edits
+// =======================================================================
+
+#[test]
+fn block_history_opens_on_block_id() {
+    let mut sim = SimInput::with_content("- [ ] My task ^abc01\nSome other line\n");
+
+    // Edit the task line (insert before block ID, not after)
+    sim.keys("0w"); // move to "My"
+    sim.keys("ciw"); // change inner word
+    sim.type_text("Edited");
+    sim.keys("<Esc>");
+
+    // Cursor is on line 0 (the task with ^abc01)
+    sim.keys("gg");
+
+    // Open block history
+    sim.keys("SPC H b");
+    let screen = sim.screen(80, 24);
+    assert_eq!(screen.mode(), "HIST", "SPC H b should open HIST mode");
+
+    // Should have temporal strip
+    assert!(screen.frame.temporal_strip.is_some(), "should have temporal strip");
+    if let Some(ts) = &screen.frame.temporal_strip {
+        assert!(ts.items.len() >= 1, "should have at least 1 version of the block");
+        assert_eq!(ts.mode, bloom_core::render::TemporalMode::BlockHistory);
+    }
+
+    // Dismiss
+    sim.keys("q");
+    assert!(sim.screen(80, 24).mode() != "HIST");
+}
+
+#[test]
+fn block_history_not_on_line_without_id() {
+    let mut sim = SimInput::with_content("Plain line without block ID\n");
+    sim.keys("SPC H b");
+    // Should show warning, not open strip
+    let screen = sim.screen(80, 24);
+    assert!(screen.frame.temporal_strip.is_none(), "should not open strip on line without block ID");
+}

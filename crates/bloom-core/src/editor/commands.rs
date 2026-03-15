@@ -114,7 +114,7 @@ impl BloomEditor {
             "undo_tree" => vec![keymap::dispatch::Action::OpenUndoTree],
             "page_history" => vec![keymap::dispatch::Action::OpenPageHistory],
             "block_history" => {
-                self.push_notification("Block history not yet implemented".into(), render::NotificationLevel::Info);
+                self.open_block_history();
                 vec![keymap::dispatch::Action::Noop]
             }
             "day_activity" => {
