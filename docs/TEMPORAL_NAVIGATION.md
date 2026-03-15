@@ -40,10 +40,11 @@ Same component, different data sources:
 |-----|--------|
 | `h` / `←` | Older |
 | `l` / `→` | Newer |
-| `e` | Toggle compact ↔ rich strip (show descriptions) |
+| `j` / `k` | At a branch point (`⑂`): expand and switch between branches |
+| `e` | Toggle compact ↔ rich (show descriptions) |
 | `d` | Toggle diff highlights (history contexts) |
 | `r` | Restore to selected version (history contexts) |
-| `Enter` | Context action (expand list / open page / jump to source) |
+| `Enter` | Context action (open page / jump to source) |
 | `Esc` / `q` | Dismiss, return to normal editing |
 
 ---
@@ -52,26 +53,48 @@ Same component, different data sources:
 
 ### Compact (default)
 
-Single line. Labels only. Good for quick scrubbing.
+Single line. Labels only. Branch points marked with `⑂`.
 
 ```
-├── ● 2m ─── ● 5m ─── ● 8m ─── ● 15m ── ○ 1h ── ○ 3h ── ○ yday ──┤
+├── ● 2m ─── ● 5m ─── ⑂ 8m ─── ● 15m ── ○ 1h ── ○ 3h ── ○ yday ──┤
                         ▲
 ```
 
 ### Rich (toggle with `e`)
 
-Two lines. Labels + descriptions. More context at a glance.
+Two lines. Labels + descriptions. Branches still collapsed.
 
 ```
 ├──────────────────────────────────────────────────────────────────┤
-│ ● 2 min      ● 5 min      ● 8 min      ● 15 min     ○ 1 hr    │
+│ ● 2 min      ● 5 min      ⑂ 8 min      ● 15 min     ○ 1 hr    │
 │ "insert"     "delete"     "insert"      auto-save     save      │
 │                             ▲                                    │
 ├──────────────────────────────────────────────────────────────────┤
 ```
 
-For day activity, descriptions are summary stats:
+### Branches (auto-expand at `⑂`)
+
+When the cursor lands on a branch point (`⑂`), pressing `j`/`k` expands the fork and moves between branches. Moving `h`/`l` away from the fork collapses it back to one line.
+
+```
+Cursor on ⑂, press j:
+├── ● 2m ── ● 5m ──┬── ● 8m "insert" ── ● 15m ── ○ 1h ──┤
+                    └── ● 8m "delete" (abandoned)
+                    ▲
+
+Press k (switch to other branch):
+├── ● 2m ── ● 5m ──┬── ● 8m "insert" ── ● 15m ── ○ 1h ──┤
+                    └── ● 8m "delete" (abandoned)
+                         ▲
+
+Press l (follow selected branch, fork collapses):
+├── ● 2m ── ● 5m ── ⑂ 8m ── ● "delete" ──┤
+                               ▲
+```
+
+No extra keystrokes. `j`/`k` does nothing on non-branch nodes (like in a single-line list). At a `⑂`, it naturally opens the fork. Moving away naturally closes it.
+
+For day activity, descriptions are summary stats (no branching):
 
 ```
 ├──────────────────────────────────────────────────────────────────┤
