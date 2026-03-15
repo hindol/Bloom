@@ -3,7 +3,7 @@
 //! Shows undo nodes (●), git commits (○), and branch points ([●]) in a
 //! horizontal timeline. Preview diff lines rendered in the pane area above.
 
-use bloom_core::render::{DiffLineKind, StripNodeKind, TemporalStripFrame};
+use bloom_core::render::{StripNodeKind, TemporalStripFrame};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style as RStyle};
 use ratatui::text::{Line, Span};
@@ -14,7 +14,7 @@ use crate::theme::TuiTheme;
 
 pub(super) fn draw_temporal_strip(
     f: &mut Frame,
-    pane_area: Rect,
+    _pane_area: Rect,
     strip_area: Rect,
     strip: &TemporalStripFrame,
     theme: &TuiTheme,
@@ -23,46 +23,7 @@ pub(super) fn draw_temporal_strip(
         return;
     }
 
-    // --- Draw diff preview in the pane content area ---
-    // The preview overlays the pane content (status bar stays in place)
-    let preview_height = pane_area.height.saturating_sub(1); // leave status bar
-    if preview_height < 2 {
-        return;
-    }
-    let preview_area = Rect::new(
-        pane_area.x,
-        pane_area.y,
-        pane_area.width,
-        preview_height,
-    );
-
-    // --- Draw preview (diff lines) ---
-    let bg = RStyle::default().bg(theme.background());
-    f.render_widget(Clear, preview_area);
-    f.render_widget(ratatui::widgets::Block::default().style(bg), preview_area);
-
-    let mut preview_lines: Vec<Line> = Vec::new();
-    for dl in &strip.preview_lines {
-        let style = match dl.kind {
-            DiffLineKind::Context => RStyle::default().fg(theme.faded()),
-            DiffLineKind::Added => RStyle::default().fg(theme.accent_green()),
-            DiffLineKind::Removed => RStyle::default().fg(theme.accent_red()),
-        };
-        let prefix = match dl.kind {
-            DiffLineKind::Context => "  ",
-            DiffLineKind::Added => "+ ",
-            DiffLineKind::Removed => "- ",
-        };
-        preview_lines.push(Line::from(Span::styled(
-            format!("{}{}", prefix, dl.text),
-            style,
-        )));
-    }
-
-    let preview_widget = Paragraph::new(preview_lines).style(bg);
-    f.render_widget(preview_widget, preview_area);
-
-    // --- Draw strip (horizontal timeline) ---
+    // --- Draw strip in the drawer area (below status bar) ---
     let strip_bg = RStyle::default().bg(theme.highlight());
     f.render_widget(Clear, strip_area);
     f.render_widget(ratatui::widgets::Block::default().style(strip_bg), strip_area);
