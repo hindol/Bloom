@@ -50,7 +50,7 @@ Bloom silently maintains a git repository in the vault. The user never interacts
 - Line-level diffs for free — exactly what temporal features need
 - Portable — the vault is a valid git repo, browsable with any git tool
 - No new storage format to invent, debug, or migrate
-- Enables self-healing block IDs (see [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md))
+- Enables self-healing block IDs (see [BLOCK_IDENTITY.md](../BLOCK_IDENTITY.md))
 
 **Why `gix` (not subprocess):**
 - No requirement that the user has git installed
@@ -273,7 +273,7 @@ Pressing `r` on the context strip copies the selected version's full content int
 
 ### Block-Level History
 
-With universal block IDs (see [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md)), file time travel extends to individual blocks. Place your cursor on any block and `SPC H H` (block history) opens the context strip showing every version of *that specific block* across time:
+With universal block IDs (see [BLOCK_IDENTITY.md](../BLOCK_IDENTITY.md)), file time travel extends to individual blocks. Place your cursor on any block and `SPC H H` (block history) opens the context strip showing every version of *that specific block* across time:
 
 <div style="font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.5; background: #141414; color: #EBE9E7; border-radius: 6px; overflow: hidden; max-width: 680px; margin: 16px 0;">
   <!-- Context strip (block history) -->
@@ -385,7 +385,7 @@ One key cycles through densities. Same data, different zoom. Not a configuration
 
 Tasks in the activity view are **actionable.** Pressing `x` on a task toggles it in the source file.
 
-**How it works:** The activity view stores tasks by block ID (see [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md)). The toggle resolves `page_id^block_id` → current line in the index → flip `[ ]` ↔ `[x]` in the rope buffer. Same code path as the agenda's toggle.
+**How it works:** The activity view stores tasks by block ID (see [BLOCK_IDENTITY.md](../BLOCK_IDENTITY.md)). The toggle resolves `page_id^block_id` → current line in the index → flip `[ ]` ↔ `[x]` in the rope buffer. Same code path as the agenda's toggle.
 
 If the block ID is orphaned (the content was deleted since that day), the task renders as historical — no action available, dimmed styling.
 
@@ -587,7 +587,7 @@ With time as a first-class dimension, emergence detection gains temporal awarene
 
 ### Block Identity (Self-Healing)
 
-Git history is the backstop that makes block ID self-healing possible. See [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md).
+Git history is the backstop that makes block ID self-healing possible. See [BLOCK_IDENTITY.md](../BLOCK_IDENTITY.md).
 
 ---
 
@@ -680,5 +680,5 @@ No external runtime dependencies. No `git` binary required. Works on macOS and W
 
 - [`gix` crate](https://github.com/GitoxideLabs/gitoxide) — pure Rust git implementation, used by `cargo`
 - [JOURNAL_REDESIGN.md](JOURNAL_REDESIGN.md) — journal file model, calendar navigation
-- [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md) — self-healing block IDs powered by git history
+- [BLOCK_IDENTITY.md](../BLOCK_IDENTITY.md) — self-healing block IDs powered by git history
 - [Journal Redesign](JOURNAL_REDESIGN.md) — `journal.md` rotation model

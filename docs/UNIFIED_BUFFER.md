@@ -405,6 +405,6 @@ Rope O(log n) insert means 10K-char paste costs the same as one keystroke. The b
 ## References
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — current threading model
-- [BLOCK_IDENTITY.md](lab/BLOCK_IDENTITY.md) — block identity and mirroring (enabled by this architecture)
+- [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md) — block identity and mirroring (enabled by this architecture)
 - [GOALS.md G17](GOALS.md) — MCP background buffers and eviction
 - Elm Architecture: https://guide.elm-lang.org/architecture/

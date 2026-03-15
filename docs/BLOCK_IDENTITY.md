@@ -2,7 +2,7 @@
 
 > Universal, short, self-healing block IDs — stable identity for every piece of content.
 > Same ID in multiple files = mirrored block, kept in sync via `^=` markers and MirrorEdit.
-> Status: **Partially implemented.** IDs assigned, parser and index support `^=`, toggle mirroring works.
+> Status: **Implemented.** IDs assigned, `^=` parser/index/highlighter, mirror promotion/demotion, general text propagation, mirror UX (gutter, status hint, SPC m s/m), retired IDs, stale row cleanup.
 
 ---
 
@@ -48,7 +48,7 @@ A block is `^k7m2x` everywhere, forever, regardless of which page it lives in. T
 | ID space | 60,500,000 |
 | Density at lifetime peak | **8.3%** — virtually no collisions during random generation |
 
-**Valid as git tree entries.** Block history is tracked as virtual files in git (see [TIME_TRAVEL.md](TIME_TRAVEL.md)). Base36 trivially satisfies git requirements (non-empty, no NUL, no `/`).
+**Valid as git tree entries.** Block history is tracked as virtual files in git (see [TIME_TRAVEL.md](lab/TIME_TRAVEL.md)). Base36 trivially satisfies git requirements (non-empty, no NUL, no `/`).
 
 ### Vault-Scoped, Not Page-Scoped
 
@@ -601,7 +601,7 @@ Brief confirmation that the edit propagated. Same transient notification style a
 
 ## References
 
-- [UNIFIED_BUFFER.md](../UNIFIED_BUFFER.md) — BufferWriter architecture, MirrorEdit design, event bus
-- [TIME_TRAVEL.md](TIME_TRAVEL.md) — git-backed history for self-healing and per-block virtual files
-- [LIVE_VIEWS.md](LIVE_VIEWS.md) — BQL result actions that depend on stable block identity
-- [EMERGENCE.md](EMERGENCE.md) — chunk identity for semantic embeddings
+- [UNIFIED_BUFFER.md](UNIFIED_BUFFER.md) — BufferWriter architecture, MirrorEdit design, event bus
+- [TIME_TRAVEL.md](lab/TIME_TRAVEL.md) — git-backed history for self-healing and per-block virtual files
+- [LIVE_VIEWS.md](lab/LIVE_VIEWS.md) — BQL result actions that depend on stable block identity
+- [EMERGENCE.md](lab/EMERGENCE.md) — chunk identity for semantic embeddings
