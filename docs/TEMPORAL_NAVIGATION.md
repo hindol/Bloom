@@ -40,7 +40,7 @@ Same component, different data sources:
 |-----|--------|
 | `h` / `←` | Older |
 | `l` / `→` | Newer |
-| `j` / `k` | At a branch point (`⑂`): expand and switch between branches |
+| `j` / `k` | At a branch point (`[●]`): switch between branches |
 | `e` | Toggle compact ↔ rich (show descriptions) |
 | `d` | Toggle diff highlights (history contexts) |
 | `r` | Restore to selected version (history contexts) |
@@ -53,10 +53,10 @@ Same component, different data sources:
 
 ### Compact (default)
 
-Single line. Labels only. Branch points marked with `⑂`.
+Single line. Labels only. Branch points marked with `[●]` — auto-expand when cursor arrives.
 
 ```
-├── ● 2m ─── ● 5m ─── ⑂ 8m ─── ● 15m ── ○ 1h ── ○ 3h ── ○ yday ──┤
+├── ● 2m ─── ● 5m ─── [●] 8m ─── ● 15m ── ○ 1h ── ○ 3h ── ○ yday ──┤
                         ▲
 ```
 
@@ -66,33 +66,37 @@ Two lines. Labels + descriptions. Branches still collapsed.
 
 ```
 ├──────────────────────────────────────────────────────────────────┤
-│ ● 2 min      ● 5 min      ⑂ 8 min      ● 15 min     ○ 1 hr    │
+│ ● 2 min      ● 5 min      [●] 8 min      ● 15 min     ○ 1 hr    │
 │ "insert"     "delete"     "insert"      auto-save     save      │
 │                             ▲                                    │
 ├──────────────────────────────────────────────────────────────────┤
 ```
 
-### Branches (auto-expand at `⑂`)
+### Branches (auto-expand at `[●]`)
 
-When the cursor lands on a branch point (`⑂`), pressing `j`/`k` expands the fork and moves between branches. Moving `h`/`l` away from the fork collapses it back to one line.
+When the cursor lands on a branch point (`[●]`), the fork auto-expands. `j`/`k` switches between branches. Moving `h`/`l` away from the fork collapses it back to one line.
 
 ```
-Cursor on ⑂, press j:
-├── ● 2m ── ● 5m ──┬── ● 8m "insert" ── ● 15m ── ○ 1h ──┤
-                    └── ● 8m "delete" (abandoned)
-                    ▲
+Scrubbing toward a branch:
+├── ● 2m ── ● 5m ── [●] 8m ── ● 10m ── ○ 1h ──┤
+                      ▲
 
-Press k (switch to other branch):
-├── ● 2m ── ● 5m ──┬── ● 8m "insert" ── ● 15m ── ○ 1h ──┤
+Cursor arrives at [●] — auto-expands:
+├── ● 2m ── ● 5m ──┬── ● 8m "insert" ── ● 10m ── ○ 1h ──┤
+                    └── ● 8m "delete" (abandoned)
+                    ▲ (on main branch)
+
+k (switch to abandoned branch):
+├── ● 2m ── ● 5m ──┬── ● 8m "insert" ── ● 10m ── ○ 1h ──┤
                     └── ● 8m "delete" (abandoned)
                          ▲
 
-Press l (follow selected branch, fork collapses):
-├── ● 2m ── ● 5m ── ⑂ 8m ── ● "delete" ──┤
-                               ▲
+l (follow abandoned branch, fork collapses):
+├── ● 2m ── ● 5m ── [●] 8m ── ● "delete" ──┤
+                                  ▲
 ```
 
-No extra keystrokes. `j`/`k` does nothing on non-branch nodes (like in a single-line list). At a `⑂`, it naturally opens the fork. Moving away naturally closes it.
+No keystrokes to discover branches — they appear the moment you reach them. `j`/`k` does nothing on non-branch nodes.
 
 ### Branch Rules
 
@@ -103,7 +107,7 @@ Undo tree: root → A → B → C → D (current)
                        └→ E (abandoned)
 
 Strip shows current path as main line:
-├── root ── A ── ⑂B ── C ── D ──┤
+├── root ── A ── [●]B ── C ── D ──┤
 
 j at B:
 ├── root ── A ──┬── C ── D ──┤   ← current path (top)
