@@ -45,13 +45,17 @@ impl BloomEditor {
                     .writer.buffers()
                     .open_buffers()
                     .iter()
-                    .map(|info| GenericPickerItem {
-                        id: info.page_id.to_hex(),
-                        label: info.title.clone(),
-                        middle: Some("[+]".to_string()),
-                        right: Some(info.path.display().to_string()),
-                        preview_text: None,
-                        score_boost: 0,
+                    .map(|info| {
+                        let is_dirty = self.writer.buffers().get(&info.page_id)
+                            .is_some_and(|b| b.is_dirty());
+                        GenericPickerItem {
+                            id: info.page_id.to_hex(),
+                            label: info.title.clone(),
+                            middle: if is_dirty { Some("[+]".to_string()) } else { None },
+                            right: Some(info.path.display().to_string()),
+                            preview_text: None,
+                            score_boost: 0,
+                        }
                     })
                     .collect();
                 (
