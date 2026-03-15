@@ -430,6 +430,23 @@ impl BloomEditor {
                 } else {
                     None
                 }
+            } else if let Some(mm) = &self.mirror_menu {
+                let items: Vec<render::InlineMenuItem> = mm.items.iter().map(|item| {
+                    render::InlineMenuItem {
+                        id: Some(item.page_id.to_hex()),
+                        label: item.title.clone(),
+                        right: Some(format!("L{}", item.line + 1)),
+                    }
+                }).collect();
+                Some(render::InlineMenuFrame {
+                    items,
+                    selected: mm.selected,
+                    anchor: render::InlineMenuAnchor::Cursor {
+                        line: mm.cursor_line.saturating_sub(self.viewport().first_visible_line),
+                        col: mm.cursor_col + 5,
+                    },
+                    hint: Some("🪞 mirrors".to_string()),
+                })
             } else {
                 None
             },

@@ -534,7 +534,7 @@ The `SPC m` prefix activates only when the cursor is on a `^=` line. On non-mirr
 | Key | Action | Description |
 |-----|--------|-------------|
 | `SPC m s` | Sever mirror | Replace `^=xxxxx` with a new `^yyyyy`. This block becomes independent. Other mirrors keep their `^=xxxxx`. If only two mirrors existed, the remaining one is demoted to `^xxxxx` on next index. |
-| `SPC m g` | Go to mirror | Picker showing all pages that share this block ID. Enter jumps to the mirror in that page at the exact line. Esc dismisses. |
+| `SPC m m` | Go to mirror | Inline menu showing all pages that share this block ID. j/k to select, Enter jumps. Esc dismisses. |
 
 #### Sever mechanics
 

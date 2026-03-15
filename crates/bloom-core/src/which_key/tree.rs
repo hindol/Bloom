@@ -318,7 +318,7 @@ fn build_static_tree(tree: &mut WhichKeyTree) {
 
     // Mirror
     tree.register("m s", "Sever mirror", "mirror_sever".into());
-    tree.register("m g", "Go to mirror", "mirror_goto".into());
+    tree.register("m m", "Go to mirror", "mirror_goto".into());
 
     // Help / Meta
     tree.register("?", "All commands", "all_commands".into());

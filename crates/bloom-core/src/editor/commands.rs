@@ -641,7 +641,7 @@ impl BloomEditor {
             Some(id) => id,
             None => return,
         };
-        let cursor_line = self.cursor_position().0;
+        let (cursor_line, cursor_col) = self.cursor_position();
         let bid = {
             let Some(buf) = self.writer.buffers().get(&page_id) else { return };
             if cursor_line >= buf.len_lines() { return; }
@@ -658,16 +658,13 @@ impl BloomEditor {
 
         let Some(idx) = &self.index else { return };
         let mirrors = idx.find_all_pages_by_block_id(&bid);
-        let items: Vec<crate::GenericPickerItem> = mirrors
+        let items: Vec<MirrorMenuItem> = mirrors
             .iter()
             .filter(|(meta, _)| meta.id != page_id)
-            .map(|(meta, line)| crate::GenericPickerItem {
-                id: meta.id.to_hex(),
-                label: meta.title.clone(),
-                middle: None,
-                right: Some(format!("line {}", line + 1)),
-                preview_text: None,
-                score_boost: 0,
+            .map(|(meta, line)| MirrorMenuItem {
+                page_id: meta.id.clone(),
+                title: meta.title.clone(),
+                line: *line,
             })
             .collect();
 
@@ -676,32 +673,11 @@ impl BloomEditor {
             return;
         }
 
-        self.open_generic_picker(
+        self.mirror_menu = Some(MirrorMenu {
             items,
-            "Mirrors",
-            keymap::dispatch::PickerKind::MirrorGoto,
-            crate::PickerAction::MirrorJump,
-        );
-    }
-
-    fn open_generic_picker(
-        &mut self,
-        items: Vec<crate::GenericPickerItem>,
-        title: &str,
-        kind: keymap::dispatch::PickerKind,
-        action: crate::PickerAction,
-    ) {
-        let picker = crate::picker::Picker::new(items);
-        self.picker_state = Some(crate::ActivePicker {
-            kind,
-            action,
-            picker,
-            title: title.to_string(),
-            query: String::new(),
-            status_noun: "items".to_string(),
-            min_query_len: 0,
-            previous_theme: None,
-            query_selected: false,
+            selected: 0,
+            cursor_line,
+            cursor_col,
         });
     }
 }

@@ -90,7 +90,6 @@ pub enum PickerKind {
     InlineLink,
     Templates,
     Theme,
-    MirrorGoto,
 }
 
 #[derive(Debug, Clone)]

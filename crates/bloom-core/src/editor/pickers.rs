@@ -23,7 +23,6 @@ pub(crate) fn picker_kind_key(kind: &keymap::dispatch::PickerKind) -> String {
         PickerKind::InlineLink => "inline_link".into(),
         PickerKind::Templates => "templates".into(),
         PickerKind::Theme => "theme".into(),
-        PickerKind::MirrorGoto => "mirror_goto".into(),
     }
 }
 
@@ -198,10 +197,6 @@ impl BloomEditor {
                 self.open_theme_picker();
                 return;
             }
-            PickerKind::MirrorGoto => {
-                // Items are set externally by mirror_goto()
-                return;
-            }
         };
         let min_query_len = match &kind {
             PickerKind::Search => 2,
@@ -220,7 +215,6 @@ impl BloomEditor {
             PickerKind::AllCommands => crate::PickerAction::ExecuteCommand,
             PickerKind::InlineLink => crate::PickerAction::InsertLink,
             PickerKind::Templates => crate::PickerAction::ExpandTemplate,
-            PickerKind::MirrorGoto => crate::PickerAction::MirrorJump,
             PickerKind::Tags => crate::PickerAction::Noop,
             PickerKind::Backlinks(_) | PickerKind::UnlinkedMentions(_) => {
                 crate::PickerAction::OpenPage
@@ -826,36 +820,6 @@ impl BloomEditor {
                     if self.writer.buffers().get(&page_id).is_some() {
                         let link_text = format!("[[{}|{}]]", item.id, item.label);
                         self.insert_text_at_cursor(&link_text);
-                    }
-                }
-            }
-            PickerAction::MirrorJump => {
-                if let Some(page_id) = types::PageId::from_hex(&item.id) {
-                    if let Some(idx) = &self.index {
-                        if let Some(meta) = idx.find_page_by_id(&page_id) {
-                            let full = self
-                                .vault_root
-                                .as_ref()
-                                .map(|r| r.join(&meta.path))
-                                .unwrap_or_else(|| meta.path.clone());
-                            if let Ok(content) = std::fs::read_to_string(&full) {
-                                self.open_page_with_content(
-                                    &page_id, &meta.title, &full, &content,
-                                );
-                                let line_num: usize = item
-                                    .right
-                                    .as_deref()
-                                    .and_then(|r| r.strip_prefix("line "))
-                                    .and_then(|n| n.parse::<usize>().ok())
-                                    .unwrap_or(1)
-                                    .saturating_sub(1);
-                                if let Some(buf) = self.writer.buffers().get(&page_id) {
-                                    let target =
-                                        buf.text().line_to_char(line_num.min(buf.len_lines().saturating_sub(1)));
-                                    self.set_cursor(target);
-                                }
-                            }
-                        }
                     }
                 }
             }

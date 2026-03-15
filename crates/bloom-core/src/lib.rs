@@ -586,6 +586,7 @@ pub struct BloomEditor {
     pub(crate) active_dialog: Option<ActiveDialog>,
     // Inline completion (link picker / tag completion)
     pub(crate) inline_completion: Option<InlineCompletion>,
+    pub(crate) mirror_menu: Option<MirrorMenu>,
     // BQL query cache (invalidated on IndexComplete)
     pub(crate) query_cache: std::cell::RefCell<query::QueryCache>,
     // Live Views state
@@ -638,6 +639,20 @@ pub(crate) struct InlineCompletion {
 pub(crate) enum InlineCompletionKind {
     Link, // triggered by [[
     Tag,  // triggered by #
+}
+
+/// Small inline menu for mirror navigation (SPC m m).
+pub(crate) struct MirrorMenu {
+    pub items: Vec<MirrorMenuItem>,
+    pub selected: usize,
+    pub cursor_line: usize,
+    pub cursor_col: usize,
+}
+
+pub(crate) struct MirrorMenuItem {
+    pub page_id: types::PageId,
+    pub title: String,
+    pub line: usize,
 }
 
 pub(crate) enum ActiveDialog {
@@ -779,8 +794,6 @@ pub(crate) enum PickerAction {
     InsertLink,
     /// Expand a template (item.id = template name).
     ExpandTemplate,
-    /// Open a page and jump to a mirror line (item.id = PageId hex, item.right = "line N").
-    MirrorJump,
     /// Apply a theme (handled specially by theme picker).
     ApplyTheme,
     /// No-op (e.g., tags picker — not yet wired to action).
@@ -901,6 +914,7 @@ impl BloomEditor {
             file_event_deadline: None,
             active_dialog: None,
             inline_completion: None,
+            mirror_menu: None,
             query_cache: std::cell::RefCell::new(query::QueryCache::new()),
             active_view: None,
             vault_lock: None,

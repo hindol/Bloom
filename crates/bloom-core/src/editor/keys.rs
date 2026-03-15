@@ -140,6 +140,11 @@ impl BloomEditor {
             return self.handle_search_key(key);
         }
 
+        // Mirror inline menu (SPC m m)
+        if self.mirror_menu.is_some() {
+            return self.handle_mirror_menu_key(key);
+        }
+
         // Vim processing — works for both mutable and frozen (read-only) buffers.
         let buf_for_vim = self
             .active_page()
@@ -1993,5 +1998,61 @@ impl BloomEditor {
         if let Some(&pos) = target {
             self.set_cursor(pos);
         }
+    }
+
+    // ── Mirror inline menu ───────────────────────────────────────────
+
+    fn handle_mirror_menu_key(
+        &mut self,
+        key: types::KeyEvent,
+    ) -> Vec<keymap::dispatch::Action> {
+        match key.code {
+            types::KeyCode::Esc | types::KeyCode::Char('q') => {
+                self.mirror_menu = None;
+            }
+            types::KeyCode::Up | types::KeyCode::Char('k') => {
+                if let Some(menu) = &mut self.mirror_menu {
+                    if menu.selected > 0 {
+                        menu.selected -= 1;
+                    }
+                }
+            }
+            types::KeyCode::Down | types::KeyCode::Char('j') => {
+                if let Some(menu) = &mut self.mirror_menu {
+                    if menu.selected + 1 < menu.items.len() {
+                        menu.selected += 1;
+                    }
+                }
+            }
+            types::KeyCode::Enter => {
+                if let Some(menu) = self.mirror_menu.take() {
+                    if let Some(item) = menu.items.get(menu.selected) {
+                        let pid = item.page_id.clone();
+                        let line = item.line;
+                        let title = item.title.clone();
+                        if let Some(idx) = &self.index {
+                            if let Some(meta) = idx.find_page_by_id(&pid) {
+                                let full = self
+                                    .vault_root
+                                    .as_ref()
+                                    .map(|r| r.join(&meta.path))
+                                    .unwrap_or_else(|| meta.path.clone());
+                                if let Ok(content) = std::fs::read_to_string(&full) {
+                                    self.open_page_with_content(&pid, &title, &full, &content);
+                                    if let Some(buf) = self.writer.buffers().get(&pid) {
+                                        let target = buf
+                                            .text()
+                                            .line_to_char(line.min(buf.len_lines().saturating_sub(1)));
+                                        self.set_cursor(target);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        vec![keymap::dispatch::Action::Noop]
     }
 }
