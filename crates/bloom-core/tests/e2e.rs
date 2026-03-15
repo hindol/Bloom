@@ -2682,3 +2682,38 @@ fn theme_persists_to_config_without_corrupting_views() {
         config
     );
 }
+
+// =======================================================================
+// Self-write detection: no reload dialog after own save
+// =======================================================================
+
+#[test]
+fn no_reload_dialog_after_self_save() {
+    let vault = TestVault::new()
+        .page("Test")
+        .with_content("original content\n")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // Open the page
+    sim.keys("SPC p p");
+    sim.type_text("Test");
+    sim.keys("Enter");
+
+    // Edit and save (triggers auto-save via Esc)
+    sim.keys("A");
+    sim.type_text(" edited");
+    sim.keys("<Esc>");
+
+    // Give time for file watcher to fire
+    sim.tick(500);
+
+    // Should NOT have a dialog
+    let screen = sim.screen(80, 24);
+    let all = screen.all_lines();
+    assert!(
+        !all.contains("changed on disk") && !all.contains("Reload?"),
+        "self-write should not trigger reload dialog, got: {}",
+        all
+    );
+}

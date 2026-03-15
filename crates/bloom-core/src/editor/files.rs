@@ -11,6 +11,7 @@ impl BloomEditor {
     /// Returns true if the visual state changed (dirty indicator flipped).
     pub fn handle_write_complete(&mut self, wc: bloom_store::disk_writer::WriteComplete) -> bool {
         tracing::debug!(path = %wc.path.display(), "write complete received");
+        self.pending_writes.remove(&wc.path);
         self.last_write_fingerprints
             .insert(wc.path.clone(), (wc.mtime, wc.size));
 
@@ -66,7 +67,12 @@ impl BloomEditor {
         let mut visual_changed = false;
 
         if let Some(page_id) = self.writer.buffers().find_by_path(&path).cloned() {
-            let is_own_write = if let Some((recorded_mtime, recorded_size)) =
+            let is_own_write = if self.pending_writes.contains(&path) {
+                // Write in-flight — FileEvent arrived before WriteComplete.
+                // Treat as self-write to avoid false reload prompt.
+                tracing::debug!(path = %path.display(), "pending write — suppressing file event");
+                true
+            } else if let Some((recorded_mtime, recorded_size)) =
                 self.last_write_fingerprints.remove(&path)
             {
                 std::fs::metadata(&path)
@@ -171,6 +177,7 @@ impl BloomEditor {
 
         // Write.
         if let Some(tx) = &self.autosave_tx {
+            self.pending_writes.insert(path.clone());
             let _ = tx.send(bloom_store::disk_writer::WriteRequest { path, content });
         } else {
             // No DiskWriter (tests, pre-init). Inline atomic write.
