@@ -276,6 +276,8 @@ pub struct RenderedLine {
     pub source: LineSource,
     pub text: String,
     pub spans: Vec<StyledSpan>,
+    /// True if this line contains a `^=` mirror marker.
+    pub is_mirror: bool,
 }
 
 /// Where a rendered line originated.

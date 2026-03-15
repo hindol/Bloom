@@ -71,6 +71,14 @@ impl BloomEditor {
             "journal_task" => vec![keymap::dispatch::Action::QuickCapture(
                 keymap::dispatch::QuickCaptureKind::Task,
             )],
+            "mirror_sever" => {
+                self.mirror_sever();
+                vec![keymap::dispatch::Action::Noop]
+            }
+            "mirror_goto" => {
+                self.mirror_goto();
+                vec![keymap::dispatch::Action::Noop]
+            }
             "split_vertical" => vec![keymap::dispatch::Action::SplitWindow(
                 window::SplitDirection::Vertical,
             )],
@@ -528,9 +536,125 @@ impl BloomEditor {
             }
         }
     }
-}
 
-/// Format a BQL QueryResult into text content and a row map for Enter-to-source.
+    /// Sever mirror: replace ^=xxxxx with a new ^yyyyy on the cursor line.
+    fn mirror_sever(&mut self) {
+        let page_id = match self.active_page().cloned() {
+            Some(id) => id,
+            None => return,
+        };
+        let cursor_line = self.cursor_position().0;
+        let (old_marker, _bid) = {
+            let Some(buf) = self.writer.buffers().get(&page_id) else { return };
+            if cursor_line >= buf.len_lines() { return; }
+            let line_text = buf.line(cursor_line).to_string();
+            let bid = bloom_md::parser::extensions::parse_block_id(&line_text, cursor_line);
+            match bid {
+                Some(b) if b.is_mirror => {
+                    let marker = format!(" ^={}", b.id.0);
+                    (marker, b.id.0)
+                }
+                _ => {
+                    self.push_notification("Not on a mirrored block".into(), crate::render::NotificationLevel::Warning);
+                    return;
+                }
+            }
+        };
+
+        // Generate a new unique ID
+        let existing = crate::block_id_gen::load_all_known_ids(
+            self.index.as_ref().map(|i| i.connection()).unwrap(),
+        );
+        let new_id = bloom_buffer::block_id::next_block_id(&existing);
+        let new_marker = format!(" ^{}", new_id);
+
+        // Replace in buffer
+        if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
+            let line_text = buf.line(cursor_line).to_string();
+            let trimmed = line_text.trim_end_matches('\n');
+            if let Some(pos) = trimmed.rfind(&old_marker) {
+                let ls = buf.text().line_to_char(cursor_line);
+                buf.replace(
+                    ls + pos..ls + pos + old_marker.len(),
+                    &new_marker,
+                );
+            }
+        }
+
+        self.save_page(&page_id);
+        self.push_notification(
+            format!("Mirror severed — new ID ^{}", new_id),
+            crate::render::NotificationLevel::Info,
+        );
+    }
+
+    /// Go to mirror: open a picker of all pages sharing the cursor line's block ID.
+    fn mirror_goto(&mut self) {
+        let page_id = match self.active_page().cloned() {
+            Some(id) => id,
+            None => return,
+        };
+        let cursor_line = self.cursor_position().0;
+        let bid = {
+            let Some(buf) = self.writer.buffers().get(&page_id) else { return };
+            if cursor_line >= buf.len_lines() { return; }
+            let line_text = buf.line(cursor_line).to_string();
+            let bid = bloom_md::parser::extensions::parse_block_id(&line_text, cursor_line);
+            match bid {
+                Some(b) if b.is_mirror => b.id,
+                _ => {
+                    self.push_notification("Not on a mirrored block".into(), crate::render::NotificationLevel::Warning);
+                    return;
+                }
+            }
+        };
+
+        let Some(idx) = &self.index else { return };
+        let mirrors = idx.find_all_pages_by_block_id(&bid);
+        let items: Vec<crate::GenericPickerItem> = mirrors
+            .iter()
+            .filter(|(meta, _)| meta.id != page_id)
+            .map(|(meta, line)| crate::GenericPickerItem {
+                id: meta.id.to_hex(),
+                label: meta.title.clone(),
+                middle: None,
+                right: Some(format!("line {}", line + 1)),
+                preview_text: None,
+                score_boost: 0,
+            })
+            .collect();
+
+        if items.is_empty() {
+            self.push_notification("No other mirrors found".into(), crate::render::NotificationLevel::Warning);
+            return;
+        }
+
+        self.open_generic_picker(
+            items,
+            "Mirrors",
+            keymap::dispatch::PickerKind::MirrorGoto,
+        );
+    }
+
+    fn open_generic_picker(
+        &mut self,
+        items: Vec<crate::GenericPickerItem>,
+        title: &str,
+        kind: keymap::dispatch::PickerKind,
+    ) {
+        let picker = crate::picker::Picker::new(items);
+        self.picker_state = Some(crate::ActivePicker {
+            kind,
+            picker,
+            title: title.to_string(),
+            query: String::new(),
+            status_noun: "items".to_string(),
+            min_query_len: 0,
+            previous_theme: None,
+            query_selected: false,
+        });
+    }
+}
 fn format_view_result(
     result: &query::QueryResult,
     today: chrono::NaiveDate,

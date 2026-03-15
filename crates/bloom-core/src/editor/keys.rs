@@ -1647,6 +1647,7 @@ impl BloomEditor {
         let Some(idx) = &self.index else { return };
         let mirrors = idx.find_all_pages_by_block_id(&types::BlockId(block_id));
         let new_trimmed = line_text.trim_end_matches('\n');
+        let mut mirror_count = 0usize;
 
         for (meta, mirror_line) in &mirrors {
             if meta.id == *page_id {
@@ -1679,6 +1680,13 @@ impl BloomEditor {
                 }
             }
             self.save_page(&meta.id);
+            mirror_count += 1;
+        }
+        if mirror_count > 0 {
+            self.push_notification(
+                format!("🪞 Updated {} mirror{}", mirror_count, if mirror_count == 1 { "" } else { "s" }),
+                crate::render::NotificationLevel::Info,
+            );
         }
     }
 

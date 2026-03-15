@@ -197,6 +197,14 @@ impl BloomEditor {
                 let show_jrnl = is_active
                     && self.in_journal_mode
                     && matches!(content, render::StatusBarContent::Normal(_));
+
+                // Mirror hint: when cursor is on a ^= line
+                let mirror_hint = if is_active && !show_jrnl {
+                    self.mirror_hint_for_cursor()
+                } else {
+                    None
+                };
+
                 render::StatusBarFrame {
                     content,
                     mode: if show_jrnl {
@@ -207,7 +215,7 @@ impl BloomEditor {
                     right_hints: if show_jrnl {
                         Some("↵:calendar  [d/]d".to_string())
                     } else {
-                        None
+                        mirror_hint
                     },
                 }
             } else {
@@ -935,6 +943,7 @@ impl BloomEditor {
                     );
                     lines.push(render::RenderedLine {
                         source: render::LineSource::Buffer(line_idx),
+                        is_mirror: line_text.contains(" ^="),
                         text: line_text,
                         spans,
                     });
@@ -973,6 +982,7 @@ impl BloomEditor {
                 );
                 lines.push(render::RenderedLine {
                     source: render::LineSource::Buffer(line_idx),
+                    is_mirror: line_text.contains(" ^="),
                     text: line_text,
                     spans,
                 });
@@ -1032,5 +1042,27 @@ impl BloomEditor {
         (0, 0)
     }
 
-
+    /// If the cursor is on a `^=` line, return a status bar hint with mirror count.
+    fn mirror_hint_for_cursor(&self) -> Option<String> {
+        let page_id = self.active_page()?;
+        let buf = self.writer.buffers().get(page_id)?;
+        let (cursor_line, _) = Self::cursor_position_for(self.cursor(), buf, &self.vim_state);
+        if cursor_line >= buf.len_lines() {
+            return None;
+        }
+        let line_text = buf.line(cursor_line).to_string();
+        let bid = bloom_md::parser::extensions::parse_block_id(&line_text, cursor_line)?;
+        if !bid.is_mirror {
+            return None;
+        }
+        let count = self
+            .index
+            .as_ref()
+            .map(|idx| idx.find_all_pages_by_block_id(&bid.id).len())
+            .unwrap_or(0);
+        if count < 2 {
+            return None;
+        }
+        Some(format!("🪞 {} pages · SPC m: mirror", count))
+    }
 }

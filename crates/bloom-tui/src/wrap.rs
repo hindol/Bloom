@@ -229,6 +229,7 @@ mod tests {
             source: bloom_core::render::LineSource::Buffer(0),
             text: text.to_string(),
             spans: vec![],
+            is_mirror: false,
         }
     }
 

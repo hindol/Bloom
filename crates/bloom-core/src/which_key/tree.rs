@@ -315,6 +315,10 @@ fn build_static_tree(tree: &mut WhichKeyTree) {
     // Tasks (checkbox actions)
     tree.register("x a", "Append task", "journal_task".into());
 
+    // Mirror
+    tree.register("m s", "Sever mirror", "mirror_sever".into());
+    tree.register("m g", "Go to mirror", "mirror_goto".into());
+
     // Help / Meta
     tree.register("?", "All commands", "all_commands".into());
 
@@ -335,6 +339,7 @@ fn build_static_tree(tree: &mut WhichKeyTree) {
     tree.set_group_label("t", "tags");
     tree.set_group_label("x", "tasks");
     tree.set_group_label("v", "views");
+    tree.set_group_label("m", "mirror");
 }
 
 // ---------- CommandRegistry ----------

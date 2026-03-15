@@ -206,7 +206,16 @@ fn draw_editor_content_unified(
                 Some(n) => format!("{:>3}  ", n + 1),
                 None => "     ".to_string(),
             };
-            let lnum_style = if is_cursor_line { base_style } else { faded_bg };
+            let lnum_style = if is_cursor_line && rendered_line.is_mirror {
+                // Mirror indicator: salient line number on cursor line only
+                RStyle::default()
+                    .fg(theme.salient())
+                    .bg(theme.highlight())
+            } else if is_cursor_line {
+                base_style
+            } else {
+                faded_bg
+            };
             spans.push(Span::styled(lnum, lnum_style));
         } else {
             let gutter_w = line_number_width as usize;
