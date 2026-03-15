@@ -1284,23 +1284,23 @@ fn word_diff(historical: &str, current: &str) -> Vec<render::DiffSegment> {
             });
             hi += 1;
             ci += 1;
-        } else if ci < c_words.len()
-            && (hi >= h_words.len()
-                || h_words[hi..].iter().position(|w| *w == c_words[ci]).is_none())
+        } else if hi < h_words.len()
+            && (ci >= c_words.len()
+                || c_words[ci..].iter().position(|w| *w == h_words[hi]).is_none())
         {
-            // Word only in current (added)
-            segments.push(render::DiffSegment {
-                text: format!(" {}", c_words[ci]),
-                kind: render::DiffLineKind::Added,
-            });
-            ci += 1;
-        } else {
-            // Word only in historical (removed)
+            // Word only in historical (removed) — show red first
             segments.push(render::DiffSegment {
                 text: format!(" {}", h_words[hi]),
                 kind: render::DiffLineKind::Removed,
             });
             hi += 1;
+        } else {
+            // Word only in current (added) — show green after red
+            segments.push(render::DiffSegment {
+                text: format!(" {}", c_words[ci]),
+                kind: render::DiffLineKind::Added,
+            });
+            ci += 1;
         }
     }
     segments
