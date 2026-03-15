@@ -94,6 +94,46 @@ Press l (follow selected branch, fork collapses):
 
 No extra keystrokes. `j`/`k` does nothing on non-branch nodes (like in a single-line list). At a `⑂`, it naturally opens the fork. Moving away naturally closes it.
 
+### Branch Rules
+
+**Main branch:** The strip always shows the path from root → current undo node as the top line. Alternate branches hang below. "Current" is defined by the undo tree's `current` pointer.
+
+```
+Undo tree: root → A → B → C → D (current)
+                       └→ E (abandoned)
+
+Strip shows current path as main line:
+├── root ── A ── ⑂B ── C ── D ──┤
+
+j at B:
+├── root ── A ──┬── C ── D ──┤   ← current path (top)
+                └── E             ← abandoned (below)
+                ▲
+```
+
+**Nested branches:** If an abandoned branch itself has a fork, it renders as an additional line. Capped at 4 visible lines — deeper nesting shows `…`.
+
+```
+├── root ── A ──┬── C ── D ──┤
+                └── E ──┬── F
+                        └── G
+                ▲
+```
+
+In practice, nested branches are rare (require: edit → undo → edit → undo past fork → edit again).
+
+**Restore from abandoned branch:** `r` on an abandoned node creates a new forward node on the current path. The abandoned branch is preserved — the restored content flows forward, not backward.
+
+```
+Before: root → A → B → C (current), B → E (abandoned)
+Restore E: root → A → B → C → [new: E's content] (current)
+Branch at B still exists in the tree.
+```
+
+**Git commits are always linear.** `j`/`k` is a no-op on `○` nodes. Only undo nodes (`●`) can have branches.
+
+**Empty undo tree.** If the page was just opened (no edits this session), the strip shows only `○` git commits. Pure linear. Graceful degradation.
+
 For day activity, descriptions are summary stats (no branching):
 
 ```
