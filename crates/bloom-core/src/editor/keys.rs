@@ -444,7 +444,7 @@ impl BloomEditor {
                             .insert(picker_kind_key(&ap.kind), ap.query.clone());
                     }
                     if let Some(selected) = ap.picker.selected() {
-                        self.handle_picker_selection(&ap.kind, selected.clone());
+                        self.handle_picker_selection(&ap.action, selected.clone());
                     }
                 }
                 vec![keymap::dispatch::Action::Noop]

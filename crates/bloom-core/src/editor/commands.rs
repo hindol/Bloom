@@ -182,6 +182,7 @@ impl BloomEditor {
                                     .collect();
                                 self.picker_state = Some(ActivePicker {
                                     kind: keymap::dispatch::PickerKind::Tags,
+                                    action: PickerAction::Noop,
                                     picker: picker::Picker::new(items),
                                     title: "Remove Tag".to_string(),
                                     query: String::new(),
@@ -430,7 +431,8 @@ impl BloomEditor {
             .collect();
         let picker = crate::picker::Picker::new(items);
         self.picker_state = Some(crate::ActivePicker {
-            kind: keymap::dispatch::PickerKind::AllCommands, // reuse for view selection
+            kind: keymap::dispatch::PickerKind::AllCommands,
+            action: crate::PickerAction::ExecuteCommand,
             picker,
             title: "Views".to_string(),
             query: String::new(),
@@ -633,6 +635,7 @@ impl BloomEditor {
             items,
             "Mirrors",
             keymap::dispatch::PickerKind::MirrorGoto,
+            crate::PickerAction::MirrorJump,
         );
     }
 
@@ -641,10 +644,12 @@ impl BloomEditor {
         items: Vec<crate::GenericPickerItem>,
         title: &str,
         kind: keymap::dispatch::PickerKind,
+        action: crate::PickerAction,
     ) {
         let picker = crate::picker::Picker::new(items);
         self.picker_state = Some(crate::ActivePicker {
             kind,
+            action,
             picker,
             title: title.to_string(),
             query: String::new(),

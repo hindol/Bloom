@@ -737,6 +737,7 @@ pub(crate) fn expand_tilde(path: &str) -> String {
 
 pub(crate) struct ActivePicker {
     pub(crate) kind: keymap::dispatch::PickerKind,
+    pub(crate) action: PickerAction,
     pub(crate) picker: picker::Picker<GenericPickerItem>,
     pub(crate) title: String,
     pub(crate) query: String,
@@ -746,6 +747,30 @@ pub(crate) struct ActivePicker {
     pub(crate) previous_theme: Option<&'static bloom_md::theme::ThemePalette>,
     /// When true, the next character typed replaces the query (select-all UX).
     pub(crate) query_selected: bool,
+}
+
+/// What to do when the user selects a picker item.
+/// Decouples the picker (view) from the business logic (selection handling).
+#[derive(Debug, Clone)]
+pub(crate) enum PickerAction {
+    /// Open a page by ID (item.id = PageId hex or file path).
+    OpenPage,
+    /// Switch to an already-open buffer (item.id = PageId hex).
+    SwitchBuffer,
+    /// Open a page and jump to a line (item.id = "path:line_number").
+    SearchJump,
+    /// Execute a command (item.id = action_id).
+    ExecuteCommand,
+    /// Insert a wiki-link at cursor (item.id = PageId hex, item.label = title).
+    InsertLink,
+    /// Expand a template (item.id = template name).
+    ExpandTemplate,
+    /// Open a page and jump to a mirror line (item.id = PageId hex, item.right = "line N").
+    MirrorJump,
+    /// Apply a theme (handled specially by theme picker).
+    ApplyTheme,
+    /// No-op (e.g., tags picker — not yet wired to action).
+    Noop,
 }
 
 #[derive(Clone)]

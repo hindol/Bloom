@@ -211,8 +211,25 @@ impl BloomEditor {
             PickerKind::Search => picker::MatchMode::AllWords,
             _ => picker::MatchMode::Fuzzy,
         };
+        let action = match &kind {
+            PickerKind::FindPage | PickerKind::PagesOnly | PickerKind::Journal => {
+                crate::PickerAction::OpenPage
+            }
+            PickerKind::SwitchBuffer => crate::PickerAction::SwitchBuffer,
+            PickerKind::Search => crate::PickerAction::SearchJump,
+            PickerKind::AllCommands => crate::PickerAction::ExecuteCommand,
+            PickerKind::InlineLink => crate::PickerAction::InsertLink,
+            PickerKind::Templates => crate::PickerAction::ExpandTemplate,
+            PickerKind::MirrorGoto => crate::PickerAction::MirrorJump,
+            PickerKind::Tags => crate::PickerAction::Noop,
+            PickerKind::Backlinks(_) | PickerKind::UnlinkedMentions(_) => {
+                crate::PickerAction::OpenPage
+            }
+            PickerKind::Theme => crate::PickerAction::ApplyTheme,
+        };
         self.picker_state = Some(ActivePicker {
             kind: kind.clone(),
+            action,
             picker: picker::Picker::with_match_mode(items, match_mode),
             title,
             query: String::new(),
@@ -651,6 +668,7 @@ impl BloomEditor {
         }
         self.picker_state = Some(ActivePicker {
             kind: keymap::dispatch::PickerKind::Theme,
+            action: crate::PickerAction::ApplyTheme,
             picker,
             title: "Theme".to_string(),
             query: String::new(),
@@ -697,12 +715,12 @@ impl BloomEditor {
 
     pub(crate) fn handle_picker_selection(
         &mut self,
-        kind: &keymap::dispatch::PickerKind,
+        action: &crate::PickerAction,
         item: GenericPickerItem,
     ) {
-        use keymap::dispatch::PickerKind;
-        match kind {
-            PickerKind::FindPage | PickerKind::PagesOnly | PickerKind::Journal => {
+        use crate::PickerAction;
+        match action {
+            PickerAction::OpenPage => {
                 // item.id is either a PageId hex (from index) or a full path (disk fallback).
                 // Try index lookup first, then fall back to treating id as a path.
                 let (path, content, title) =
@@ -741,7 +759,7 @@ impl BloomEditor {
                 let id = crate::uuid::generate_hex_id();
                 self.open_page_with_content(&id, &title, &path, &content);
             }
-            PickerKind::Search => {
+            PickerAction::SearchJump => {
                 // item.id is "path:line_number" — open page and jump to line
                 if let Some(colon) = item.id.rfind(':') {
                     let path_str = &item.id[..colon];
@@ -754,7 +772,6 @@ impl BloomEditor {
                             .unwrap_or_else(|| item.label.clone());
                         let id = crate::uuid::generate_hex_id();
                         self.open_page_with_content(&id, &title, &path, &content);
-                        // Jump cursor to the matching line
                         if let Some(page_id) = self.active_page().cloned() {
                             if let Some(buf) = self.writer.buffers().get(&page_id) {
                                 let target_char = buf
@@ -766,24 +783,17 @@ impl BloomEditor {
                     }
                 }
             }
-            PickerKind::SwitchBuffer => {
+            PickerAction::SwitchBuffer => {
                 if let Some(page_id) = types::PageId::from_hex(&item.id) {
                     self.set_active_page(Some(page_id));
                     self.set_cursor(0);
                 }
             }
-            PickerKind::Tags => {
-                // Open a search filtered by this tag (for now, just log)
-                // TODO: transition to search picker filtered by tag
-            }
-            PickerKind::AllCommands => {
-                // Execute the command
+            PickerAction::ExecuteCommand => {
                 let actions = self.action_id_to_actions(&item.id);
-                // Need to execute these actions
                 let _ = self.execute_actions(actions);
             }
-            PickerKind::Templates => {
-                // Find and expand the selected template, then open as new page
+            PickerAction::ExpandTemplate => {
                 if let Some(engine) = &self.template_engine {
                     let templates = engine.list();
                     if let Some(template) = templates.iter().find(|t| t.name == item.id) {
@@ -797,7 +807,6 @@ impl BloomEditor {
                             .map(|r| r.join("pages").join(format!("{}.md", title)))
                             .unwrap_or_else(|| std::path::PathBuf::from(format!("{}.md", title)));
                         self.open_page_with_content(&id, &title, &path, &expanded.content);
-                        // Activate template mode if there are tab stops
                         if !expanded.tab_stops.is_empty() {
                             self.template_mode =
                                 Some(template::TemplateModeState::new(expanded.tab_stops));
@@ -805,7 +814,7 @@ impl BloomEditor {
                     }
                 }
             }
-            PickerKind::InlineLink => {
+            PickerAction::InsertLink => {
                 if let Some(page_id) = self.active_page().cloned() {
                     if self.writer.buffers().get(&page_id).is_some() {
                         let link_text = format!("[[{}|{}]]", item.id, item.label);
@@ -813,8 +822,7 @@ impl BloomEditor {
                     }
                 }
             }
-            PickerKind::MirrorGoto => {
-                // item.id is a PageId hex, item.right is "line N"
+            PickerAction::MirrorJump => {
                 if let Some(page_id) = types::PageId::from_hex(&item.id) {
                     if let Some(idx) = &self.index {
                         if let Some(meta) = idx.find_page_by_id(&page_id) {
@@ -827,7 +835,6 @@ impl BloomEditor {
                                 self.open_page_with_content(
                                     &page_id, &meta.title, &full, &content,
                                 );
-                                // Jump to the mirror line
                                 let line_num: usize = item
                                     .right
                                     .as_deref()
@@ -845,7 +852,7 @@ impl BloomEditor {
                     }
                 }
             }
-            _ => {}
+            PickerAction::ApplyTheme | PickerAction::Noop => {}
         }
     }
 }
