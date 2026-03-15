@@ -554,6 +554,10 @@ pub struct BloomEditor {
     pub(crate) last_viewed_journal_date: Option<chrono::NaiveDate>,
     pub(crate) in_journal_mode: bool,
     pub(crate) journal_nav_at: Option<Instant>,
+
+    // Temporal strip (unified history view)
+    pub(crate) temporal_strip: Option<TemporalStripState>,
+
     pub(crate) notifications: Vec<render::Notification>,
     pub(crate) notification_history: Vec<render::Notification>,
     pub(crate) wizard: Option<SetupWizardState>,
@@ -661,6 +665,30 @@ pub(crate) enum ActiveDialog {
         path: std::path::PathBuf,
         selected: usize,
     },
+}
+
+/// State for the temporal strip (page history, block history, day activity).
+pub(crate) struct TemporalStripState {
+    pub mode: render::TemporalMode,
+    pub items: Vec<TemporalItem>,
+    pub selected: usize,
+    pub compact: bool,
+    pub page_id: types::PageId,
+    /// Current buffer content (for diff computation).
+    pub current_content: String,
+}
+
+pub(crate) struct TemporalItem {
+    pub label: String,
+    pub detail: Option<String>,
+    pub kind: render::StripNodeKind,
+    pub branch_count: usize,
+    /// Full content at this point (for preview/diff/restore).
+    pub content: Option<String>,
+    /// Undo node ID (if from undo tree).
+    pub undo_node_id: Option<bloom_buffer::UndoNodeId>,
+    /// Git commit OID (if from git).
+    pub git_oid: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -890,6 +918,7 @@ impl BloomEditor {
             last_viewed_journal_date: None,
             in_journal_mode: false,
             journal_nav_at: None,
+            temporal_strip: None,
             notifications: Vec::new(),
             notification_history: Vec::new(),
             wizard: None,
@@ -1146,6 +1175,8 @@ impl BloomEditor {
 
     /// Called when page history results arrive from the history thread.
     fn receive_page_history(&mut self, entries: Vec<history::PageHistoryEntry>) {
+        // Feed the temporal strip if it's open
+        self.append_git_history(&entries);
         self.page_history_entries = Some(entries);
         self.page_history_selected = 0;
     }
@@ -1154,7 +1185,17 @@ impl BloomEditor {
     fn receive_blob_at(&mut self, _oid: &str, _uuid: &str, content: Option<String>) {
         let Some(content) = content else { return };
 
-        // Restore the content into the active buffer (undo-able).
+        // If temporal strip is open, store content on the selected item
+        if let Some(ts) = &mut self.temporal_strip {
+            if let Some(item) = ts.items.get_mut(ts.selected) {
+                if item.content.is_none() {
+                    item.content = Some(content.clone());
+                    return; // Don't restore — just cache for preview
+                }
+            }
+        }
+
+        // Otherwise restore into the active buffer (legacy path)
         if let Some(page_id) = self.active_page().cloned() {
             if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
                 let len = buf.len_chars();

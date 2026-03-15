@@ -60,6 +60,7 @@ impl BloomEditor {
                 which_key: None,
                 date_picker: None,
                 context_strip: None,
+                temporal_strip: None,
                 dialog: None,
                 view: None,
                 notifications: Vec::new(),
@@ -656,6 +657,7 @@ impl BloomEditor {
             }, // which_key
             date_picker: self.build_date_picker_frame(),
             context_strip: self.build_context_strip(),
+            temporal_strip: self.build_temporal_strip_frame(),
             dialog: match &self.active_dialog {
                 Some(ActiveDialog::FileChanged { path, selected, .. }) => {
                     let filename = path
@@ -1100,4 +1102,101 @@ impl BloomEditor {
         }
         Some(format!("🪞 {} pages · SPC m: mirror", count))
     }
+
+    fn build_temporal_strip_frame(&self) -> Option<render::TemporalStripFrame> {
+        let ts = self.temporal_strip.as_ref()?;
+        let items: Vec<render::StripNode> = ts
+            .items
+            .iter()
+            .map(|item| render::StripNode {
+                label: item.label.clone(),
+                detail: item.detail.clone(),
+                kind: item.kind,
+                branch_count: item.branch_count,
+            })
+            .collect();
+
+        // Compute diff preview between selected item and current content
+        let preview_lines = if let Some(item) = ts.items.get(ts.selected) {
+            if let Some(hist_content) = &item.content {
+                compute_diff_lines(hist_content, &ts.current_content)
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
+        let title = match ts.mode {
+            render::TemporalMode::PageHistory => {
+                // Use page title
+                self.active_page()
+                    .and_then(|id| {
+                        self.writer
+                            .buffers()
+                            .open_buffers()
+                            .iter()
+                            .find(|b| b.page_id == *id)
+                            .map(|b| b.title.clone())
+                    })
+                    .unwrap_or_else(|| "History".to_string())
+            }
+            render::TemporalMode::BlockHistory => "Block History".to_string(),
+            render::TemporalMode::DayActivity => "Day Activity".to_string(),
+        };
+
+        Some(render::TemporalStripFrame {
+            items,
+            selected: ts.selected,
+            mode: ts.mode,
+            compact: ts.compact,
+            preview_lines,
+            title,
+        })
+    }
+}
+
+/// Compute line-level diff between historical and current content.
+fn compute_diff_lines(historical: &str, current: &str) -> Vec<render::DiffLine> {
+    let hist_lines: Vec<&str> = historical.lines().collect();
+    let curr_lines: Vec<&str> = current.lines().collect();
+    let mut result = Vec::new();
+
+    // Simple LCS-based diff (adequate for ~100 line pages)
+    let max_len = hist_lines.len().max(curr_lines.len());
+    let mut hi = 0;
+    let mut ci = 0;
+    while hi < hist_lines.len() || ci < curr_lines.len() {
+        if hi < hist_lines.len() && ci < curr_lines.len() && hist_lines[hi] == curr_lines[ci] {
+            result.push(render::DiffLine {
+                text: hist_lines[hi].to_string(),
+                kind: render::DiffLineKind::Context,
+            });
+            hi += 1;
+            ci += 1;
+        } else if ci < curr_lines.len()
+            && (hi >= hist_lines.len()
+                || hist_lines[hi..]
+                    .iter()
+                    .position(|l| *l == curr_lines[ci])
+                    .is_none())
+        {
+            result.push(render::DiffLine {
+                text: curr_lines[ci].to_string(),
+                kind: render::DiffLineKind::Removed, // in current but not historical
+            });
+            ci += 1;
+        } else {
+            result.push(render::DiffLine {
+                text: hist_lines[hi].to_string(),
+                kind: render::DiffLineKind::Added, // in historical but not current
+            });
+            hi += 1;
+        }
+
+        if result.len() > max_len + 50 {
+            break; // safety cap
+        }
+    }
+    result
 }

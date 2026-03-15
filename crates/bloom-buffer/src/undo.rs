@@ -59,6 +59,11 @@ impl UndoTree {
         self.nodes[self.current as usize].snapshot.to_string()
     }
 
+    /// Get the content of a specific node as a string.
+    pub fn node_snapshot_string(&self, node_id: UndoNodeId) -> String {
+        self.nodes[node_id as usize].snapshot.to_string()
+    }
+
     pub fn parent(&self, node: UndoNodeId) -> Option<UndoNodeId> {
         self.nodes[node as usize].parent
     }

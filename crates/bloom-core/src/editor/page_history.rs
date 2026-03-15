@@ -1,105 +1,200 @@
-//! Page history overlay — `SPC H h`.
+//! Page history — `SPC H h`.
 //!
-//! Opens a split pane showing the git commit history for the current page.
-//! Navigation: j/k to move, Enter to view read-only, d for diff, r to restore, q to close.
+//! Opens a temporal strip showing the unified history: undo tree (recent,
+//! branching) followed by git commits (older, linear). Preview shows diff.
 
 use crate::history::HistoryRequest;
-use crate::window::{PaneKind, SplitDirection};
 use crate::*;
 
 impl BloomEditor {
-    /// Open the page history split pane for the current page.
+    /// Open page history as a temporal strip.
     pub(crate) fn open_page_history(&mut self) {
         let page_id = match self.active_page() {
             Some(id) => id.clone(),
             None => return,
         };
 
-        let uuid_hex = page_id.to_hex();
+        let current_content = match self.writer.buffers().get(&page_id) {
+            Some(buf) => buf.text().to_string(),
+            None => return,
+        };
 
-        // Request history from the history thread.
+        // Collect undo tree nodes (recent history)
+        let mut items: Vec<TemporalItem> = Vec::new();
+        if let Some(buf) = self.writer.buffers().get(&page_id) {
+            let tree = buf.undo_tree();
+            let mut node_id = tree.current();
+            let mut visited = std::collections::HashSet::new();
+            while visited.insert(node_id) {
+                let info = tree.node_info(node_id);
+                let elapsed = info.timestamp.elapsed();
+                let label = if elapsed.as_secs() < 60 {
+                    format!("{}s", elapsed.as_secs())
+                } else if elapsed.as_secs() < 3600 {
+                    format!("{}m", elapsed.as_secs() / 60)
+                } else {
+                    format!("{}h", elapsed.as_secs() / 3600)
+                };
+                let branch_count = tree.children(node_id).len();
+                items.push(TemporalItem {
+                    label,
+                    detail: Some(info.description.clone()),
+                    kind: render::StripNodeKind::UndoNode,
+                    branch_count,
+                    content: Some(tree.node_snapshot_string(node_id)),
+                    undo_node_id: Some(node_id),
+                    git_oid: None,
+                });
+                match tree.parent(node_id) {
+                    Some(parent) => node_id = parent,
+                    None => break,
+                }
+            }
+        }
+        // Undo items are newest-first (from current to root). Reverse for left=older.
+        items.reverse();
+
+        // Request git history (async — will arrive via handle_history_complete)
+        let uuid_hex = page_id.to_hex();
         if let Some(tx) = &self.history_tx {
             let _ = tx.send(HistoryRequest::PageHistory {
                 uuid: uuid_hex,
-                limit: 100,
+                limit: 50,
             });
         }
 
-        // Open (or toggle) the PageHistory split pane.
-        self.window_mgr
-            .open_special_view(PaneKind::PageHistory, SplitDirection::Vertical);
+        // Select the most recent item (rightmost)
+        let selected = items.len().saturating_sub(1);
+
+        self.temporal_strip = Some(TemporalStripState {
+            mode: render::TemporalMode::PageHistory,
+            items,
+            selected,
+            compact: true,
+            page_id,
+            current_content,
+        });
     }
 
-    /// Whether the active pane is a PageHistory pane.
-    pub(crate) fn is_page_history_active(&self) -> bool {
-        let active = self.window_mgr.active_pane();
-        self.window_mgr.pane_kind(active) == Some(&PaneKind::PageHistory)
+    /// Append git history entries to the temporal strip when they arrive.
+    pub(crate) fn append_git_history(&mut self, entries: &[history::PageHistoryEntry]) {
+        let Some(ts) = &mut self.temporal_strip else { return };
+        if !matches!(ts.mode, render::TemporalMode::PageHistory) {
+            return;
+        }
+
+        // Git entries are newest-first. Insert at the BEGINNING (older = left).
+        let git_items: Vec<TemporalItem> = entries
+            .iter()
+            .rev()
+            .map(|entry| {
+                let date = chrono::DateTime::from_timestamp(entry.timestamp, 0)
+                    .map(|dt| dt.format("%b %-d").to_string())
+                    .unwrap_or_else(|| "?".to_string());
+                TemporalItem {
+                    label: date,
+                    detail: Some(entry.message.clone()),
+                    kind: render::StripNodeKind::GitCommit,
+                    branch_count: 0,
+                    content: None, // Loaded on-demand via BlobAt
+                    undo_node_id: None,
+                    git_oid: Some(entry.oid.clone()),
+                }
+            })
+            .collect();
+
+        let git_count = git_items.len();
+        // Insert git items before undo items (older on the left)
+        let mut new_items = git_items;
+        new_items.append(&mut ts.items);
+        ts.items = new_items;
+        // Adjust selected to keep pointing at the same item
+        ts.selected += git_count;
     }
 
-    /// Handle keys when the page history pane is active.
-    pub(crate) fn handle_page_history_key(
+    /// Handle keys when temporal strip is active.
+    pub(crate) fn handle_temporal_strip_key(
         &mut self,
         key: &types::KeyEvent,
     ) -> Vec<keymap::dispatch::Action> {
         match &key.code {
-            types::KeyCode::Char('j') | types::KeyCode::Down => {
-                self.page_history_move(1);
+            types::KeyCode::Char('h') | types::KeyCode::Left => {
+                if let Some(ts) = &mut self.temporal_strip {
+                    if ts.selected > 0 {
+                        ts.selected -= 1;
+                        // Load git content on-demand
+                        self.load_temporal_content_if_needed();
+                    }
+                }
             }
-            types::KeyCode::Char('k') | types::KeyCode::Up => {
-                self.page_history_move(-1);
+            types::KeyCode::Char('l') | types::KeyCode::Right => {
+                if let Some(ts) = &mut self.temporal_strip {
+                    if ts.selected + 1 < ts.items.len() {
+                        ts.selected += 1;
+                    }
+                }
+            }
+            types::KeyCode::Char('e') => {
+                if let Some(ts) = &mut self.temporal_strip {
+                    ts.compact = !ts.compact;
+                }
             }
             types::KeyCode::Char('r') => {
-                self.page_history_restore();
+                self.temporal_strip_restore();
             }
             types::KeyCode::Char('q') | types::KeyCode::Esc => {
-                self.close_page_history();
+                self.temporal_strip = None;
             }
             _ => {}
         }
         vec![keymap::dispatch::Action::Noop]
     }
 
-    /// Navigate page history selection (j/k in the history pane).
-    pub(crate) fn page_history_move(&mut self, delta: i32) {
-        if let Some(entries) = &self.page_history_entries {
-            if entries.is_empty() {
-                return;
-            }
-            let len = entries.len() as i32;
-            let new_idx = (self.page_history_selected as i32 + delta).clamp(0, len - 1);
-            self.page_history_selected = new_idx as usize;
-        }
-    }
-
-    /// Restore the selected history version into the current buffer (undo-able).
-    pub(crate) fn page_history_restore(&mut self) {
-        let (oid, uuid) = match self.page_history_selected_entry() {
-            Some((oid, _)) => {
-                let uuid = self.active_page().map(|p| p.to_hex()).unwrap_or_default();
-                (oid.to_string(), uuid)
-            }
-            None => return,
+    /// Restore the selected temporal item to the buffer.
+    fn temporal_strip_restore(&mut self) {
+        let (content, undo_node_id, page_id) = {
+            let Some(ts) = &self.temporal_strip else { return };
+            let Some(item) = ts.items.get(ts.selected) else { return };
+            (item.content.clone(), item.undo_node_id, ts.page_id.clone())
         };
 
-        // Request blob content from the history thread.
-        if let Some(tx) = &self.history_tx {
-            let _ = tx.send(HistoryRequest::BlobAt { oid, uuid });
+        if let Some(node_id) = undo_node_id {
+            // Restore from undo tree (preserves branching)
+            if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
+                buf.restore_state(node_id);
+            }
+        } else if let Some(content) = content {
+            // Restore from git (replaces buffer content)
+            self.writer.apply(crate::BufferMessage::Reload {
+                page_id: page_id.clone(),
+                content,
+            });
+        } else {
+            return;
         }
+
+        self.temporal_strip = None;
+        self.save_page(&page_id);
+        self.push_notification(
+            "Restored from history".into(),
+            render::NotificationLevel::Info,
+        );
     }
 
-    /// Close the page history pane.
-    pub(crate) fn close_page_history(&mut self) {
-        if let Some(pane) = self.window_mgr.find_pane_by_kind(&PaneKind::PageHistory) {
-            self.window_mgr.close(pane);
+    /// Load content for the selected temporal item (git commits are lazy-loaded).
+    fn load_temporal_content_if_needed(&self) {
+        let Some(ts) = &self.temporal_strip else { return };
+        let Some(item) = ts.items.get(ts.selected) else { return };
+        if item.content.is_some() {
+            return; // Already loaded
         }
-        self.page_history_entries = None;
-        self.page_history_selected = 0;
-    }
-
-    /// Get the currently selected history entry (oid, message).
-    fn page_history_selected_entry(&self) -> Option<(&str, &str)> {
-        let entries = self.page_history_entries.as_ref()?;
-        let entry = entries.get(self.page_history_selected)?;
-        Some((&entry.oid, &entry.message))
+        if let Some(oid) = &item.git_oid {
+            if let Some(tx) = &self.history_tx {
+                let _ = tx.send(HistoryRequest::BlobAt {
+                    oid: oid.clone(),
+                    uuid: ts.page_id.to_hex(),
+                });
+            }
+        }
     }
 }

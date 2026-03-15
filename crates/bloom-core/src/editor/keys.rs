@@ -23,11 +23,6 @@ impl BloomEditor {
             return self.handle_dialog_key(&key);
         }
 
-        // If page history pane is active, handle history navigation
-        if self.is_page_history_active() {
-            return self.handle_page_history_key(&key);
-        }
-
         // Check platform shortcuts first
         if let Some(action) = keymap::platform_shortcut(&key) {
             self.leader_keys.clear();
@@ -143,6 +138,11 @@ impl BloomEditor {
         // Mirror inline menu (SPC m m)
         if self.mirror_menu.is_some() {
             return self.handle_mirror_menu_key(key);
+        }
+
+        // Temporal strip (SPC H h — page history)
+        if self.temporal_strip.is_some() {
+            return self.handle_temporal_strip_key(&key);
         }
 
         // Vim processing — works for both mutable and frozen (read-only) buffers.

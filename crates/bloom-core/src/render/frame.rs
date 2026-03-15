@@ -25,6 +25,7 @@ pub struct RenderFrame {
     pub which_key: Option<WhichKeyFrame>,
     pub date_picker: Option<DatePickerFrame>,
     pub context_strip: Option<ContextStripFrame>,
+    pub temporal_strip: Option<TemporalStripFrame>,
     pub dialog: Option<DialogFrame>,
     pub view: Option<ViewFrame>,
     pub notifications: Vec<Notification>,
@@ -254,6 +255,59 @@ pub struct ContextStripDay {
     pub stats: String,
     /// First task or first content line (e.g., "[ ] Fix parser bug").
     pub first_line: String,
+}
+
+// ---------------------------------------------------------------------------
+// Temporal strip — unified horizontal timeline for history views
+// ---------------------------------------------------------------------------
+
+/// Horizontal timeline strip for page history, block history, and day activity.
+#[derive(Serialize)]
+pub struct TemporalStripFrame {
+    pub items: Vec<StripNode>,
+    pub selected: usize,
+    pub mode: TemporalMode,
+    pub compact: bool,
+    /// Preview content: diff lines for history, summary for day activity.
+    pub preview_lines: Vec<DiffLine>,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StripNode {
+    pub label: String,
+    pub detail: Option<String>,
+    pub kind: StripNodeKind,
+    /// Number of branches at this node (0 = linear, 2+ = fork).
+    pub branch_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum StripNodeKind {
+    /// Recent undo tree node (●).
+    UndoNode,
+    /// Git commit (○).
+    GitCommit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum TemporalMode {
+    PageHistory,
+    BlockHistory,
+    DayActivity,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiffLine {
+    pub text: String,
+    pub kind: DiffLineKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum DiffLineKind {
+    Context,
+    Added,
+    Removed,
 }
 
 // ---------------------------------------------------------------------------
