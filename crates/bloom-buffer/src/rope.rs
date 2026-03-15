@@ -17,6 +17,7 @@ pub struct Buffer {
     dirty: bool,
     clean_version: Version,
     edit_group_checkpoint: Option<Rope>,
+    pending_write_id: Option<u64>,
 }
 
 impl Buffer {
@@ -32,6 +33,7 @@ impl Buffer {
             dirty: false,
             clean_version: 0,
             edit_group_checkpoint: None,
+            pending_write_id: None,
         }
     }
 
@@ -39,6 +41,18 @@ impl Buffer {
 
     pub fn text(&self) -> &Rope {
         &self.rope
+    }
+
+    pub fn pending_write_id(&self) -> Option<u64> {
+        self.pending_write_id
+    }
+
+    pub fn set_pending_write_id(&mut self, id: u64) {
+        self.pending_write_id = Some(id);
+    }
+
+    pub fn clear_pending_write_id(&mut self) {
+        self.pending_write_id = None;
     }
 
     pub fn len_chars(&self) -> usize {

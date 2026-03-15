@@ -1008,6 +1008,8 @@ impl BloomEditor {
                 let _ = tx.send(bloom_store::disk_writer::WriteRequest {
                     path: path.clone(),
                     content: content.clone(),
+                    write_id: 0,
+                    buffer_version: 0,
                 });
             }
             self.open_page_with_content(&id, "Agenda", &path, &content);

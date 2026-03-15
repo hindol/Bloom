@@ -2,27 +2,36 @@
 //!
 //! Coalesces multiple [`WriteRequest`]s per path within a configurable debounce
 //! window, then performs an atomic write sequence (temp file → fsync → rename)
-//! to prevent data corruption. Sends a [`WriteComplete`] ack per successful write.
+//! to prevent data corruption. Sends [`WriteResult`] back per write.
 
 use crossbeam::channel;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 /// A write request sent from the editor to the [`DiskWriter`] thread.
 pub struct WriteRequest {
     pub path: PathBuf,
     pub content: String,
+    pub write_id: u64,
+    pub buffer_version: u64,
 }
 
-/// Sent back to the editor after a successful atomic write.
+/// Result sent back to the editor after a write attempt.
 #[derive(Debug, Clone)]
-pub struct WriteComplete {
-    pub path: PathBuf,
-    pub mtime: SystemTime,
-    pub size: u64,
+pub enum WriteResult {
+    Complete {
+        path: PathBuf,
+        write_id: u64,
+        buffer_version: u64,
+    },
+    Failed {
+        path: PathBuf,
+        write_id: u64,
+        error: String,
+    },
 }
 
 /// Debounced atomic disk writer running on a dedicated thread.
@@ -32,7 +41,7 @@ pub struct WriteComplete {
 /// [`new`](Self::new), then spawn with [`start`](Self::start) on an OS thread.
 pub struct DiskWriter {
     rx: channel::Receiver<WriteRequest>,
-    ack_tx: channel::Sender<WriteComplete>,
+    ack_tx: channel::Sender<WriteResult>,
     debounce_ms: u64,
 }
 
@@ -42,7 +51,7 @@ impl DiskWriter {
     ) -> (
         Self,
         channel::Sender<WriteRequest>,
-        channel::Receiver<WriteComplete>,
+        channel::Receiver<WriteResult>,
     ) {
         let (tx, rx) = channel::unbounded();
         let (ack_tx, ack_rx) = channel::unbounded();
@@ -63,12 +72,13 @@ impl DiskWriter {
         tracing::info!("disk writer thread started");
         let debounce = Duration::from_millis(self.debounce_ms);
         // Track latest content and when we first saw a pending write for each path.
-        let mut pending: HashMap<PathBuf, (String, Instant)> = HashMap::new();
+        let mut pending: HashMap<PathBuf, (String, Instant, u64, u64)> = HashMap::new();
+        // pending: path → (content, debounce_start, write_id, buffer_version)
 
         loop {
             let timeout = pending
                 .values()
-                .map(|(_, t)| debounce.saturating_sub(t.elapsed()))
+                .map(|(_, t, _, _)| debounce.saturating_sub(t.elapsed()))
                 .min()
                 .unwrap_or(debounce);
 
@@ -76,15 +86,30 @@ impl DiskWriter {
                 Ok(req) => {
                     let entry = pending
                         .entry(req.path)
-                        .or_insert_with(|| (String::new(), Instant::now()));
+                        .or_insert_with(|| (String::new(), Instant::now(), 0, 0));
                     entry.0 = req.content;
+                    entry.2 = req.write_id;
+                    entry.3 = req.buffer_version;
                 }
                 Err(channel::RecvTimeoutError::Timeout) => {}
                 Err(channel::RecvTimeoutError::Disconnected) => {
                     // Flush remaining writes before exiting.
-                    for (path, (content, _)) in pending.drain() {
-                        if atomic_write(&path, &content).is_ok() {
-                            self.send_ack(&path);
+                    for (path, (content, _, write_id, buffer_version)) in pending.drain() {
+                        match atomic_write(&path, &content) {
+                            Ok(()) => {
+                                let _ = self.ack_tx.send(WriteResult::Complete {
+                                    path,
+                                    write_id,
+                                    buffer_version,
+                                });
+                            }
+                            Err(e) => {
+                                let _ = self.ack_tx.send(WriteResult::Failed {
+                                    path,
+                                    write_id,
+                                    error: e.to_string(),
+                                });
+                            }
                         }
                     }
                     return;
@@ -95,33 +120,33 @@ impl DiskWriter {
             let now = Instant::now();
             let ready: Vec<PathBuf> = pending
                 .iter()
-                .filter(|(_, (_, t))| now.duration_since(*t) >= debounce)
+                .filter(|(_, (_, t, _, _))| now.duration_since(*t) >= debounce)
                 .map(|(p, _)| p.clone())
                 .collect();
 
             for path in ready {
-                if let Some((content, _)) = pending.remove(&path) {
+                if let Some((content, _, write_id, buffer_version)) = pending.remove(&path) {
                     let size = content.len();
-                    if let Err(e) = atomic_write(&path, &content) {
-                        tracing::error!(path = %path.display(), error = %e, "atomic write failed");
-                    } else {
-                        tracing::debug!(path = %path.display(), size_bytes = size, "atomic write complete");
-                        self.send_ack(&path);
+                    match atomic_write(&path, &content) {
+                        Ok(()) => {
+                            tracing::debug!(path = %path.display(), size_bytes = size, "atomic write complete");
+                            let _ = self.ack_tx.send(WriteResult::Complete {
+                                path,
+                                write_id,
+                                buffer_version,
+                            });
+                        }
+                        Err(e) => {
+                            tracing::error!(path = %path.display(), error = %e, "atomic write failed");
+                            let _ = self.ack_tx.send(WriteResult::Failed {
+                                path,
+                                write_id,
+                                error: e.to_string(),
+                            });
+                        }
                     }
                 }
             }
-        }
-    }
-
-    fn send_ack(&self, path: &PathBuf) {
-        if let Ok(meta) = fs::metadata(path) {
-            let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-            let size = meta.len();
-            let _ = self.ack_tx.send(WriteComplete {
-                path: path.clone(),
-                mtime,
-                size,
-            });
         }
     }
 }

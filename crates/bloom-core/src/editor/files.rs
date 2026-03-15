@@ -1,48 +1,77 @@
 //! File save, auto-save, and watcher integration.
 //!
 //! All saves go through [`BloomEditor::save_page`] — the single save path.
-//! It handles block ID assignment, content extraction, and routing to the
-//! [`DiskWriter`](bloom_store::DiskWriter) (or inline atomic write in tests).
+//! Write IDs track each request so that stale completions don't clear dirty flags.
+//! FileEvent handling uses content comparison (no fingerprints).
 
 use crate::*;
 
 impl BloomEditor {
-    /// Handle a single DiskWriter completion ack.
+    /// Handle a DiskWriter result (success or failure).
     /// Returns true if the visual state changed (dirty indicator flipped).
-    pub fn handle_write_complete(&mut self, wc: bloom_store::disk_writer::WriteComplete) -> bool {
-        tracing::debug!(path = %wc.path.display(), "write complete received");
-        if let Some(count) = self.pending_writes.get_mut(&wc.path) {
-            *count -= 1;
-            if *count == 0 {
-                self.pending_writes.remove(&wc.path);
-            }
-        }
-        self.last_write_fingerprints
-            .insert(wc.path.clone(), (wc.mtime, wc.size));
-
-        // Signal history thread that a file was written.
-        if let Some(tx) = &self.history_tx {
-            let _ = tx.send(history::HistoryRequest::FileDirty);
-        }
-
-        if let Some(page_id) = self.writer.buffers().find_by_path(&wc.path).cloned() {
-            if let Some(buf) = self.writer.buffers().get(&page_id) {
-                if buf.is_dirty() {
-                    self.writer.apply(crate::BufferMessage::MarkClean { page_id: page_id.clone() });
-                    let filename = wc
-                        .path
-                        .file_name()
-                        .map(|f| f.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "file".to_string());
-                    self.push_notification(
-                        format!("✓ Saved {filename}"),
-                        render::NotificationLevel::Info,
-                    );
-                    return true;
+    pub fn handle_write_result(&mut self, result: bloom_store::disk_writer::WriteResult) -> bool {
+        match result {
+            bloom_store::disk_writer::WriteResult::Complete {
+                path,
+                write_id,
+                buffer_version,
+            } => {
+                tracing::debug!(path = %path.display(), write_id, "write complete");
+                // Signal history thread
+                if let Some(tx) = &self.history_tx {
+                    let _ = tx.send(history::HistoryRequest::FileDirty);
                 }
+                // Mark buffer clean only if this is the LATEST write AND buffer
+                // hasn't been edited since the save was initiated.
+                if let Some(page_id) = self.writer.buffers().find_by_path(&path).cloned() {
+                    if let Some(buf) = self.writer.buffers().get(&page_id) {
+                        let is_latest = buf.pending_write_id() == Some(write_id);
+                        let unchanged = buf.version() == buffer_version;
+                        if is_latest && unchanged {
+                            self.writer.apply(crate::BufferMessage::MarkClean {
+                                page_id: page_id.clone(),
+                            });
+                            let filename = path
+                                .file_name()
+                                .map(|f| f.to_string_lossy().to_string())
+                                .unwrap_or_else(|| "file".to_string());
+                            self.push_notification(
+                                format!("✓ Saved {filename}"),
+                                render::NotificationLevel::Info,
+                            );
+                            return true;
+                        }
+                    }
+                    // Clear pending regardless (this write is done)
+                    if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
+                        if buf.pending_write_id() == Some(write_id) {
+                            buf.clear_pending_write_id();
+                        }
+                    }
+                }
+                false
+            }
+            bloom_store::disk_writer::WriteResult::Failed {
+                path,
+                write_id,
+                error,
+            } => {
+                tracing::error!(path = %path.display(), write_id, error = %error, "write failed");
+                // Clear pending so future saves aren't blocked
+                if let Some(page_id) = self.writer.buffers().find_by_path(&path).cloned() {
+                    if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
+                        if buf.pending_write_id() == Some(write_id) {
+                            buf.clear_pending_write_id();
+                        }
+                    }
+                }
+                self.push_notification(
+                    format!("Write failed: {error}"),
+                    render::NotificationLevel::Error,
+                );
+                true
             }
         }
-        false
     }
 
     /// Handle a single file watcher event.
@@ -72,38 +101,16 @@ impl BloomEditor {
         let mut visual_changed = false;
 
         if let Some(page_id) = self.writer.buffers().find_by_path(&path).cloned() {
-            let is_own_write = if self.pending_writes.get(&path).copied().unwrap_or(0) > 0 {
-                // Write in-flight — FileEvent arrived before WriteComplete.
-                // Treat as self-write to avoid false reload prompt.
-                tracing::debug!(path = %path.display(), "pending write — suppressing file event");
-                true
-            } else if let Some((recorded_mtime, recorded_size)) =
-                self.last_write_fingerprints.remove(&path)
-            {
-                std::fs::metadata(&path)
-                    .map(|meta| {
-                        meta.len() == recorded_size && meta.modified().ok() == Some(recorded_mtime)
-                    })
-                    .unwrap_or(false)
-            } else {
-                false
-            };
-
-            if is_own_write {
-                // Fingerprint matched — already marked clean in handle_write_complete
-                tracing::debug!(path = %path.display(), "self-write detected, skipping reload");
-            } else if let Ok(disk_content) = std::fs::read_to_string(&path) {
+            // Content comparison: read disk, compare to buffer. No fingerprints.
+            if let Ok(disk_content) = std::fs::read_to_string(&path) {
                 let buf_content = self.writer.buffers().get(&page_id).map(|b| b.text().to_string());
                 if buf_content.as_deref() == Some(disk_content.as_str()) {
-                    if let Some(buf) = self.writer.buffers().get(&page_id) {
-                        if buf.is_dirty() {
-                            self.writer.apply(crate::BufferMessage::MarkClean { page_id: page_id.clone() });
-                            visual_changed = true;
-                        }
-                    }
+                    // Content matches — our write or identical external. No action.
+                    tracing::debug!(path = %path.display(), "file event: content matches buffer");
                 } else {
                     let is_dirty = self.writer.buffers().get(&page_id).is_some_and(|b| b.is_dirty());
                     if is_dirty {
+                        // Conflict: buffer dirty + disk differs → ask user
                         self.active_dialog = Some(ActiveDialog::FileChanged {
                             page_id,
                             path: path.clone(),
@@ -111,6 +118,7 @@ impl BloomEditor {
                         });
                         visual_changed = true;
                     } else {
+                        // Clean buffer + disk differs → auto-reload
                         self.writer.apply(crate::BufferMessage::Reload {
                             page_id: page_id.clone(),
                             content: disk_content,
@@ -169,21 +177,31 @@ impl BloomEditor {
             return;
         }
 
-        // Extract content and path.
-        let (content, path) = {
+        // Extract content, path, and version.
+        let (content, path, buffer_version) = {
             let Some((buf, info)) = self.writer.buffers().get_with_info(page_id) else {
                 return;
             };
             if !buf.is_dirty() {
                 return;
             }
-            (buf.text().to_string(), info.path.clone())
+            (buf.text().to_string(), info.path.clone(), buf.version())
         };
 
-        // Write.
+        // Write with monotonic write ID.
         if let Some(tx) = &self.autosave_tx {
-            self.pending_writes.entry(path.clone()).and_modify(|c| *c += 1).or_insert(1);
-            let _ = tx.send(bloom_store::disk_writer::WriteRequest { path, content });
+            self.write_counter += 1;
+            let write_id = self.write_counter;
+            // Set pending write ID on buffer so WriteComplete can match
+            if let Some(buf) = self.writer.buffers_mut().get_mut(page_id) {
+                buf.set_pending_write_id(write_id);
+            }
+            let _ = tx.send(bloom_store::disk_writer::WriteRequest {
+                path,
+                content,
+                write_id,
+                buffer_version,
+            });
         } else {
             // No DiskWriter (tests, pre-init). Inline atomic write.
             if bloom_store::disk_writer::atomic_write(&path, &content).is_ok() {

@@ -500,8 +500,8 @@ impl Default for BufferWriter {
 /// indexer). Fields are `None` until [`BloomEditor::init_vault`] sets them up.
 /// Designed for multiplexing with `crossbeam::select!`.
 pub struct EditorChannels {
-    pub write_complete_rx:
-        Option<crossbeam::channel::Receiver<bloom_store::disk_writer::WriteComplete>>,
+    pub write_result_rx:
+        Option<crossbeam::channel::Receiver<bloom_store::disk_writer::WriteResult>>,
     pub watcher_rx: Option<crossbeam::channel::Receiver<bloom_store::traits::FileEvent>>,
     pub indexer_rx: Option<crossbeam::channel::Receiver<index::indexer::IndexComplete>>,
     pub history_rx: Option<crossbeam::channel::Receiver<history::HistoryComplete>>,
@@ -569,13 +569,10 @@ pub struct BloomEditor {
     // Auto-save
     pub(crate) autosave_tx:
         Option<crossbeam::channel::Sender<bloom_store::disk_writer::WriteRequest>>,
-    pub(crate) write_complete_rx:
-        Option<crossbeam::channel::Receiver<bloom_store::disk_writer::WriteComplete>>,
-    pub(crate) last_write_fingerprints:
-        std::collections::HashMap<std::path::PathBuf, (std::time::SystemTime, u64)>,
-    /// Paths with writes in-flight. Counter tracks overlapping writes to the same path.
-    /// FileEvents for paths with count > 0 are treated as self-writes.
-    pub(crate) pending_writes: std::collections::HashMap<std::path::PathBuf, usize>,
+    pub(crate) write_result_rx:
+        Option<crossbeam::channel::Receiver<bloom_store::disk_writer::WriteResult>>,
+    /// Monotonic write ID counter.
+    pub(crate) write_counter: u64,
     pub(crate) terminal_height: u16,
     pub(crate) terminal_width: u16,
     // Background indexer
@@ -931,9 +928,8 @@ impl BloomEditor {
             which_key_visible: false,
             active_theme,
             autosave_tx: None,
-            write_complete_rx: None,
-            last_write_fingerprints: std::collections::HashMap::new(),
-            pending_writes: std::collections::HashMap::new(),
+            write_result_rx: None,
+            write_counter: 0,
             terminal_height: 24,
             terminal_width: 80,
             indexer_rx: None,
@@ -1095,7 +1091,7 @@ impl BloomEditor {
     /// Returns None for channels not yet initialized (pre-init_vault).
     pub fn channels(&self) -> EditorChannels {
         EditorChannels {
-            write_complete_rx: self.write_complete_rx.clone(),
+            write_result_rx: self.write_result_rx.clone(),
             watcher_rx: self.watcher_rx.clone(),
             indexer_rx: self.indexer_rx.clone(),
             history_rx: self.history_rx.clone(),

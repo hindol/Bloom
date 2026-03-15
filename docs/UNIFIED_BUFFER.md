@@ -179,27 +179,40 @@ Two threads, clear separation of concerns. The BufferWriter never blocks on I/O.
 
 ### Write Pipeline: Indexer Reads, DiskWriter Writes, UI Decides
 
-**Principle:** The indexer never writes to disk. All file mutations flow through the DiskWriter. The UI thread is the brain — it filters, guards, and routes.
+**Principle:** The indexer never writes to disk. All file mutations flow through the DiskWriter. The UI thread is the brain — it filters, guards, and routes. Every write carries a monotonic `write_id` so completions can't be confused.
 
 ```
 Indexer (read-only):
-  read files → compute mutations (pure functions) → optimistic CAS
+  read files → compute mutations (pure functions) → optimistic CAS (mtime+size, max 3 retries)
   → IndexComplete { pending_writes: HashMap<PathBuf, CasWriteRequest> }
 
 UI thread (the brain):
+  write_counter: u64 (monotonic)
   receive IndexComplete → filter pending_writes:
     open + dirty buffer → drop (user's Esc handles it)
-    open + clean buffer → eager reload buffer, keep write
-    not open → keep write
+    open + clean buffer → eager reload, assign write_id, set buf.pending_write_id
+    not open → assign write_id
   → send WriteBatch(HashMap) to DiskWriter
 
+  save_page:
+    write_counter += 1
+    buf.pending_write_id = Some(write_counter)
+    → send Single { path, content, write_id, buffer_version } to DiskWriter
+
 DiskWriter:
-  Single { path, content }  → fstat skip-if-identical, atomic_write
-  WriteBatch(HashMap)        → par_values() CAS + atomic_write
-  → WriteComplete { path } to UI
+  Single { path, content, write_id, buffer_version }
+    → fstat skip-if-identical, atomic_write
+    → WriteComplete { path, write_id, buffer_version } or WriteFailed { path, write_id, error }
+  WriteBatch(HashMap<PathBuf, CasWriteRequest>)
+    → par_values() CAS (stat mtime+size vs expected) + atomic_write
+    → WriteComplete / WriteFailed per file
 
 UI thread:
-  WriteComplete → mark buffer clean
+  WriteComplete { write_id, buffer_version }
+    → if buf.pending_write_id == write_id AND buf.version() == buffer_version → mark_clean
+    → clear pending_write_id
+  WriteFailed { write_id, error }
+    → clear pending_write_id, show error notification
   FileEvent → read disk, compare to buffer content
     match → no action
     mismatch + clean → auto-reload
@@ -209,11 +222,11 @@ UI thread:
 **Key properties:**
 
 - **One mutation function, two delivery mechanisms.** `assign_block_ids` and `promote_mirrors` are pure functions used by both the indexer and the UI thread. The indexer packages results; the DiskWriter delivers them.
-- **HashMap guarantees dedup.** The indexer accumulates writes in `HashMap<PathBuf, CasWriteRequest>`. Same file mutated twice (IDs + promotion) → HashMap keeps only the final result.
-- **Optimistic CAS.** The indexer re-stats after computing. Mtime+size mismatch → retry (max 3). Gives up gracefully — next cycle catches it.
-- **DiskWriter CAS.** Before writing, stats the file. If mtime+size don't match expected → skip (file changed since indexer read it).
-- **Content comparison replaces fingerprints.** The UI thread compares `read_to_string(path)` to `buffer.text()`. No fingerprint HashMap, no pending_writes counter, no races. ~50µs per event.
-- **Parallel batch writes.** `par_values()` on the HashMap — each path is unique by construction. No shared mutable state between threads.
+- **HashMap guarantees dedup.** The indexer accumulates writes in `HashMap<PathBuf, CasWriteRequest>`. Same file mutated twice (IDs + promotion) → HashMap keeps only the final result. `par_values()` for parallel writes — unique paths by construction.
+- **Optimistic CAS.** The indexer re-stats after computing. Mtime+size mismatch → retry (max 3). Gives up gracefully — next cycle catches it. DiskWriter also CAS-checks before writing batches.
+- **Monotonic write IDs.** Each write gets a unique `u64`. WriteComplete is only applied if the buffer's `pending_write_id` matches AND `buffer_version` hasn't changed since the save. Prevents stale completions from clearing dirty flags.
+- **WriteComplete vs WriteFailed.** Success marks clean. Failure clears pending and notifies. No boolean flags.
+- **Content comparison replaces fingerprints.** FileEvent handling reads the file and compares to buffer content. No mtime/size fingerprint tracking, no pending-write counters, no races. ~50µs per event.
 
 ---
 

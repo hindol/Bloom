@@ -57,7 +57,7 @@ impl BloomEditor {
         let (writer, tx, ack_rx) =
             bloom_store::disk_writer::DiskWriter::new(self.config.autosave_debounce_ms);
         self.autosave_tx = Some(tx);
-        self.write_complete_rx = Some(ack_rx);
+        self.write_result_rx = Some(ack_rx);
         std::thread::Builder::new()
             .name("bloom-disk-writer".into())
             .spawn(move || writer.start())

@@ -10,6 +10,6 @@ pub mod local;
 pub mod traits;
 pub mod watcher;
 
-pub use disk_writer::{DiskWriter, WriteComplete, WriteRequest};
+pub use disk_writer::{DiskWriter, WriteRequest, WriteResult};
 pub use local::LocalFileStore;
 pub use traits::{FileEvent, NoteStore};

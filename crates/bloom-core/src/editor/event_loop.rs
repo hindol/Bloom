@@ -104,9 +104,9 @@ pub fn run_event_loop(
                     }
                 }
             }
-            recv(channels.write_complete_rx.as_ref().unwrap_or(&wc_never)) -> msg => {
-                if let Ok(wc) = msg {
-                    if editor.handle_write_complete(wc) {
+            recv(channels.write_result_rx.as_ref().unwrap_or(&wc_never)) -> msg => {
+                if let Ok(result) = msg {
+                    if editor.handle_write_result(result) {
                         needs_render = true;
                     }
                 }
