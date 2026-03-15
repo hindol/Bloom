@@ -176,12 +176,14 @@ pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
         },
         Style::SearchMatch => StyleProps {
             fg: Some(p.foreground),
-            bg: Some(p.ultralight),
+            bg: Some(p.mild),
             ..Default::default()
         },
         Style::SearchMatchCurrent => StyleProps {
             fg: Some(p.foreground),
-            bg: Some(p.popout),
+            bg: Some(p.mild),
+            bold: true,
+            underline: true,
             ..Default::default()
         },
     }
