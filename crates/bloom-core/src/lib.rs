@@ -573,9 +573,9 @@ pub struct BloomEditor {
         Option<crossbeam::channel::Receiver<bloom_store::disk_writer::WriteComplete>>,
     pub(crate) last_write_fingerprints:
         std::collections::HashMap<std::path::PathBuf, (std::time::SystemTime, u64)>,
-    /// Paths with writes in-flight. FileEvents for these paths are treated as self-writes
-    /// even if WriteComplete hasn't arrived yet (closes the race window).
-    pub(crate) pending_writes: std::collections::HashSet<std::path::PathBuf>,
+    /// Paths with writes in-flight. Counter tracks overlapping writes to the same path.
+    /// FileEvents for paths with count > 0 are treated as self-writes.
+    pub(crate) pending_writes: std::collections::HashMap<std::path::PathBuf, usize>,
     pub(crate) terminal_height: u16,
     pub(crate) terminal_width: u16,
     // Background indexer
@@ -933,7 +933,7 @@ impl BloomEditor {
             autosave_tx: None,
             write_complete_rx: None,
             last_write_fingerprints: std::collections::HashMap::new(),
-            pending_writes: std::collections::HashSet::new(),
+            pending_writes: std::collections::HashMap::new(),
             terminal_height: 24,
             terminal_width: 80,
             indexer_rx: None,

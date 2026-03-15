@@ -177,6 +177,44 @@ DiskWriter (I/O, blocking, existing):
 
 Two threads, clear separation of concerns. The BufferWriter never blocks on I/O. The DiskWriter never holds buffer locks. Communication is the existing channel pair.
 
+### Write Pipeline: Indexer Reads, DiskWriter Writes, UI Decides
+
+**Principle:** The indexer never writes to disk. All file mutations flow through the DiskWriter. The UI thread is the brain — it filters, guards, and routes.
+
+```
+Indexer (read-only):
+  read files → compute mutations (pure functions) → optimistic CAS
+  → IndexComplete { pending_writes: HashMap<PathBuf, CasWriteRequest> }
+
+UI thread (the brain):
+  receive IndexComplete → filter pending_writes:
+    open + dirty buffer → drop (user's Esc handles it)
+    open + clean buffer → eager reload buffer, keep write
+    not open → keep write
+  → send WriteBatch(HashMap) to DiskWriter
+
+DiskWriter:
+  Single { path, content }  → fstat skip-if-identical, atomic_write
+  WriteBatch(HashMap)        → par_values() CAS + atomic_write
+  → WriteComplete { path } to UI
+
+UI thread:
+  WriteComplete → mark buffer clean
+  FileEvent → read disk, compare to buffer content
+    match → no action
+    mismatch + clean → auto-reload
+    mismatch + dirty → dialog
+```
+
+**Key properties:**
+
+- **One mutation function, two delivery mechanisms.** `assign_block_ids` and `promote_mirrors` are pure functions used by both the indexer and the UI thread. The indexer packages results; the DiskWriter delivers them.
+- **HashMap guarantees dedup.** The indexer accumulates writes in `HashMap<PathBuf, CasWriteRequest>`. Same file mutated twice (IDs + promotion) → HashMap keeps only the final result.
+- **Optimistic CAS.** The indexer re-stats after computing. Mtime+size mismatch → retry (max 3). Gives up gracefully — next cycle catches it.
+- **DiskWriter CAS.** Before writing, stats the file. If mtime+size don't match expected → skip (file changed since indexer read it).
+- **Content comparison replaces fingerprints.** The UI thread compares `read_to_string(path)` to `buffer.text()`. No fingerprint HashMap, no pending_writes counter, no races. ~50µs per event.
+- **Parallel batch writes.** `par_values()` on the HashMap — each path is unique by construction. No shared mutable state between threads.
+
 ---
 
 ## Event Bus: Block-Level Notifications
@@ -334,6 +372,14 @@ Surveyed how production editors handle buffer mutation threading:
 7. **Direct calls for tight couplings, event bus for loose.** `mark_clean`, `set_cursor`, `begin/end_edit_group` — direct calls (one producer, one consumer). Block changes → views — event bus (one producer, N unknown consumers).
 
 8. **Event bus is block-level only.** Pickers use snapshots — they're ephemeral (open, pick, close) so stale titles are fine. The user expects this. No page-level subscriptions needed. The event bus serves only long-lived views that watch specific blocks. One event type (`BlockChanged`), one subscriber type (views).
+
+9. **Indexer never writes to disk.** The indexer is read-only. File mutations (block ID assignment, mirror promotion) are computed as pure functions and packaged in `IndexComplete.pending_writes`. The UI filters (skip dirty buffers, eager-reload clean ones) and routes to DiskWriter. One write path for all mutations.
+
+10. **Content comparison replaces fingerprints.** FileEvent handling reads the file and compares to buffer content. Match → no action. No mtime/size fingerprint tracking, no pending-write counters, no race conditions. ~50µs per event.
+
+11. **DiskWriter CAS for indexer batches.** Batch writes check mtime+size before writing. Stale batches (file changed since indexer read) are silently skipped. Self-correcting on next cycle.
+
+12. **HashMap for write dedup.** Indexer accumulates writes in `HashMap<PathBuf, CasWriteRequest>`. Same file mutated by IDs + promotion → HashMap keeps only final state. `par_values()` for parallel writes — unique paths by construction.
 
 ---
 
