@@ -723,42 +723,46 @@ impl BloomEditor {
         match action {
             PickerAction::OpenPage => {
                 // item.id is either a PageId hex (from index) or a full path (disk fallback).
-                // Try index lookup first, then fall back to treating id as a path.
-                let (path, content, title) =
-                    if let Some(page_id) = types::PageId::from_hex(&item.id) {
-                        if let Some(idx) = &self.index {
-                            if let Some(meta) = idx.find_page_by_id(&page_id) {
-                                let full = self
-                                    .vault_root
-                                    .as_ref()
-                                    .map(|r| r.join(&meta.path))
-                                    .unwrap_or_else(|| meta.path.clone());
-                                match std::fs::read_to_string(&full) {
-                                    Ok(c) => (full, c, meta.title),
-                                    Err(_) => return,
-                                }
-                            } else {
-                                return;
+                if let Some(page_id) = types::PageId::from_hex(&item.id) {
+                    // Index-based: use the real page ID
+                    if self.writer.buffers().is_open(&page_id) {
+                        // Already open — just switch to it
+                        self.set_active_page(Some(page_id));
+                        self.set_cursor(0);
+                        return;
+                    }
+                    if let Some(idx) = &self.index {
+                        if let Some(meta) = idx.find_page_by_id(&page_id) {
+                            let full = self
+                                .vault_root
+                                .as_ref()
+                                .map(|r| r.join(&meta.path))
+                                .unwrap_or_else(|| meta.path.clone());
+                            if let Ok(content) = std::fs::read_to_string(&full) {
+                                self.open_page_with_content(&page_id, &meta.title, &full, &content);
                             }
+                        }
+                    }
+                } else {
+                    // Disk fallback: parse frontmatter for the real ID
+                    let path = std::path::PathBuf::from(&item.id);
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        let fm = self.parser.parse_frontmatter(&content);
+                        let title = fm
+                            .as_ref()
+                            .and_then(|f| f.title.clone())
+                            .unwrap_or_else(|| item.label.clone());
+                        let id = fm
+                            .and_then(|f| f.id)
+                            .unwrap_or_else(crate::uuid::generate_hex_id);
+                        if self.writer.buffers().is_open(&id) {
+                            self.set_active_page(Some(id));
+                            self.set_cursor(0);
                         } else {
-                            return;
+                            self.open_page_with_content(&id, &title, &path, &content);
                         }
-                    } else {
-                        // Disk fallback: id is a full file path
-                        let path = std::path::PathBuf::from(&item.id);
-                        match std::fs::read_to_string(&path) {
-                            Ok(c) => {
-                                let fm = self.parser.parse_frontmatter(&c);
-                                let title = fm
-                                    .and_then(|f| f.title)
-                                    .unwrap_or_else(|| item.label.clone());
-                                (path, c, title)
-                            }
-                            Err(_) => return,
-                        }
-                    };
-                let id = crate::uuid::generate_hex_id();
-                self.open_page_with_content(&id, &title, &path, &content);
+                    }
+                }
             }
             PickerAction::SearchJump => {
                 // item.id is "path:line_number" — open page and jump to line
@@ -769,10 +773,18 @@ impl BloomEditor {
                     if let Ok(content) = std::fs::read_to_string(&path) {
                         let fm = self.parser.parse_frontmatter(&content);
                         let title = fm
-                            .and_then(|f| f.title)
+                            .as_ref()
+                            .and_then(|f| f.title.clone())
                             .unwrap_or_else(|| item.label.clone());
-                        let id = crate::uuid::generate_hex_id();
-                        self.open_page_with_content(&id, &title, &path, &content);
+                        let id = fm
+                            .and_then(|f| f.id)
+                            .unwrap_or_else(crate::uuid::generate_hex_id);
+                        if self.writer.buffers().is_open(&id) {
+                            self.set_active_page(Some(id));
+                        } else {
+                            self.open_page_with_content(&id, &title, &path, &content);
+                        }
+                        // Jump to line
                         if let Some(page_id) = self.active_page().cloned() {
                             if let Some(buf) = self.writer.buffers().get(&page_id) {
                                 let target_char = buf
