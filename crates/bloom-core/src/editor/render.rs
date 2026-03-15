@@ -203,10 +203,13 @@ impl BloomEditor {
                 };
                 let show_jrnl = is_active
                     && self.in_journal_mode
+                    && self.temporal_strip.is_none()
                     && matches!(content, render::StatusBarContent::Normal(_));
 
+                let show_hist = is_active && self.temporal_strip.is_some();
+
                 // Mirror hint: when cursor is on a ^= line
-                let mirror_hint = if is_active && !show_jrnl {
+                let mirror_hint = if is_active && !show_jrnl && !show_hist {
                     self.mirror_hint_for_cursor()
                 } else {
                     None
@@ -214,12 +217,16 @@ impl BloomEditor {
 
                 render::StatusBarFrame {
                     content,
-                    mode: if show_jrnl {
+                    mode: if show_hist {
+                        "HIST".to_string()
+                    } else if show_jrnl {
                         "JRNL".to_string()
                     } else {
                         mode_str.to_string()
                     },
-                    right_hints: if show_jrnl {
+                    right_hints: if show_hist {
+                        Some("h/l:scrub  e:detail  r:restore  q:close".to_string())
+                    } else if show_jrnl {
                         Some("↵:calendar  [d/]d".to_string())
                     } else {
                         mirror_hint

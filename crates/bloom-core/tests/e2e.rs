@@ -2759,3 +2759,46 @@ fn spc_j_t_does_not_create_duplicate_buffers() {
         );
     }
 }
+
+// =======================================================================
+// Page history: SPC H h opens temporal strip, status bar shows HIST
+// =======================================================================
+
+#[test]
+fn page_history_opens_with_hist_mode() {
+    let vault = TestVault::new()
+        .page("Test")
+        .with_content("Some content\n")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // Open a page first
+    sim.keys("SPC p p");
+    sim.type_text("Test");
+    sim.keys("Enter");
+
+    // Open page history
+    sim.keys("SPC H h");
+
+    let screen = sim.screen(80, 24);
+    assert_eq!(screen.mode(), "HIST", "SPC H h should show HIST mode in status bar");
+
+    // Status bar should be at the bottom, not the top
+    // The last visible line should contain the status bar mode
+    let _last_line = screen.line_count().saturating_sub(1);
+    // Content should be visible at the top (not displaced by status bar)
+    let first_line = screen.line_text(0);
+    assert!(
+        !first_line.contains("HIST") && !first_line.contains("NORMAL"),
+        "status bar should not be at line 0, got: '{}'",
+        first_line
+    );
+
+    // Dismiss with q
+    sim.keys("q");
+    let screen = sim.screen(80, 24);
+    assert!(
+        screen.mode() == "NORMAL" || screen.mode() == "JRNL",
+        "q should dismiss history and restore normal mode"
+    );
+}

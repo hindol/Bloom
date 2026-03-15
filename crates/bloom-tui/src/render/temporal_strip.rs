@@ -42,27 +42,6 @@ pub(super) fn draw_temporal_strip(
     f.render_widget(ratatui::widgets::Block::default().style(bg), preview_area);
 
     let mut preview_lines: Vec<Line> = Vec::new();
-    // Title line
-    let mode_label = match strip.mode {
-        bloom_core::render::TemporalMode::PageHistory => "HIST",
-        bloom_core::render::TemporalMode::BlockHistory => "HIST",
-        bloom_core::render::TemporalMode::DayActivity => "DAY",
-    };
-    preview_lines.push(Line::from(vec![
-        Span::styled(
-            format!(" {} ", mode_label),
-            RStyle::default()
-                .fg(theme.background())
-                .bg(theme.accent_yellow())
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!("  {}", strip.title),
-            RStyle::default().fg(theme.foreground()).bg(theme.background()),
-        ),
-    ]));
-    preview_lines.push(Line::from(""));
-
     for dl in &strip.preview_lines {
         let style = match dl.kind {
             DiffLineKind::Context => RStyle::default().fg(theme.faded()),
