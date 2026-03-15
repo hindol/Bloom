@@ -2934,3 +2934,73 @@ fn day_hopping_reuses_buffers() {
     let revisit_b = sim.screen(80, 24).title().to_string();
     assert_eq!(day_b, revisit_b, "[d revisit should show same page");
 }
+
+// =======================================================================
+// Block history diff: only the block line content should appear in diff
+// =======================================================================
+
+#[test]
+fn block_history_diff_contains_only_block_content() {
+    let mut sim = SimInput::with_content("- [ ] My task ^abc01\nUnrelated line two\nUnrelated line three\n");
+
+    // Edit the task — change "My" to "Edited"
+    sim.keys("03w"); // on "My" (skip "- [ ] ")
+    sim.keys("ciw");
+    sim.type_text("Edited");
+    sim.keys("<Esc>");
+
+    // Verify edit happened
+    let text = sim.buffer_text();
+    eprintln!("BUFFER AFTER EDIT: {}", text);
+    assert!(text.contains("Edited"), "edit should have happened, got: {}", text);
+
+    // Go to line 0 and open block history
+    sim.keys("gg");
+    sim.keys("SPC H b");
+
+    let screen = sim.screen(80, 24);
+    assert_eq!(screen.mode(), "HIST");
+
+    // Scrub to the OLDEST version (press h twice — past the middle)
+    sim.keys("h");
+    sim.keys("h");
+    let screen = sim.screen(80, 24);
+
+    if let Some(ts) = &screen.frame.temporal_strip {
+        eprintln!("SELECTED: {} / {}", ts.selected, ts.items.len());
+
+        // The preview should be about the block line, not unrelated content
+        assert!(!ts.block_diff_segments.is_empty(), "should have diff segments");
+
+        // Collect all segment text
+        let all_text: String = ts.block_diff_segments.iter().map(|s| s.text.as_str()).collect();
+        eprintln!("DIFF TEXT: '{}'", all_text);
+
+        // Should contain task content
+        assert!(all_text.contains("task"), "diff should contain 'task', got: {}", all_text);
+        // Should NOT contain unrelated lines
+        assert!(!all_text.contains("Unrelated"), "diff should NOT contain 'Unrelated', got: {}", all_text);
+
+        // Check diff coloring
+        let removed: String = ts.block_diff_segments.iter()
+            .filter(|s| s.kind == bloom_core::render::DiffLineKind::Removed)
+            .map(|s| s.text.as_str())
+            .collect();
+        let added: String = ts.block_diff_segments.iter()
+            .filter(|s| s.kind == bloom_core::render::DiffLineKind::Added)
+            .map(|s| s.text.as_str())
+            .collect();
+        eprintln!("REMOVED: '{}' ADDED: '{}'", removed, added);
+
+        // If there are multiple versions, we should see some diff
+        if ts.items.len() > 1 && ts.selected < ts.items.len().saturating_sub(1) {
+            // Older version should show "My" as removed and "Edited" as added
+            assert!(
+                !removed.is_empty() || !added.is_empty(),
+                "diff should have some changes between versions"
+            );
+        }
+    }
+
+    sim.keys("q");
+}
