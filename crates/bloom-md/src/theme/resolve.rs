@@ -220,7 +220,7 @@ pub fn resolve_status_bar(mode: &str, active: bool, p: &ThemePalette) -> StylePr
             ..Default::default()
         },
         // Temporal modes share accent_yellow (per WINDOW_LAYOUTS.md)
-        "JRNL" | "HISTORY" | "DAY" => StyleProps {
+        "JRNL" | "HIST" | "HISTORY" | "DAY" => StyleProps {
             fg: Some(p.background),
             bg: Some(p.accent_yellow),
             ..Default::default()
