@@ -121,6 +121,7 @@ impl BloomEditor {
             .parser
             .parse_frontmatter(&content)
             .and_then(|fm| fm.id)
+            .or_else(|| self.writer.buffers().find_by_path(&path).cloned())
             .unwrap_or_else(crate::uuid::generate_hex_id);
         let title = date.format("%Y-%m-%d").to_string();
         if !self.writer.buffers().is_open(&id) {
@@ -287,6 +288,7 @@ impl BloomEditor {
         let fm_parsed = self.parser.parse_frontmatter(&content);
         let id = fm_parsed
             .and_then(|f| f.id)
+            .or_else(|| self.writer.buffers().find_by_path(&path).cloned())
             .unwrap_or_else(crate::uuid::generate_hex_id);
         if self.writer.buffers().is_open(&id) {
             self.set_active_page(Some(id));

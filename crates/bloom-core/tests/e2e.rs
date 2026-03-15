@@ -2902,3 +2902,35 @@ fn block_history_not_on_line_without_id() {
     let screen = sim.screen(80, 24);
     assert!(screen.frame.temporal_strip.is_none(), "should not open strip on line without block ID");
 }
+
+// =======================================================================
+// Day hopping does not create duplicate buffers
+// =======================================================================
+
+#[test]
+fn day_hopping_reuses_buffers() {
+    let vault = TestVault::new()
+        .raw_file("journal/2026-03-12.md", "---\nid: jtest12\ntitle: \"2026-03-12\"\ncreated: 2026-03-12\ntags: [journal]\n---\n\nDay 12\n")
+        .raw_file("journal/2026-03-14.md", "---\nid: jtest14\ntitle: \"2026-03-14\"\ncreated: 2026-03-14\ntags: [journal]\n---\n\nDay 14\n")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // SPC j t opens today's journal (creates it)
+    sim.keys("SPC j t");
+
+    // Hop back twice to reach Mar 14, then Mar 12
+    sim.keys("[d");
+    let day_a = sim.screen(80, 24).title().to_string();
+    sim.keys("[d");
+    let day_b = sim.screen(80, 24).title().to_string();
+
+    // Hop forward to revisit day_a
+    sim.keys("]d");
+    let revisit_a = sim.screen(80, 24).title().to_string();
+    assert_eq!(day_a, revisit_a, "]d revisit should show same page");
+
+    // Hop back to revisit day_b
+    sim.keys("[d");
+    let revisit_b = sim.screen(80, 24).title().to_string();
+    assert_eq!(day_b, revisit_b, "[d revisit should show same page");
+}
