@@ -46,11 +46,7 @@ pub fn draw(
 
     // Layout: panes | temporal strip (optional) | which-key drawer (optional)
     // Both temporal strip and which-key are bottom drawers below the status bar.
-    let ts_h = if let Some(ts) = &frame.temporal_strip {
-        if ts.compact { 2u16 } else { 3u16 } // strip line(s) + hint line
-    } else {
-        0
-    };
+    let ts_h = frame.temporal_strip.as_ref().map(|ts| ts.drawer_height()).unwrap_or(0);
 
     let wk_h = if let Some(wk) = &frame.which_key {
         let col_width = 24u16;

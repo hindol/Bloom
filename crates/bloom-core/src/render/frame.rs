@@ -273,6 +273,13 @@ pub struct TemporalStripFrame {
     pub title: String,
 }
 
+impl TemporalStripFrame {
+    /// Height of the drawer area (below status bar).
+    pub fn drawer_height(&self) -> u16 {
+        if self.compact { 2 } else { 3 }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct StripNode {
     pub label: String,

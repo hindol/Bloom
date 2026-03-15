@@ -98,10 +98,7 @@ impl BloomEditor {
         } else {
             0
         };
-        let ts_h: u16 = match &self.temporal_strip {
-            Some(ts) => if ts.compact { 2 } else { 3 },
-            None => 0,
-        };
+        let ts_h = self.temporal_strip.as_ref().map(|ts| ts.drawer_height()).unwrap_or(0);
         let drawer_h = wk_h.max(ts_h);
         let pane_area_h = height.saturating_sub(drawer_h);
         let pane_rects = self.window_mgr.compute_pane_rects(width, pane_area_h);
