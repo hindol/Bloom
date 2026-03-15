@@ -74,6 +74,8 @@ impl BloomEditor {
             compact: true,
             page_id,
             current_content,
+            block_id: None,
+            block_line: None,
         });
     }
 
@@ -173,6 +175,8 @@ impl BloomEditor {
             compact: true,
             page_id,
             current_content: current_line_text,
+            block_id: Some(block_id_str.clone()),
+            block_line: Some(cursor_line),
         });
     }
 

@@ -676,6 +676,10 @@ pub(crate) struct TemporalStripState {
     pub page_id: types::PageId,
     /// Current buffer content (for diff computation).
     pub current_content: String,
+    /// For BlockHistory: the block ID being tracked.
+    #[allow(dead_code)] pub block_id: Option<String>,
+    /// For BlockHistory: the line index of the block in the buffer.
+    pub block_line: Option<usize>,
 }
 
 impl TemporalStripState {

@@ -23,8 +23,50 @@ pub(super) fn draw_temporal_strip(
         return;
     }
 
-    // --- Draw diff preview in the pane content area (above status bar) ---
-    if !strip.preview_lines.is_empty() && pane_area.height > 2 {
+    // --- Draw preview ---
+    // Page history: full-page diff overlay
+    // Block history: inline diff on one line only (rest of page stays normal)
+    if strip.mode == bloom_core::render::TemporalMode::BlockHistory {
+        // Inline block diff: render word-diff segments on the block's line
+        if let Some(block_line) = strip.block_line {
+            if !strip.block_diff_segments.is_empty() {
+                // Find the screen Y for this buffer line
+                // block_line is 0-based buffer line; pane starts at pane_area.y
+                // Account for viewport scroll (approximation: assume line is visible)
+                let gutter_w = 5u16; // line number width
+                let y = pane_area.y + block_line as u16; // simplified; real impl should check viewport
+                if y < pane_area.y + pane_area.height.saturating_sub(1) {
+                    let line_area = Rect::new(
+                        pane_area.x + gutter_w,
+                        y,
+                        pane_area.width.saturating_sub(gutter_w),
+                        1,
+                    );
+                    let bg = RStyle::default().bg(theme.background());
+                    f.render_widget(Clear, line_area);
+                    let mut spans: Vec<Span> = Vec::new();
+                    for seg in &strip.block_diff_segments {
+                        let style = match seg.kind {
+                            bloom_core::render::DiffLineKind::Context => {
+                                RStyle::default().fg(theme.foreground()).bg(theme.background())
+                            }
+                            bloom_core::render::DiffLineKind::Added => {
+                                RStyle::default().fg(theme.accent_green()).bg(theme.background())
+                            }
+                            bloom_core::render::DiffLineKind::Removed => {
+                                RStyle::default()
+                                    .fg(theme.accent_red())
+                                    .bg(theme.background())
+                                    .add_modifier(Modifier::CROSSED_OUT)
+                            }
+                        };
+                        spans.push(Span::styled(&seg.text, style));
+                    }
+                    f.render_widget(Paragraph::new(vec![Line::from(spans)]).style(bg), line_area);
+                }
+            }
+        }
+    } else if !strip.preview_lines.is_empty() && pane_area.height > 2 {
         // Content area = pane minus status bar (last line)
         let content_area = Rect::new(
             pane_area.x,

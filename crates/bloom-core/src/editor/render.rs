@@ -1138,15 +1138,33 @@ impl BloomEditor {
             })
             .collect();
 
-        // Compute diff preview between selected item and current content
-        let preview_lines = if let Some(item) = ts.items.get(ts.selected) {
-            if let Some(hist_content) = &item.content {
-                compute_diff_lines(hist_content, &ts.current_content)
-            } else {
-                Vec::new()
+        // For block history: compute word diff for inline preview on the block line.
+        // For page history: compute full page diff for the overlay.
+        let (preview_lines, block_line, block_diff_segments) = match ts.mode {
+            render::TemporalMode::BlockHistory => {
+                let segments = if let Some(item) = ts.items.get(ts.selected) {
+                    if let Some(hist_line) = &item.content {
+                        word_diff(hist_line, &ts.current_content)
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                };
+                (Vec::new(), ts.block_line, segments)
             }
-        } else {
-            Vec::new()
+            _ => {
+                let lines = if let Some(item) = ts.items.get(ts.selected) {
+                    if let Some(hist_content) = &item.content {
+                        compute_diff_lines(hist_content, &ts.current_content)
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                };
+                (lines, None, Vec::new())
+            }
         };
 
         let title = match ts.mode {
@@ -1174,6 +1192,8 @@ impl BloomEditor {
             compact: ts.compact,
             preview_lines,
             title,
+            block_line,
+            block_diff_segments,
         })
     }
 }
