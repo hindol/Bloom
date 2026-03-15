@@ -1,8 +1,8 @@
-# Journal Redesign 📓
+# Journal 📓
 
 > Daily journal files in `journal/`, navigated by time with a rich scrubber panel.
 > Status: **Implemented** — core features shipped, calendar and scrubber live.
-> See also: [TIME_TRAVEL.md](TIME_TRAVEL.md) for git-backed history.
+> See also: [TIME_TRAVEL.md](lab/TIME_TRAVEL.md) for git-backed history.
 
 ---
 
@@ -246,6 +246,6 @@ tasks   | where page in $journal | where not done     -- open tasks from any jou
 
 ## References
 
-- Current design: [GOALS.md G14](../GOALS.md) (Daily Journal)
-- [TIME_TRAVEL.md](TIME_TRAVEL.md) — git-backed history, context strip component, calendar
-- [BLOCK_IDENTITY.md](../BLOCK_IDENTITY.md) — stable IDs for task actions
+- Current design: [GOALS.md G14](GOALS.md) (Daily Journal)
+- [TIME_TRAVEL.md](lab/TIME_TRAVEL.md) — git-backed history, context strip component, calendar
+- [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md) — stable IDs for task actions

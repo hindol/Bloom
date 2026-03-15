@@ -292,9 +292,9 @@ Just the page title. No mode, no position, no pending keys. `subtle` background 
 | COMMAND | `background` | `accent_blue` | Informational — you're talking to the editor |
 | HISTORY | `background` | `accent_yellow` | Time-travel — browsing past versions (see [TIME_TRAVEL.md](lab/TIME_TRAVEL.md)) |
 | DAY | `background` | `accent_yellow` | Time-travel — browsing daily activity (see [TIME_TRAVEL.md](lab/TIME_TRAVEL.md)) |
-| JOURNAL | `background` | `accent_yellow` | Time-travel — browsing journal days (see [JOURNAL_REDESIGN.md](lab/JOURNAL_REDESIGN.md)) |
+| JOURNAL | `background` | `accent_yellow` | Time-travel — browsing journal days (see [JOURNAL.md](JOURNAL.md)) |
 
-The temporal modes (`HISTORY`, `DAY`, `JOURNAL`) share `accent_yellow` to form a consistent visual family. They are active when the context strip or calendar grid from [TIME_TRAVEL.md](lab/TIME_TRAVEL.md) or [JOURNAL_REDESIGN.md](lab/JOURNAL_REDESIGN.md) is open.
+The temporal modes (`HISTORY`, `DAY`, `JOURNAL`) share `accent_yellow` to form a consistent visual family. They are active when the context strip or calendar grid from [TIME_TRAVEL.md](lab/TIME_TRAVEL.md) or [JOURNAL.md](JOURNAL.md) is open.
 
 ### Temporal Mode Status Bar Layout
 

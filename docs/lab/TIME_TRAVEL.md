@@ -2,7 +2,7 @@
 
 > Git-backed history via `gix` — the infrastructure layer for temporal features.
 > Status: **Draft** — exploratory, not committed.
-> See also: [JOURNAL_REDESIGN.md](JOURNAL_REDESIGN.md) for journal navigation and calendar.
+> See also: [JOURNAL.md](../JOURNAL.md) for journal navigation and calendar.
 
 ---
 
@@ -20,7 +20,7 @@ Bloom maintains a complete, automatic history of every change to your vault. Not
 
 **Fearless editing.** Every version of every thought is recoverable. Split pages, merge pages, delete sections — knowing you can always get back to any previous state. The undo tree handles per-keystroke recovery within a session; git handles everything beyond that.
 
-This document covers the **infrastructure layer**: git as the time-series store, auto-commit strategy, file and block history, day activity, and the threading model. [JOURNAL_REDESIGN.md](JOURNAL_REDESIGN.md) covers the journal file model and calendar navigation.
+This document covers the **infrastructure layer**: git as the time-series store, auto-commit strategy, file and block history, day activity, and the threading model. [JOURNAL.md](../JOURNAL.md) covers the journal file model and calendar navigation.
 
 ---
 
@@ -138,7 +138,7 @@ The history of a single page over time.
 
 ### Context Strip
 
-Bloom uses a **context strip** — a 3-line panel above the status bar for navigating through ordered items (history versions, calendar days). The same component powers page history (`SPC H h`), day activity browsing (`SPC H c` → `[d`/`]d`), and journal day-hopping (`SPC j p`/`SPC j n`). See [JOURNAL_REDESIGN.md](JOURNAL_REDESIGN.md) for journal-specific navigation.
+Bloom uses a **context strip** — a 3-line panel above the status bar for navigating through ordered items (history versions, calendar days). The same component powers page history (`SPC H h`), day activity browsing (`SPC H c` → `[d`/`]d`), and journal day-hopping (`SPC j p`/`SPC j n`). See [JOURNAL.md](../JOURNAL.md) for journal-specific navigation.
 
 The strip shows the **selected item plus its neighbors** — one before, one after — giving temporal context at a glance. Neighbors are rendered in `faded` text. The status bar stays at the very bottom (always present) and becomes **mode-aware**: `HIST`, `DAY`, or `JRNL` mode replaces `NORMAL`, with key hints in the right section replacing cursor position and thread indicators (both irrelevant during temporal browsing). See [WINDOW_LAYOUTS.md](../../WINDOW_LAYOUTS.md) § Status Bar Anatomy for mode colour assignments.
 
@@ -576,7 +576,7 @@ history | where page = "Text Editor Theory"              -- all versions of a pa
 history | where page = "Text Editor Theory" | where date before 2026-03-01
 ```
 
-See [JOURNAL_REDESIGN.md](JOURNAL_REDESIGN.md) for journal-level BQL queries.
+See [JOURNAL.md](../JOURNAL.md) for journal-level BQL queries.
 
 ### Emergence (Semantic Embeddings)
 
@@ -679,6 +679,6 @@ No external runtime dependencies. No `git` binary required. Works on macOS and W
 ## References
 
 - [`gix` crate](https://github.com/GitoxideLabs/gitoxide) — pure Rust git implementation, used by `cargo`
-- [JOURNAL_REDESIGN.md](JOURNAL_REDESIGN.md) — journal file model, calendar navigation
+- [JOURNAL.md](../JOURNAL.md) — journal file model, calendar navigation
 - [BLOCK_IDENTITY.md](../BLOCK_IDENTITY.md) — self-healing block IDs powered by git history
-- [Journal Redesign](JOURNAL_REDESIGN.md) — `journal.md` rotation model
+- [JOURNAL.md](../JOURNAL.md) — `journal.md` rotation model
