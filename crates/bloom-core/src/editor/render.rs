@@ -1178,21 +1178,38 @@ impl BloomEditor {
     }
 }
 
-/// Compute line-level diff between historical and current content.
+/// Compute diff between historical and current content.
+/// Current = green (Added), historical-only = red (Removed).
+/// Lines that changed get inline word-level diff segments.
 fn compute_diff_lines(historical: &str, current: &str) -> Vec<render::DiffLine> {
     let hist_lines: Vec<&str> = historical.lines().collect();
     let curr_lines: Vec<&str> = current.lines().collect();
     let mut result = Vec::new();
 
-    // Simple LCS-based diff (adequate for ~100 line pages)
     let max_len = hist_lines.len().max(curr_lines.len());
     let mut hi = 0;
     let mut ci = 0;
     while hi < hist_lines.len() || ci < curr_lines.len() {
         if hi < hist_lines.len() && ci < curr_lines.len() && hist_lines[hi] == curr_lines[ci] {
+            // Unchanged line
             result.push(render::DiffLine {
-                text: hist_lines[hi].to_string(),
+                segments: vec![render::DiffSegment {
+                    text: curr_lines[ci].to_string(),
+                    kind: render::DiffLineKind::Context,
+                }],
                 kind: render::DiffLineKind::Context,
+            });
+            hi += 1;
+            ci += 1;
+        } else if hi < hist_lines.len()
+            && ci < curr_lines.len()
+            && similar_enough(hist_lines[hi], curr_lines[ci])
+        {
+            // Modified line — word-level diff
+            let segments = word_diff(hist_lines[hi], curr_lines[ci]);
+            result.push(render::DiffLine {
+                segments,
+                kind: render::DiffLineKind::Context, // mixed line
             });
             hi += 1;
             ci += 1;
@@ -1203,22 +1220,88 @@ fn compute_diff_lines(historical: &str, current: &str) -> Vec<render::DiffLine> 
                     .position(|l| *l == curr_lines[ci])
                     .is_none())
         {
+            // Line only in current (added)
             result.push(render::DiffLine {
-                text: curr_lines[ci].to_string(),
-                kind: render::DiffLineKind::Removed, // in current but not historical
+                segments: vec![render::DiffSegment {
+                    text: curr_lines[ci].to_string(),
+                    kind: render::DiffLineKind::Added,
+                }],
+                kind: render::DiffLineKind::Added,
             });
             ci += 1;
         } else {
+            // Line only in historical (removed)
             result.push(render::DiffLine {
-                text: hist_lines[hi].to_string(),
-                kind: render::DiffLineKind::Added, // in historical but not current
+                segments: vec![render::DiffSegment {
+                    text: hist_lines[hi].to_string(),
+                    kind: render::DiffLineKind::Removed,
+                }],
+                kind: render::DiffLineKind::Removed,
             });
             hi += 1;
         }
 
         if result.len() > max_len + 50 {
-            break; // safety cap
+            break;
         }
     }
     result
+}
+
+/// Two lines are "similar enough" for word-diff if they share > 50% of words.
+fn similar_enough(a: &str, b: &str) -> bool {
+    let a_words: Vec<&str> = a.split_whitespace().collect();
+    let b_words: Vec<&str> = b.split_whitespace().collect();
+    if a_words.is_empty() || b_words.is_empty() {
+        return false;
+    }
+    let common = a_words.iter().filter(|w| b_words.contains(w)).count();
+    let total = a_words.len().max(b_words.len());
+    common * 2 > total
+}
+
+/// Word-level diff between two similar lines.
+/// Returns segments: Context (shared), Added (in current), Removed (in historical).
+fn word_diff(historical: &str, current: &str) -> Vec<render::DiffSegment> {
+    let h_words: Vec<&str> = historical.split_whitespace().collect();
+    let c_words: Vec<&str> = current.split_whitespace().collect();
+    let mut segments = Vec::new();
+    let mut hi = 0;
+    let mut ci = 0;
+
+    while hi < h_words.len() || ci < c_words.len() {
+        if hi < h_words.len() && ci < c_words.len() && h_words[hi] == c_words[ci] {
+            // Same word
+            if !segments.is_empty() {
+                segments.push(render::DiffSegment {
+                    text: " ".to_string(),
+                    kind: render::DiffLineKind::Context,
+                });
+            }
+            segments.push(render::DiffSegment {
+                text: c_words[ci].to_string(),
+                kind: render::DiffLineKind::Context,
+            });
+            hi += 1;
+            ci += 1;
+        } else if ci < c_words.len()
+            && (hi >= h_words.len()
+                || h_words[hi..].iter().position(|w| *w == c_words[ci]).is_none())
+        {
+            // Word only in current (added)
+            segments.push(render::DiffSegment {
+                text: format!(" {}", c_words[ci]),
+                kind: render::DiffLineKind::Added,
+            });
+            ci += 1;
+        } else {
+            // Word only in historical (removed)
+            segments.push(render::DiffSegment {
+                text: format!(" {}", h_words[hi]),
+                kind: render::DiffLineKind::Removed,
+            });
+            hi += 1;
+        }
+    }
+    segments
 }

@@ -299,6 +299,13 @@ pub enum TemporalMode {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DiffLine {
+    /// Segments with word-level diff styling.
+    pub segments: Vec<DiffSegment>,
+    pub kind: DiffLineKind,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DiffSegment {
     pub text: String,
     pub kind: DiffLineKind,
 }
@@ -306,8 +313,8 @@ pub struct DiffLine {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum DiffLineKind {
     Context,
-    Added,
-    Removed,
+    Added,   // in current version (green)
+    Removed, // in historical version (red)
 }
 
 // ---------------------------------------------------------------------------
