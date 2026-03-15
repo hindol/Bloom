@@ -186,6 +186,15 @@ pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
             underline: true,
             ..Default::default()
         },
+        Style::DiffAdded => StyleProps {
+            fg: Some(p.accent_green),
+            ..Default::default()
+        },
+        Style::DiffRemoved => StyleProps {
+            fg: Some(p.accent_red),
+            strikethrough: true,
+            ..Default::default()
+        },
     }
 }
 

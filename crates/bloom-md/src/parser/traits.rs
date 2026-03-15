@@ -142,6 +142,8 @@ pub enum Style {
     SyntaxNoise,
     SearchMatch,
     SearchMatchCurrent,
+    DiffAdded,
+    DiffRemoved,
 }
 
 #[derive(Debug, Clone, Default)]

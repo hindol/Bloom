@@ -1039,6 +1039,50 @@ impl BloomEditor {
                         );
                     }
                 }
+                // Block history inline diff: replace spans on the block line
+                if let Some(ts) = &self.temporal_strip {
+                    if matches!(ts.mode, render::TemporalMode::BlockHistory) {
+                        if ts.block_line == Some(line_idx) {
+                            if let Some(item) = ts.items.get(ts.selected) {
+                                if let Some(hist_line) = &item.content {
+                                    let diff_segs = word_diff(hist_line, &ts.current_content);
+                                    let mut diff_spans = Vec::new();
+                                    let mut pos = 0usize;
+                                    for seg in &diff_segs {
+                                        let style = match seg.kind {
+                                            render::DiffLineKind::Context => {
+                                                bloom_md::parser::traits::Style::Normal
+                                            }
+                                            render::DiffLineKind::Added => {
+                                                bloom_md::parser::traits::Style::DiffAdded
+                                            }
+                                            render::DiffLineKind::Removed => {
+                                                bloom_md::parser::traits::Style::DiffRemoved
+                                            }
+                                        };
+                                        let end = pos + seg.text.len();
+                                        diff_spans.push(bloom_md::parser::traits::StyledSpan {
+                                            range: pos..end,
+                                            style,
+                                        });
+                                        pos = end;
+                                    }
+                                    let diff_text: String =
+                                        diff_segs.iter().map(|s| s.text.as_str()).collect();
+                                    lines.push(render::RenderedLine {
+                                        source: render::LineSource::Buffer(line_idx),
+                                        is_mirror: diff_text.contains(" ^="),
+                                        text: diff_text,
+                                        spans: diff_spans,
+                                    });
+                                    line_idx += 1;
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
+
                 lines.push(render::RenderedLine {
                     source: render::LineSource::Buffer(line_idx),
                     is_mirror: line_text.contains(" ^="),
