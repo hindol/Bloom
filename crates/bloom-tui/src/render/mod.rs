@@ -7,6 +7,7 @@ mod page_history;
 mod pane;
 mod picker;
 mod status_bar;
+mod temporal_strip;
 mod timeline;
 mod undo_tree;
 mod view;
@@ -81,6 +82,11 @@ pub fn draw(
     // Context strip (journal day-hopping, temporal navigation)
     if let Some(strip) = &frame.context_strip {
         context_strip::draw_context_strip(f, pane_area, strip, theme);
+    }
+
+    // Temporal strip (page history, block history, day activity)
+    if let Some(strip) = &frame.temporal_strip {
+        temporal_strip::draw_temporal_strip(f, pane_area, strip, theme);
     }
 
     // Overlays — drawn after panes, so their set_cursor_position() wins.
