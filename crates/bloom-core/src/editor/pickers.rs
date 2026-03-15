@@ -577,6 +577,13 @@ impl BloomEditor {
                         continue;
                     }
                     if let Some(score) = picker::nucleo::fuzzy_words_score(&query, line_text) {
+                        // Boost score for lines containing exact substring matches
+                        let lower_line = line_text.to_lowercase();
+                        let exact_bonus: u32 = query
+                            .split_whitespace()
+                            .filter(|w| lower_line.contains(&w.to_lowercase()))
+                            .count() as u32
+                            * 1000;
                         page_set.insert(meta.id.clone());
                         scored.push((
                             GenericPickerItem {
@@ -587,7 +594,7 @@ impl BloomEditor {
                                 preview_text: None,
                                 score_boost: 0,
                             },
-                            score,
+                            score + exact_bonus,
                         ));
                     }
                 }

@@ -265,10 +265,15 @@ pub(super) fn draw_picker_single_column(
         let mut spans: Vec<Span> = Vec::new();
         spans.push(Span::styled(marker, style));
 
-        if !picker.query.is_empty() && !is_selected {
+        if !picker.query.is_empty() {
             let match_spans =
                 bloom_core::render::search_highlight::highlight_matches(&label, &picker.query);
-            let match_style = theme.style_for(&bloom_md::parser::traits::Style::SearchMatch);
+            let match_style = if is_selected {
+                // Selected + highlighted: use popout background
+                theme.style_for(&bloom_md::parser::traits::Style::SearchMatchCurrent)
+            } else {
+                theme.style_for(&bloom_md::parser::traits::Style::SearchMatch)
+            };
             if match_spans.is_empty() {
                 spans.push(Span::styled(label.clone(), style));
             } else {
