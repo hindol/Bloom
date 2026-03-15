@@ -148,168 +148,51 @@ Each node stores a full rope snapshot and cursor position (in-memory only — cu
 
 ---
 
-## File Time Travel
+## Page & Block History
 
-The history of a single page over time.
-
-### Context Strip
-
-Bloom uses a **context strip** — a 3-line panel above the status bar for navigating through ordered items (history versions, calendar days). The same component powers page history (`SPC H h`), day activity browsing (`SPC H c` → `[d`/`]d`), and journal day-hopping (`[d`/`]d`). See [JOURNAL.md](../JOURNAL.md) for journal-specific navigation.
-
-The strip shows the **selected item plus its neighbors** — one before, one after — giving temporal context at a glance. Neighbors are rendered in `faded` text. The status bar stays at the very bottom (always present) and becomes **mode-aware**: `HIST`, `DAY`, or `JRNL` mode replaces `NORMAL`, with key hints in the right section replacing cursor position and thread indicators (both irrelevant during temporal browsing). See [WINDOW_LAYOUTS.md](../WINDOW_LAYOUTS.md) § Status Bar Anatomy for mode colour assignments.
-
-**Three states:**
-
-| State | Chrome overhead | Trigger |
-|-------|----------------|---------|
-| **Context strip** (default) | 3 lines above status bar | `SPC H h` or `]d`/`[d` |
-| **Expanded list** | ~40% of terminal above status bar | `Enter` from strip |
-| **Dismissed** | 0 (status bar returns to normal mode) | `Esc` / `q` |
+See [TEMPORAL_NAVIGATION.md](../TEMPORAL_NAVIGATION.md) for wireframes and UX interactions.
 
 ### Page History (`SPC H h`)
 
-While viewing any page, `SPC H h` opens the unified history — undo tree entries (recent, branching) seamlessly followed by git commits (older, linear).
+Opens the unified history timeline for the current page. Uses UUID-based lookup — rename-proof.
 
-```
-┌─ Rust Project ─────────────────────────────────────┐
-│ ## Rope Data Structure                             │
-│                                                     │
-│ Ropes are O(log n) for inserts.                    │  ← live preview
-│ They use balanced binary trees.                     │     of selected
-│ See Xi Editor for details.                         │     version
-│                                                     │
-├─────────────────────────────────────────────────────┤
-│  Mar 8 14:32   Restructured headings      +5 / -8  │  ← faded
-│▸ Mar 8 16:01   Added rope section        +12 / -0  │  ← selected
-│  Mar 8 21:00   Fixed typo                 +1 / -1  │  ← faded
-├─────────────────────────────────────────────────────┤
-│ HIST  Rust Project          d:diff  r:restore  3/12│
-└─────────────────────────────────────────────────────┘
-```
+**Data sources:**
+- Undo tree (recent, per-edit-group, branching) — walk nodes, extract content per version
+- Git commits (older, per-save, linear) — `history_repo.blob_at(oid, uuid)`
 
-#### Expanded history list (`Enter` from strip)
+**Restore:** Undo node → `buf.restore_state(node_id)`, cursor restored. Git commit → replace buffer content, creates new undo branch.
 
-```
-┌─ Rust Project (preview) ───────────────────────────┐
-│ ## Rope Data Structure                             │
-│ Ropes are O(log n) for inserts.                    │
-├─────────────────────────────────────────────────────┤
-│  ● 2 min ago    "insert session"    (3 branches)   │  ← undo tree
-│  ├─● 5 min ago  "delete line"                      │
-│  │ └─● 5 min ago "change word" (abandoned)         │
-│  ├─● 8 min ago  "insert session"                   │
-│  ● 15 min ago   auto-save                          │  ← undo root = git
-│  ○ 1 hour ago   auto-save            +3 / -1       │  ← git commits
-│  ○ 3 hours ago  auto-save            +8 / -2       │
-│  ○ yesterday    auto-save           +12 / -0       │
-│  ○ Mar 12       auto-save           +28 / -0       │
-│                                                     │
-│  12 versions · Mar 1 – now                         │
-├─────────────────────────────────────────────────────┤
-│ HIST  Rust Project       j/k:nav  r:restore  3/12  │
-└─────────────────────────────────────────────────────┘
-```
+### Block History (`SPC H H`)
 
-- **● = undo node** (recent, rich). Full branching visible. Can restore to any node including abandoned branches.
-- **○ = git commit** (older, linear). Restore replaces buffer. Creates a new undo branch.
-- The transition is seamless — no visual break, just `●` → `○`.
+Filters history to the block under the cursor, identified by block ID.
 
-**Interaction model:**
+**Undo tree (recent):** Walk tree nodes. At each node, extract line containing `^k7m2x`. If content differs from child → this node changed the block. Skip unchanged nodes. Branching preserved.
 
-| Key | Action |
-|-----|--------|
-| `h` / `←` | Older version (strip mode, live preview updates) |
-| `l` / `→` | Newer version (strip mode) |
-| `j` / `k` | Navigate up/down (expanded mode) |
-| `d` | Toggle inline diff (green = added, red = removed vs current) |
-| `Enter` | Expand strip → scrollable list / collapse back |
-| `r` | Restore selected version to buffer (undo-able) |
-| `Esc` / `q` | Dismiss, return to current version |
+**Git (older):** For each commit, `blob_at(oid, uuid)` → file content → grep for `^k7m2x` → extract line. If changed from previous commit → show it. If absent in older commit → creation point.
 
-**Live preview:** While scrubbing, the editor pane displays historical content read-only. The actual buffer is never modified. On `Esc`, original content reappears. On `r`, preview replaces buffer (one undo step).
+**Cross-page moves:** Block ID disappears from page A, appears in page B between two commits. Detected by scanning git diffs for the ID across all changed files.
+
+**Restore:** Replaces ONLY that line in the current buffer (MirrorEdit-style line replacement). Rest of the page untouched.
+
+**Performance:** Undo tree walk: µs. Git per-block scan: ~1ms/commit. 100 commits ≈ 100ms. Cacheable.
 
 ### Restore
 
-Pressing `r` on the context strip copies the selected version's full content into the current buffer. This is a normal edit — it goes through the rope, it's undo-able, it triggers auto-save. You can restore a past version and then `u` to undo if you change your mind. The git history gains a new commit showing the restore.
-
-### Block-Level History
-
-`SPC H H` (cursor on any block) opens history filtered to that specific block ID.
-
-```
-┌─ History: ^k7m2x ──────────────────────────────────┐
-│                                                     │
-│  ● 2 min ago    "Review ropey + petgraph API"       │  ← undo tree
-│  ● 8 min ago    "Review ropey API"                  │  ← undo tree
-│  ○ 1 hour ago   "Review the ropey API @due(03-16)"  │  ← git commit
-│  ○ yesterday    (created)                           │  ← git: block born
-│                                                     │
-│  ─── moved: Weekly Review → Rust Project ───        │  ← cross-page move
-│  ○ Mar 10       "Review rope libraries @due(03-12)" │  ← git: original form
-│                                                     │
-├─────────────────────────────────────────────────────┤
-│  ↑/↓ navigate  Enter: preview  r: restore  q: close│
-└─────────────────────────────────────────────────────┘
-```
-
-**How it works at each layer:**
-
-**Undo tree (recent):** Walk the tree. At each node, extract the line containing `^k7m2x`. If content differs from child → this node changed the block. Show it. Skip nodes that didn't touch this block. Branching preserved.
-
-**Git (older):** For each commit, `blob_at(oid, uuid)` → file content → grep for `^k7m2x` → extract line. If changed from previous commit → show it. If `^k7m2x` absent in older commit → creation point.
-
-**Cross-page moves:** Block ID disappears from page A, appears in page B between two commits. Detected by scanning git diffs for the block ID across all changed files. Shown as a "moved" event in the timeline.
-
-**Restore:** Replaces ONLY that line in the current buffer (same MirrorEdit-style line replacement). Rest of the page is untouched.
-
-**Performance:** Undo tree walk: µs. Git per-block scan: ~1ms/commit. 100 commits ≈ 100ms. Cacheable.
+Pressing `r` on any history entry copies that version's content into the current buffer. This is a normal edit — undo-able, triggers auto-save. Git gains a new commit showing the restore.
 
 ---
 
 ## Day Activity
 
-A git-derived summary of vault-wide activity for any given day. Available via `SPC H c` (day activity calendar). This is a **separate feature** from the journal (`SPC j c`) — it shows what happened across the entire vault, not just what you journaled.
-
-| Keybinding | Action |
-|-----------|--------|
-| `SPC H c` | Open day activity calendar (◆ = days with git activity) |
-| `[d` / `]d` | Hop to previous / next day with activity (from within day activity view) |
+A git-derived summary of vault-wide activity for any given day. Available via `SPC H c`. Separate from the journal (`SPC j c`). See [TEMPORAL_NAVIGATION.md](../TEMPORAL_NAVIGATION.md) for wireframes and UX.
 
 ### What the Activity View Shows
 
 | Section | Source | Content |
 |---------|--------|---------|
-| ✏️ Edited | Git diff: first commit of day → last commit of day | Page name, `+N / -M` lines, content snippets |
+| ✏️ Edited | Git diff: first commit of day → last commit of day | Page name, `+N / -M` lines |
 | 🌱 Created | Git diff: new files that day | Page titles + tags |
-| ✅ Completed | Git diff: task lines that changed from `[ ]` to `[x]` | Task text + source page (identified by block ID) |
-
-**Philosophy: over-surface, recall over precision.** When you're browsing back through time, too much context is better than too little. The stray detail is what triggers the memory.
-
-### Wireframe
-
-```
-┌─ Day Activity — Saturday, March 8, 2026 ───────────┐
-│                                                     │
-│  ✏️ Edited                                          │
-│  Text Editor Theory                       +12 lines │
-│  Rust Programming                          +3 lines │
-│                                                     │
-│  🌱 Created                                         │
-│  Gap Buffer Tradeoffs  #data-structures             │
-│                                                     │
-│  ✅ Completed                                       │
-│  [x] Compare with PieceTable      Text Editor Theory│
-│  [x] Read Neovim buffer internals  Rust Programming │
-│                                                     │
-│  3 pages edited · 1 created · 2 tasks completed     │
-├─────────────────────────────────────────────────────┤
-│  ◆ Mar 6 Thu                                        │
-│▸ ◆ Mar 8 Sat                                        │
-│  ◆ Mar 12 Wed                                       │
-├─────────────────────────────────────────────────────┤
-│ DAY  Saturday, March 8       e:detail  [d/]d  ↵:cal │
-└─────────────────────────────────────────────────────┘
-```
+| ✅ Completed | Git diff: task lines `[ ]` → `[x]` | Task text + source page (by block ID) |
 
 ### Detail Levels
 
@@ -621,5 +504,6 @@ No external runtime dependencies. No `git` binary required. Works on macOS and W
 ## References
 
 - [`gix` crate](https://github.com/GitoxideLabs/gitoxide) — pure Rust git implementation, used by `cargo`
+- [TEMPORAL_NAVIGATION.md](../TEMPORAL_NAVIGATION.md) — unified wireframes and UX for all temporal views
 - [JOURNAL.md](../JOURNAL.md) — journal file model, calendar navigation
 - [BLOCK_IDENTITY.md](../BLOCK_IDENTITY.md) — block IDs, mirroring, self-healing
