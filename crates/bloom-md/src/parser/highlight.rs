@@ -83,14 +83,20 @@ pub fn highlight_line(line: &str, context: &LineContext) -> Vec<StyledSpan> {
 
     if trimmed.starts_with("> ") || trimmed == ">" {
         spans.push(StyledSpan {
-            range: indent..indent + 1,
+            range: indent..indent + 2.min(trimmed.len()),
             style: Style::BlockquoteMarker,
         });
         if trimmed.len() > 2 {
-            spans.push(StyledSpan {
-                range: indent + 2..len,
-                style: Style::Blockquote,
-            });
+            let content_start = indent + 2;
+            let mut inline_spans = Vec::new();
+            highlight_inline(line, content_start, &mut inline_spans);
+            // Replace Normal spans with Blockquote — keep special styles (BlockId, Tag, etc.)
+            for s in inline_spans {
+                spans.push(StyledSpan {
+                    range: s.range,
+                    style: if s.style == Style::Normal { Style::Blockquote } else { s.style },
+                });
+            }
         }
         return spans;
     }
@@ -635,6 +641,20 @@ mod tests {
         let spans = highlight_line("## My Heading ^sect-1", &ctx);
         assert!(spans.iter().any(|s| s.style == Style::Heading { level: 2 }));
         assert!(spans.iter().any(|s| s.style == Style::BlockIdCaret));
+        assert!(spans.iter().any(|s| s.style == Style::BlockId));
+    }
+
+    #[test]
+    fn test_highlight_block_id_in_blockquote() {
+        let ctx = LineContext::default();
+        let spans = highlight_line("> Some quoted text ^r4d8n", &ctx);
+        assert!(spans.iter().any(|s| s.style == Style::BlockquoteMarker));
+        assert!(spans.iter().any(|s| s.style == Style::Blockquote));
+        assert!(
+            spans.iter().any(|s| s.style == Style::BlockIdCaret),
+            "block ID caret should be styled in blockquote, spans: {:?}",
+            spans.iter().map(|s| format!("{:?} {:?}", s.range, s.style)).collect::<Vec<_>>()
+        );
         assert!(spans.iter().any(|s| s.style == Style::BlockId));
     }
 
