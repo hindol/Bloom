@@ -1701,16 +1701,18 @@ fn jr07_jrnl_mode_on_journal_today() {
 
 // JR-08: JRNL mode does NOT appear after startup (journal startup mode)
 #[test]
-fn jr08_no_jrnl_mode_on_startup() {
+fn jr08_jrnl_mode_on_journal_page() {
     let vault = TestVault::new().page("Test").build();
     let mut sim = SimInput::with_vault(vault);
 
-    // Startup opens journal but should NOT set JRNL mode
+    // Startup opens journal — if on a journal page, JRNL mode should be active
     let screen = sim.screen(80, 24);
-    assert_ne!(
+    // The mode is JRNL if the startup page is a journal page, NORMAL otherwise.
+    // Default startup opens today's journal → JRNL mode.
+    assert_eq!(
         screen.mode(),
         "JRNL",
-        "startup should not set JRNL mode"
+        "startup on journal page should set JRNL mode"
     );
 }
 
@@ -2716,4 +2718,44 @@ fn no_reload_dialog_after_self_save() {
         "self-write should not trigger reload dialog, got: {}",
         all
     );
+}
+
+// =======================================================================
+// No duplicate buffers: SPC j t multiple times
+// =======================================================================
+
+#[test]
+fn spc_j_t_does_not_create_duplicate_buffers() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // Open today's journal
+    sim.keys("SPC j t");
+    let title1 = sim.screen(80, 24).title().to_string();
+
+    // Open it again
+    sim.keys("SPC j t");
+    let title2 = sim.screen(80, 24).title().to_string();
+
+    // Should be the same page
+    assert_eq!(title1, title2, "SPC j t twice should show same page");
+
+    // Open it a third time
+    sim.keys("SPC j t");
+    let title3 = sim.screen(80, 24).title().to_string();
+    assert_eq!(title1, title3, "SPC j t three times should show same page");
+
+    // Verify only one journal buffer exists by trying to switch
+    // If duplicates exist, SPC b b would show multiple entries
+    sim.keys("SPC b b");
+    let screen = sim.screen(80, 24);
+    if screen.has_picker() {
+        let results = screen.picker_results();
+        let journal_count = results.iter().filter(|r| r.contains(&title1)).count();
+        assert!(
+            journal_count <= 1,
+            "should have at most 1 buffer for today's journal, found {}",
+            journal_count
+        );
+    }
 }

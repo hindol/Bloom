@@ -38,7 +38,6 @@ impl BloomEditor {
         let today = journal::Journal::today();
         let title = today.format("%Y-%m-%d").to_string();
 
-        // If journal module is initialized, use its path; otherwise use a sensible default
         let path = self
             .journal
             .as_ref()
@@ -46,30 +45,50 @@ impl BloomEditor {
             .unwrap_or_else(|| std::path::PathBuf::from(format!("journal/{}.md", title)));
 
         // Read from disk if the file exists, otherwise generate default frontmatter
-        let content = if path.exists() {
-            std::fs::read_to_string(&path).unwrap_or_default()
+        let (content, id) = if path.exists() {
+            let content = std::fs::read_to_string(&path).unwrap_or_default();
+            let fm = self.parser.parse_frontmatter(&content);
+            let id = fm.and_then(|f| f.id);
+            (content, id)
         } else {
-            let fm = bloom_md::parser::traits::Frontmatter {
-                id: None,
-                title: Some(title.clone()),
-                created: Some(today),
-                tags: vec![types::TagName("journal".to_string())],
-                extra: std::collections::HashMap::new(),
-            };
-            let mut s = self.parser.serialize_frontmatter(&fm);
-            s.push('\n');
-            s
+            (String::new(), None)
         };
 
-        // Use the real page ID from frontmatter (or generate one for new files)
-        let fm = self.parser.parse_frontmatter(&content);
-        let id = fm
-            .and_then(|f| f.id)
-            .unwrap_or_else(crate::uuid::generate_hex_id);
+        // Use existing ID or generate a stable one
+        let id = id.unwrap_or_else(|| {
+            // Check if we already have this file open by path
+            if let Some(existing) = self.writer.buffers().find_by_path(&path) {
+                return existing.clone();
+            }
+            // Generate new ID and embed it in frontmatter
+            crate::uuid::generate_hex_id()
+        });
 
         if self.writer.buffers().is_open(&id) {
             self.set_active_page(Some(id));
         } else {
+            // If content has no frontmatter ID, create content with one
+            let content = if content.is_empty() || !content.contains(&format!("id: {}", id.to_hex())) {
+                let fm = bloom_md::parser::traits::Frontmatter {
+                    id: Some(id.clone()),
+                    title: Some(title.clone()),
+                    created: Some(today),
+                    tags: vec![types::TagName("journal".to_string())],
+                    extra: std::collections::HashMap::new(),
+                };
+                let mut s = self.parser.serialize_frontmatter(&fm);
+                s.push('\n');
+                // If file had content beyond frontmatter, append it
+                if !content.is_empty() {
+                    if let Some(body_start) = content.find("\n---\n") {
+                        let body = &content[body_start + 5..];
+                        s.push_str(body);
+                    }
+                }
+                s
+            } else {
+                content
+            };
             self.open_page_with_content(&id, &title, &path, &content);
         }
         self.last_viewed_journal_date = Some(today);
