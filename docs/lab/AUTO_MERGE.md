@@ -2,7 +2,7 @@
 
 > Three-way merge for concurrent edits — eliminate the "reload or keep?" prompt.
 > Status: **Draft** — exploratory, not committed.
-> Depends on: [TIME_TRAVEL.md](TIME_TRAVEL.md) (git provides the base version).
+> Depends on: [HISTORY.md](HISTORY.md) (git provides the base version).
 
 ---
 
@@ -157,4 +157,4 @@ If the file has never been committed (brand new, created this session), no base 
 
 - Current conflict detection: [GOALS.md G21](../GOALS.md) (git merge conflict markers)
 - Current external change handling: `editor/files.rs` `handle_file_event`
-- Git base version: [TIME_TRAVEL.md](TIME_TRAVEL.md) (`History::file_at_commit`)
+- Git base version: [HISTORY.md](HISTORY.md) (`History::file_at_commit`)

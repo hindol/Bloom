@@ -1,7 +1,7 @@
-# Time Travel 🕰️
+# History 🕰️
 
-> Git-backed history via `gix` — the infrastructure layer for temporal features.
-> Status: **Draft** — exploratory, not committed.
+> Unified history — undo tree for recent edits, git for permanent record.
+> Status: **Draft** — undo tree implemented, git layer via bloom-history crate.
 > See also: [JOURNAL.md](../JOURNAL.md) for journal navigation and calendar.
 
 ---
@@ -18,24 +18,35 @@ Today's tools give you two options: full-text search (requires remembering keywo
 
 Bloom maintains a complete, automatic history of every change to your vault. Not as a backup feature — as a **thinking tool.** Time becomes a first-class dimension you can navigate — per-file version history, per-block evolution, and vault-wide daily activity summaries.
 
-**Fearless editing.** Every version of every thought is recoverable. Split pages, merge pages, delete sections — knowing you can always get back to any previous state. The undo tree handles per-keystroke recovery within a session; git handles everything beyond that.
-
-This document covers the **infrastructure layer**: git as the time-series store, auto-commit strategy, file and block history, day activity, and the threading model. [JOURNAL.md](../JOURNAL.md) covers the journal file model and calendar navigation.
+**Fearless editing.** Every version of every thought is recoverable. The undo tree handles per-keystroke recovery within a session; git handles everything beyond that. The user sees one seamless timeline — they never need to know which system is serving the history.
 
 ---
 
-## Two Layers of History
+## Unified History Model
 
-| Layer | Granularity | Persistence | Branching | Purpose |
-|-------|-------------|-------------|-----------|---------|
-| **Undo tree** (SQLite) | Per-edit | Survives restarts, pruned on buffer close or after 24h | Full branching | "Undo what I just did" |
-| **Git history** | 5-minute snapshots | Permanent (in `.index/.git/`) | Linear | "What did this look like last month?" |
+The user's mental model: **"I can go back to any point in time."**
 
-The undo tree is the fine-grained, branching history — same as VS Code's persistent undo model. It's serialized to SQLite on quit and restored on next launch.
+```
+Now ─────────────────── 24h ago ──────────────────── weeks ago
+│                         │                            │
+│  Undo tree              │  Git commits               │
+│  (full branching,       │  (linear, per-save,        │
+│   per-edit-group,       │   one snapshot per          │
+│   in-memory + SQLite)   │   auto-save cycle)          │
+│                         │                            │
+└── rich, interactive ───►└── degraded, read-only ────►│
+```
 
-Git provides the coarse-grained, permanent record. Linear (no git branches), automatic, invisible. Every 5 minutes of inactivity, Bloom commits the current vault state. These commits are the substrate for page history, day view, and block-level time travel.
+| Layer | Granularity | Time range | Branching | Storage |
+|-------|-------------|------------|-----------|---------|
+| **Undo tree** | Per-edit-group (Insert session, `dd`, etc.) | Session + 24h (persisted to SQLite) | Full branching | In-memory, serialized to SQLite |
+| **Git history** | Per-save (auto-commit on save) | Permanent | Linear (one branch) | `.index/.git/` via gix |
 
-The two layers are complementary, not competing. `u` in Vim walks the undo tree. `SPC H h` browses git history.
+**The transition is seamless.** The undo tree's root node corresponds to the buffer state at the last git commit. When you scroll past the undo tree into older history, you're looking at git commits. No visual break — just `●` (undo node) becomes `○` (git commit).
+
+**Restore behavior differs silently:**
+- Restore from undo node → `buf.restore_state(node_id)`. Cursor restored. Branching preserved.
+- Restore from git commit → load content from `history_repo.blob_at(oid, uuid)`, replace buffer. Cursor at line 0. Creates a new undo tree branch ("restored from Mar 12").
 
 ---
 
@@ -152,120 +163,65 @@ The strip shows the **selected item plus its neighbors** — one before, one aft
 
 ### Page History (`SPC H h`)
 
-While viewing any page, `SPC H h` opens the context strip with the page's **commit history** — every version of that file, newest first. Each entry is a commit that touched this page's UUID. Rename-proof — the UUID never changes, so history follows the page regardless of title changes.
+While viewing any page, `SPC H h` opens the unified history — undo tree entries (recent, branching) seamlessly followed by git commits (older, linear).
 
-#### Context strip (default)
-
-<div style="font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.5; background: #141414; color: #EBE9E7; border-radius: 6px; overflow: hidden; max-width: 680px; margin: 16px 0;">
-  <!-- Editor pane (live preview) -->
-  <div style="padding: 12px 16px;">
-    <div style="color: #A3A3A3; font-size: 11px; margin-bottom: 8px;">Live preview of selected version</div>
-    <div><span style="color: #A3A3A3; opacity: 0.5;">##</span> <span style="color: #F4BF4F; font-weight: bold;">Rope Data Structure</span></div>
-    <div>&nbsp;</div>
-    <div><span style="color: #62C554;">+</span> <span style="color: #62C554;">Ropes are O(log n) for inserts.</span></div>
-    <div><span style="color: #62C554;">+</span> <span style="color: #62C554;">They use balanced binary trees</span></div>
-    <div>&nbsp;</div>
-    <div>See Xi Editor for details.</div>
-  </div>
-  <!-- Context strip -->
-  <div style="border-top: 1px solid #37373E;">
-    <div style="padding: 4px 16px; color: #A3A3A3;">
-      <div style="display: flex; justify-content: space-between;"><span>Mar 6 &nbsp; Restructured headings</span><span>+5 / -8</span></div>
-    </div>
-    <div style="padding: 4px 16px; background: #212228;">
-      <div style="display: flex; justify-content: space-between;"><span><span style="color: #EBE9E7;">▸</span> <span style="color: #EBE9E7; font-weight: bold;">Mar 8 &nbsp; Added rope section</span></span><span style="color: #62C554;">+12 / -0</span></div>
-    </div>
-    <div style="padding: 4px 16px; color: #A3A3A3;">
-      <div style="display: flex; justify-content: space-between;"><span>Mar 8 &nbsp; Fixed typo in rope section</span><span>+1 / -1</span></div>
-    </div>
-  </div>
-  <!-- Status bar (HIST mode) -->
-  <div style="background: #F2DA61; color: #141414; padding: 3px 16px; display: flex; justify-content: space-between; font-size: 12px;">
-    <div>
-      <span style="font-weight: bold;">HIST</span>
-      <span style="opacity: 0.4;"> │ </span>
-      <span>Text Editor Theory</span>
-    </div>
-    <div style="opacity: 0.7;">d:diff &nbsp; r:restore &nbsp; ↵:list &nbsp; 3/12</div>
-  </div>
-</div>
-
-- Selected item in **accent** colour with `▸` indicator
-- Previous/next items in **faded** text
-- At boundaries (first/last version), the missing neighbor row is blank
-- The status bar shows `HIST` mode, page title, key hints, and version position
-
-**Interaction model (context strip):**
-
-| Key | Action |
-|-----|--------|
-| `h` / `←` | Older version (live preview updates) |
-| `l` / `→` | Newer version |
-| `d` | Toggle inline diff highlights (green = added, red = removed vs current) |
-| `Enter` | Expand into scrollable version list |
-| `r` | Restore — apply selected version to buffer (undo-able) |
-| `Esc` / `q` | Dismiss strip, return to current version |
-
-**Live preview:** While scrubbing, the editor pane displays the historical content read-only. The actual buffer is never modified — the preview is display-only. On `Esc`, the original content reappears instantly. On `r`, the preview content replaces the buffer (one undo step).
-
-**Inline diff:** Pressing `d` toggles line-level diff highlights on the live preview. Added lines are tinted `accent_green`, removed lines `accent_red`. The diff is computed against the current (saved) version. Pressing `d` again turns highlights off.
+```
+┌─ Rust Project ─────────────────────────────────────┐
+│ ## Rope Data Structure                             │
+│                                                     │
+│ Ropes are O(log n) for inserts.                    │  ← live preview
+│ They use balanced binary trees.                     │     of selected
+│ See Xi Editor for details.                         │     version
+│                                                     │
+├─────────────────────────────────────────────────────┤
+│  Mar 8 14:32   Restructured headings      +5 / -8  │  ← faded
+│▸ Mar 8 16:01   Added rope section        +12 / -0  │  ← selected
+│  Mar 8 21:00   Fixed typo                 +1 / -1  │  ← faded
+├─────────────────────────────────────────────────────┤
+│ HIST  Rust Project          d:diff  r:restore  3/12│
+└─────────────────────────────────────────────────────┘
+```
 
 #### Expanded history list (`Enter` from strip)
 
-The strip grows upward into a scrollable list. The editor preview compresses to the top portion:
+```
+┌─ Rust Project (preview) ───────────────────────────┐
+│ ## Rope Data Structure                             │
+│ Ropes are O(log n) for inserts.                    │
+├─────────────────────────────────────────────────────┤
+│  ● 2 min ago    "insert session"    (3 branches)   │  ← undo tree
+│  ├─● 5 min ago  "delete line"                      │
+│  │ └─● 5 min ago "change word" (abandoned)         │
+│  ├─● 8 min ago  "insert session"                   │
+│  ● 15 min ago   auto-save                          │  ← undo root = git
+│  ○ 1 hour ago   auto-save            +3 / -1       │  ← git commits
+│  ○ 3 hours ago  auto-save            +8 / -2       │
+│  ○ yesterday    auto-save           +12 / -0       │
+│  ○ Mar 12       auto-save           +28 / -0       │
+│                                                     │
+│  12 versions · Mar 1 – now                         │
+├─────────────────────────────────────────────────────┤
+│ HIST  Rust Project       j/k:nav  r:restore  3/12  │
+└─────────────────────────────────────────────────────┘
+```
 
-<div style="font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.5; background: #141414; color: #EBE9E7; border-radius: 6px; overflow: hidden; max-width: 680px; margin: 16px 0;">
-  <!-- Editor pane (compressed preview) -->
-  <div style="padding: 12px 16px; border-bottom: 1px solid #37373E;">
-    <div><span style="color: #A3A3A3; opacity: 0.5;">##</span> <span style="color: #F4BF4F; font-weight: bold;">Rope Data Structure</span></div>
-    <div>Ropes are O(log n) for inserts. They use balanced binary trees.</div>
-    <div>See Xi Editor for a real-world implementation.</div>
-  </div>
-  <!-- Expanded version list -->
-  <div style="padding: 8px 0;">
-    <div style="padding: 4px 16px; background: #212228;">
-      <div style="display: flex; justify-content: space-between;"><span><span style="color: #EBE9E7;">▸</span> <span style="color: #EBE9E7; font-weight: bold;">Mar 8, 14:32</span> &nbsp; Added rope section</span><span style="color: #62C554;">+12 / -0</span></div>
-    </div>
-    <div style="padding: 4px 16px; color: #A3A3A3;">
-      <div style="display: flex; justify-content: space-between;"><span>&nbsp; Mar 8, 21:00 &nbsp; Fixed typo in rope section</span><span>+1 / -1</span></div>
-    </div>
-    <div style="padding: 4px 16px; color: #A3A3A3;">
-      <div style="display: flex; justify-content: space-between;"><span>&nbsp; Mar 6, 09:15 &nbsp; Restructured headings</span><span>+5 / -8</span></div>
-    </div>
-    <div style="padding: 4px 16px; color: #A3A3A3;">
-      <div style="display: flex; justify-content: space-between;"><span>&nbsp; Mar 1, 22:41 &nbsp; Created page</span><span>+28 / -0</span></div>
-    </div>
-    <div style="padding: 4px 16px; color: #A3A3A3;">
-      <div style="display: flex; justify-content: space-between;"><span>&nbsp; Feb 28, 11:20 &nbsp; Added Xi Editor reference</span><span>+3 / -0</span></div>
-    </div>
-    <div style="padding: 4px 16px; color: #A3A3A3;">
-      <div style="display: flex; justify-content: space-between;"><span>&nbsp; Feb 25, 16:07 &nbsp; Initial braindump</span><span>+15 / -0</span></div>
-    </div>
-    <div style="padding: 8px 16px; color: #A3A3A3; font-size: 12px;">6 of 12 versions · Feb 14 – Mar 8</div>
-  </div>
-  <!-- Status bar (HIST mode, expanded) -->
-  <div style="background: #F2DA61; color: #141414; padding: 3px 16px; display: flex; justify-content: space-between; font-size: 12px;">
-    <div>
-      <span style="font-weight: bold;">HIST</span>
-      <span style="opacity: 0.4;"> │ </span>
-      <span>Text Editor Theory</span>
-    </div>
-    <div style="opacity: 0.7;">j/k:nav &nbsp; d:diff &nbsp; r:restore &nbsp; 3/12</div>
-  </div>
-</div>
+- **● = undo node** (recent, rich). Full branching visible. Can restore to any node including abandoned branches.
+- **○ = git commit** (older, linear). Restore replaces buffer. Creates a new undo branch.
+- The transition is seamless — no visual break, just `●` → `○`.
 
-- **No search/filter input.** History is chronological; you scrub, not search. Median page has ~20 versions — `j`/`k` scrolling is sufficient.
-- **Columns:** Date+time · Description (from commit message) · Diff stat (`+N / -M`)
-- Preview updates on highlight change (same as strip mode)
-- `Esc` collapses back to the 3-line strip (not full close)
-- `q` closes entirely (returns to normal editing, status bar reverts to `NOR`)
-- Status bar hints change: `j/k:nav` replaces `h/l`; `Esc` now means "collapse to strip"
+**Interaction model:**
 
-**Reusable design:** The context strip is generic over its item type. Page history uses `PageHistoryEntry` (commit oid, date, message). Day view uses `ActiveDay` (date, summary stats). The component provides:
-- `h` / `l` navigation with boundary clamping (strip mode)
-- `j` / `k` navigation with scrolling (expanded mode)
-- Expand / collapse state transition
-- Label formatting via a pluggable function
+| Key | Action |
+|-----|--------|
+| `h` / `←` | Older version (strip mode, live preview updates) |
+| `l` / `→` | Newer version (strip mode) |
+| `j` / `k` | Navigate up/down (expanded mode) |
+| `d` | Toggle inline diff (green = added, red = removed vs current) |
+| `Enter` | Expand strip → scrollable list / collapse back |
+| `r` | Restore selected version to buffer (undo-able) |
+| `Esc` / `q` | Dismiss, return to current version |
+
+**Live preview:** While scrubbing, the editor pane displays historical content read-only. The actual buffer is never modified. On `Esc`, original content reappears. On `r`, preview replaces buffer (one undo step).
 
 ### Restore
 
@@ -273,37 +229,35 @@ Pressing `r` on the context strip copies the selected version's full content int
 
 ### Block-Level History
 
-With universal block IDs (see [BLOCK_IDENTITY.md](../BLOCK_IDENTITY.md)), file time travel extends to individual blocks. Place your cursor on any block and `SPC H H` (block history) opens the context strip showing every version of *that specific block* across time:
+`SPC H H` (cursor on any block) opens history filtered to that specific block ID.
 
-<div style="font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.5; background: #141414; color: #EBE9E7; border-radius: 6px; overflow: hidden; max-width: 680px; margin: 16px 0;">
-  <!-- Context strip (block history) -->
-  <div style="border-top: 1px solid #37373E;">
-    <div style="padding: 4px 16px; color: #A3A3A3;">
-      <div>Mar 1 &nbsp; <span style="color: #EBE9E7;">-</span> <span style="color: #F2DA61;">[ ]</span> <span style="color: #A3A3A3;">Review the ropey crate</span></div>
-    </div>
-    <div style="padding: 4px 16px; background: #212228;">
-      <div><span style="color: #EBE9E7;">▸</span> <span style="color: #EBE9E7; font-weight: bold;">Mar 6</span> &nbsp; <span style="color: #EBE9E7;">-</span> <span style="color: #F2DA61;">[ ]</span> Review the ropey API <span style="color: #A3A3A3;">@due</span><span style="color: #A3A3A3; opacity: 0.5;">(</span>2026-03-08<span style="color: #A3A3A3; opacity: 0.5;">)</span></div>
-    </div>
-    <div style="padding: 4px 16px; color: #A3A3A3;">
-      <div>Mar 8 &nbsp; <span style="color: #EBE9E7;">-</span> <span style="color: #F2DA61;">[ ]</span> <span style="color: #A3A3A3;">Review the ropey API @due(2026-03-10)</span></div>
-    </div>
-  </div>
-  <!-- Status bar (HIST mode, block) -->
-  <div style="background: #F2DA61; color: #141414; padding: 3px 16px; display: flex; justify-content: space-between; font-size: 12px;">
-    <div>
-      <span style="font-weight: bold;">HIST</span>
-      <span style="opacity: 0.4;"> │ </span>
-      <span>^k7m2x</span>
-    </div>
-    <div style="opacity: 0.7;">d:diff &nbsp; r:restore &nbsp; ↵:list &nbsp; 2/3</div>
-  </div>
-</div>
+```
+┌─ History: ^k7m2x ──────────────────────────────────┐
+│                                                     │
+│  ● 2 min ago    "Review ropey + petgraph API"       │  ← undo tree
+│  ● 8 min ago    "Review ropey API"                  │  ← undo tree
+│  ○ 1 hour ago   "Review the ropey API @due(03-16)"  │  ← git commit
+│  ○ yesterday    (created)                           │  ← git: block born
+│                                                     │
+│  ─── moved: Weekly Review → Rust Project ───        │  ← cross-page move
+│  ○ Mar 10       "Review rope libraries @due(03-12)" │  ← git: original form
+│                                                     │
+├─────────────────────────────────────────────────────┤
+│  ↑/↓ navigate  Enter: preview  r: restore  q: close│
+└─────────────────────────────────────────────────────┘
+```
 
-Same context strip UX as page history — `h`/`l` to scrub, `d` for diff, `r` to restore. The status bar shows the block ID instead of a page title.
+**How it works at each layer:**
 
-This uses pickaxe search (`-S "^k7m2x"`) scoped to the page's UUID file (`-- 8f3a1b2c.md`). Because the git tree uses UUIDs, the search is scoped to one file's history, not the entire tree. Estimated: <10ms for a typical page.
+**Undo tree (recent):** Walk the tree. At each node, extract the line containing `^k7m2x`. If content differs from child → this node changed the block. Show it. Skip nodes that didn't touch this block. Branching preserved.
 
-For cross-page block moves, an unscoped pickaxe search finds the block ID across all UUID files — revealing which page it lived in at each point in time.
+**Git (older):** For each commit, `blob_at(oid, uuid)` → file content → grep for `^k7m2x` → extract line. If changed from previous commit → show it. If `^k7m2x` absent in older commit → creation point.
+
+**Cross-page moves:** Block ID disappears from page A, appears in page B between two commits. Detected by scanning git diffs for the block ID across all changed files. Shown as a "moved" event in the timeline.
+
+**Restore:** Replaces ONLY that line in the current buffer (same MirrorEdit-style line replacement). Rest of the page is untouched.
+
+**Performance:** Undo tree walk: µs. Git per-block scan: ~1ms/commit. 100 commits ≈ 100ms. Cacheable.
 
 ---
 
