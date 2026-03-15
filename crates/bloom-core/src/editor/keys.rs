@@ -1205,14 +1205,16 @@ impl BloomEditor {
                         self.writer.apply(crate::BufferMessage::BeginEditGroup { page_id });
                     }
                 } else if matches!(mode, bloom_vim::Mode::Normal) {
-                    // Leaving Insert (or Visual, Command) → close any open group
+                    // Leaving Insert (or Visual, Command) → close the edit group first,
+                    // then run system ops (block IDs, alignment, mirrors).
+                    // System ops push their own undo nodes outside the group so that
+                    // undo first reverts the system change, then the user edit.
+                    // TODO: merge system ops into the edit group for single-undo.
                     if let Some(page_id) = self.active_page().cloned() {
                         let is_ro = self.writer.buffers().is_read_only(&page_id);
                         self.writer.apply(crate::BufferMessage::EndEditGroup { page_id: page_id.clone() });
-                        // Skip block IDs, mirroring, and alignment for read-only buffers
                         if !is_ro {
                             self.ensure_block_ids(&page_id);
-                            // Mirror propagation: if cursor line has ^=, propagate to peers
                             if was_insert {
                                 self.propagate_mirror_edit(&page_id);
                             }

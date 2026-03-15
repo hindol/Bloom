@@ -2106,7 +2106,7 @@ fn index_is_fully_derivable() {
     // Verify initial state: pages picker works
     sim.keys("SPC p p");
     assert!(sim.screen(80, 24).has_picker(), "pages picker should open initially");
-    sim.keys("Escape");
+    sim.keys("<Esc>");
 
     // Delete the index directory completely
     let index_dir = vault_root.join(".index");
@@ -2217,4 +2217,93 @@ fn retired_ids_recovered_from_broken_links() {
     // verify the index rebuilt correctly
     sim.keys("SPC p p");
     assert!(sim.screen(80, 24).has_picker(), "pages picker works after retirement");
+}
+
+// =======================================================================
+// Undo: comprehensive tests
+// =======================================================================
+
+#[test]
+fn undo_reverts_insert_session() {
+    let mut sim = SimInput::with_content("hello");
+    // Enter insert, type " world", exit
+    sim.keys("A");
+    sim.type_text(" world");
+    sim.keys("<Esc>");
+    assert!(sim.buffer_text().contains("hello world"));
+
+    // One undo should revert the entire insert session
+    sim.keys("u");
+    assert_eq!(sim.buffer_text().trim(), "hello", "u should undo entire insert session");
+}
+
+#[test]
+fn undo_redo_round_trip() {
+    let mut sim = SimInput::with_content("original");
+    sim.keys("A");
+    sim.type_text(" added");
+    sim.keys("<Esc>");
+    assert!(sim.buffer_text().contains("original added"));
+
+    sim.keys("u");
+    assert_eq!(sim.buffer_text().trim(), "original", "undo should revert");
+
+    sim.keys("C-r");
+    assert!(sim.buffer_text().contains("original added"), "redo should restore");
+}
+
+#[test]
+fn undo_multiple_insert_sessions() {
+    let mut sim = SimInput::with_content("");
+    // First insert
+    sim.keys("i");
+    sim.type_text("aaa");
+    sim.keys("<Esc>");
+
+    // Second insert
+    sim.keys("A");
+    sim.type_text("bbb");
+    sim.keys("<Esc>");
+
+    assert!(sim.buffer_text().contains("aaabbb"));
+
+    // First undo → reverts "bbb"
+    sim.keys("u");
+    assert_eq!(sim.buffer_text().trim(), "aaa", "first u should undo second session");
+
+    // Second undo → reverts "aaa"
+    sim.keys("u");
+    assert_eq!(sim.buffer_text().trim(), "", "second u should undo first session");
+}
+
+#[test]
+fn undo_delete_line() {
+    let mut sim = SimInput::with_content("line one\nline two\nline three");
+    // dd deletes "line one"
+    sim.keys("dd");
+    assert!(!sim.buffer_text().contains("line one"), "dd should delete first line");
+
+    sim.keys("u");
+    assert!(sim.buffer_text().contains("line one"), "u should restore deleted line");
+}
+
+#[test]
+fn undo_single_insert_not_alignment() {
+    // Regression: alignment/block-ids after Esc should be in the same undo group
+    let mut sim = SimInput::with_content("- [ ] task @due(2026-03-20)");
+    sim.keys("A");
+    sim.type_text(" more text");
+    sim.keys("<Esc>");
+
+    let after_edit = sim.buffer_text();
+    assert!(after_edit.contains("more text"), "edit should be present");
+
+    // ONE undo should revert everything (edit + any system alignment)
+    sim.keys("u");
+    let after_undo = sim.buffer_text();
+    assert!(
+        !after_undo.contains("more text"),
+        "single u should undo the edit (not just alignment). Got: {}",
+        after_undo
+    );
 }
