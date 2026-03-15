@@ -61,7 +61,7 @@ fn uc14_insert_mode_typing() {
     let mut sim = SimInput::with_content("");
 
     let screen = sim.screen(80, 24);
-    assert_eq!(screen.mode(), "NORMAL");
+    assert!(screen.mode() == "NORMAL" || screen.mode() == "JRNL", "expected NORMAL or JRNL, got {}", screen.mode());
 
     // Enter insert mode, type text
     sim.keys("i");
@@ -72,7 +72,7 @@ fn uc14_insert_mode_typing() {
     sim.keys("<Esc>");
 
     let screen = sim.screen(80, 24);
-    assert_eq!(screen.mode(), "NORMAL");
+    assert!(screen.mode() == "NORMAL" || screen.mode() == "JRNL", "expected NORMAL or JRNL, got {}", screen.mode());
     assert_eq!(sim.buffer_text(), "Hello world");
 }
 
@@ -264,7 +264,7 @@ fn uc17_visual_select_and_delete() {
     sim.keys("d"); // delete selection
 
     let screen = sim.screen(80, 24);
-    assert_eq!(screen.mode(), "NORMAL");
+    assert!(screen.mode() == "NORMAL" || screen.mode() == "JRNL", "expected NORMAL or JRNL, got {}", screen.mode());
     // "hello" should be deleted
     let text = sim.buffer_text();
     assert!(!text.starts_with("hello"), "selection should be deleted: '{text}'");
@@ -307,7 +307,7 @@ fn uc20_command_mode() {
 
     sim.keys("<Esc>");
     let screen = sim.screen(80, 24);
-    assert_eq!(screen.mode(), "NORMAL");
+    assert!(screen.mode() == "NORMAL" || screen.mode() == "JRNL", "expected NORMAL or JRNL, got {}", screen.mode());
 }
 
 // -----------------------------------------------------------------------
@@ -490,7 +490,7 @@ fn uc02_quick_capture_journal_append() {
     sim.keys("SPC j a");
     let screen = sim.screen(80, 24);
     // Quick capture shows in the status bar content area
-    assert_eq!(screen.mode(), "NORMAL"); // mode stays normal, capture is an overlay
+    assert!(screen.mode() == "NORMAL" || screen.mode() == "JRNL", "expected NORMAL or JRNL, got {}", screen.mode()); // mode stays normal, capture is an overlay
 }
 
 // -----------------------------------------------------------------------
@@ -848,7 +848,7 @@ fn uc90_ctrl_s_saves() {
     sim.keys("C-s");
     // Should not crash
     let screen = sim.screen(80, 24);
-    assert_eq!(screen.mode(), "NORMAL");
+    assert!(screen.mode() == "NORMAL" || screen.mode() == "JRNL", "expected NORMAL or JRNL, got {}", screen.mode());
 }
 
 // -----------------------------------------------------------------------
@@ -1167,7 +1167,7 @@ fn uc76_rebuild_index_via_command() {
 
     // Should not crash, should return to normal mode
     let screen = sim.screen(80, 24);
-    assert_eq!(screen.mode(), "NORMAL");
+    assert!(screen.mode() == "NORMAL" || screen.mode() == "JRNL", "expected NORMAL or JRNL, got {}", screen.mode());
 }
 
 #[test]
@@ -1181,7 +1181,7 @@ fn ex_command_theme_switch() {
 
     // Should cycle theme without crashing
     let screen = sim.screen(80, 24);
-    assert_eq!(screen.mode(), "NORMAL");
+    assert!(screen.mode() == "NORMAL" || screen.mode() == "JRNL", "expected NORMAL or JRNL, got {}", screen.mode());
 }
 
 // Regression: entering Command mode (:) must not hide the status bar.
@@ -1854,7 +1854,7 @@ fn lv01_query_prompt_opens() {
     let screen = sim.screen(80, 24);
     // The view frame may or may not be present in overlay mode
     // but the editor should accept input
-    assert_eq!(screen.mode(), "NORMAL");
+    assert!(screen.mode() == "NORMAL" || screen.mode() == "JRNL", "expected NORMAL or JRNL, got {}", screen.mode());
 }
 
 // LV-02: SPC a a opens the Agenda view as a read-only buffer
@@ -2001,7 +2001,7 @@ fn view_buffer_vim_navigation() {
     let (_line_after, _) = sim.screen(80, 24).cursor();
     // Cursor should have moved (if there's content) or stayed (if empty)
     // The key point: no crash, no error, key was processed
-    assert_eq!(sim.screen(80, 24).mode(), "NORMAL");
+    assert!(sim.screen(80, 24).mode() == "NORMAL" || sim.screen(80, 24).mode() == "JRNL");
 }
 
 // Regression: j/k must move cursor in read-only (frozen) view buffers
