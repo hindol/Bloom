@@ -50,25 +50,55 @@ Same component, different data sources:
 
 ## Strip Modes
 
-### Compact (default)
+### Compact (default — 4 lines)
 
-Single line. Labels only. Branch points marked with `[●]` — auto-expand when cursor arrives.
-
-```
-├── ● 2m ─── ● 5m ─── [●] 8m ─── ● 15m ── ○ 1h ── ○ 3h ── ○ yday ──┤
-                        ▲
-```
-
-### Rich (toggle with `e`)
-
-Two lines. Labels + descriptions. Branches still collapsed.
+Each node gets ~12 characters. The viewport scrolls horizontally to keep the selected node centered. Nodes off-screen are clipped.
 
 ```
-├──────────────────────────────────────────────────────────────────┤
-│ ● 2 min      ● 5 min      [●] 8 min      ● 15 min     ○ 1 hr    │
-│ "insert"     "delete"     "insert"      auto-save     save      │
-│                             ▲                                    │
-├──────────────────────────────────────────────────────────────────┤
+├─ Page History ──────────────────────────────┤
+│    ● 5 min     [●] 8 min     ● 15 min      │
+│                 ▲ insert session             │
+├─ h/l:scrub  e:detail  r:restore  q:close ──┤
+```
+
+Line 1: title bar (mode + version count + date range)
+Line 2: timeline nodes (scrollable, selected centered)
+Line 3: selected node's description (follows cursor)
+Line 4: key hints
+
+### Rich (toggle with `e` — 6 lines)
+
+Each node gets ~16 characters. Description + diff stat visible for the selected node.
+
+```
+├─ Page History ── 12 versions ── Mar 5–now ──┤
+│    ● 5 min       [●] 8 min       ● 15 min  │
+│                    ▲                         │
+│   "delete"    "insert session"   auto-save   │
+│                  +3 / -1                     │
+├─ h/l:scrub  r:restore  d:diff  q:close ─────┤
+```
+
+Line 1: title + stats
+Line 2: timeline nodes (scrollable)
+Line 3: cursor indicator
+Line 4: descriptions for visible nodes
+Line 5: diff stat for selected node
+Line 6: key hints
+
+### Horizontal scrolling
+
+The timeline is wider than the screen. Moving `h`/`l` scrolls the viewport to keep the selected node roughly centered. ~5-6 nodes visible on 80-column terminals. Edges clip gracefully.
+
+```
+At the beginning (selected = first):
+│ ▸● 2 min     ● 5 min     ● 8 min     ● 15 min │
+
+After pressing l several times (viewport shifts):
+│    ● 8 min     ● 15 min    ○ 1 hour    ○ 3 hr  │
+
+At the end (selected = last):
+│  ○ 3 hours    ○ yesterday    ○ Mar 12   ▸○ Mar 5│
 ```
 
 ### Branches (auto-expand at `[●]`)

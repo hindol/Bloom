@@ -84,104 +84,122 @@ pub(super) fn draw_temporal_strip(
     f.render_widget(Clear, strip_area);
     f.render_widget(ratatui::widgets::Block::default().style(strip_bg), strip_area);
 
-    let mut spans: Vec<Span> = Vec::new();
-    spans.push(Span::styled("├─", RStyle::default().fg(theme.faded()).bg(theme.highlight())));
+    let faded = RStyle::default().fg(theme.faded()).bg(theme.highlight());
+    let bright = RStyle::default().fg(theme.foreground()).bg(theme.highlight());
+    let accent = RStyle::default().fg(theme.accent_yellow()).bg(theme.highlight());
+    let width = strip_area.width as usize;
 
-    for (i, node) in strip.items.iter().enumerate() {
+    // Horizontal scrolling: fixed node width, viewport centered on selected
+    let node_w: usize = if strip.compact { 12 } else { 16 };
+    let visible_count = (width.saturating_sub(4)) / node_w.max(1);
+    let total = strip.items.len();
+    let half = visible_count / 2;
+    let viewport_start = if strip.selected <= half {
+        0
+    } else if strip.selected + half >= total {
+        total.saturating_sub(visible_count)
+    } else {
+        strip.selected - half
+    };
+    let viewport_end = (viewport_start + visible_count).min(total);
+
+    let version_count = total;
+    let first_label = strip.items.first().map(|n| n.label.as_str()).unwrap_or("");
+    let last_label = strip.items.last().map(|n| n.label.as_str()).unwrap_or("");
+
+    // --- Line 1: Title bar ---
+    let title_text = if strip.compact {
+        format!("├─ {} ", strip.title)
+    } else {
+        format!("├─ {} ── {} versions ── {}–{} ", strip.title, version_count, first_label, last_label)
+    };
+    f.render_widget(
+        Paragraph::new(vec![Line::from(Span::styled(
+            super::truncate_to_width(&title_text, width), faded,
+        ))]).style(strip_bg),
+        Rect::new(strip_area.x, strip_area.y, strip_area.width, 1),
+    );
+
+    // --- Line 2: Timeline nodes (scrollable) ---
+    let mut node_spans: Vec<Span> = Vec::new();
+    node_spans.push(Span::styled("│ ", faded));
+    for i in viewport_start..viewport_end {
+        let node = &strip.items[i];
         let is_selected = i == strip.selected;
-        let marker = if node.branch_count > 1 {
-            "[●]"
-        } else {
+        let marker = if node.branch_count > 1 { "[●]" } else {
             match node.kind {
                 StripNodeKind::UndoNode => "●",
                 StripNodeKind::GitCommit => "○",
             }
         };
-
         let node_style = if is_selected {
-            RStyle::default()
-                .fg(theme.foreground())
-                .bg(theme.highlight())
-                .add_modifier(Modifier::BOLD)
+            RStyle::default().fg(theme.foreground()).bg(theme.highlight()).add_modifier(Modifier::BOLD)
         } else {
             match node.kind {
-                StripNodeKind::UndoNode => {
-                    RStyle::default().fg(theme.foreground()).bg(theme.highlight())
-                }
-                StripNodeKind::GitCommit => {
-                    RStyle::default().fg(theme.faded()).bg(theme.highlight())
-                }
+                StripNodeKind::UndoNode => bright,
+                StripNodeKind::GitCommit => faded,
             }
         };
-
-        let connector = if i > 0 { "── " } else { " " };
-        spans.push(Span::styled(connector, RStyle::default().fg(theme.faded()).bg(theme.highlight())));
-
-        if is_selected {
-            spans.push(Span::styled("▸", RStyle::default().fg(theme.accent_yellow()).bg(theme.highlight())));
-        }
-        spans.push(Span::styled(marker, node_style));
-        spans.push(Span::styled(
-            format!(" {}", node.label),
-            node_style,
-        ));
+        let label = super::truncate_to_width(&node.label, node_w.saturating_sub(4));
+        let cell = if is_selected {
+            format!("▸{} {}", marker, label)
+        } else {
+            format!(" {} {}", marker, label)
+        };
+        node_spans.push(Span::styled(format!("{:<w$}", cell, w = node_w), node_style));
     }
+    f.render_widget(
+        Paragraph::new(vec![Line::from(node_spans)]).style(strip_bg),
+        Rect::new(strip_area.x, strip_area.y + 1, strip_area.width, 1),
+    );
 
-    spans.push(Span::styled(
-        "─┤",
-        RStyle::default().fg(theme.faded()).bg(theme.highlight()),
-    ));
+    // --- Line 3: Cursor + selected description ---
+    let selected_desc = strip.items.get(strip.selected)
+        .and_then(|n| n.detail.as_deref()).unwrap_or("");
+    let sel_visual = strip.selected.saturating_sub(viewport_start);
+    let arrow_pad = 2 + sel_visual * node_w;
+    let mut desc_str = String::new();
+    desc_str.push_str("│ ");
+    for _ in 0..arrow_pad.saturating_sub(2) { desc_str.push(' '); }
+    desc_str.push_str("▲ ");
+    desc_str.push_str(&super::truncate_to_width(selected_desc, width.saturating_sub(arrow_pad + 4)));
+    f.render_widget(
+        Paragraph::new(vec![Line::from(Span::styled(
+            super::truncate_to_width(&desc_str, width), accent,
+        ))]).style(strip_bg),
+        Rect::new(strip_area.x, strip_area.y + 2, strip_area.width, 1),
+    );
 
-    let strip_line = Line::from(spans);
-    let strip_line_area = Rect::new(strip_area.x, strip_area.y, strip_area.width, 1);
-    f.render_widget(Paragraph::new(vec![strip_line]).style(strip_bg), strip_line_area);
-
-    // Rich mode: second line with descriptions
-    if !strip.compact && strip_area.height > 1 {
-        let mut detail_spans: Vec<Span> = Vec::new();
-        detail_spans.push(Span::styled("│ ", RStyle::default().fg(theme.faded()).bg(theme.highlight())));
-        for (i, node) in strip.items.iter().enumerate() {
+    // --- Rich mode: line 4 (all visible descriptions) and line 5 (stat) ---
+    if !strip.compact && strip_area.height >= 6 {
+        let mut desc_spans: Vec<Span> = Vec::new();
+        desc_spans.push(Span::styled("│ ", faded));
+        for i in viewport_start..viewport_end {
+            let node = &strip.items[i];
             let detail = node.detail.as_deref().unwrap_or("");
-            let truncated = super::truncate_to_width(detail, 12);
-            let pad = if i > 0 { "   " } else { "" };
-            let style = if i == strip.selected {
-                RStyle::default().fg(theme.foreground()).bg(theme.highlight())
-            } else {
-                RStyle::default().fg(theme.faded()).bg(theme.highlight())
-            };
-            detail_spans.push(Span::styled(format!("{}{:<12}", pad, truncated), style));
+            let truncated = super::truncate_to_width(detail, node_w.saturating_sub(2));
+            let style = if i == strip.selected { bright } else { faded };
+            desc_spans.push(Span::styled(format!("{:<w$}", truncated, w = node_w), style));
         }
-        let detail_line = Line::from(detail_spans);
-        let detail_area = Rect::new(strip_area.x, strip_area.y + 1, strip_area.width, 1);
-        f.render_widget(Paragraph::new(vec![detail_line]).style(strip_bg), detail_area);
+        f.render_widget(
+            Paragraph::new(vec![Line::from(desc_spans)]).style(strip_bg),
+            Rect::new(strip_area.x, strip_area.y + 3, strip_area.width, 1),
+        );
+        // Line 5: empty/stat placeholder
+        f.render_widget(
+            Paragraph::new(vec![Line::from(Span::styled("│", faded))]).style(strip_bg),
+            Rect::new(strip_area.x, strip_area.y + 4, strip_area.width, 1),
+        );
     }
 
-    // --- Separator line with hints ---
+    // --- Last line: key hints ---
     let hints = match strip.mode {
-        bloom_core::render::TemporalMode::PageHistory | bloom_core::render::TemporalMode::BlockHistory => {
-            "h/l:scrub  e:detail  r:restore  q:close"
-        }
-        bloom_core::render::TemporalMode::DayActivity => {
-            "h/l:scrub  e:detail  Enter:page  q:close"
-        }
+        bloom_core::render::TemporalMode::PageHistory
+        | bloom_core::render::TemporalMode::BlockHistory => "h/l:scrub  e:detail  r:restore  d:diff  q:close",
+        bloom_core::render::TemporalMode::DayActivity => "h/l:scrub  e:detail  Enter:page  q:close",
     };
-    let sep_line = Line::from(vec![
-        Span::styled(
-            "├",
-            RStyle::default().fg(theme.faded()).bg(theme.highlight()),
-        ),
-        Span::styled(
-            format!("─ {} ", hints),
-            RStyle::default().fg(theme.faded()).bg(theme.highlight()),
-        ),
-    ]);
-    let hint_y = if !strip.compact && strip_area.height > 2 {
-        strip_area.y + 2
-    } else if strip_area.height > 1 {
-        strip_area.y + 1
-    } else {
-        return; // no room for hints
-    };
-    let hint_area = Rect::new(strip_area.x, hint_y, strip_area.width, 1);
-    f.render_widget(Paragraph::new(vec![sep_line]).style(strip_bg), hint_area);
+    f.render_widget(
+        Paragraph::new(vec![Line::from(Span::styled(format!("├─ {} ", hints), faded))]).style(strip_bg),
+        Rect::new(strip_area.x, strip_area.y + strip_area.height.saturating_sub(1), strip_area.width, 1),
+    );
 }

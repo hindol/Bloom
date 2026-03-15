@@ -680,7 +680,7 @@ pub(crate) struct TemporalStripState {
 
 impl TemporalStripState {
     pub fn drawer_height(&self) -> u16 {
-        if self.compact { 2 } else { 3 }
+        if self.compact { 4 } else { 6 }
     }
 }
 
