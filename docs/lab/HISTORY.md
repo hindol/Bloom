@@ -94,18 +94,17 @@ When `commit_all()` stages files, it reads each vault file, looks up its UUID in
 
 ### Auto-Commit Strategy
 
-Bloom commits automatically. The user never thinks about it.
+Bloom commits automatically on save. The user never thinks about it.
 
 **When to commit:**
 
 | Trigger | Rationale |
 |---------|-----------|
-| On quit | Capture the final state of the session |
-| After 5 minutes of inactivity | Natural pause boundary — you've context-switched |
-| On journal rotation (start of new day) | Close out the day cleanly before rotating |
-| After 1 hour regardless of activity | Safety net for long uninterrupted sessions |
+| On save (debounced) | Every auto-save triggers a git commit. The history thread batches rapid saves. |
+| On quit | Capture final state |
+| On journal rotation (start of new day) | Close out the day cleanly |
 
-**Not** on every auto-save. The 300ms auto-save debounce writes to disk for crash safety, but committing every 300ms would create hundreds of commits per day. The 5-minute idle window batches edits into meaningful chunks — typically 3–10 commits per active day.
+Auto-save fires 300ms after the last edit (on Insert→Normal transition). The history thread debounces: multiple saves within a few seconds are batched into one commit. Typical result: 10–30 commits per active day, each representing a meaningful editing pause.
 
 **Commit details:**
 
@@ -115,7 +114,7 @@ Message: "2026-03-08 14:32 — edited Text Editor Theory, journal"
 ```
 
 - Machine-authored (filterable if the user also commits manually)
-- Timestamp + summary of what changed (auto-generated from the staged diff)
+- Timestamp + summary of changed files (auto-generated)
 - Staged by UUID: index lookup maps each changed vault file to its UUID
 
 ### Single-Instance Lock
@@ -126,20 +125,26 @@ This prevents concurrent writes to both the SQLite index and the git repo.
 
 ### Persistent Undo Tree
 
-The in-memory undo tree (G9) is serialized to SQLite on quit and restored on next launch:
+The in-memory undo tree is serialized to SQLite on quit and restored on next launch:
 
 ```sql
 CREATE TABLE undo_tree (
-    page_id    TEXT NOT NULL,
-    node_id    INTEGER NOT NULL,
-    parent_id  INTEGER,           -- NULL for root
-    content    BLOB NOT NULL,     -- rope snapshot or delta
-    timestamp  TEXT NOT NULL,
+    page_id      TEXT NOT NULL,
+    node_id      INTEGER NOT NULL,
+    parent_id    INTEGER,           -- NULL for root
+    content      TEXT NOT NULL,     -- rope snapshot
+    timestamp_ms INTEGER NOT NULL,
+    description  TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (page_id, node_id)
+);
+
+CREATE TABLE undo_tree_state (
+    page_id         TEXT PRIMARY KEY,
+    current_node_id INTEGER NOT NULL
 );
 ```
 
-On restart, the undo tree is deserialized. `u` and `Ctrl-R` work across sessions. The undo tree is pruned when the buffer is closed or after 24 hours — beyond that, git history provides recovery.
+Each node stores a full rope snapshot and cursor position (in-memory only — cursor not persisted). On restart, `u` and `Ctrl-R` work across sessions. Pruned after buffer close or 24 hours.
 
 ---
 
@@ -149,9 +154,9 @@ The history of a single page over time.
 
 ### Context Strip
 
-Bloom uses a **context strip** — a 3-line panel above the status bar for navigating through ordered items (history versions, calendar days). The same component powers page history (`SPC H h`), day activity browsing (`SPC H c` → `[d`/`]d`), and journal day-hopping (`SPC j p`/`SPC j n`). See [JOURNAL.md](../JOURNAL.md) for journal-specific navigation.
+Bloom uses a **context strip** — a 3-line panel above the status bar for navigating through ordered items (history versions, calendar days). The same component powers page history (`SPC H h`), day activity browsing (`SPC H c` → `[d`/`]d`), and journal day-hopping (`[d`/`]d`). See [JOURNAL.md](../JOURNAL.md) for journal-specific navigation.
 
-The strip shows the **selected item plus its neighbors** — one before, one after — giving temporal context at a glance. Neighbors are rendered in `faded` text. The status bar stays at the very bottom (always present) and becomes **mode-aware**: `HIST`, `DAY`, or `JRNL` mode replaces `NORMAL`, with key hints in the right section replacing cursor position and thread indicators (both irrelevant during temporal browsing). See [WINDOW_LAYOUTS.md](../../WINDOW_LAYOUTS.md) § Status Bar Anatomy for mode colour assignments.
+The strip shows the **selected item plus its neighbors** — one before, one after — giving temporal context at a glance. Neighbors are rendered in `faded` text. The status bar stays at the very bottom (always present) and becomes **mode-aware**: `HIST`, `DAY`, or `JRNL` mode replaces `NORMAL`, with key hints in the right section replacing cursor position and thread indicators (both irrelevant during temporal browsing). See [WINDOW_LAYOUTS.md](../WINDOW_LAYOUTS.md) § Status Bar Anatomy for mode colour assignments.
 
 **Three states:**
 
@@ -282,46 +287,29 @@ A git-derived summary of vault-wide activity for any given day. Available via `S
 
 ### Wireframe
 
-<div style="font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.5; background: #141414; color: #EBE9E7; border-radius: 6px; overflow: hidden; max-width: 680px; margin: 16px 0;">
-  <!-- Day activity content -->
-  <div style="padding: 12px 16px;">
-    <div style="color: #A3A3A3; font-size: 11px; margin-bottom: 8px;">Day Activity — Saturday, March 8, 2026</div>
-    <div>&nbsp;</div>
-    <div><span style="font-weight: bold;">✏️ &nbsp;Edited</span></div>
-    <div style="display: flex; justify-content: space-between;"><span>Text Editor Theory</span><span style="color: #62C554;">+12 lines</span></div>
-    <div style="display: flex; justify-content: space-between;"><span>Rust Programming</span><span style="color: #62C554;">+3 lines</span></div>
-    <div>&nbsp;</div>
-    <div><span style="font-weight: bold;">🌱 &nbsp;Created</span></div>
-    <div>Gap Buffer Tradeoffs <span style="color: #A3A3A3;">#data-structures</span></div>
-    <div>&nbsp;</div>
-    <div><span style="font-weight: bold;">✅ &nbsp;Completed</span></div>
-    <div style="display: flex; justify-content: space-between;"><span><span style="color: #62C554;">[x]</span> Compare with PieceTable</span><span style="color: #A3A3A3;">Text Editor Theory</span></div>
-    <div style="display: flex; justify-content: space-between;"><span><span style="color: #62C554;">[x]</span> Read Neovim buffer internals</span><span style="color: #A3A3A3;">Rust Programming</span></div>
-    <div>&nbsp;</div>
-    <div style="color: #A3A3A3; font-size: 12px;">3 pages edited · 1 page created · 2 tasks completed</div>
-  </div>
-  <!-- Context strip -->
-  <div style="border-top: 1px solid #37373E;">
-    <div style="padding: 4px 16px; color: #A3A3A3;">
-      <div><span style="color: #F4BF4F;">◆</span> Mar 6 Thu</div>
-    </div>
-    <div style="padding: 4px 16px; background: #212228;">
-      <div><span style="color: #EBE9E7;">▸</span> <span style="color: #F4BF4F;">◆</span> <span style="color: #EBE9E7; font-weight: bold;">Mar 8 Sat</span></div>
-    </div>
-    <div style="padding: 4px 16px; color: #A3A3A3;">
-      <div><span style="color: #F4BF4F;">◆</span> Mar 12 Wed</div>
-    </div>
-  </div>
-  <!-- Status bar (DAY mode) -->
-  <div style="background: #F2DA61; color: #141414; padding: 3px 16px; display: flex; justify-content: space-between; font-size: 12px;">
-    <div>
-      <span style="font-weight: bold;">DAY</span>
-      <span style="opacity: 0.4;"> │ </span>
-      <span>Saturday, March 8, 2026</span>
-    </div>
-    <div style="opacity: 0.7;">e:detail &nbsp; ↵:calendar &nbsp; [d ]d</div>
-  </div>
-</div>
+```
+┌─ Day Activity — Saturday, March 8, 2026 ───────────┐
+│                                                     │
+│  ✏️ Edited                                          │
+│  Text Editor Theory                       +12 lines │
+│  Rust Programming                          +3 lines │
+│                                                     │
+│  🌱 Created                                         │
+│  Gap Buffer Tradeoffs  #data-structures             │
+│                                                     │
+│  ✅ Completed                                       │
+│  [x] Compare with PieceTable      Text Editor Theory│
+│  [x] Read Neovim buffer internals  Rust Programming │
+│                                                     │
+│  3 pages edited · 1 created · 2 tasks completed     │
+├─────────────────────────────────────────────────────┤
+│  ◆ Mar 6 Thu                                        │
+│▸ ◆ Mar 8 Sat                                        │
+│  ◆ Mar 12 Wed                                       │
+├─────────────────────────────────────────────────────┤
+│ DAY  Saturday, March 8       e:detail  [d/]d  ↵:cal │
+└─────────────────────────────────────────────────────┘
+```
 
 ### Detail Levels
 
@@ -339,7 +327,7 @@ One key cycles through densities. Same data, different zoom. Not a configuration
 
 Tasks in the activity view are **actionable.** Pressing `x` on a task toggles it in the source file.
 
-**How it works:** The activity view stores tasks by block ID (see [BLOCK_IDENTITY.md](../BLOCK_IDENTITY.md)). The toggle resolves `page_id^block_id` → current line in the index → flip `[ ]` ↔ `[x]` in the rope buffer. Same code path as the agenda's toggle.
+**How it works:** The activity view stores tasks by block ID (see [BLOCK_IDENTITY.md](../BLOCK_IDENTITY.md)). The toggle resolves block ID → page + line via the index → flip `[ ]` ↔ `[x]` in the rope buffer. Same code path as the agenda's toggle.
 
 If the block ID is orphaned (the content was deleted since that day), the task renders as historical — no action available, dimmed styling.
 
@@ -488,7 +476,7 @@ History Thread (new)
 UI Thread: render result frames
 ```
 
-The history thread owns the `gix::Repository` handle and all caches. Auto-commits also go through this thread — the disk writer signals it (via channel) after each successful write, and the history thread debounces these signals (5-minute idle window) before committing.
+The history thread owns the `gix::Repository` handle and all caches. Auto-commits also go through this thread — the disk writer signals it (via channel) after each successful write, and the history thread debounces rapid saves before committing.
 
 ---
 
@@ -549,7 +537,7 @@ Git history is the backstop that makes block ID self-healing possible. See [BLOC
 
 ```toml
 [history]
-auto_commit_idle_minutes = 5    # commit after N minutes of inactivity
+# auto-commit triggers on save (debounced by history thread)
 max_commit_interval_minutes = 60  # safety net for long uninterrupted sessions
 ```
 
@@ -634,5 +622,4 @@ No external runtime dependencies. No `git` binary required. Works on macOS and W
 
 - [`gix` crate](https://github.com/GitoxideLabs/gitoxide) — pure Rust git implementation, used by `cargo`
 - [JOURNAL.md](../JOURNAL.md) — journal file model, calendar navigation
-- [BLOCK_IDENTITY.md](../BLOCK_IDENTITY.md) — self-healing block IDs powered by git history
-- [JOURNAL.md](../JOURNAL.md) — `journal.md` rotation model
+- [BLOCK_IDENTITY.md](../BLOCK_IDENTITY.md) — block IDs, mirroring, self-healing
