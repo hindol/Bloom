@@ -14,13 +14,52 @@ use crate::theme::TuiTheme;
 
 pub(super) fn draw_temporal_strip(
     f: &mut Frame,
-    _pane_area: Rect,
+    pane_area: Rect,
     strip_area: Rect,
     strip: &TemporalStripFrame,
     theme: &TuiTheme,
 ) {
     if strip.items.is_empty() {
         return;
+    }
+
+    // --- Draw diff preview in the pane content area (above status bar) ---
+    if !strip.preview_lines.is_empty() && pane_area.height > 2 {
+        // Content area = pane minus status bar (last line)
+        let content_area = Rect::new(
+            pane_area.x,
+            pane_area.y,
+            pane_area.width,
+            pane_area.height.saturating_sub(1),
+        );
+        let bg = RStyle::default().bg(theme.background());
+        f.render_widget(Clear, content_area);
+        f.render_widget(ratatui::widgets::Block::default().style(bg), content_area);
+
+        let mut preview_lines: Vec<Line> = Vec::new();
+        for dl in &strip.preview_lines {
+            let style = match dl.kind {
+                bloom_core::render::DiffLineKind::Context => {
+                    RStyle::default().fg(theme.faded()).bg(theme.background())
+                }
+                bloom_core::render::DiffLineKind::Added => {
+                    RStyle::default().fg(theme.accent_green()).bg(theme.background())
+                }
+                bloom_core::render::DiffLineKind::Removed => {
+                    RStyle::default().fg(theme.accent_red()).bg(theme.background())
+                }
+            };
+            let prefix = match dl.kind {
+                bloom_core::render::DiffLineKind::Context => "  ",
+                bloom_core::render::DiffLineKind::Added => "+ ",
+                bloom_core::render::DiffLineKind::Removed => "- ",
+            };
+            preview_lines.push(Line::from(Span::styled(
+                format!("{}{}", prefix, dl.text),
+                style,
+            )));
+        }
+        f.render_widget(Paragraph::new(preview_lines).style(bg), content_area);
     }
 
     // --- Draw strip in the drawer area (below status bar) ---

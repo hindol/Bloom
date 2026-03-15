@@ -2802,3 +2802,60 @@ fn page_history_opens_with_hist_mode() {
         "q should dismiss history and restore normal mode"
     );
 }
+
+// =======================================================================
+// History: scrubbing shows preview, dismiss restores
+// =======================================================================
+
+#[test]
+fn history_scrub_shows_undo_preview() {
+    let mut sim = SimInput::with_content("original line");
+    
+    // Make an edit to create undo history
+    sim.keys("A");
+    sim.type_text(" edited");
+    sim.keys("<Esc>");
+    assert!(sim.buffer_text().contains("original line edited"));
+
+    // Open history
+    sim.keys("SPC H h");
+    let screen = sim.screen(80, 24);
+    assert!(screen.mode() == "HIST", "should be in HIST mode, got: {}", screen.mode());
+
+    // Scrub left (older — should show original version)
+    sim.keys("h");
+    let screen = sim.screen(80, 24);
+    // The temporal strip should have preview lines with the diff
+    assert!(screen.frame.temporal_strip.is_some(), "strip should exist after h");
+    if let Some(ts) = &screen.frame.temporal_strip {
+        assert!(!ts.preview_lines.is_empty(), "preview should have diff lines after scrubbing");
+    }
+
+    // Dismiss
+    sim.keys("q");
+    let screen = sim.screen(80, 24);
+    assert!(screen.mode() != "HIST", "q should dismiss history");
+    // Buffer should be unchanged (preview was read-only)
+    assert!(sim.buffer_text().contains("original line edited"), "buffer should be unchanged after dismiss");
+}
+
+#[test]
+fn history_restore_changes_buffer() {
+    let mut sim = SimInput::with_content("version one");
+    
+    sim.keys("A");
+    sim.type_text(" plus two");
+    sim.keys("<Esc>");
+    assert!(sim.buffer_text().contains("version one plus two"));
+
+    sim.keys("SPC H h");
+    sim.keys("h"); // go to older version
+    sim.keys("r"); // restore
+
+    let text = sim.buffer_text();
+    assert!(
+        text.contains("version one") && !text.contains("plus two"),
+        "restore should revert to older version, got: {}",
+        text
+    );
+}
