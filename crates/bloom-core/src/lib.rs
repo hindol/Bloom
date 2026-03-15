@@ -1013,20 +1013,28 @@ impl BloomEditor {
             return;
         };
         let name = self.active_theme.name;
-        let new_content = if content.contains("name = ") {
-            content
-                .lines()
-                .map(|l| {
-                    if l.trim().starts_with("name = ") && !l.contains("mode") {
-                        format!("name = \"{}\"", name)
-                    } else {
-                        l.to_string()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
+
+        // Replace theme name in [theme] section only, or append section if missing.
+        let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+        let mut in_theme_section = false;
+        let mut replaced = false;
+
+        for line in &mut lines {
+            let trimmed = line.trim();
+            if trimmed.starts_with('[') {
+                in_theme_section = trimmed == "[theme]";
+            }
+            if in_theme_section && trimmed.starts_with("name = ") {
+                *line = format!("name = \"{}\"", name);
+                replaced = true;
+            }
+        }
+
+        let new_content = if replaced {
+            lines.join("\n")
         } else {
-            format!("{content}\n[theme]\nname = \"{name}\"\n")
+            // No [theme] section — append one
+            format!("{}\n\n[theme]\nname = \"{}\"\n", content.trim_end(), name)
         };
         let _ = std::fs::write(&config_path, new_content);
     }

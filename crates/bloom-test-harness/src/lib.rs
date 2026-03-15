@@ -253,6 +253,14 @@ impl SimInput {
         }
     }
 
+    /// Create a SimInput with a pre-configured editor and vault.
+    pub fn with_editor_and_vault(editor: BloomEditor, vault: TestVault) -> Self {
+        Self {
+            editor,
+            vault: Some(vault),
+        }
+    }
+
     /// Send a key sequence. Supports: `"dw"`, `"SPC f f"`, `"<Esc>"`,
     /// `"<CR>"`, `"C-r"`, etc.
     pub fn keys(&mut self, sequence: &str) -> &mut Self {

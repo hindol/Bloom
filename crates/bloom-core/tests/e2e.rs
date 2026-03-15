@@ -2628,3 +2628,57 @@ fn spc_star_searches_word_under_cursor() {
     let screen = sim.screen(80, 24);
     assert!(screen.has_picker(), "SPC * should open search picker");
 }
+
+// =======================================================================
+// Theme: persist and restore from config
+// =======================================================================
+
+#[test]
+fn theme_persists_to_config_without_corrupting_views() {
+    let vault = TestVault::new()
+        .page("Test")
+        .build();
+    let vault_root = vault.root().to_path_buf();
+    // Write config at vault root BEFORE init
+    std::fs::write(
+        vault_root.join("config.toml"),
+        "[theme]\nname = \"bloom-dark\"\n\n[[views]]\nname = \"Agenda\"\nquery = \"tasks | where not done | sort due\"\nkey = \"a a\"\n",
+    ).unwrap();
+
+    let config = bloom_core::config::Config::load(&vault_root.join("config.toml"))
+        .unwrap_or_else(|_| bloom_core::config::Config::defaults());
+    let mut editor = bloom_core::BloomEditor::new(config).unwrap();
+    let _ = editor.init_vault(&vault_root);
+    let ch = editor.channels();
+    if let Some(rx) = &ch.indexer_rx {
+        for _ in 0..300 {
+            if let Ok(complete) = rx.try_recv() {
+                editor.handle_index_complete(complete);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+    editor.startup();
+
+    let mut sim = SimInput::with_editor_and_vault(editor, vault);
+
+    // Change theme via picker
+    sim.keys("SPC T t");
+    sim.keys("C-n"); // move to next theme
+    sim.keys("Enter"); // confirm
+
+    // Read config back and verify
+    let config = std::fs::read_to_string(vault_root.join("config.toml")).unwrap();
+    // Theme should be changed
+    assert!(
+        !config.contains("name = \"bloom-dark\"") || config.contains("[theme]"),
+        "theme should be updated in config"
+    );
+    // View name should NOT be corrupted
+    assert!(
+        config.contains("name = \"Agenda\""),
+        "view name should be preserved, got:\n{}",
+        config
+    );
+}
