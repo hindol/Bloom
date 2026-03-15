@@ -288,6 +288,7 @@ impl SimInput {
 
     /// Render and return a TestScreen for assertions.
     pub fn screen(&mut self, width: u16, height: u16) -> TestScreen {
+        self.editor.update_layout(width, height);
         let frame = self.editor.render(width, height);
         TestScreen::from_frame(frame, width, height)
     }
