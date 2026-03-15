@@ -1324,48 +1324,86 @@ fn similar_enough(a: &str, b: &str) -> bool {
     common * 2 > total
 }
 
-/// Word-level diff between two similar lines.
+/// Word-level diff between two similar lines using LCS.
 /// Returns segments: Context (shared), Added (in current), Removed (in historical).
 fn word_diff(historical: &str, current: &str) -> Vec<render::DiffSegment> {
     let h_words: Vec<&str> = historical.split_whitespace().collect();
     let c_words: Vec<&str> = current.split_whitespace().collect();
-    let mut segments = Vec::new();
-    let mut hi = 0;
-    let mut ci = 0;
 
-    while hi < h_words.len() || ci < c_words.len() {
-        if hi < h_words.len() && ci < c_words.len() && h_words[hi] == c_words[ci] {
-            // Same word
-            if !segments.is_empty() {
-                segments.push(render::DiffSegment {
-                    text: " ".to_string(),
-                    kind: render::DiffLineKind::Context,
-                });
-            }
-            segments.push(render::DiffSegment {
-                text: c_words[ci].to_string(),
-                kind: render::DiffLineKind::Context,
-            });
-            hi += 1;
-            ci += 1;
-        } else if hi < h_words.len()
-            && (ci >= c_words.len()
-                || c_words[ci..].iter().position(|w| *w == h_words[hi]).is_none())
-        {
-            // Word only in historical (removed) — show red first
-            segments.push(render::DiffSegment {
-                text: format!(" {}", h_words[hi]),
-                kind: render::DiffLineKind::Removed,
-            });
-            hi += 1;
-        } else {
-            // Word only in current (added) — show green after red
-            segments.push(render::DiffSegment {
-                text: format!(" {}", c_words[ci]),
-                kind: render::DiffLineKind::Added,
-            });
-            ci += 1;
+    // LCS table
+    let hn = h_words.len();
+    let cn = c_words.len();
+    let mut dp = vec![vec![0u16; cn + 1]; hn + 1];
+    for i in 1..=hn {
+        for j in 1..=cn {
+            dp[i][j] = if h_words[i - 1] == c_words[j - 1] {
+                dp[i - 1][j - 1] + 1
+            } else {
+                dp[i - 1][j].max(dp[i][j - 1])
+            };
         }
     }
-    segments
+
+    // Backtrack to build diff segments
+    let mut i = hn;
+    let mut j = cn;
+    let mut pending_removed: Vec<&str> = Vec::new();
+    let mut pending_added: Vec<&str> = Vec::new();
+
+    // Collect operations in reverse, then reverse at the end
+    let mut ops: Vec<render::DiffSegment> = Vec::new();
+
+    while i > 0 || j > 0 {
+        if i > 0 && j > 0 && h_words[i - 1] == c_words[j - 1] {
+            // Flush pending diffs before this common word
+            for w in pending_removed.drain(..).rev() {
+                ops.push(render::DiffSegment {
+                    text: format!(" {}", w),
+                    kind: render::DiffLineKind::Removed,
+                });
+            }
+            for w in pending_added.drain(..).rev() {
+                ops.push(render::DiffSegment {
+                    text: format!(" {}", w),
+                    kind: render::DiffLineKind::Added,
+                });
+            }
+            ops.push(render::DiffSegment {
+                text: format!(" {}", c_words[j - 1]),
+                kind: render::DiffLineKind::Context,
+            });
+            i -= 1;
+            j -= 1;
+        } else if j > 0 && (i == 0 || dp[i][j - 1] >= dp[i - 1][j]) {
+            pending_added.push(c_words[j - 1]);
+            j -= 1;
+        } else {
+            pending_removed.push(h_words[i - 1]);
+            i -= 1;
+        }
+    }
+    // Flush remaining
+    for w in pending_removed.drain(..).rev() {
+        ops.push(render::DiffSegment {
+            text: format!(" {}", w),
+            kind: render::DiffLineKind::Removed,
+        });
+    }
+    for w in pending_added.drain(..).rev() {
+        ops.push(render::DiffSegment {
+            text: format!(" {}", w),
+            kind: render::DiffLineKind::Added,
+        });
+    }
+
+    ops.reverse();
+
+    // Trim leading space on the first segment
+    if let Some(first) = ops.first_mut() {
+        if first.text.starts_with(' ') {
+            first.text = first.text[1..].to_string();
+        }
+    }
+
+    ops
 }
