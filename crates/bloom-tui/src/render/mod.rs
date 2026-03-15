@@ -44,21 +44,33 @@ pub fn draw(
         area,
     );
 
-    // Layout: panes | which-key drawer (optional)
+    // Layout: panes | temporal strip (optional) | which-key drawer (optional)
+    // Both temporal strip and which-key are bottom drawers below the status bar.
+    let ts_h = if let Some(ts) = &frame.temporal_strip {
+        if ts.compact { 2u16 } else { 3u16 } // strip line(s) + hint line
+    } else {
+        0
+    };
+
     let wk_h = if let Some(wk) = &frame.which_key {
         let col_width = 24u16;
         let cols = (area.width.saturating_sub(4) / col_width).max(1);
         let rows_needed = (wk.entries.len() as u16).div_ceil(cols);
-        // +1 for top padding, +1 for bottom padding
         (rows_needed + 2).min(area.height / 3).max(3)
     } else {
         0
     };
 
-    let pane_h = area.height.saturating_sub(wk_h);
+    let drawer_h = ts_h.max(wk_h); // only one is active at a time
+    let pane_h = area.height.saturating_sub(drawer_h);
     let pane_area = Rect::new(area.x, area.y, area.width, pane_h);
     let wk_area = if wk_h > 0 {
         Some(Rect::new(area.x, area.y + pane_h, area.width, wk_h))
+    } else {
+        None
+    };
+    let ts_area = if ts_h > 0 {
+        Some(Rect::new(area.x, area.y + pane_h, area.width, ts_h))
     } else {
         None
     };
@@ -84,9 +96,9 @@ pub fn draw(
         context_strip::draw_context_strip(f, pane_area, strip, theme);
     }
 
-    // Temporal strip (page history, block history, day activity)
-    if let Some(strip) = &frame.temporal_strip {
-        temporal_strip::draw_temporal_strip(f, pane_area, strip, theme);
+    // Temporal strip (below status bar, like which-key drawer)
+    if let (Some(strip), Some(ts_rect)) = (&frame.temporal_strip, ts_area) {
+        temporal_strip::draw_temporal_strip(f, pane_area, ts_rect, strip, theme);
     }
 
     // Overlays — drawn after panes, so their set_cursor_position() wins.

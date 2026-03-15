@@ -15,6 +15,7 @@ use crate::theme::TuiTheme;
 pub(super) fn draw_temporal_strip(
     f: &mut Frame,
     pane_area: Rect,
+    strip_area: Rect,
     strip: &TemporalStripFrame,
     theme: &TuiTheme,
 ) {
@@ -22,31 +23,17 @@ pub(super) fn draw_temporal_strip(
         return;
     }
 
-    // Layout: preview takes most of the space, strip takes 3 lines at bottom,
-    // status bar is rendered separately by the pane.
-    let strip_height = if strip.compact { 1u16 } else { 2u16 };
-    let total_overlay = strip_height + 1; // +1 for separator
-    if pane_area.height < total_overlay + 4 {
-        return; // not enough space
+    // --- Draw diff preview in the pane content area ---
+    // The preview overlays the pane content (status bar stays in place)
+    let preview_height = pane_area.height.saturating_sub(1); // leave status bar
+    if preview_height < 2 {
+        return;
     }
-
     let preview_area = Rect::new(
         pane_area.x,
         pane_area.y,
         pane_area.width,
-        pane_area.height.saturating_sub(total_overlay),
-    );
-    let strip_area = Rect::new(
-        pane_area.x,
-        pane_area.y + preview_area.height,
-        pane_area.width,
-        strip_height,
-    );
-    let sep_area = Rect::new(
-        pane_area.x,
-        strip_area.y + strip_height,
-        pane_area.width,
-        1,
+        preview_height,
     );
 
     // --- Draw preview (diff lines) ---
@@ -150,7 +137,8 @@ pub(super) fn draw_temporal_strip(
     ));
 
     let strip_line = Line::from(spans);
-    f.render_widget(Paragraph::new(vec![strip_line]).style(strip_bg), strip_area);
+    let strip_line_area = Rect::new(strip_area.x, strip_area.y, strip_area.width, 1);
+    f.render_widget(Paragraph::new(vec![strip_line]).style(strip_bg), strip_line_area);
 
     // Rich mode: second line with descriptions
     if !strip.compact && strip_area.height > 1 {
@@ -191,5 +179,13 @@ pub(super) fn draw_temporal_strip(
             RStyle::default().fg(theme.faded()).bg(theme.highlight()),
         ),
     ]);
-    f.render_widget(Paragraph::new(vec![sep_line]).style(strip_bg), sep_area);
+    let hint_y = if !strip.compact && strip_area.height > 2 {
+        strip_area.y + 2
+    } else if strip_area.height > 1 {
+        strip_area.y + 1
+    } else {
+        return; // no room for hints
+    };
+    let hint_area = Rect::new(strip_area.x, hint_y, strip_area.width, 1);
+    f.render_widget(Paragraph::new(vec![sep_line]).style(strip_bg), hint_area);
 }

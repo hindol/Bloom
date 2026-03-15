@@ -13,15 +13,14 @@
 │                  PREVIEW PANE                       │
 │          (content varies by context)                │
 │                                                     │
-├── older ────────── STRIP ──────────── newer ────────┤
-│                     ▲                               │
-│                  selected                           │
 ├─────────────────────────────────────────────────────┤
-│ MODE  title                            hints        │
+│ MODE  title                            hints        │  ← status bar (stays anchored)
+├── older ────────── STRIP ──────────── newer ────────┤  ← drawer below status bar
+│                     ▲                               │
 └─────────────────────────────────────────────────────┘
 ```
 
-The strip is a horizontal timeline. Moving `h`/`l` (or `←`/`→`) selects a point in time. The preview pane above updates to show what that moment looks like. The status bar shows the mode and context-specific hints.
+The status bar stays at its normal position. The strip opens as a bottom drawer below it (same pattern as the which-key drawer). The content area shrinks to make room. Moving `h`/`l` (or `←`/`→`) selects a point in time. The preview pane updates to show what that moment looks like.
 
 Same component, different data sources:
 
