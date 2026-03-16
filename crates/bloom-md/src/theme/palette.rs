@@ -2,6 +2,19 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rgb(pub u8, pub u8, pub u8);
 
+impl Rgb {
+    /// Blend this color toward `target` by `amount` (0.0 = self, 1.0 = target).
+    /// Used to compute dimmed colors without relying on terminal SGR 2 (dim),
+    /// which Windows Terminal does not support.
+    pub fn blend(self, target: Rgb, amount: f32) -> Rgb {
+        let lerp = |a: u8, b: u8| -> u8 {
+            let v = a as f32 + (b as f32 - a as f32) * amount;
+            v.round().clamp(0.0, 255.0) as u8
+        };
+        Rgb(lerp(self.0, target.0), lerp(self.1, target.1), lerp(self.2, target.2))
+    }
+}
+
 /// 16-slot theme palette per THEMING.md.
 #[derive(Debug, Clone)]
 pub struct ThemePalette {

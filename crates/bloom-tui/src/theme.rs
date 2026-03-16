@@ -25,9 +25,6 @@ pub fn to_rstyle(props: &StyleProps) -> RStyle {
     if props.underline {
         s = s.add_modifier(Modifier::UNDERLINED);
     }
-    if props.dim {
-        s = s.add_modifier(Modifier::DIM);
-    }
     if props.strikethrough {
         s = s.add_modifier(Modifier::CROSSED_OUT);
     }

@@ -14,7 +14,6 @@ pub struct StyleProps {
     pub bold: bool,
     pub italic: bool,
     pub underline: bool,
-    pub dim: bool,
     pub strikethrough: bool,
 }
 
@@ -27,7 +26,6 @@ impl StyleProps {
             bold: false,
             italic: false,
             underline: false,
-            dim: false,
             strikethrough: false,
         }
     }
@@ -40,7 +38,6 @@ impl StyleProps {
             bold: false,
             italic: false,
             underline: false,
-            dim: false,
             strikethrough: false,
         }
     }
@@ -53,6 +50,9 @@ impl StyleProps {
 /// Styles that intentionally override bg (Code, LinkText, SearchMatch) set it explicitly.
 pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
     let base = StyleProps::content(p);
+    // Dim effect: blend faded toward background. This replaces Modifier::DIM
+    // which Windows Terminal does not render (SGR 2 unsupported).
+    let dimmed = p.faded.blend(p.background, 0.45);
     match style {
         Style::Normal => base,
         Style::Heading { level: 1 } => StyleProps {
@@ -92,8 +92,7 @@ pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
             ..base
         },
         Style::LinkChrome => StyleProps {
-            fg: p.faded,
-            dim: true,
+            fg: dimmed,
             ..base
         },
         Style::Tag => StyleProps {
@@ -110,18 +109,15 @@ pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
             ..base
         },
         Style::TimestampParens => StyleProps {
-            fg: p.faded,
-            dim: true,
+            fg: dimmed,
             ..base
         },
         Style::BlockId => StyleProps {
-            fg: p.faded,
-            dim: true,
+            fg: dimmed,
             ..base
         },
         Style::BlockIdCaret => StyleProps {
-            fg: p.faded,
-            dim: true,
+            fg: dimmed,
             ..base
         },
         Style::ListMarker => base,
@@ -152,8 +148,7 @@ pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
             ..base
         },
         Style::TableAlignmentRow => StyleProps {
-            fg: p.faded,
-            dim: true,
+            fg: dimmed,
             ..base
         },
         Style::Frontmatter => StyleProps {
@@ -172,9 +167,8 @@ pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
             ..base
         },
         Style::FrontmatterId => StyleProps {
-            fg: p.faded,
+            fg: dimmed,
             italic: true,
-            dim: true,
             ..base
         },
         Style::FrontmatterDate => StyleProps {
@@ -192,8 +186,7 @@ pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
             ..base
         },
         Style::SyntaxNoise => StyleProps {
-            fg: p.faded,
-            dim: true,
+            fg: dimmed,
             ..base
         },
         Style::SearchMatch => StyleProps {
