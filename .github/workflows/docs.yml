@@ -60,12 +60,21 @@ jobs:
           mkdir -p docs-site/static/animations
           cp target/animations/*.gif docs-site/static/animations/ 2>/dev/null || true
 
-      # --- Build site (future: Docusaurus) ---
-      - name: Add redirect to bloom_core
-        run: echo '<meta http-equiv="refresh" content="0; url=bloom_core/">' > target/doc/index.html
+      # --- Nest API docs inside Docusaurus static ---
+      - name: Copy API docs
+        run: |
+          mkdir -p docs-site/static/api
+          cp -r target/doc/* docs-site/static/api/
+
+      # --- Build Docusaurus site ---
+      - name: Install docs-site dependencies
+        run: cd docs-site && npm ci
+
+      - name: Build docs site
+        run: cd docs-site && npm run build
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: target/doc
+          path: docs-site/build
       - id: deployment
         uses: actions/deploy-pages@v4

@@ -4,12 +4,13 @@ const config = {
   title: 'Bloom',
   tagline: 'A local-first, Vim-modal note-taking app',
   favicon: 'img/favicon.ico',
-  url: 'https://bloom-editor.github.io',
-  baseUrl: '/',
-  organizationName: 'bloom-editor',
-  projectName: 'bloom-editor.github.io',
-  onBrokenLinks: 'throw',
+  url: 'https://hindol.github.io',
+  baseUrl: '/Bloom/',
+  organizationName: 'hindol',
+  projectName: 'Bloom',
+  onBrokenLinks: 'warn',
   onBrokenMarkdownLinks: 'warn',
+  markdown: { hooks: { onBrokenMarkdownImages: 'warn' } },
   i18n: { defaultLocale: 'en', locales: ['en'] },
 
   presets: [
@@ -34,7 +35,7 @@ const config = {
         title: 'Bloom',
         items: [
           { type: 'docSidebar', sidebarId: 'docs', position: 'left', label: 'Docs' },
-          { href: 'https://github.com/ARP-25/Bloom', label: 'GitHub', position: 'right' },
+          { href: 'https://github.com/hindol/Bloom', label: 'GitHub', position: 'right' },
         ],
       },
       footer: {
