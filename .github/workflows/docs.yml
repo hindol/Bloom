@@ -34,7 +34,7 @@ jobs:
           key: docs-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       # --- API docs (cargo doc) ---
-      - run: cargo doc --workspace --no-deps
+      - run: cargo doc --workspace --no-deps --exclude bloom-gui
         env:
           RUSTDOCFLAGS: "--cfg docsrs"
 
