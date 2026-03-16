@@ -37,43 +37,76 @@ pub(super) fn draw_temporal_strip(
             pane_area.width,
             pane_area.height.saturating_sub(1),
         );
-        let bg = RStyle::default().bg(theme.background());
+        let bg_style = RStyle::default().bg(theme.background());
         f.render_widget(Clear, content_area);
-        f.render_widget(ratatui::widgets::Block::default().style(bg), content_area);
+        f.render_widget(ratatui::widgets::Block::default().style(bg_style), content_area);
 
         let mut preview_lines: Vec<Line> = Vec::new();
+        let bg = theme.background();
+
+        // Gutter width: "old  new │ " = 4 + 1 + 4 + 3 = 12 chars
+        let gutter_style = RStyle::default().fg(theme.faded()).bg(bg);
+        let sep_style = RStyle::default().fg(theme.faded()).bg(bg);
+
         for dl in &strip.preview_lines {
+            let mut spans: Vec<Span> = Vec::new();
+
+            // Old line number (4 chars, right-aligned)
+            let old_col = match dl.old_line {
+                Some(n) => format!("{n:>4}"),
+                None => "    ".to_string(),
+            };
+            // New line number (4 chars, right-aligned)
+            let new_col = match dl.new_line {
+                Some(n) => format!("{n:>4}"),
+                None => "    ".to_string(),
+            };
+            let ln_style = match dl.kind {
+                bloom_core::render::DiffLineKind::Added => {
+                    RStyle::default().fg(theme.accent_green()).bg(bg)
+                }
+                bloom_core::render::DiffLineKind::Removed => {
+                    RStyle::default().fg(theme.accent_red()).bg(bg)
+                }
+                _ => gutter_style,
+            };
+            spans.push(Span::styled(old_col, ln_style));
+            spans.push(Span::styled(" ", gutter_style));
+            spans.push(Span::styled(new_col, ln_style));
+            spans.push(Span::styled(" │ ", sep_style));
+
+            // +/- prefix
             let prefix = match dl.kind {
                 bloom_core::render::DiffLineKind::Context => "  ",
                 bloom_core::render::DiffLineKind::Added => "+ ",
                 bloom_core::render::DiffLineKind::Removed => "- ",
             };
-            let mut spans: Vec<Span> = Vec::new();
             let prefix_style = match dl.kind {
                 bloom_core::render::DiffLineKind::Context => {
-                    RStyle::default().fg(theme.faded()).bg(theme.background())
+                    RStyle::default().fg(theme.faded()).bg(bg)
                 }
                 bloom_core::render::DiffLineKind::Added => {
-                    RStyle::default().fg(theme.accent_green()).bg(theme.background())
+                    RStyle::default().fg(theme.accent_green()).bg(bg)
                 }
                 bloom_core::render::DiffLineKind::Removed => {
-                    RStyle::default().fg(theme.accent_red()).bg(theme.background())
+                    RStyle::default().fg(theme.accent_red()).bg(bg)
                 }
             };
             spans.push(Span::styled(prefix, prefix_style));
 
+            // Content with word-level diff styling
             for seg in &dl.segments {
                 let style = match seg.kind {
                     bloom_core::render::DiffLineKind::Context => {
-                        RStyle::default().fg(theme.faded()).bg(theme.background())
+                        RStyle::default().fg(theme.foreground()).bg(bg)
                     }
                     bloom_core::render::DiffLineKind::Added => {
-                        RStyle::default().fg(theme.accent_green()).bg(theme.background())
+                        RStyle::default().fg(theme.accent_green()).bg(bg)
                     }
                     bloom_core::render::DiffLineKind::Removed => {
                         RStyle::default()
                             .fg(theme.accent_red())
-                            .bg(theme.background())
+                            .bg(bg)
                             .add_modifier(Modifier::CROSSED_OUT)
                     }
                 };
@@ -81,7 +114,7 @@ pub(super) fn draw_temporal_strip(
             }
             preview_lines.push(Line::from(spans));
         }
-        f.render_widget(Paragraph::new(preview_lines).style(bg), content_area);
+        f.render_widget(Paragraph::new(preview_lines).style(bg_style), content_area);
     }
 
     // --- Draw strip in the drawer area (below status bar) ---

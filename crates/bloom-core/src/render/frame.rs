@@ -315,6 +315,10 @@ pub struct DiffLine {
     /// Segments with word-level diff styling.
     pub segments: Vec<DiffSegment>,
     pub kind: DiffLineKind,
+    /// Line number in the old (historical) version. None for added lines.
+    pub old_line: Option<usize>,
+    /// Line number in the new (current) version. None for removed lines.
+    pub new_line: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
