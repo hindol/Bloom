@@ -26,9 +26,13 @@ Bloom is a local-first note editor built in Rust. Your notes are plain Markdown 
 
 ## Every thought is safe
 
-Most note apps give you undo and redo — a single line you can walk back and forth. Bloom gives you an **undo tree**. Every edit creates a node. Undo, then make a different edit — that's a branch, not a lost history. Both paths are preserved, navigable, and restorable.
+Your notes live as Markdown files in a single folder on your machine. No cloud, no sync service, no account. Bloom makes **zero network calls** — your journal entries, company secrets, and half-formed ideas stay exactly where you put them. Back up with `git`, move with `cp`, read with any text editor. The files are yours.
 
-But the safety net goes deeper than one session. Every save triggers an automatic git commit in the background. Your entire vault has a complete version history — per page, per block, across days and weeks. Press `SPC H b` on any block and scrub through its evolution: when it was written, when it changed, when it moved between pages. All without you ever thinking about version control.
+The SQLite index that powers search, backlinks, and tag queries is fully **derivable** — delete it, and Bloom rebuilds it from your files in seconds. It's an accelerator, not a dependency. Your Markdown files are always the source of truth.
+
+And within that local vault, nothing is lost. Most note apps give you undo and redo — a single line you can walk back and forth. Bloom gives you an **undo tree**. Every edit creates a node. Undo, then make a different edit — that's a branch, not a lost history. Both paths are preserved, navigable, and restorable.
+
+The safety net goes deeper than one session. Every save triggers an automatic git commit in the background. Your entire vault has a complete version history — per page, per block, across days and weeks. Press `SPC H b` on any block and scrub through its evolution: when it was written, when it changed, when it moved between pages. All without you ever thinking about version control.
 
 The undo tree handles the last few minutes. Git handles everything before that. You see one seamless timeline.
 
