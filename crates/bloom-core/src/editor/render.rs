@@ -1245,165 +1245,46 @@ impl BloomEditor {
 /// Compute diff between historical and current content.
 /// Current = green (Added), historical-only = red (Removed).
 /// Lines that changed get inline word-level diff segments.
+/// Compute line-level diff using similar crate (Myers algorithm).
+/// Current = green (Added), historical-only = red (Removed).
 fn compute_diff_lines(historical: &str, current: &str) -> Vec<render::DiffLine> {
-    let hist_lines: Vec<&str> = historical.lines().collect();
-    let curr_lines: Vec<&str> = current.lines().collect();
+    use similar::{ChangeTag, TextDiff};
+
+    let diff = TextDiff::from_lines(historical, current);
     let mut result = Vec::new();
 
-    let max_len = hist_lines.len().max(curr_lines.len());
-    let mut hi = 0;
-    let mut ci = 0;
-    while hi < hist_lines.len() || ci < curr_lines.len() {
-        if hi < hist_lines.len() && ci < curr_lines.len() && hist_lines[hi] == curr_lines[ci] {
-            // Unchanged line
-            result.push(render::DiffLine {
-                segments: vec![render::DiffSegment {
-                    text: curr_lines[ci].to_string(),
-                    kind: render::DiffLineKind::Context,
-                }],
-                kind: render::DiffLineKind::Context,
-            });
-            hi += 1;
-            ci += 1;
-        } else if hi < hist_lines.len()
-            && ci < curr_lines.len()
-            && similar_enough(hist_lines[hi], curr_lines[ci])
-        {
-            // Modified line — word-level diff
-            let segments = word_diff(hist_lines[hi], curr_lines[ci]);
-            result.push(render::DiffLine {
-                segments,
-                kind: render::DiffLineKind::Context, // mixed line
-            });
-            hi += 1;
-            ci += 1;
-        } else if ci < curr_lines.len()
-            && (hi >= hist_lines.len()
-                || hist_lines[hi..]
-                    .iter()
-                    .position(|l| *l == curr_lines[ci])
-                    .is_none())
-        {
-            // Line only in current (added)
-            result.push(render::DiffLine {
-                segments: vec![render::DiffSegment {
-                    text: curr_lines[ci].to_string(),
-                    kind: render::DiffLineKind::Added,
-                }],
-                kind: render::DiffLineKind::Added,
-            });
-            ci += 1;
-        } else {
-            // Line only in historical (removed)
-            result.push(render::DiffLine {
-                segments: vec![render::DiffSegment {
-                    text: hist_lines[hi].to_string(),
-                    kind: render::DiffLineKind::Removed,
-                }],
-                kind: render::DiffLineKind::Removed,
-            });
-            hi += 1;
-        }
-
-        if result.len() > max_len + 50 {
-            break;
-        }
+    for change in diff.iter_all_changes() {
+        let text = change.value().trim_end_matches('\n').to_string();
+        let kind = match change.tag() {
+            ChangeTag::Equal => render::DiffLineKind::Context,
+            ChangeTag::Insert => render::DiffLineKind::Added,
+            ChangeTag::Delete => render::DiffLineKind::Removed,
+        };
+        result.push(render::DiffLine {
+            segments: vec![render::DiffSegment { text, kind }],
+            kind,
+        });
     }
     result
 }
 
-/// Two lines are "similar enough" for word-diff if they share > 50% of words.
-fn similar_enough(a: &str, b: &str) -> bool {
-    let a_words: Vec<&str> = a.split_whitespace().collect();
-    let b_words: Vec<&str> = b.split_whitespace().collect();
-    if a_words.is_empty() || b_words.is_empty() {
-        return false;
-    }
-    let common = a_words.iter().filter(|w| b_words.contains(w)).count();
-    let total = a_words.len().max(b_words.len());
-    common * 2 > total
-}
-
-/// Word-level diff between two similar lines using LCS.
+/// Word-level diff using similar crate.
 /// Returns segments: Context (shared), Added (in current), Removed (in historical).
 fn word_diff(historical: &str, current: &str) -> Vec<render::DiffSegment> {
-    let h_words: Vec<&str> = historical.split_whitespace().collect();
-    let c_words: Vec<&str> = current.split_whitespace().collect();
+    use similar::{ChangeTag, TextDiff};
 
-    // LCS table
-    let hn = h_words.len();
-    let cn = c_words.len();
-    let mut dp = vec![vec![0u16; cn + 1]; hn + 1];
-    for i in 1..=hn {
-        for j in 1..=cn {
-            dp[i][j] = if h_words[i - 1] == c_words[j - 1] {
-                dp[i - 1][j - 1] + 1
-            } else {
-                dp[i - 1][j].max(dp[i][j - 1])
+    let diff = TextDiff::from_words(historical, current);
+    diff.iter_all_changes()
+        .map(|change| {
+            let kind = match change.tag() {
+                ChangeTag::Equal => render::DiffLineKind::Context,
+                ChangeTag::Insert => render::DiffLineKind::Added,
+                ChangeTag::Delete => render::DiffLineKind::Removed,
             };
-        }
-    }
-
-    // Backtrack to build diff segments
-    let mut i = hn;
-    let mut j = cn;
-    let mut pending_removed: Vec<&str> = Vec::new();
-    let mut pending_added: Vec<&str> = Vec::new();
-
-    // Collect operations in reverse, then reverse at the end
-    let mut ops: Vec<render::DiffSegment> = Vec::new();
-
-    while i > 0 || j > 0 {
-        if i > 0 && j > 0 && h_words[i - 1] == c_words[j - 1] {
-            // Flush pending diffs before this common word
-            for w in pending_removed.drain(..).rev() {
-                ops.push(render::DiffSegment {
-                    text: format!(" {}", w),
-                    kind: render::DiffLineKind::Removed,
-                });
+            render::DiffSegment {
+                text: change.value().to_string(),
+                kind,
             }
-            for w in pending_added.drain(..).rev() {
-                ops.push(render::DiffSegment {
-                    text: format!(" {}", w),
-                    kind: render::DiffLineKind::Added,
-                });
-            }
-            ops.push(render::DiffSegment {
-                text: format!(" {}", c_words[j - 1]),
-                kind: render::DiffLineKind::Context,
-            });
-            i -= 1;
-            j -= 1;
-        } else if j > 0 && (i == 0 || dp[i][j - 1] >= dp[i - 1][j]) {
-            pending_added.push(c_words[j - 1]);
-            j -= 1;
-        } else {
-            pending_removed.push(h_words[i - 1]);
-            i -= 1;
-        }
-    }
-    // Flush remaining
-    for w in pending_removed.drain(..).rev() {
-        ops.push(render::DiffSegment {
-            text: format!(" {}", w),
-            kind: render::DiffLineKind::Removed,
-        });
-    }
-    for w in pending_added.drain(..).rev() {
-        ops.push(render::DiffSegment {
-            text: format!(" {}", w),
-            kind: render::DiffLineKind::Added,
-        });
-    }
-
-    ops.reverse();
-
-    // Trim leading space on the first segment
-    if let Some(first) = ops.first_mut() {
-        if first.text.starts_with(' ') {
-            first.text = first.text[1..].to_string();
-        }
-    }
-
-    ops
+        })
+        .collect()
 }

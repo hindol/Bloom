@@ -47,6 +47,7 @@ unicode-width = "0.2"
 rayon = "1"
 # Git-backed vault history
 bloom-history = { path = "../bloom-history" }
+similar = "2.7.0"
 
 # POSIX process queries (macOS stale-lock detection via kill(pid, 0))
 [target.'cfg(target_os = "macos")'.dependencies]
