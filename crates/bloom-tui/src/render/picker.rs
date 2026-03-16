@@ -45,7 +45,7 @@ pub(super) fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme
         .borders(Borders::ALL)
         .title(format!(" {} ", picker.title))
         .style(theme.picker_style())
-        .border_style(theme.border_style());
+        .border_style(theme.picker_border());
     let inner = block.inner(picker_area);
     f.render_widget(block, picker_area);
 
@@ -120,7 +120,7 @@ pub(super) fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme
         let hy = results_area.y + results_area.height / 2;
         if hy < results_area.bottom() {
             f.render_widget(
-                Paragraph::new(Line::from(Span::styled(hint, theme.faded_style()))),
+                Paragraph::new(Line::from(Span::styled(hint, theme.picker_faded()))),
                 Rect::new(hx, hy, hint.width() as u16, 1),
             );
         }
@@ -156,7 +156,7 @@ pub(super) fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme
     };
     let footer_y = content_area.y + top_h.saturating_sub(1);
     f.render_widget(
-        Paragraph::new(Line::from(Span::styled(footer, theme.faded_style()))),
+        Paragraph::new(Line::from(Span::styled(footer, theme.picker_faded()))),
         Rect::new(content_area.x, footer_y, content_area.width, 1),
     );
 
@@ -166,7 +166,7 @@ pub(super) fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme
         let sep_x = right_area.x.saturating_sub(1);
         for row in 0..inner.height {
             f.render_widget(
-                Paragraph::new(Line::from(Span::styled("│", theme.border_style()))),
+                Paragraph::new(Line::from(Span::styled("│", theme.picker_border()))),
                 Rect::new(sep_x, inner.y + row, 1, 1),
             );
         }
@@ -186,7 +186,7 @@ pub(super) fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme
         // Horizontal separator
         let sep_line = "─".repeat(inner.width as usize);
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(sep_line, theme.border_style()))),
+            Paragraph::new(Line::from(Span::styled(sep_line, theme.picker_border()))),
             Rect::new(inner.x, sep_y, inner.width, 1),
         );
 
@@ -250,7 +250,7 @@ pub(super) fn draw_picker_single_column(
     let marker_w = 3;
     let label_max = available.saturating_sub(marker_w + middle_zone + right_zone);
 
-    let faded_style = theme.faded_style();
+    let faded_style = theme.picker_faded();
 
     for (vi, row) in visible_slice.iter().enumerate() {
         let abs_i = scroll_offset + vi;
@@ -368,7 +368,7 @@ pub(super) fn draw_picker_multi_column(
     // Scroll: which page of items is visible
     let page_start = (picker.selected_index / items_per_page) * items_per_page;
 
-    let faded_style = theme.faded_style();
+    let faded_style = theme.picker_faded();
     let actual_col_w = results_area.width as usize / col_count;
 
     for (i, row) in picker
@@ -428,7 +428,7 @@ pub(super) fn render_highlighted_preview(
     search_query: &str,
     theme: &TuiTheme,
 ) {
-    let faded = theme.faded_style();
+    let faded = theme.picker_faded();
     let match_style = theme.style_for(&bloom_md::parser::traits::Style::SearchMatch);
     let search_spans = bloom_core::render::search_highlight::highlight_matches(text, search_query);
     let match_ranges: Vec<std::ops::Range<usize>> =

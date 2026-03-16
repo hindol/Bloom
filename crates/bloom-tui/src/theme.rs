@@ -129,6 +129,20 @@ impl<'a> TuiTheme<'a> {
         to_rstyle(&theme::resolve_chrome(Chrome::WindowBorder, self.palette))
     }
 
+    /// Faded text on the picker surface (subtle bg, not editor bg).
+    pub fn picker_faded(&self) -> RStyle {
+        RStyle::default()
+            .fg(rgb(self.palette.faded))
+            .bg(rgb(self.palette.subtle))
+    }
+
+    /// Border/separator on the picker surface.
+    pub fn picker_border(&self) -> RStyle {
+        RStyle::default()
+            .fg(rgb(self.palette.faded))
+            .bg(rgb(self.palette.subtle))
+    }
+
     pub fn picker_style(&self) -> RStyle {
         to_rstyle(&theme::resolve_chrome(Chrome::PickerSurface, self.palette))
     }
