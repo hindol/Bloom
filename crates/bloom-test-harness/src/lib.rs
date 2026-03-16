@@ -509,3 +509,170 @@ pub fn commit_at(
     repo.commit_all(files, message, Some(timestamp))
         .expect("commit_at failed")
 }
+
+// ---------------------------------------------------------------------------
+// FrameRecorder — captures animation frames from editor sessions
+// ---------------------------------------------------------------------------
+
+/// A recorded animation frame — one step in an animated documentation GIF.
+#[derive(serde::Serialize)]
+pub struct AnimationFrame {
+    /// Frame index (0-based).
+    pub index: usize,
+    /// Milliseconds to display this frame before advancing.
+    pub duration_ms: u64,
+    /// Optional caption text rendered below the wireframe.
+    pub caption: Option<String>,
+    /// The key sequence that produced this frame (for debugging).
+    pub keys: Option<String>,
+    /// The full render frame.
+    pub frame: RenderFrame,
+    /// Screen dimensions.
+    pub width: u16,
+    pub height: u16,
+}
+
+/// Records a sequence of editor frames for animated documentation.
+///
+/// Wraps `SimInput` and captures a `RenderFrame` after each step.
+/// Outputs a JSON array of frames with timing metadata, which a
+/// renderer script converts to SVG frames and then an animated GIF.
+///
+/// ```rust,ignore
+/// let mut rec = FrameRecorder::new(SimInput::with_content("hello world"));
+/// rec.step("w");           // move to next word
+/// rec.step("dw");          // delete word
+/// rec.caption("Word deleted");
+/// rec.save("word-delete"); // → target/animations/word-delete.json
+/// ```
+pub struct FrameRecorder {
+    sim: SimInput,
+    frames: Vec<AnimationFrame>,
+    width: u16,
+    height: u16,
+    /// Default frame duration (ms).
+    default_duration: u64,
+    /// Typing speed per character (ms).
+    typing_speed: u64,
+    /// Current caption (sticky — applied to subsequent frames until changed).
+    current_caption: Option<String>,
+}
+
+impl FrameRecorder {
+    /// Create a new recorder wrapping a SimInput.
+    pub fn new(sim: SimInput) -> Self {
+        Self::with_size(sim, 80, 24)
+    }
+
+    /// Create a recorder with custom screen dimensions.
+    pub fn with_size(sim: SimInput, width: u16, height: u16) -> Self {
+        Self {
+            sim,
+            frames: Vec::new(),
+            width,
+            height,
+            default_duration: 100,
+            typing_speed: 60,
+            current_caption: None,
+        }
+    }
+
+    /// Record a frame after executing a key sequence.
+    pub fn step(&mut self, keys: &str) -> &mut Self {
+        self.sim.keys(keys);
+        self.capture_frame(Some(keys.to_string()), self.default_duration);
+        self
+    }
+
+    /// Record frames for each character typed (natural typing animation).
+    pub fn step_type(&mut self, text: &str) -> &mut Self {
+        for ch in text.chars() {
+            self.sim.type_text(&ch.to_string());
+            self.capture_frame(
+                Some(format!("type '{}'", ch)),
+                self.typing_speed,
+            );
+        }
+        self
+    }
+
+    /// Record a pause frame (holds the current state for visual emphasis).
+    pub fn pause(&mut self, ms: u64) -> &mut Self {
+        self.capture_frame(None, ms);
+        self
+    }
+
+    /// Set a caption that appears on subsequent frames.
+    pub fn caption(&mut self, text: &str) -> &mut Self {
+        self.current_caption = Some(text.to_string());
+        // Re-capture current state with the new caption
+        self.capture_frame(None, 1500);
+        self
+    }
+
+    /// Clear the current caption.
+    pub fn clear_caption(&mut self) -> &mut Self {
+        self.current_caption = None;
+        self
+    }
+
+    /// Access the underlying SimInput for assertions.
+    pub fn sim(&self) -> &SimInput {
+        &self.sim
+    }
+
+    /// Access the underlying SimInput mutably.
+    pub fn sim_mut(&mut self) -> &mut SimInput {
+        &mut self.sim
+    }
+
+    /// Capture the current editor state as a frame.
+    fn capture_frame(&mut self, keys: Option<String>, duration_ms: u64) {
+        self.sim.editor.update_layout(self.width, self.height);
+        let frame = self.sim.editor.render(self.width, self.height);
+        let index = self.frames.len();
+        self.frames.push(AnimationFrame {
+            index,
+            duration_ms,
+            caption: self.current_caption.clone(),
+            keys,
+            frame,
+            width: self.width,
+            height: self.height,
+        });
+    }
+
+    /// Save recorded frames as JSON to `target/animations/{name}.json`.
+    /// Uses the workspace root's target directory.
+    pub fn save(&self, name: &str) -> std::path::PathBuf {
+        // Find workspace root by looking for the workspace Cargo.toml
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let workspace_root = manifest_dir
+            .parent()  // crates/
+            .and_then(|p| p.parent())  // workspace root
+            .unwrap_or(manifest_dir);
+        let dir = workspace_root.join("target/animations");
+        std::fs::create_dir_all(&dir).expect("create animations dir");
+        let path = dir.join(format!("{}.json", name));
+        let json = serde_json::to_string_pretty(&self.frames)
+            .expect("serialize frames");
+        std::fs::write(&path, json).expect("write animation JSON");
+        eprintln!(
+            "Animation saved: {} ({} frames, {}KB)",
+            path.display(),
+            self.frames.len(),
+            std::fs::metadata(&path).map(|m| m.len() / 1024).unwrap_or(0),
+        );
+        path
+    }
+
+    /// Total number of captured frames.
+    pub fn frame_count(&self) -> usize {
+        self.frames.len()
+    }
+
+    /// Total animation duration in milliseconds.
+    pub fn total_duration_ms(&self) -> u64 {
+        self.frames.iter().map(|f| f.duration_ms).sum()
+    }
+}
