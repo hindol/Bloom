@@ -68,6 +68,9 @@ pub(super) fn draw_temporal_strip(
                 bloom_core::render::DiffLineKind::Removed => {
                     RStyle::default().fg(theme.accent_red()).bg(bg)
                 }
+                bloom_core::render::DiffLineKind::Modified => {
+                    RStyle::default().fg(theme.salient()).bg(bg)
+                }
                 _ => gutter_style,
             };
             spans.push(Span::styled(old_col, ln_style));
@@ -80,6 +83,7 @@ pub(super) fn draw_temporal_strip(
                 bloom_core::render::DiffLineKind::Context => "  ",
                 bloom_core::render::DiffLineKind::Added => "+ ",
                 bloom_core::render::DiffLineKind::Removed => "- ",
+                bloom_core::render::DiffLineKind::Modified => "~ ",
             };
             let prefix_style = match dl.kind {
                 bloom_core::render::DiffLineKind::Context => {
@@ -90,6 +94,9 @@ pub(super) fn draw_temporal_strip(
                 }
                 bloom_core::render::DiffLineKind::Removed => {
                     RStyle::default().fg(theme.accent_red()).bg(bg)
+                }
+                bloom_core::render::DiffLineKind::Modified => {
+                    RStyle::default().fg(theme.salient()).bg(bg)
                 }
             };
             spans.push(Span::styled(prefix, prefix_style));
@@ -108,6 +115,11 @@ pub(super) fn draw_temporal_strip(
                             .fg(theme.accent_red())
                             .bg(bg)
                             .add_modifier(Modifier::CROSSED_OUT)
+                    }
+                    bloom_core::render::DiffLineKind::Modified => {
+                        // Segments inside a Modified line are Context/Added/Removed,
+                        // not Modified — this arm shouldn't be hit but handle gracefully.
+                        RStyle::default().fg(theme.foreground()).bg(bg)
                     }
                 };
                 spans.push(Span::styled(&seg.text, style));

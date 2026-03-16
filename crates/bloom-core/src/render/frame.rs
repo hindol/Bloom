@@ -330,8 +330,9 @@ pub struct DiffSegment {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum DiffLineKind {
     Context,
-    Added,   // in current version (green)
-    Removed, // in historical version (red)
+    Added,    // in current version (green)
+    Removed,  // in historical version (red)
+    Modified, // inline word diff — single line with mixed red/green segments
 }
 
 // ---------------------------------------------------------------------------

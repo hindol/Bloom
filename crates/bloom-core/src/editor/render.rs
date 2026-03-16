@@ -1059,6 +1059,9 @@ impl BloomEditor {
                                             render::DiffLineKind::Removed => {
                                                 bloom_md::parser::traits::Style::DiffRemoved
                                             }
+                                            render::DiffLineKind::Modified => {
+                                                bloom_md::parser::traits::Style::Normal
+                                            }
                                         };
                                         let end = pos + seg.text.len();
                                         diff_spans.push(bloom_md::parser::traits::StyledSpan {
@@ -1312,7 +1315,7 @@ fn compute_diff_lines(historical: &str, current: &str) -> Vec<render::DiffLine> 
                 new_index,
                 new_len,
             } => {
-                // Pair by position; word_diff shows exactly what changed.
+                // Paired lines: single inline line with word-level diff
                 let paired = old_len.min(new_len);
                 for i in 0..paired {
                     let old_text = old_lines.get(old_index + i).unwrap_or(&"");
@@ -1320,23 +1323,9 @@ fn compute_diff_lines(historical: &str, current: &str) -> Vec<render::DiffLine> 
                     let segments = word_diff(old_text, new_text);
 
                     result.push(render::DiffLine {
-                        segments: segments
-                            .iter()
-                            .filter(|s| s.kind != render::DiffLineKind::Added)
-                            .cloned()
-                            .collect(),
-                        kind: render::DiffLineKind::Removed,
+                        segments,
+                        kind: render::DiffLineKind::Modified,
                         old_line: Some(old_index + i + 1),
-                        new_line: None,
-                    });
-                    result.push(render::DiffLine {
-                        segments: segments
-                            .iter()
-                            .filter(|s| s.kind != render::DiffLineKind::Removed)
-                            .cloned()
-                            .collect(),
-                        kind: render::DiffLineKind::Added,
-                        old_line: None,
                         new_line: Some(new_index + i + 1),
                     });
                 }

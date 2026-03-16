@@ -8,6 +8,7 @@ license = "AGPL-3.0-or-later"
 bloom-core = { path = "../bloom-core" }
 bloom-history = { path = "../bloom-history" }
 dirs = "6"
+similar = "2"
 tempfile = "3"
 insta = "1"
 serde = { version = "1.0.228", features = ["derive"] }
