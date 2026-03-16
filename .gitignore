@@ -4,3 +4,7 @@
 screenshots/*.txt
 target/animations/
 crates/*/target/
+scripts/node_modules/
+docs-site/node_modules/
+docs-site/build/
+docs-site/.docusaurus/

@@ -1,0 +1,23 @@
+:root {
+  --ifm-color-primary: #6c63ff;
+  --ifm-color-primary-dark: #5a52e0;
+  --ifm-color-primary-darker: #4e44d4;
+  --ifm-color-primary-darkest: #3a33b0;
+  --ifm-color-primary-light: #7e76ff;
+  --ifm-color-primary-lighter: #8a83ff;
+  --ifm-color-primary-lightest: #a8a3ff;
+}
+
+[data-theme='dark'] {
+  --ifm-background-color: #1a1a2e;
+  --ifm-font-color-base: #e0e0e0;
+}
+
+/* Animation GIFs: centered, rounded, with subtle border */
+img[src*="/animations/"] {
+  display: block;
+  margin: 1.5rem auto;
+  border-radius: 8px;
+  border: 1px solid var(--ifm-color-primary-darkest);
+  max-width: 100%;
+}

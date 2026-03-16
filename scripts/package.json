@@ -1,0 +1,13 @@
+{
+  "private": true,
+  "description": "Bloom documentation animation tools",
+  "scripts": {
+    "render-svg": "node render-animations.js",
+    "assemble-gifs": "node assemble-gifs.js",
+    "all": "node render-animations.js && node assemble-gifs.js"
+  },
+  "dependencies": {
+    "sharp": "^0.33.0",
+    "sharp-gif2": "^0.1.3"
+  }
+}
