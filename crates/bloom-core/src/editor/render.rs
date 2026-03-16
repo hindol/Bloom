@@ -1243,149 +1243,132 @@ impl BloomEditor {
     }
 }
 
-/// Compute diff between historical and current content.
-/// Tracks old/new line numbers and detects adjacent remove+add pairs
-/// (modifications) to apply word-level diff highlighting.
+/// Compute diff between historical and current content using `similar`'s
+/// `DiffOp` API. `Replace` ops get word-level diff; `Insert`/`Delete` are
+/// pure additions/removals. Line numbers track both old and new sides.
 fn compute_diff_lines(historical: &str, current: &str) -> Vec<render::DiffLine> {
-    use similar::{ChangeTag, TextDiff};
+    use similar::{DiffOp, TextDiff};
 
     let diff = TextDiff::from_lines(historical, current);
-    let mut raw: Vec<(render::DiffLineKind, String)> = Vec::new();
-
-    for change in diff.iter_all_changes() {
-        let text = change.value().trim_end_matches('\n').to_string();
-        let kind = match change.tag() {
-            ChangeTag::Equal => render::DiffLineKind::Context,
-            ChangeTag::Insert => render::DiffLineKind::Added,
-            ChangeTag::Delete => render::DiffLineKind::Removed,
-        };
-        raw.push((kind, text));
-    }
-
-    // Detect adjacent Removed+Added pairs (modifications) and apply word-level diff.
+    let old_lines: Vec<&str> = historical.lines().collect();
+    let new_lines: Vec<&str> = current.lines().collect();
     let mut result = Vec::new();
-    let mut old_ln: usize = 1;
-    let mut new_ln: usize = 1;
-    let mut i = 0;
 
-    while i < raw.len() {
-        let kind = raw[i].0;
-
-        if kind == render::DiffLineKind::Removed {
-            // Collect consecutive removed lines
-            let rem_start = i;
-            while i < raw.len() && raw[i].0 == render::DiffLineKind::Removed {
-                i += 1;
-            }
-            let rem_end = i;
-
-            // Collect consecutive added lines
-            let add_start = i;
-            while i < raw.len() && raw[i].0 == render::DiffLineKind::Added {
-                i += 1;
-            }
-            let add_end = i;
-
-            let rem_count = rem_end - rem_start;
-            let add_count = add_end - add_start;
-            let paired = rem_count.min(add_count);
-
-            // Paired lines get word-level diff
-            for j in 0..paired {
-                let old_text = &raw[rem_start + j].1;
-                let new_text = &raw[add_start + j].1;
-                let segments = word_diff(old_text, new_text);
-
-                result.push(render::DiffLine {
-                    segments: segments
-                        .iter()
-                        .filter(|s| s.kind != render::DiffLineKind::Added)
-                        .cloned()
-                        .collect(),
-                    kind: render::DiffLineKind::Removed,
-                    old_line: Some(old_ln),
-                    new_line: None,
-                });
-                old_ln += 1;
-
-                result.push(render::DiffLine {
-                    segments: segments
-                        .iter()
-                        .filter(|s| s.kind != render::DiffLineKind::Removed)
-                        .cloned()
-                        .collect(),
-                    kind: render::DiffLineKind::Added,
-                    old_line: None,
-                    new_line: Some(new_ln),
-                });
-                new_ln += 1;
-            }
-
-            // Unpaired removed
-            for j in paired..rem_count {
-                result.push(render::DiffLine {
-                    segments: vec![render::DiffSegment {
-                        text: raw[rem_start + j].1.clone(),
-                        kind: render::DiffLineKind::Removed,
-                    }],
-                    kind: render::DiffLineKind::Removed,
-                    old_line: Some(old_ln),
-                    new_line: None,
-                });
-                old_ln += 1;
-            }
-
-            // Unpaired added
-            for j in paired..add_count {
-                result.push(render::DiffLine {
-                    segments: vec![render::DiffSegment {
-                        text: raw[add_start + j].1.clone(),
-                        kind: render::DiffLineKind::Added,
-                    }],
-                    kind: render::DiffLineKind::Added,
-                    old_line: None,
-                    new_line: Some(new_ln),
-                });
-                new_ln += 1;
-            }
-            continue;
-        }
-
-        // Context or standalone added
-        let text = raw[i].1.clone();
-        match kind {
-            render::DiffLineKind::Context => {
-                result.push(render::DiffLine {
-                    segments: vec![render::DiffSegment {
-                        text,
+    for op in diff.ops() {
+        match *op {
+            DiffOp::Equal {
+                old_index,
+                new_index,
+                len,
+            } => {
+                for i in 0..len {
+                    let text = old_lines.get(old_index + i).unwrap_or(&"").to_string();
+                    result.push(render::DiffLine {
+                        segments: vec![render::DiffSegment {
+                            text,
+                            kind: render::DiffLineKind::Context,
+                        }],
                         kind: render::DiffLineKind::Context,
-                    }],
-                    kind,
-                    old_line: Some(old_ln),
-                    new_line: Some(new_ln),
-                });
-                old_ln += 1;
-                new_ln += 1;
+                        old_line: Some(old_index + i + 1),
+                        new_line: Some(new_index + i + 1),
+                    });
+                }
             }
-            render::DiffLineKind::Added => {
-                result.push(render::DiffLine {
-                    segments: vec![render::DiffSegment {
-                        text,
+            DiffOp::Delete {
+                old_index, old_len, ..
+            } => {
+                for i in 0..old_len {
+                    let text = old_lines.get(old_index + i).unwrap_or(&"").to_string();
+                    result.push(render::DiffLine {
+                        segments: vec![render::DiffSegment {
+                            text,
+                            kind: render::DiffLineKind::Removed,
+                        }],
+                        kind: render::DiffLineKind::Removed,
+                        old_line: Some(old_index + i + 1),
+                        new_line: None,
+                    });
+                }
+            }
+            DiffOp::Insert {
+                new_index, new_len, ..
+            } => {
+                for i in 0..new_len {
+                    let text = new_lines.get(new_index + i).unwrap_or(&"").to_string();
+                    result.push(render::DiffLine {
+                        segments: vec![render::DiffSegment {
+                            text,
+                            kind: render::DiffLineKind::Added,
+                        }],
                         kind: render::DiffLineKind::Added,
-                    }],
-                    kind,
-                    old_line: None,
-                    new_line: Some(new_ln),
-                });
-                new_ln += 1;
+                        old_line: None,
+                        new_line: Some(new_index + i + 1),
+                    });
+                }
             }
-            _ => unreachable!(),
+            DiffOp::Replace {
+                old_index,
+                old_len,
+                new_index,
+                new_len,
+            } => {
+                // Pair by position; word_diff shows exactly what changed.
+                let paired = old_len.min(new_len);
+                for i in 0..paired {
+                    let old_text = old_lines.get(old_index + i).unwrap_or(&"");
+                    let new_text = new_lines.get(new_index + i).unwrap_or(&"");
+                    let segments = word_diff(old_text, new_text);
+
+                    result.push(render::DiffLine {
+                        segments: segments
+                            .iter()
+                            .filter(|s| s.kind != render::DiffLineKind::Added)
+                            .cloned()
+                            .collect(),
+                        kind: render::DiffLineKind::Removed,
+                        old_line: Some(old_index + i + 1),
+                        new_line: None,
+                    });
+                    result.push(render::DiffLine {
+                        segments: segments
+                            .iter()
+                            .filter(|s| s.kind != render::DiffLineKind::Removed)
+                            .cloned()
+                            .collect(),
+                        kind: render::DiffLineKind::Added,
+                        old_line: None,
+                        new_line: Some(new_index + i + 1),
+                    });
+                }
+                for i in paired..old_len {
+                    let text = old_lines.get(old_index + i).unwrap_or(&"").to_string();
+                    result.push(render::DiffLine {
+                        segments: vec![render::DiffSegment {
+                            text,
+                            kind: render::DiffLineKind::Removed,
+                        }],
+                        kind: render::DiffLineKind::Removed,
+                        old_line: Some(old_index + i + 1),
+                        new_line: None,
+                    });
+                }
+                for i in paired..new_len {
+                    let text = new_lines.get(new_index + i).unwrap_or(&"").to_string();
+                    result.push(render::DiffLine {
+                        segments: vec![render::DiffSegment {
+                            text,
+                            kind: render::DiffLineKind::Added,
+                        }],
+                        kind: render::DiffLineKind::Added,
+                        old_line: None,
+                        new_line: Some(new_index + i + 1),
+                    });
+                }
+            }
         }
-        i += 1;
     }
     result
 }
-
 /// Word-level diff using similar crate.
 /// Returns segments: Context (shared), Added (in current), Removed (in historical).
 fn word_diff(historical: &str, current: &str) -> Vec<render::DiffSegment> {
