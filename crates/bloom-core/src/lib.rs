@@ -1217,6 +1217,31 @@ impl BloomEditor {
                     } else {
                         item.content = Some(content.clone());
                     }
+
+                    // For block history: remove this git item if:
+                    // 1. Its block line matches current_content (no diff to show)
+                    // 2. Its block line matches the nearest loaded older neighbor
+                    //    (consecutive commits with same block content → duplicate)
+                    if matches!(ts.mode, render::TemporalMode::BlockHistory) {
+                        let sel = ts.selected;
+                        if let Some(ref cur_text) = ts.items[sel].content {
+                            let matches_current = cur_text == &ts.current_content;
+                            let matches_older = ts.items[..sel]
+                                .iter()
+                                .rev()
+                                .find_map(|i| i.content.as_ref())
+                                == Some(cur_text);
+                            if matches_current || matches_older {
+                                ts.items.remove(sel);
+                                if ts.selected >= ts.items.len() {
+                                    ts.selected = ts.items.len().saturating_sub(1);
+                                }
+                                self.load_temporal_content_if_needed();
+                                return;
+                            }
+                        }
+                    }
+
                     return; // Don't restore — just cache for preview
                 }
             }

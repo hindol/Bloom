@@ -3196,3 +3196,73 @@ fn block_history_git_blob_falls_back_to_line_number() {
 
     sim.keys("q");
 }
+
+#[test]
+fn block_history_skips_unchanged_git_commits() {
+    // Git commits that didn't change the block should be removed from the strip
+    // after their blob is loaded.
+    let content = "---\nid: pg02\ntitle: \"Page\"\n---\n\n## Heading ^hd001\n\nBody text.\n";
+    let mut sim = SimInput::with_content(content);
+
+    sim.keys("6gg");
+    // Edit so there's at least one undo item
+    sim.keys("w");
+    sim.keys("ciw");
+    sim.type_text("Title");
+    sim.keys("<Esc>");
+    sim.keys("6gg");
+
+    sim.keys("SPC H b");
+
+    // Add 3 git entries
+    let entries = vec![
+        bloom_core::history::PageHistoryEntry {
+            oid: "aaa".to_string(),
+            message: "commit A".to_string(),
+            timestamp: 100, changed_files: vec![],
+        },
+        bloom_core::history::PageHistoryEntry {
+            oid: "bbb".to_string(),
+            message: "commit B".to_string(),
+            timestamp: 200, changed_files: vec![],
+        },
+        bloom_core::history::PageHistoryEntry {
+            oid: "ccc".to_string(),
+            message: "commit C".to_string(),
+            timestamp: 300, changed_files: vec![],
+        },
+    ];
+    sim.editor.handle_history_complete(
+        bloom_core::history::HistoryComplete::PageHistory { entries },
+    );
+
+    // Strip should now have 3 git + undo items
+    let screen_before = sim.screen(80, 24);
+    let count_before = screen_before.frame.temporal_strip.as_ref().unwrap().items.len();
+    eprintln!("ITEMS BEFORE: {}", count_before);
+
+    // Navigate to commit C (newest git, right before undo items)
+    // Git items are at the left. Navigate to the last git item (index 2).
+    sim.keys("h"); // go left
+    sim.keys("h");
+    sim.keys("h");
+
+    // Simulate blob for the selected git item — SAME block content as current.
+    // This means this commit didn't change the block → should be removed.
+    let same_page = "---\nid: pg02\ntitle: \"Page\"\n---\n\n## Title ^hd001\n\nBody text.\n";
+    sim.editor.handle_history_complete(
+        bloom_core::history::HistoryComplete::BlobAt {
+            oid: "ccc".to_string(),
+            uuid: "pg02".to_string(),
+            content: Some(same_page.to_string()),
+        },
+    );
+
+    let screen_after = sim.screen(80, 24);
+    let count_after = screen_after.frame.temporal_strip.as_ref().unwrap().items.len();
+    eprintln!("ITEMS AFTER: {}", count_after);
+    assert!(count_after < count_before,
+        "unchanged commit should be removed: before={}, after={}", count_before, count_after);
+
+    sim.keys("q");
+}

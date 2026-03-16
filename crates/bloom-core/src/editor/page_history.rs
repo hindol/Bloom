@@ -305,7 +305,7 @@ impl BloomEditor {
     }
 
     /// Load content for the selected temporal item (git commits are lazy-loaded).
-    fn load_temporal_content_if_needed(&self) {
+    pub(crate) fn load_temporal_content_if_needed(&self) {
         let Some(ts) = &self.temporal_strip else { return };
         let Some(item) = ts.items.get(ts.selected) else { return };
         if item.content.is_some() {
