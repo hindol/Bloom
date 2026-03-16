@@ -9,8 +9,13 @@ fn rgb(c: Rgb) -> Color {
 }
 
 /// Convert core `StyleProps` to ratatui `Style`.
+/// fg is always set (non-optional). bg is set only when the style specifies one —
+/// content spans leave bg unset so the TUI layer's contextual background shows through.
 pub fn to_rstyle(props: &StyleProps) -> RStyle {
-    let mut s = RStyle::default().fg(rgb(props.fg)).bg(rgb(props.bg));
+    let mut s = RStyle::default().fg(rgb(props.fg));
+    if let Some(bg) = props.bg {
+        s = s.bg(rgb(bg));
+    }
     if props.bold {
         s = s.add_modifier(Modifier::BOLD);
     }

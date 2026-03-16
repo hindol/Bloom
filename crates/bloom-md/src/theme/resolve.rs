@@ -2,11 +2,15 @@ use super::palette::{Rgb, ThemePalette};
 use crate::parser::traits::Style;
 
 /// Resolved style properties — UI-agnostic, ready for frontend conversion.
-/// Both `fg` and `bg` are always set — no cell should inherit terminal defaults.
+///
+/// `fg` is always set — no cell should inherit the terminal's default foreground.
+/// `bg` is optional — `None` means "inherit from context" (current-line highlight,
+/// picker selection, search match, etc.). Content styles rarely set bg; chrome and
+/// status bar styles always do.
 #[derive(Debug, Clone)]
 pub struct StyleProps {
     pub fg: Rgb,
-    pub bg: Rgb,
+    pub bg: Option<Rgb>,
     pub bold: bool,
     pub italic: bool,
     pub underline: bool,
@@ -15,11 +19,24 @@ pub struct StyleProps {
 }
 
 impl StyleProps {
-    /// Base style: palette foreground on palette background, no decorations.
-    fn base(p: &ThemePalette) -> Self {
+    /// Base content style: palette foreground, no bg override, no decorations.
+    fn content(p: &ThemePalette) -> Self {
         Self {
             fg: p.foreground,
-            bg: p.background,
+            bg: None,
+            bold: false,
+            italic: false,
+            underline: false,
+            dim: false,
+            strikethrough: false,
+        }
+    }
+
+    /// Base chrome style: palette foreground on palette background, no decorations.
+    fn chrome(p: &ThemePalette) -> Self {
+        Self {
+            fg: p.foreground,
+            bg: Some(p.background),
             bold: false,
             italic: false,
             underline: false,
@@ -30,8 +47,12 @@ impl StyleProps {
 }
 
 /// Resolve a `Style` variant to `StyleProps` using the face mapping table from THEMING.md.
+///
+/// Content styles set fg explicitly but leave bg as None — the TUI layer provides
+/// the contextual background (normal, current-line highlight, search match, etc.).
+/// Styles that intentionally override bg (Code, LinkText, SearchMatch) set it explicitly.
 pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
-    let base = StyleProps::base(p);
+    let base = StyleProps::content(p);
     match style {
         Style::Normal => base,
         Style::Heading { level: 1 } => StyleProps {
@@ -57,16 +78,16 @@ pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
             ..base
         },
         Style::Code => StyleProps {
-            bg: p.subtle,
+            bg: Some(p.subtle),
             ..base
         },
         Style::CodeBlock => StyleProps {
-            bg: p.subtle,
+            bg: Some(p.subtle),
             ..base
         },
         Style::LinkText => StyleProps {
             fg: p.strong,
-            bg: p.modeline,
+            bg: Some(p.modeline),
             underline: true,
             ..base
         },
@@ -176,11 +197,11 @@ pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
             ..base
         },
         Style::SearchMatch => StyleProps {
-            bg: p.mild,
+            bg: Some(p.mild),
             ..base
         },
         Style::SearchMatchCurrent => StyleProps {
-            bg: p.mild,
+            bg: Some(p.mild),
             bold: true,
             underline: true,
             ..base
@@ -198,44 +219,45 @@ pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
 }
 
 /// Resolve status bar style per UI Chrome Mapping in THEMING.md.
+/// Status bar always has explicit bg — it's a chrome surface, not layered content.
 pub fn resolve_status_bar(mode: &str, active: bool, p: &ThemePalette) -> StyleProps {
-    let base = StyleProps::base(p);
+    let base = StyleProps::chrome(p);
     if !active {
         return StyleProps {
             fg: p.faded,
-            bg: p.subtle,
+            bg: Some(p.subtle),
             ..base
         };
     }
     match mode {
         "INSERT" => StyleProps {
             fg: p.background,
-            bg: p.accent_green,
+            bg: Some(p.accent_green),
             ..base
         },
         "VISUAL" => StyleProps {
             fg: p.background,
-            bg: p.popout,
+            bg: Some(p.popout),
             ..base
         },
         "COMMAND" => StyleProps {
             fg: p.background,
-            bg: p.accent_blue,
+            bg: Some(p.accent_blue),
             ..base
         },
         "QUERY" => StyleProps {
             fg: p.background,
-            bg: p.salient,
+            bg: Some(p.salient),
             ..base
         },
         // Temporal modes share accent_yellow (per WINDOW_LAYOUTS.md)
         "JRNL" | "HIST" | "HISTORY" | "DAY" => StyleProps {
             fg: p.background,
-            bg: p.accent_yellow,
+            bg: Some(p.accent_yellow),
             ..base
         },
         _ => StyleProps {
-            bg: p.highlight,
+            bg: Some(p.highlight),
             ..base
         },
     }
@@ -256,15 +278,16 @@ pub enum Chrome {
 }
 
 /// Resolve UI chrome element styles per THEMING.md.
+/// Chrome styles always have explicit bg — they are surfaces, not layered content.
 pub fn resolve_chrome(element: Chrome, p: &ThemePalette) -> StyleProps {
-    let base = StyleProps::base(p);
+    let base = StyleProps::chrome(p);
     match element {
         Chrome::PickerSurface => StyleProps {
-            bg: p.subtle,
+            bg: Some(p.subtle),
             ..base
         },
         Chrome::PickerSelected => StyleProps {
-            bg: p.mild,
+            bg: Some(p.mild),
             ..base
         },
         Chrome::PickerBorder | Chrome::WindowBorder | Chrome::Faded => StyleProps {
@@ -273,21 +296,21 @@ pub fn resolve_chrome(element: Chrome, p: &ThemePalette) -> StyleProps {
         },
         Chrome::WhichKey => base,
         Chrome::CurrentLine => StyleProps {
-            bg: p.highlight,
+            bg: Some(p.highlight),
             ..base
         },
         Chrome::NotificationInfo => StyleProps {
-            bg: p.subtle,
+            bg: Some(p.subtle),
             ..base
         },
         Chrome::NotificationWarning => StyleProps {
             fg: p.background,
-            bg: p.accent_yellow,
+            bg: Some(p.accent_yellow),
             ..base
         },
         Chrome::NotificationError => StyleProps {
             fg: p.background,
-            bg: p.critical,
+            bg: Some(p.critical),
             ..base
         },
     }
