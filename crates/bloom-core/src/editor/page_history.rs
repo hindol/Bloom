@@ -128,8 +128,12 @@ impl BloomEditor {
                 );
 
                 if let Some(ref line) = block_line_text {
-                    // Only add if content changed from the next (newer) version
-                    let changed = last_line_content.as_ref() != Some(line);
+                    // Only add if actual content changed (ignore block ID suffix
+                    // differences — those are metadata, not user edits)
+                    let stripped = strip_block_id_suffix(line);
+                    let changed = last_line_content.as_ref()
+                        .map(|prev| strip_block_id_suffix(prev) != stripped)
+                        .unwrap_or(true);
                     if changed {
                         let elapsed = info.timestamp.elapsed();
                         let label = if elapsed.as_secs() < 60 {
@@ -340,4 +344,33 @@ pub(crate) fn extract_block_line(
     }
     // Fallback: same line number (block ID may not have existed in this version)
     content.lines().nth(fallback_line).map(|l| l.to_string())
+}
+
+/// Strip trailing block ID suffix (` ^xxxxx` or ` ^=xxxxx`) for content
+/// comparison. Two lines that differ only by block ID presence should be
+/// considered identical when filtering unchanged commits.
+pub(crate) fn strip_block_id_suffix(line: &str) -> &str {
+    // Match ` ^=xxxxx` (6-char suffix with space) or ` ^xxxxx` (7-char suffix)
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    // Check ` ^=XXXXX` (8 chars: space, ^, =, 5 alnum)
+    if len >= 8 {
+        let tail = &bytes[len - 8..];
+        if tail[0] == b' ' && tail[1] == b'^' && tail[2] == b'='
+            && tail[3..].iter().all(|b| b.is_ascii_alphanumeric())
+        {
+            return &line[..len - 8];
+        }
+    }
+    // Check ` ^XXXXX` (7 chars: space, ^, 5 alnum)
+    if len >= 7 {
+        let tail = &bytes[len - 7..];
+        if tail[0] == b' ' && tail[1] == b'^'
+            && tail[2] != b'='
+            && tail[2..].iter().all(|b| b.is_ascii_alphanumeric())
+        {
+            return &line[..len - 7];
+        }
+    }
+    line
 }

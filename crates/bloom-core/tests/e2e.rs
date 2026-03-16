@@ -3138,7 +3138,8 @@ fn block_history_git_blob_extracts_block_line_only() {
 #[test]
 fn block_history_git_blob_falls_back_to_line_number() {
     // When an old git version didn't have the block ID at all (it was assigned
-    // later), the code should fall back to showing the same line number.
+    // later), the code falls back to the same line number. If the line content
+    // (ignoring block ID) is the same, the commit is filtered as unchanged.
     let content = "---\nid: pg01\ntitle: \"Page\"\n---\n\n## Overview ^blk01\n\nSome text.\n";
     let mut sim = SimInput::with_content(content);
 
@@ -3147,6 +3148,8 @@ fn block_history_git_blob_falls_back_to_line_number() {
 
     // Open block history
     sim.keys("SPC H b");
+
+    let before = sim.screen(80, 24).frame.temporal_strip.as_ref().unwrap().items.len();
 
     // Add a git entry and navigate to it
     let entries = vec![bloom_core::history::PageHistoryEntry {
@@ -3160,7 +3163,9 @@ fn block_history_git_blob_falls_back_to_line_number() {
     sim.keys("h");
     sim.keys("h");
 
-    // Simulate blob with NO block ID — the old version before indexer assigned it
+    // Simulate blob with NO block ID — the old version before indexer assigned it.
+    // Content is "## Overview" vs current "## Overview ^blk01" — differs only by
+    // block ID suffix, so the commit should be filtered as unchanged.
     let old_page = "---\nid: pg01\ntitle: \"Page\"\n---\n\n## Overview\n\nSome text.\n";
     sim.editor.handle_history_complete(
         bloom_core::history::HistoryComplete::BlobAt {
@@ -3170,29 +3175,11 @@ fn block_history_git_blob_falls_back_to_line_number() {
         },
     );
 
-    let screen = sim.screen(80, 24);
-    if let Some(ts) = &screen.frame.temporal_strip {
-        let all_text: String = ts.block_diff_segments.iter().map(|s| s.text.as_str()).collect();
-        eprintln!("FALLBACK DIFF TEXT: '{}'", all_text);
-        for (i, seg) in ts.block_diff_segments.iter().enumerate() {
-            eprintln!("  seg[{}]: kind={:?} text='{}'", i, seg.kind, seg.text);
-        }
-
-        // Should show "## Overview" (from line-number fallback), NOT full page
-        assert!(all_text.contains("Overview"), "should contain 'Overview' via line fallback");
-        assert!(!all_text.contains("---"), "should NOT contain frontmatter, got: {}", all_text);
-        assert!(!all_text.contains("Some text"), "should NOT contain other lines, got: {}", all_text);
-
-        // The diff should show ^blk01 as added (present in current, absent in old)
-        let added: String = ts.block_diff_segments.iter()
-            .filter(|s| s.kind == bloom_core::render::DiffLineKind::Added)
-            .map(|s| s.text.as_str())
-            .collect();
-        eprintln!("ADDED: '{}'", added);
-        assert!(added.contains("blk01"), "block ID should appear as added, got: {}", added);
-    } else {
-        panic!("temporal strip should be open");
-    }
+    let after = sim.screen(80, 24).frame.temporal_strip.as_ref().unwrap().items.len();
+    eprintln!("LINE NUMBER FALLBACK: before={}, after={}", before, after);
+    // The git entry should be removed — the line content (sans block ID) hasn't changed
+    assert!(after <= before,
+        "commit with only block ID difference should be filtered: before={}, after={}", before, after);
 
     sim.keys("q");
 }
@@ -3263,6 +3250,46 @@ fn block_history_skips_unchanged_git_commits() {
     eprintln!("ITEMS AFTER: {}", count_after);
     assert!(count_after < count_before,
         "unchanged commit should be removed: before={}, after={}", count_before, count_after);
+
+    sim.keys("q");
+}
+
+#[test]
+fn block_history_skips_commit_differing_only_by_block_id() {
+    // Real-world scenario: git blob has "## Overview" (no block ID), current
+    // buffer has "## Overview ^blk01" (ID assigned by indexer). The only
+    // difference is the block ID suffix — should be filtered as unchanged.
+    let content = "---\nid: pg03\ntitle: \"Test\"\n---\n\n## Overview ^blk01\n\nContent.\n";
+    let mut sim = SimInput::with_content(content);
+    sim.keys("6gg");
+    sim.keys("SPC H b");
+
+    let entries = vec![bloom_core::history::PageHistoryEntry {
+        oid: "old1".to_string(),
+        message: "before IDs".to_string(),
+        timestamp: 500, changed_files: vec![],
+    }];
+    sim.editor.handle_history_complete(
+        bloom_core::history::HistoryComplete::PageHistory { entries },
+    );
+
+    let before = sim.screen(80, 24).frame.temporal_strip.as_ref().unwrap().items.len();
+    sim.keys("h"); // navigate to git entry
+
+    // Blob with NO block ID — same semantic content, just missing the ^blk01
+    let old_page = "---\nid: pg03\ntitle: \"Test\"\n---\n\n## Overview\n\nContent.\n";
+    sim.editor.handle_history_complete(
+        bloom_core::history::HistoryComplete::BlobAt {
+            oid: "old1".to_string(),
+            uuid: "pg03".to_string(),
+            content: Some(old_page.to_string()),
+        },
+    );
+
+    let after = sim.screen(80, 24).frame.temporal_strip.as_ref().unwrap().items.len();
+    eprintln!("BLOCK ID ONLY DIFF: before={}, after={}", before, after);
+    assert!(after < before,
+        "commit differing only by block ID should be removed: before={}, after={}", before, after);
 
     sim.keys("q");
 }
