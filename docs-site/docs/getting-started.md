@@ -1,17 +1,34 @@
 ---
 slug: /
 sidebar_position: 1
+sidebar_label: Home
 title: Bloom
 hide_title: true
 ---
 
-<div style={{textAlign: 'center', marginBottom: '2rem'}}>
+<div style={{textAlign: 'center', padding: '3rem 0 1rem'}}>
 
-# Bloom 🌱
+<span style={{fontSize: '3.5rem'}}>🌱</span>
 
-**Vim-modal notes. Local-first. Built in Rust.**
+# Bloom
 
-Your notes are Markdown files on disk — no cloud, no lock-in. Bloom adds modal editing, `[[links]]`, block-level history, and a query engine on top.
+<p style={{fontSize: '1.35rem', fontWeight: 500, marginBottom: '0.5rem'}}>
+Vim-modal notes. Local-first. Built in Rust.
+</p>
+
+<p style={{color: 'var(--ifm-color-emphasis-700)', maxWidth: '520px', margin: '0 auto'}}>
+Your notes are Markdown files on disk — no cloud, no lock-in.<br/>
+Bloom adds modal editing, <code>[[links]]</code>, block-level history, and a query engine on top.
+</p>
+
+</div>
+
+<div className="bloom-features-intro">
+
+- 📝 **Plain Markdown** — files on disk, version-controllable, portable
+- 🔗 **`[[Links]]` + Block IDs** — UUID-based, survive renames and moves
+- 📓 **Daily Journal** — `SPC j t` opens today, quick-capture without switching buffers
+- ⌨️ **Full Vim Grammar** — motions, operators, text objects, registers, macros
 
 </div>
 
@@ -66,10 +83,10 @@ Cursor on a block, `SPC H b` opens a timeline strip. `h`/`l` scrubs through vers
 
 ```bash
 # macOS / Linux
-curl -fsSL https://bloom-editor.github.io/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/hindol/Bloom/main/install.sh | sh
 
-# Windows
-irm https://bloom-editor.github.io/install.ps1 | iex
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/hindol/Bloom/main/install.ps1 | iex
 
 # Then
 bloom ~/notes
@@ -77,6 +94,6 @@ bloom ~/notes
 
 <div style={{textAlign: 'center', marginTop: '1.5rem', marginBottom: '1rem'}}>
 
-[API Docs →](/api/bloom_core) · [GitHub →](https://github.com/hindol/Bloom)
+[API Docs →](pathname:///Bloom/api/bloom_core) · [GitHub →](https://github.com/hindol/Bloom) · [Releases →](https://github.com/hindol/Bloom/releases)
 
 </div>

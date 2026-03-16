@@ -1,7 +1,11 @@
 /** @type {import('@docusaurus/plugin-content-docs').SidebarsConfig} */
 const sidebars = {
   docs: [
-    'getting-started',
+    {
+      type: 'doc',
+      id: 'getting-started',
+      label: 'Home',
+    },
     {
       type: 'category',
       label: 'Features',
@@ -10,6 +14,11 @@ const sidebars = {
         'features/search',
         'features/block-history',
       ],
+    },
+    {
+      type: 'link',
+      label: 'API Docs (cargo doc)',
+      href: '/Bloom/api/bloom_core',
     },
   ],
 };

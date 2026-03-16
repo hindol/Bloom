@@ -1,23 +1,80 @@
 :root {
-  --ifm-color-primary: #6c63ff;
-  --ifm-color-primary-dark: #5a52e0;
-  --ifm-color-primary-darker: #4e44d4;
-  --ifm-color-primary-darkest: #3a33b0;
-  --ifm-color-primary-light: #7e76ff;
-  --ifm-color-primary-lighter: #8a83ff;
-  --ifm-color-primary-lightest: #a8a3ff;
+  --ifm-color-primary: #F4BF4F;
+  --ifm-color-primary-dark: #d9a83e;
+  --ifm-color-primary-darker: #c89735;
+  --ifm-color-primary-darkest: #a67c2b;
+  --ifm-color-primary-light: #f6ca68;
+  --ifm-color-primary-lighter: #f7d07a;
+  --ifm-color-primary-lightest: #fae0a6;
+  --ifm-heading-font-weight: 700;
 }
 
 [data-theme='dark'] {
-  --ifm-background-color: #1a1a2e;
-  --ifm-font-color-base: #e0e0e0;
+  --ifm-background-color: #141414;
+  --ifm-background-surface-color: #1a1919;
+  --ifm-font-color-base: #EBE9E7;
+  --ifm-color-emphasis-700: #A3A3A3;
+  --ifm-footer-background-color: #1a1919;
 }
 
-/* Animation GIFs: centered, rounded, with subtle border */
+/* Animation GIFs */
 img[src*="/animations/"] {
   display: block;
   margin: 1.5rem auto;
   border-radius: 8px;
-  border: 1px solid var(--ifm-color-primary-darkest);
-  max-width: 100%;
+  border: 1px solid rgba(244, 191, 79, 0.25);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  max-width: min(100%, 680px);
+}
+
+/* Feature intro bullets */
+.bloom-features-intro {
+  max-width: 520px;
+  margin: 1.5rem auto 0;
+  padding: 0;
+}
+
+.bloom-features-intro ul {
+  list-style: none;
+  padding: 0;
+}
+
+.bloom-features-intro li {
+  margin-bottom: 0.4rem;
+  font-size: 0.95rem;
+}
+
+/* Details / summary (collapsible "what you just saw") */
+details {
+  margin-top: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+details summary {
+  cursor: pointer;
+  color: var(--ifm-color-emphasis-700);
+  font-size: 0.9rem;
+  font-style: italic;
+}
+
+details summary:hover {
+  color: var(--ifm-color-primary);
+}
+
+details > p {
+  font-size: 0.9rem;
+  color: var(--ifm-color-emphasis-700);
+  margin-top: 0.5rem;
+}
+
+/* Section separators — more breathing room */
+.markdown hr {
+  margin: 2.5rem 0;
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+/* Hero title sizing */
+.markdown h1:first-of-type {
+  font-size: 2.8rem;
+  margin-bottom: 0.3rem;
 }
