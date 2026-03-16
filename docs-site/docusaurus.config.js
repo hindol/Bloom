@@ -69,7 +69,7 @@ const config = {
         ],
         copyright: `Bloom — local-first notes with Vim soul.`,
       },
-      colorMode: { defaultMode: 'dark', respectPrefersColorScheme: true },
+      colorMode: { defaultMode: 'light', disableSwitch: true, respectPrefersColorScheme: false },
     }),
 };
 
