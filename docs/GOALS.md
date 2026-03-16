@@ -99,7 +99,7 @@ When viewing a page, `SPC l t` opens a timeline panel showing a chronological li
 - Full branching undo history, not linear undo/redo.
 - Every edit creates a node in the tree. Undoing and making a new edit creates a branch.
 - Navigate the full tree of document states within a session.
-- **Persistent** — the undo tree is serialized to SQLite on quit and restored on next launch (same model as VS Code). Pruned when the buffer is closed or after 24 hours. For long-term history beyond the undo tree, Bloom's git-based time travel provides session-level snapshots (see `docs/lab/HISTORY.md`).
+- **Persistent** — the undo tree is serialized to SQLite on quit and restored on next launch (same model as VS Code). Pruned when the buffer is closed or after 24 hours. For long-term history beyond the undo tree, Bloom's git-based time travel provides session-level snapshots (see `docs/HISTORY.md`).
 
 ### G10: Cross-Platform — macOS and Windows
 

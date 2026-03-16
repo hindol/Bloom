@@ -1,7 +1,7 @@
 # History 🕰️
 
 > Unified history — undo tree for recent edits, git for permanent record.
-> Status: **Draft** — undo tree implemented, git layer via bloom-history crate.
+> Status: **Implemented** — undo tree implemented, git layer via bloom-history crate.
 > See also: [JOURNAL.md](../JOURNAL.md) for journal navigation and calendar.
 
 ---
