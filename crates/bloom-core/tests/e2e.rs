@@ -3004,3 +3004,60 @@ fn block_history_diff_contains_only_block_content() {
 
     sim.keys("q");
 }
+
+#[test]
+fn block_history_diff_no_extra_content_in_long_file() {
+    // Simulate a real page with many lines
+    let content = "---\nid: testpage\ntitle: \"Test\"\ncreated: 2026-01-01\ntags: []\n---\n\n\
+## Heading\n\n\
+- [ ] First task ^task01\n\
+- [ ] Second task ^task02\n\
+- [ ] Target task ^target1\n\
+- [ ] Fourth task ^task04\n\n\
+Some paragraph with text.\n\
+Another paragraph.\n";
+
+    let mut sim = SimInput::with_content(content);
+
+    // Navigate to the target task line (line 11 = "- [ ] Target task ^target1")
+    sim.keys("12gg"); // go to line 12 (1-indexed)
+
+    // Edit: change "Target" to "Modified"
+    sim.keys("03w"); // on "Target"
+    sim.keys("ciw");
+    sim.type_text("Modified");
+    sim.keys("<Esc>");
+
+    // Go back to the edited line
+    sim.keys("12gg");
+    let line = sim.screen(80, 24).line_text(11);
+    eprintln!("EDITED LINE: {}", line);
+
+    // Open block history
+    sim.keys("SPC H b");
+    sim.keys("h"); // scrub to older
+    sim.keys("h"); // oldest
+
+    let screen = sim.screen(80, 24);
+    if let Some(ts) = &screen.frame.temporal_strip {
+        let all_text: String = ts.block_diff_segments.iter().map(|s| s.text.as_str()).collect();
+        eprintln!("BLOCK DIFF TEXT: '{}'", all_text);
+        eprintln!("SEGMENT COUNT: {}", ts.block_diff_segments.len());
+        for (i, seg) in ts.block_diff_segments.iter().enumerate() {
+            eprintln!("  seg[{}]: kind={:?} text='{}'", i, seg.kind, seg.text);
+        }
+
+        // Should only contain the target task line content
+        assert!(!all_text.contains("First task"), "should not contain 'First task'");
+        assert!(!all_text.contains("Second task"), "should not contain 'Second task'");
+        assert!(!all_text.contains("Fourth task"), "should not contain 'Fourth task'");
+        assert!(!all_text.contains("paragraph"), "should not contain paragraph text");
+        assert!(!all_text.contains("Heading"), "should not contain heading");
+        assert!(all_text.contains("task"), "should contain 'task' from the target line");
+        assert!(all_text.contains("target1"), "should contain block ID 'target1'");
+    } else {
+        panic!("temporal strip should be open");
+    }
+
+    sim.keys("q");
+}
