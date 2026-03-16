@@ -1199,7 +1199,24 @@ impl BloomEditor {
         if let Some(ts) = &mut self.temporal_strip {
             if let Some(item) = ts.items.get_mut(ts.selected) {
                 if item.content.is_none() {
-                    item.content = Some(content.clone());
+                    // For block history: extract only the matching block line
+                    // from the full page blob, not the entire content.
+                    if matches!(ts.mode, render::TemporalMode::BlockHistory) {
+                        if let Some(ref bid) = ts.block_id {
+                            let block_pat = format!("^{}", bid);
+                            let mirror_pat = format!("^={}", bid);
+                            let fallback = ts.block_line.unwrap_or(0);
+                            item.content =
+                                crate::editor::page_history::extract_block_line(
+                                    &content,
+                                    &block_pat,
+                                    &mirror_pat,
+                                    fallback,
+                                );
+                        }
+                    } else {
+                        item.content = Some(content.clone());
+                    }
                     return; // Don't restore — just cache for preview
                 }
             }

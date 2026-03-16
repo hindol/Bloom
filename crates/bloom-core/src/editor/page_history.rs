@@ -118,13 +118,16 @@ impl BloomEditor {
             while visited.insert(node_id) {
                 let info = tree.node_info(node_id);
                 let snapshot = tree.node_snapshot_string(node_id);
-                // Find the line containing our block ID in this snapshot
-                let block_line = snapshot
-                    .lines()
-                    .find(|l| l.contains(&block_pattern) || l.contains(&mirror_pattern))
-                    .map(|l| l.to_string());
+                // Find the line containing our block ID, or fall back to
+                // same line number if the ID didn't exist in this version.
+                let block_line_text = extract_block_line(
+                    &snapshot,
+                    &block_pattern,
+                    &mirror_pattern,
+                    cursor_line,
+                );
 
-                if let Some(ref line) = block_line {
+                if let Some(ref line) = block_line_text {
                     // Only add if content changed from the next (newer) version
                     let changed = last_line_content.as_ref() != Some(line);
                     if changed {
@@ -317,4 +320,24 @@ impl BloomEditor {
             }
         }
     }
+}
+
+/// Extract the block line from a full-page snapshot.
+/// First tries to find the line by block ID pattern match.
+/// Falls back to the same line number if the ID didn't exist yet.
+pub(crate) fn extract_block_line(
+    content: &str,
+    block_pattern: &str,
+    mirror_pattern: &str,
+    fallback_line: usize,
+) -> Option<String> {
+    // Primary: find by block ID
+    if let Some(line) = content
+        .lines()
+        .find(|l| l.contains(block_pattern) || l.contains(mirror_pattern))
+    {
+        return Some(line.to_string());
+    }
+    // Fallback: same line number (block ID may not have existed in this version)
+    content.lines().nth(fallback_line).map(|l| l.to_string())
 }

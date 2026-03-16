@@ -3061,3 +3061,138 @@ Another paragraph.\n";
 
     sim.keys("q");
 }
+
+#[test]
+fn block_history_git_blob_extracts_block_line_only() {
+    // Regression: receive_blob_at stored the ENTIRE page content for block
+    // history items instead of extracting the single matching block line.
+    // This caused word_diff(full_page, single_line) → massive red blob.
+    let content = "---\nid: rp01\ntitle: \"Page\"\n---\n\n## Overview ^blk01\n\nSome paragraph text here.\nAnother paragraph.\n";
+    let mut sim = SimInput::with_content(content);
+
+    // Navigate to the block line (line 5 = "## Overview ^blk01")
+    sim.keys("6gg");
+
+    // Edit so there's undo history — change "Overview" to "Summary"
+    // (don't append after block ID — it must stay at line end)
+    sim.keys("w");  // on "Overview"
+    sim.keys("ciw");
+    sim.type_text("Summary");
+    sim.keys("<Esc>");
+
+    // Go back to line 5
+    sim.keys("6gg");
+
+    // Open block history
+    sim.keys("SPC H b");
+    let screen = sim.screen(80, 24);
+    assert_eq!(screen.mode(), "HIST", "should be in HIST mode");
+
+    // Simulate a git blob arriving with FULL page content (the bug scenario).
+    // First, add a git entry to the strip.
+    let entries = vec![bloom_core::history::PageHistoryEntry {
+        oid: "abc123".to_string(),
+        message: "old commit".to_string(),
+        timestamp: 1000000, changed_files: vec![],
+    }];
+    sim.editor.handle_history_complete(
+        bloom_core::history::HistoryComplete::PageHistory { entries },
+    );
+
+    // Navigate to the git entry (leftmost = oldest, so press h to go left)
+    sim.keys("h");
+    sim.keys("h");
+    sim.keys("h");
+
+    // Simulate the blob arriving — this is the FULL page content from git
+    let old_page = "---\nid: rp01\ntitle: \"Page\"\n---\n\n## Overview ^blk01\n\nOld paragraph text.\n";
+    sim.editor.handle_history_complete(
+        bloom_core::history::HistoryComplete::BlobAt {
+            oid: "abc123".to_string(),
+            uuid: "rp01".to_string(),
+            content: Some(old_page.to_string()),
+        },
+    );
+
+    // Now render and check the diff segments
+    let screen = sim.screen(80, 24);
+    if let Some(ts) = &screen.frame.temporal_strip {
+        let all_text: String = ts.block_diff_segments.iter().map(|s| s.text.as_str()).collect();
+        eprintln!("GIT BLOB DIFF TEXT: '{}'", all_text);
+        for (i, seg) in ts.block_diff_segments.iter().enumerate() {
+            eprintln!("  seg[{}]: kind={:?} text='{}'", i, seg.kind, seg.text);
+        }
+
+        // Should contain only block line content, NOT other page content
+        assert!(!all_text.contains("paragraph"), "should NOT contain paragraph text, got: {}", all_text);
+        assert!(!all_text.contains("---"), "should NOT contain frontmatter, got: {}", all_text);
+        assert!(all_text.contains("Overview"), "should contain 'Overview' from the block line");
+        assert!(all_text.contains("blk01"), "should contain block ID");
+    } else {
+        panic!("temporal strip should be open after block history");
+    }
+
+    sim.keys("q");
+}
+
+#[test]
+fn block_history_git_blob_falls_back_to_line_number() {
+    // When an old git version didn't have the block ID at all (it was assigned
+    // later), the code should fall back to showing the same line number.
+    let content = "---\nid: pg01\ntitle: \"Page\"\n---\n\n## Overview ^blk01\n\nSome text.\n";
+    let mut sim = SimInput::with_content(content);
+
+    // Navigate to "## Overview ^blk01" (line 5, 0-indexed)
+    sim.keys("6gg");
+
+    // Open block history
+    sim.keys("SPC H b");
+
+    // Add a git entry and navigate to it
+    let entries = vec![bloom_core::history::PageHistoryEntry {
+        oid: "def456".to_string(),
+        message: "before ID assignment".to_string(),
+        timestamp: 900000, changed_files: vec![],
+    }];
+    sim.editor.handle_history_complete(
+        bloom_core::history::HistoryComplete::PageHistory { entries },
+    );
+    sim.keys("h");
+    sim.keys("h");
+
+    // Simulate blob with NO block ID — the old version before indexer assigned it
+    let old_page = "---\nid: pg01\ntitle: \"Page\"\n---\n\n## Overview\n\nSome text.\n";
+    sim.editor.handle_history_complete(
+        bloom_core::history::HistoryComplete::BlobAt {
+            oid: "def456".to_string(),
+            uuid: "pg01".to_string(),
+            content: Some(old_page.to_string()),
+        },
+    );
+
+    let screen = sim.screen(80, 24);
+    if let Some(ts) = &screen.frame.temporal_strip {
+        let all_text: String = ts.block_diff_segments.iter().map(|s| s.text.as_str()).collect();
+        eprintln!("FALLBACK DIFF TEXT: '{}'", all_text);
+        for (i, seg) in ts.block_diff_segments.iter().enumerate() {
+            eprintln!("  seg[{}]: kind={:?} text='{}'", i, seg.kind, seg.text);
+        }
+
+        // Should show "## Overview" (from line-number fallback), NOT full page
+        assert!(all_text.contains("Overview"), "should contain 'Overview' via line fallback");
+        assert!(!all_text.contains("---"), "should NOT contain frontmatter, got: {}", all_text);
+        assert!(!all_text.contains("Some text"), "should NOT contain other lines, got: {}", all_text);
+
+        // The diff should show ^blk01 as added (present in current, absent in old)
+        let added: String = ts.block_diff_segments.iter()
+            .filter(|s| s.kind == bloom_core::render::DiffLineKind::Added)
+            .map(|s| s.text.as_str())
+            .collect();
+        eprintln!("ADDED: '{}'", added);
+        assert!(added.contains("blk01"), "block ID should appear as added, got: {}", added);
+    } else {
+        panic!("temporal strip should be open");
+    }
+
+    sim.keys("q");
+}
