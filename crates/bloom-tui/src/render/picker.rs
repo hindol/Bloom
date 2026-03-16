@@ -34,6 +34,12 @@ pub(super) fn draw_picker(f: &mut Frame, area: Rect, picker: &PickerFrame, theme
     let picker_area = Rect::new(x, y, w, h);
 
     f.render_widget(Clear, picker_area);
+    // Fill the entire picker area with the picker surface style so that
+    // empty cells don't fall back to Color::Reset (terminal default).
+    f.render_widget(
+        Block::default().style(theme.picker_style()),
+        picker_area,
+    );
 
     let block = Block::default()
         .borders(Borders::ALL)
