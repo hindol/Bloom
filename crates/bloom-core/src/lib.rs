@@ -1218,23 +1218,19 @@ impl BloomEditor {
                         item.content = Some(content.clone());
                     }
 
-                    // For block history: remove this item if its content
-                    // (ignoring block ID suffix) matches current or nearest
-                    // loaded older neighbor — the commit didn't change this
-                    // block's actual content.
+                    // For block history: remove this git item if:
+                    // 1. Its block line matches current_content (no diff to show)
+                    // 2. Its block line matches the nearest loaded older neighbor
+                    //    (consecutive commits with same block content → duplicate)
                     if matches!(ts.mode, render::TemporalMode::BlockHistory) {
                         let sel = ts.selected;
                         if let Some(ref cur_text) = ts.items[sel].content {
-                            use crate::editor::page_history::strip_block_id_suffix;
-                            let cur_stripped = strip_block_id_suffix(cur_text);
-                            let current_stripped = strip_block_id_suffix(&ts.current_content);
-                            let matches_current = cur_stripped == current_stripped;
+                            let matches_current = cur_text == &ts.current_content;
                             let matches_older = ts.items[..sel]
                                 .iter()
                                 .rev()
                                 .find_map(|i| i.content.as_ref())
-                                .map(|s| strip_block_id_suffix(s) == cur_stripped)
-                                .unwrap_or(false);
+                                == Some(cur_text);
                             if matches_current || matches_older {
                                 ts.items.remove(sel);
                                 if ts.selected >= ts.items.len() {
