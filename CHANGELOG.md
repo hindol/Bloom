@@ -2,6 +2,44 @@
 
 All notable changes to Bloom.
 
+## 0.3.0-alpha — 2026-03-16
+
+### Features
+- **In-buffer search**: `/`, `?`, `n`, `N` with live highlighting; `SPC *` searches word under cursor across vault
+- **Page history**: `SPC H h` opens temporal strip — unified undo tree + git commit timeline
+- **Block history**: `SPC H b` scrubs a single block's versions with inline word diff
+- **Block history skip**: unchanged git commits are eagerly loaded and dimmed; `h`/`l` skips over them
+- **Temporal strip**: horizontal scrollable timeline with compact (4-line) and rich (6-line) modes
+- **Inline word diff**: block history shows red/green word-level changes on the cursor line, flows through normal word-wrap
+- **Mirror menu**: `SPC m m` inline popup to jump between mirror instances
+- **J (join lines)**: Vim `J` command implemented in grammar + state handler
+
+### Improvements
+- **Write pipeline redesign**: write IDs (monotonic u64), content comparison replaces fingerprints, no more self-write race
+- **Indexer reads only**: indexer computes mutations as pure functions, packages in `CasWriteRequest` — never writes to disk directly
+- **Buffer reuse**: ID resolution chain (frontmatter → find_by_path → generate) prevents duplicate buffers across all open paths
+- **`similar` crate for diffs**: replaced ~160 lines of custom LCS with Myers algorithm via `similar`
+- **Picker refactor**: `PickerAction` enum decouples view from selection logic
+- **Search highlight contrast**: mild background for both match types, visible on all themes
+- **JRNL mode is page-based**: journal pages show JRNL badge regardless of how they were opened
+- **Non-markdown files**: render as plaintext, not markdown-highlighted
+- **Block IDs in blockquotes**: inline elements styled correctly inside `>` blocks
+
+### Bug Fixes
+- **dd on last line**: cursor no longer lands past EOF after deleting the last line
+- **Undo cursor restore**: `begin_edit_group` stores cursor on current node before edit starts
+- **Theme persist**: section-aware replacement — no longer corrupts view names
+- **Day-hopping duplicates**: `[d`/`]d` and calendar preview reuse existing buffers
+- **Block history excess red**: git blobs now extract single block line (was storing full page content)
+- **Block history line fallback**: when block ID didn't exist in old version, falls back to same line number
+- **Status bar in HIST mode**: visible with correct accent_yellow badge
+- **Dirty marker**: `[+]` only shown for actually modified buffers
+
+### Documentation
+- Promoted from lab to docs/: **HISTORY.md**, **UNIFIED_BUFFER.md**, **BLOCK_IDENTITY.md**, **JOURNAL.md**
+- Created **TEMPORAL_NAVIGATION.md** — unified wireframes for all temporal views
+- 153 e2e tests, 82 parser tests, 18 buffer tests
+
 ## 0.2.0-alpha — 2026-03-14
 
 ### Features
