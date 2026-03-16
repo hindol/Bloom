@@ -291,6 +291,8 @@ pub struct StripNode {
     pub kind: StripNodeKind,
     /// Number of branches at this node (0 = linear, 2+ = fork).
     pub branch_count: usize,
+    /// True if this node is dimmed (block content unchanged from older neighbor).
+    pub skip: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

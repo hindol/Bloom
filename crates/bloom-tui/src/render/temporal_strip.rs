@@ -127,11 +127,16 @@ pub(super) fn draw_temporal_strip(
 
     // --- Line 2: Timeline nodes (scrollable) ---
     let mut node_spans: Vec<Span> = Vec::new();
+    let dimmed = RStyle::default().fg(theme.faded()).bg(theme.highlight()).add_modifier(Modifier::DIM);
     node_spans.push(Span::styled("│ ", faded));
     for i in viewport_start..viewport_end {
         let node = &strip.items[i];
         let is_selected = i == strip.selected;
-        let marker = if node.branch_count > 1 { "[●]" } else {
+        let marker = if node.skip {
+            "·" // dimmed dot for skipped nodes
+        } else if node.branch_count > 1 {
+            "[●]"
+        } else {
             match node.kind {
                 StripNodeKind::UndoNode => "●",
                 StripNodeKind::GitCommit => "○",
@@ -139,6 +144,8 @@ pub(super) fn draw_temporal_strip(
         };
         let node_style = if is_selected {
             RStyle::default().fg(theme.foreground()).bg(theme.highlight()).add_modifier(Modifier::BOLD)
+        } else if node.skip {
+            dimmed
         } else {
             match node.kind {
                 StripNodeKind::UndoNode => bright,

@@ -3199,8 +3199,8 @@ fn block_history_git_blob_falls_back_to_line_number() {
 
 #[test]
 fn block_history_skips_unchanged_git_commits() {
-    // Git commits that didn't change the block should be removed from the strip
-    // after their blob is loaded.
+    // Git commits that didn't change the block should be marked skip=true
+    // after their blob is loaded. Navigation (h/l) skips over them.
     let content = "---\nid: pg02\ntitle: \"Page\"\n---\n\n## Heading ^hd001\n\nBody text.\n";
     let mut sim = SimInput::with_content(content);
 
@@ -3214,7 +3214,7 @@ fn block_history_skips_unchanged_git_commits() {
 
     sim.keys("SPC H b");
 
-    // Add 3 git entries
+    // Add 3 git entries (oldest first after reverse: A=oldest, C=newest)
     let entries = vec![
         bloom_core::history::PageHistoryEntry {
             oid: "aaa".to_string(),
@@ -3236,33 +3236,48 @@ fn block_history_skips_unchanged_git_commits() {
         bloom_core::history::HistoryComplete::PageHistory { entries },
     );
 
-    // Strip should now have 3 git + undo items
-    let screen_before = sim.screen(80, 24);
-    let count_before = screen_before.frame.temporal_strip.as_ref().unwrap().items.len();
-    eprintln!("ITEMS BEFORE: {}", count_before);
+    // Strip: [git_C(0), git_B(1), git_A(2), undo_root(3), undo_mid(4), undo_current(5)]
+    // (entries were oldest-first in the test, .rev() made them newest-first in array)
+    // Simulate eager loading: fires right-to-left (idx 2, 1, 0) = aaa, bbb, ccc.
+    // Responses arrive in FIFO order, so right neighbors are loaded first.
+    let same_page = "---\nid: pg02\ntitle: \"Page\"\n---\n\n## Heading ^hd001\n\nBody text.\n";
+    for oid in &["aaa", "bbb", "ccc"] {
+        sim.editor.handle_history_complete(
+            bloom_core::history::HistoryComplete::BlobAt {
+                oid: oid.to_string(),
+                uuid: "pg02".to_string(),
+                content: Some(same_page.to_string()),
+            },
+        );
+    }
 
-    // Navigate to commit C (newest git, right before undo items)
-    // Git items are at the left. Navigate to the last git item (index 2).
-    sim.keys("h"); // go left
+    let screen = sim.screen(80, 24);
+    let ts = screen.frame.temporal_strip.as_ref().unwrap();
+    let skip_count = ts.items.iter().filter(|n| n.skip).count();
+    eprintln!("SKIP COUNT: {} / {} items", skip_count, ts.items.len());
+    for (i, node) in ts.items.iter().enumerate() {
+        eprintln!("  item[{}]: skip={} kind={:?} label={}", i, node.skip, node.kind, node.label);
+    }
+
+    // git_A loads → right neighbor git_B has same content → git_B.skip=true
+    // git_B loads → right neighbor git_C has same content → git_C.skip=true
+    // git_C loads → right neighbor is undo (never skipped)
+    assert!(skip_count >= 2, "at least 2 git commits should be skip=true, got {}", skip_count);
+
+    // Navigation should skip over the dimmed items
+    // Start at rightmost (undo). Press h — should skip past git_C and git_B to git_A.
+    let sel_before = ts.selected;
+    sim.keys("h"); // skip past undo items to first non-skip
+    sim.keys("h"); // should land on git_A (skipping git_B, git_C if they're skip)
     sim.keys("h");
     sim.keys("h");
 
-    // Simulate blob for the selected git item — SAME block content as current.
-    // This means this commit didn't change the block → should be removed.
-    let same_page = "---\nid: pg02\ntitle: \"Page\"\n---\n\n## Title ^hd001\n\nBody text.\n";
-    sim.editor.handle_history_complete(
-        bloom_core::history::HistoryComplete::BlobAt {
-            oid: "ccc".to_string(),
-            uuid: "pg02".to_string(),
-            content: Some(same_page.to_string()),
-        },
-    );
-
-    let screen_after = sim.screen(80, 24);
-    let count_after = screen_after.frame.temporal_strip.as_ref().unwrap().items.len();
-    eprintln!("ITEMS AFTER: {}", count_after);
-    assert!(count_after < count_before,
-        "unchanged commit should be removed: before={}, after={}", count_before, count_after);
+    let screen2 = sim.screen(80, 24);
+    let ts2 = screen2.frame.temporal_strip.as_ref().unwrap();
+    eprintln!("SELECTED: {} (was {})", ts2.selected, sel_before);
+    // Should have jumped to git_A (index 0) or stayed at the first non-skip
+    let landed = &ts2.items[ts2.selected];
+    assert!(!landed.skip, "should land on a non-skip item");
 
     sim.keys("q");
 }

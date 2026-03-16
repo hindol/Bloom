@@ -699,6 +699,9 @@ pub(crate) struct TemporalItem {
     pub undo_node_id: Option<bloom_buffer::UndoNodeId>,
     /// Git commit OID (if from git).
     pub git_oid: Option<String>,
+    /// True if this item has same block content as its older neighbor.
+    /// Navigation skips over these. Set during background blob loading.
+    pub skip: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -1192,58 +1195,62 @@ impl BloomEditor {
     }
 
     /// Called when a blob-at-commit result arrives from the history thread.
-    fn receive_blob_at(&mut self, _oid: &str, _uuid: &str, content: Option<String>) {
+    fn receive_blob_at(&mut self, oid: &str, _uuid: &str, content: Option<String>) {
         let Some(content) = content else { return };
 
-        // If temporal strip is open, store content on the selected item
+        // If temporal strip is open, store content on the matching item.
         if let Some(ts) = &mut self.temporal_strip {
-            if let Some(item) = ts.items.get_mut(ts.selected) {
-                if item.content.is_none() {
-                    // For block history: extract only the matching block line
-                    // from the full page blob, not the entire content.
-                    if matches!(ts.mode, render::TemporalMode::BlockHistory) {
-                        if let Some(ref bid) = ts.block_id {
-                            let block_pat = format!("^{}", bid);
-                            let mirror_pat = format!("^={}", bid);
-                            let fallback = ts.block_line.unwrap_or(0);
-                            item.content =
-                                crate::editor::page_history::extract_block_line(
-                                    &content,
-                                    &block_pat,
-                                    &mirror_pat,
-                                    fallback,
-                                );
-                        }
-                    } else {
-                        item.content = Some(content.clone());
-                    }
+            // For block history with eager loading: find item by OID (not
+            // selected index) since multiple BlobAt requests are in flight.
+            // For page history: use selected index (only one BlobAt at a time).
+            let target_idx = if matches!(ts.mode, render::TemporalMode::BlockHistory) {
+                ts.items.iter().position(|i| {
+                    i.git_oid.as_deref() == Some(oid) && i.content.is_none()
+                })
+            } else {
+                let sel = ts.selected;
+                if ts.items.get(sel).map_or(false, |i| i.content.is_none()) {
+                    Some(sel)
+                } else {
+                    None
+                }
+            };
 
-                    // For block history: remove this git item if:
-                    // 1. Its block line matches current_content (no diff to show)
-                    // 2. Its block line matches the nearest loaded older neighbor
-                    //    (consecutive commits with same block content → duplicate)
-                    if matches!(ts.mode, render::TemporalMode::BlockHistory) {
-                        let sel = ts.selected;
-                        if let Some(ref cur_text) = ts.items[sel].content {
-                            let matches_current = cur_text == &ts.current_content;
-                            let matches_older = ts.items[..sel]
-                                .iter()
-                                .rev()
-                                .find_map(|i| i.content.as_ref())
-                                == Some(cur_text);
-                            if matches_current || matches_older {
-                                ts.items.remove(sel);
-                                if ts.selected >= ts.items.len() {
-                                    ts.selected = ts.items.len().saturating_sub(1);
-                                }
-                                self.load_temporal_content_if_needed();
-                                return;
+            if let Some(idx) = target_idx {
+                // For block history: extract only the matching block line
+                if matches!(ts.mode, render::TemporalMode::BlockHistory) {
+                    if let Some(ref bid) = ts.block_id {
+                        let block_pat = format!("^{}", bid);
+                        let mirror_pat = format!("^={}", bid);
+                        let fallback = ts.block_line.unwrap_or(0);
+                        ts.items[idx].content =
+                            crate::editor::page_history::extract_block_line(
+                                &content,
+                                &block_pat,
+                                &mirror_pat,
+                                fallback,
+                            );
+                    }
+                } else {
+                    ts.items[idx].content = Some(content.clone());
+                }
+
+                // For block history: mark the RIGHT neighbor as skip if its
+                // content matches this item (it didn't introduce a change).
+                // Never skip undo items (already deduped by undo walk).
+                if matches!(ts.mode, render::TemporalMode::BlockHistory) {
+                    if let Some(ref loaded) = ts.items[idx].content {
+                        if let Some(right) = ts.items.get(idx + 1) {
+                            if matches!(right.kind, render::StripNodeKind::GitCommit)
+                                && right.content.as_ref() == Some(loaded)
+                            {
+                                ts.items[idx + 1].skip = true;
                             }
                         }
                     }
-
-                    return; // Don't restore — just cache for preview
                 }
+
+                return;
             }
         }
 

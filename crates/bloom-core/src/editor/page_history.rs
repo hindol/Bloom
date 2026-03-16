@@ -45,6 +45,7 @@ impl BloomEditor {
                     content: Some(tree.node_snapshot_string(node_id)),
                     undo_node_id: Some(node_id),
                     git_oid: None,
+                    skip: false,
                 });
                 match tree.parent(node_id) {
                     Some(parent) => node_id = parent,
@@ -147,6 +148,7 @@ impl BloomEditor {
                             content: Some(line.clone()),
                             undo_node_id: Some(node_id),
                             git_oid: None,
+                            skip: false,
                         });
                     }
                     last_line_content = Some(line.clone());
@@ -206,6 +208,7 @@ impl BloomEditor {
                     content: None, // Loaded on-demand via BlobAt
                     undo_node_id: None,
                     git_oid: Some(entry.oid.clone()),
+                    skip: false,
                 }
             })
             .collect();
@@ -217,6 +220,26 @@ impl BloomEditor {
         ts.items = new_items;
         // Adjust selected to keep pointing at the same item
         ts.selected += git_count;
+
+        // For block history: eagerly fire BlobAt for all git entries (newest
+        // first) so we can mark unchanged commits as skip. The UI stays
+        // interactive — blobs load in the background and nodes dim as they
+        // resolve.
+        if matches!(ts.mode, render::TemporalMode::BlockHistory) {
+            let uuid_hex = ts.page_id.to_hex();
+            if let Some(tx) = &self.history_tx {
+                // Fire newest-first: git items are oldest-first in the array
+                // (indices 0..git_count), so iterate in reverse.
+                for i in (0..git_count).rev() {
+                    if let Some(oid) = &ts.items[i].git_oid {
+                        let _ = tx.send(HistoryRequest::BlobAt {
+                            oid: oid.clone(),
+                            uuid: uuid_hex.clone(),
+                        });
+                    }
+                }
+            }
+        }
     }
 
     /// Handle keys when temporal strip is active.
@@ -227,17 +250,32 @@ impl BloomEditor {
         match &key.code {
             types::KeyCode::Char('h') | types::KeyCode::Left => {
                 if let Some(ts) = &mut self.temporal_strip {
-                    if ts.selected > 0 {
-                        ts.selected -= 1;
-                        // Load git content on-demand
+                    // Move left, skipping over `skip` items
+                    let mut target = ts.selected;
+                    while target > 0 {
+                        target -= 1;
+                        if !ts.items[target].skip {
+                            break;
+                        }
+                    }
+                    if target != ts.selected {
+                        ts.selected = target;
                         self.load_temporal_content_if_needed();
                     }
                 }
             }
             types::KeyCode::Char('l') | types::KeyCode::Right => {
                 if let Some(ts) = &mut self.temporal_strip {
-                    if ts.selected + 1 < ts.items.len() {
-                        ts.selected += 1;
+                    // Move right, skipping over `skip` items
+                    let mut target = ts.selected;
+                    while target + 1 < ts.items.len() {
+                        target += 1;
+                        if !ts.items[target].skip {
+                            break;
+                        }
+                    }
+                    if target != ts.selected {
+                        ts.selected = target;
                     }
                 }
             }

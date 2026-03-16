@@ -1179,6 +1179,7 @@ impl BloomEditor {
                 detail: item.detail.clone(),
                 kind: item.kind,
                 branch_count: item.branch_count,
+                skip: item.skip,
             })
             .collect();
 
