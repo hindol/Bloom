@@ -19,6 +19,11 @@ fn main() -> io::Result<()> {
     let vault_path = default_vault_path();
     init_logging(&vault_path);
 
+    // Ensure true-color mode on terminals that support it but don't advertise
+    // via COLORTERM. Windows Terminal sets WT_SESSION but not COLORTERM;
+    // crossterm checks COLORTERM to decide whether to emit 24-bit SGR sequences.
+    ensure_colorterm();
+
     // Terminal setup
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -197,4 +202,26 @@ fn rotate_logs(log_dir: &std::path::Path) {
     }
 
     let _ = std::fs::rename(&current, log_dir.join("bloom.1.log"));
+}
+
+/// Set COLORTERM=truecolor when the terminal supports 24-bit color but doesn't
+/// advertise it. Without this, crossterm may fall back to 256/16-color mode,
+/// mangling Bloom's carefully tuned RGB palette.
+fn ensure_colorterm() {
+    if std::env::var_os("COLORTERM").is_some() {
+        return; // already set — respect the user's configuration
+    }
+
+    let dominated_by_true_color =
+        // Windows Terminal
+        std::env::var_os("WT_SESSION").is_some()
+        // VS Code integrated terminal
+        || std::env::var("TERM_PROGRAM").ok().as_deref() == Some("vscode")
+        // ConEmu / Cmder
+        || std::env::var_os("ConEmuPID").is_some();
+
+    if dominated_by_true_color {
+        std::env::set_var("COLORTERM", "truecolor");
+        tracing::debug!("set COLORTERM=truecolor (auto-detected capable terminal)");
+    }
 }
