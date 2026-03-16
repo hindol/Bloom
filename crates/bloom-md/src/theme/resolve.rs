@@ -2,10 +2,11 @@ use super::palette::{Rgb, ThemePalette};
 use crate::parser::traits::Style;
 
 /// Resolved style properties — UI-agnostic, ready for frontend conversion.
-#[derive(Debug, Clone, Default)]
+/// Both `fg` and `bg` are always set — no cell should inherit terminal defaults.
+#[derive(Debug, Clone)]
 pub struct StyleProps {
-    pub fg: Option<Rgb>,
-    pub bg: Option<Rgb>,
+    pub fg: Rgb,
+    pub bg: Rgb,
     pub bold: bool,
     pub italic: bool,
     pub underline: bool,
@@ -13,231 +14,229 @@ pub struct StyleProps {
     pub strikethrough: bool,
 }
 
+impl StyleProps {
+    /// Base style: palette foreground on palette background, no decorations.
+    fn base(p: &ThemePalette) -> Self {
+        Self {
+            fg: p.foreground,
+            bg: p.background,
+            bold: false,
+            italic: false,
+            underline: false,
+            dim: false,
+            strikethrough: false,
+        }
+    }
+}
+
 /// Resolve a `Style` variant to `StyleProps` using the face mapping table from THEMING.md.
 pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
+    let base = StyleProps::base(p);
     match style {
-        Style::Normal => StyleProps {
-            fg: Some(p.foreground),
-            ..Default::default()
-        },
+        Style::Normal => base,
         Style::Heading { level: 1 } => StyleProps {
-            fg: Some(p.strong),
+            fg: p.strong,
             bold: true,
-            ..Default::default()
+            ..base
         },
         Style::Heading { level: 2 } => StyleProps {
-            fg: Some(p.salient),
+            fg: p.salient,
             bold: true,
-            ..Default::default()
+            ..base
         },
         Style::Heading { .. } => StyleProps {
-            fg: Some(p.foreground),
             bold: true,
-            ..Default::default()
+            ..base
         },
         Style::Bold => StyleProps {
-            fg: Some(p.foreground),
             bold: true,
-            ..Default::default()
+            ..base
         },
         Style::Italic => StyleProps {
-            fg: Some(p.foreground),
             italic: true,
-            ..Default::default()
+            ..base
         },
         Style::Code => StyleProps {
-            fg: Some(p.foreground),
-            bg: Some(p.subtle),
-            ..Default::default()
+            bg: p.subtle,
+            ..base
         },
         Style::CodeBlock => StyleProps {
-            fg: Some(p.foreground),
-            bg: Some(p.subtle),
-            ..Default::default()
+            bg: p.subtle,
+            ..base
         },
         Style::LinkText => StyleProps {
-            fg: Some(p.strong),
-            bg: Some(p.modeline),
+            fg: p.strong,
+            bg: p.modeline,
             underline: true,
-            ..Default::default()
+            ..base
         },
         Style::LinkChrome => StyleProps {
-            fg: Some(p.faded),
+            fg: p.faded,
             dim: true,
-            ..Default::default()
+            ..base
         },
         Style::Tag => StyleProps {
-            fg: Some(p.faded),
-            ..Default::default()
+            fg: p.faded,
+            ..base
         },
         Style::TimestampKeyword => StyleProps {
-            fg: Some(p.faded),
-            ..Default::default()
+            fg: p.faded,
+            ..base
         },
-        Style::TimestampDate => StyleProps {
-            fg: Some(p.foreground),
-            ..Default::default()
-        },
+        Style::TimestampDate => base,
         Style::TimestampOverdue => StyleProps {
-            fg: Some(p.accent_red),
-            ..Default::default()
+            fg: p.accent_red,
+            ..base
         },
         Style::TimestampParens => StyleProps {
-            fg: Some(p.faded),
+            fg: p.faded,
             dim: true,
-            ..Default::default()
+            ..base
         },
         Style::BlockId => StyleProps {
-            fg: Some(p.faded),
+            fg: p.faded,
             dim: true,
-            ..Default::default()
+            ..base
         },
         Style::BlockIdCaret => StyleProps {
-            fg: Some(p.faded),
+            fg: p.faded,
             dim: true,
-            ..Default::default()
+            ..base
         },
-        Style::ListMarker => StyleProps {
-            fg: Some(p.foreground),
-            ..Default::default()
-        },
+        Style::ListMarker => base,
         Style::CheckboxUnchecked => StyleProps {
-            fg: Some(p.accent_yellow),
-            ..Default::default()
+            fg: p.accent_yellow,
+            ..base
         },
         Style::CheckboxChecked => StyleProps {
-            fg: Some(p.accent_green),
+            fg: p.accent_green,
             strikethrough: true,
-            ..Default::default()
+            ..base
         },
         Style::CheckedTaskText => StyleProps {
-            fg: Some(p.faded),
+            fg: p.faded,
             strikethrough: true,
-            ..Default::default()
+            ..base
         },
         Style::Blockquote => StyleProps {
-            fg: Some(p.foreground),
             italic: true,
-            ..Default::default()
+            ..base
         },
         Style::BlockquoteMarker => StyleProps {
-            fg: Some(p.faded),
-            ..Default::default()
+            fg: p.faded,
+            ..base
         },
         Style::TablePipe => StyleProps {
-            fg: Some(p.faded),
-            ..Default::default()
+            fg: p.faded,
+            ..base
         },
         Style::TableAlignmentRow => StyleProps {
-            fg: Some(p.faded),
+            fg: p.faded,
             dim: true,
-            ..Default::default()
+            ..base
         },
         Style::Frontmatter => StyleProps {
-            fg: Some(p.faded),
+            fg: p.faded,
             italic: true,
-            ..Default::default()
+            ..base
         },
         Style::FrontmatterKey => StyleProps {
-            fg: Some(p.faded),
+            fg: p.faded,
             italic: true,
-            ..Default::default()
+            ..base
         },
         Style::FrontmatterTitle => StyleProps {
-            fg: Some(p.foreground),
             bold: true,
             italic: true,
-            ..Default::default()
+            ..base
         },
         Style::FrontmatterId => StyleProps {
-            fg: Some(p.faded),
+            fg: p.faded,
             italic: true,
             dim: true,
-            ..Default::default()
+            ..base
         },
         Style::FrontmatterDate => StyleProps {
-            fg: Some(p.faded),
+            fg: p.faded,
             italic: true,
-            ..Default::default()
+            ..base
         },
         Style::FrontmatterTags => StyleProps {
-            fg: Some(p.faded),
-            ..Default::default()
+            fg: p.faded,
+            ..base
         },
         Style::BrokenLink => StyleProps {
-            fg: Some(p.critical),
+            fg: p.critical,
             strikethrough: true,
-            ..Default::default()
+            ..base
         },
         Style::SyntaxNoise => StyleProps {
-            fg: Some(p.faded),
+            fg: p.faded,
             dim: true,
-            ..Default::default()
+            ..base
         },
         Style::SearchMatch => StyleProps {
-            fg: Some(p.foreground),
-            bg: Some(p.mild),
-            ..Default::default()
+            bg: p.mild,
+            ..base
         },
         Style::SearchMatchCurrent => StyleProps {
-            fg: Some(p.foreground),
-            bg: Some(p.mild),
+            bg: p.mild,
             bold: true,
             underline: true,
-            ..Default::default()
+            ..base
         },
         Style::DiffAdded => StyleProps {
-            fg: Some(p.accent_green),
-            ..Default::default()
+            fg: p.accent_green,
+            ..base
         },
         Style::DiffRemoved => StyleProps {
-            fg: Some(p.accent_red),
+            fg: p.accent_red,
             strikethrough: true,
-            ..Default::default()
+            ..base
         },
     }
 }
 
 /// Resolve status bar style per UI Chrome Mapping in THEMING.md.
 pub fn resolve_status_bar(mode: &str, active: bool, p: &ThemePalette) -> StyleProps {
+    let base = StyleProps::base(p);
     if !active {
         return StyleProps {
-            fg: Some(p.faded),
-            bg: Some(p.subtle),
-            ..Default::default()
+            fg: p.faded,
+            bg: p.subtle,
+            ..base
         };
     }
     match mode {
         "INSERT" => StyleProps {
-            fg: Some(p.background),
-            bg: Some(p.accent_green),
-            ..Default::default()
+            fg: p.background,
+            bg: p.accent_green,
+            ..base
         },
         "VISUAL" => StyleProps {
-            fg: Some(p.background),
-            bg: Some(p.popout),
-            ..Default::default()
+            fg: p.background,
+            bg: p.popout,
+            ..base
         },
         "COMMAND" => StyleProps {
-            fg: Some(p.background),
-            bg: Some(p.accent_blue),
-            ..Default::default()
+            fg: p.background,
+            bg: p.accent_blue,
+            ..base
         },
         "QUERY" => StyleProps {
-            fg: Some(p.background),
-            bg: Some(p.salient),
-            ..Default::default()
+            fg: p.background,
+            bg: p.salient,
+            ..base
         },
         // Temporal modes share accent_yellow (per WINDOW_LAYOUTS.md)
         "JRNL" | "HIST" | "HISTORY" | "DAY" => StyleProps {
-            fg: Some(p.background),
-            bg: Some(p.accent_yellow),
-            ..Default::default()
+            fg: p.background,
+            bg: p.accent_yellow,
+            ..base
         },
         _ => StyleProps {
-            fg: Some(p.foreground),
-            bg: Some(p.highlight),
-            ..Default::default()
+            bg: p.highlight,
+            ..base
         },
     }
 }
@@ -258,44 +257,38 @@ pub enum Chrome {
 
 /// Resolve UI chrome element styles per THEMING.md.
 pub fn resolve_chrome(element: Chrome, p: &ThemePalette) -> StyleProps {
+    let base = StyleProps::base(p);
     match element {
         Chrome::PickerSurface => StyleProps {
-            fg: Some(p.foreground),
-            bg: Some(p.subtle),
-            ..Default::default()
+            bg: p.subtle,
+            ..base
         },
         Chrome::PickerSelected => StyleProps {
-            fg: Some(p.foreground),
-            bg: Some(p.mild),
-            ..Default::default()
+            bg: p.mild,
+            ..base
         },
         Chrome::PickerBorder | Chrome::WindowBorder | Chrome::Faded => StyleProps {
-            fg: Some(p.faded),
-            ..Default::default()
+            fg: p.faded,
+            ..base
         },
-        Chrome::WhichKey => StyleProps {
-            fg: Some(p.foreground),
-            bg: Some(p.background),
-            ..Default::default()
-        },
+        Chrome::WhichKey => base,
         Chrome::CurrentLine => StyleProps {
-            bg: Some(p.highlight),
-            ..Default::default()
+            bg: p.highlight,
+            ..base
         },
         Chrome::NotificationInfo => StyleProps {
-            fg: Some(p.foreground),
-            bg: Some(p.subtle),
-            ..Default::default()
+            bg: p.subtle,
+            ..base
         },
         Chrome::NotificationWarning => StyleProps {
-            fg: Some(p.background),
-            bg: Some(p.accent_yellow),
-            ..Default::default()
+            fg: p.background,
+            bg: p.accent_yellow,
+            ..base
         },
         Chrome::NotificationError => StyleProps {
-            fg: Some(p.background),
-            bg: Some(p.critical),
-            ..Default::default()
+            fg: p.background,
+            bg: p.critical,
+            ..base
         },
     }
 }

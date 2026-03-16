@@ -10,13 +10,7 @@ fn rgb(c: Rgb) -> Color {
 
 /// Convert core `StyleProps` to ratatui `Style`.
 pub fn to_rstyle(props: &StyleProps) -> RStyle {
-    let mut s = RStyle::default();
-    if let Some(fg) = props.fg {
-        s = s.fg(rgb(fg));
-    }
-    if let Some(bg) = props.bg {
-        s = s.bg(rgb(bg));
-    }
+    let mut s = RStyle::default().fg(rgb(props.fg)).bg(rgb(props.bg));
     if props.bold {
         s = s.add_modifier(Modifier::BOLD);
     }
@@ -51,7 +45,7 @@ impl<'a> TuiTheme<'a> {
     pub fn style_for(&self, style: &Style) -> RStyle {
         if matches!(style, Style::Heading { level: 1 }) {
             let mut props = theme::resolve(style, self.palette);
-            props.fg = Some(self.palette.salient);
+            props.fg = self.palette.salient;
             return to_rstyle(&props);
         }
         to_rstyle(&theme::resolve(style, self.palette))

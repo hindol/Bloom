@@ -105,7 +105,12 @@ mod tests {
             ];
             for style in &styles {
                 let props = resolve(style, palette);
-                assert!(props.fg.is_some(), "{name}: {style:?} should have fg");
+                // fg and bg are always set (non-optional) — verify they differ
+                // from zero to catch accidental default construction.
+                assert!(
+                    props.fg.0 != 0 || props.fg.1 != 0 || props.fg.2 != 0,
+                    "{name}: {style:?} should have non-zero fg"
+                );
             }
         }
     }
@@ -121,9 +126,8 @@ mod tests {
     fn test_status_bar_modes() {
         let palette = &BLOOM_DARK;
         for mode in &["NORMAL", "INSERT", "VISUAL", "COMMAND", "QUERY"] {
-            let props = resolve_status_bar(mode, true, palette);
-            assert!(props.fg.is_some());
-            assert!(props.bg.is_some());
+            let _props = resolve_status_bar(mode, true, palette);
+            // fg and bg are always set by type — call succeeding is the assertion
         }
     }
 }
