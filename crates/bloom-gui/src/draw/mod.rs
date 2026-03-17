@@ -7,7 +7,7 @@ pub mod pane;
 use iced::widget::canvas::{self, Frame, Path, Stroke};
 use iced::{Color, Font, Point, Rectangle, Size};
 
-use crate::{CHAR_WIDTH, FONT_SIZE, LINE_HEIGHT};
+use crate::{CHAR_WIDTH, FONT_SIZE, LINE_HEIGHT, TEXT_Y_OFFSET};
 
 pub(crate) fn rect(x: f32, y: f32, width: f32, height: f32) -> Rectangle {
     Rectangle {
@@ -27,10 +27,16 @@ pub(crate) fn inset(area: Rectangle, padding: f32) -> Rectangle {
     }
 }
 
-pub(crate) fn draw_text(frame: &mut Frame, x: f32, y: f32, content: impl Into<String>, color: Color) {
+pub(crate) fn draw_text(
+    frame: &mut Frame,
+    x: f32,
+    y: f32,
+    content: impl Into<String>,
+    color: Color,
+) {
     frame.fill_text(canvas::Text {
         content: content.into(),
-        position: Point::new(x, y),
+        position: Point::new(x, y + TEXT_Y_OFFSET),
         color,
         size: FONT_SIZE.into(),
         font: Font::MONOSPACE,
@@ -45,7 +51,13 @@ pub(crate) fn draw_text_right(
     content: &str,
     color: Color,
 ) {
-    draw_text(frame, (right_x - text_width(content)).max(0.0), y, content, color);
+    draw_text(
+        frame,
+        (right_x - text_width(content)).max(0.0),
+        y,
+        content,
+        color,
+    );
 }
 
 pub(crate) fn draw_text_center(
@@ -60,12 +72,19 @@ pub(crate) fn draw_text_center(
 }
 
 pub(crate) fn fill_rect(frame: &mut Frame, area: Rectangle, color: Color) {
-    frame.fill_rectangle(Point::new(area.x, area.y), Size::new(area.width, area.height), color);
+    frame.fill_rectangle(
+        Point::new(area.x, area.y),
+        Size::new(area.width, area.height),
+        color,
+    );
 }
 
 pub(crate) fn stroke_rect(frame: &mut Frame, area: Rectangle, color: Color) {
     frame.stroke(
-        &Path::rectangle(Point::new(area.x, area.y), Size::new(area.width, area.height)),
+        &Path::rectangle(
+            Point::new(area.x, area.y),
+            Size::new(area.width, area.height),
+        ),
         Stroke::default().with_color(color).with_width(1.0),
     );
 }

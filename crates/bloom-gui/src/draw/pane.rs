@@ -10,9 +10,13 @@ use crate::draw::{
     truncate_text,
 };
 use crate::theme::{rgb_to_color, style_to_color};
-use crate::{CHAR_WIDTH, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT};
+use crate::{CHAR_WIDTH, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, STATUS_BAR_HEIGHT};
 
-pub(crate) fn draw_pane(frame: &mut iced::widget::canvas::Frame, pane: &PaneFrame, theme: &ThemePalette) {
+pub(crate) fn draw_pane(
+    frame: &mut iced::widget::canvas::Frame,
+    pane: &PaneFrame,
+    theme: &ThemePalette,
+) {
     let rect_frame = &pane.rect;
     let pane_x = rect_frame.x as f32 * CHAR_WIDTH;
     let pane_y = rect_frame.y as f32 * LINE_HEIGHT;
@@ -76,7 +80,13 @@ fn draw_editor_content(
                 draw_text(frame, pane_x, y, num_str, gutter_color);
             }
             LineSource::BeyondEof => {
-                draw_text(frame, pane_x + CHAR_WIDTH, y, "~", rgb_to_color(&theme.faded));
+                draw_text(
+                    frame,
+                    pane_x + CHAR_WIDTH,
+                    y,
+                    "~",
+                    rgb_to_color(&theme.faded),
+                );
             }
         }
 
@@ -148,19 +158,22 @@ fn draw_active_status_bar(
     let status_y = pane_y + pane.rect.content_height as f32 * LINE_HEIGHT;
     fill_rect(
         frame,
-        rect(pane_x, status_y, pane_w, LINE_HEIGHT),
+        rect(pane_x, status_y, pane_w, STATUS_BAR_HEIGHT),
         rgb_to_color(&theme.modeline),
     );
 
+    // Center text vertically within the taller status bar.
+    let text_y = status_y + (STATUS_BAR_HEIGHT - LINE_HEIGHT) / 2.0;
+
     match &pane.status_bar.content {
         StatusBarContent::Normal(normal) => {
-            draw_normal_status(frame, pane, normal, theme, pane_x, status_y, pane_w)
+            draw_normal_status(frame, pane, normal, theme, pane_x, text_y, pane_w)
         }
         StatusBarContent::CommandLine(command) => {
-            draw_command_line(frame, command, theme, pane_x, pane_y, pane_w, status_y)
+            draw_command_line(frame, command, theme, pane_x, pane_y, pane_w, text_y)
         }
         StatusBarContent::QuickCapture(capture) => {
-            draw_quick_capture(frame, capture, theme, pane_x, pane_w, status_y)
+            draw_quick_capture(frame, capture, theme, pane_x, pane_w, text_y)
         }
     }
 }
@@ -176,15 +189,16 @@ fn draw_inactive_status_bar(
     let status_y = pane_y + pane.rect.content_height as f32 * LINE_HEIGHT;
     fill_rect(
         frame,
-        rect(pane_x, status_y, pane_w, LINE_HEIGHT),
+        rect(pane_x, status_y, pane_w, STATUS_BAR_HEIGHT),
         rgb_to_color(&theme.subtle),
     );
 
+    let text_y = status_y + (STATUS_BAR_HEIGHT - LINE_HEIGHT) / 2.0;
     let title = truncate_text(&pane.title, chars_that_fit((pane_w - CHAR_WIDTH).max(0.0)));
     draw_text(
         frame,
         pane_x + CHAR_WIDTH / 2.0,
-        status_y,
+        text_y,
         format!(" {title}"),
         rgb_to_color(&theme.faded),
     );
@@ -249,8 +263,17 @@ fn draw_command_line(
     status_y: f32,
 ) {
     let input_max = chars_that_fit((pane_w - CHAR_WIDTH).max(0.0));
-    let prefix = format!(":{}", truncate_text(&command.input, input_max.saturating_sub(1)));
-    draw_text(frame, pane_x, status_y, &prefix, rgb_to_color(&theme.foreground));
+    let prefix = format!(
+        ":{}",
+        truncate_text(&command.input, input_max.saturating_sub(1))
+    );
+    draw_text(
+        frame,
+        pane_x,
+        status_y,
+        &prefix,
+        rgb_to_color(&theme.foreground),
+    );
 
     if let Some(ghost_text) = &command.ghost_text {
         let ghost_x = pane_x + text_width(&prefix);
@@ -328,7 +351,11 @@ fn draw_timeline(
         }
         let selected = index == timeline.selected_index;
         if selected {
-            fill_rect(frame, rect(area.x, y, area.width, LINE_HEIGHT), rgb_to_color(&theme.mild));
+            fill_rect(
+                frame,
+                rect(area.x, y, area.width, LINE_HEIGHT),
+                rgb_to_color(&theme.mild),
+            );
         }
         let header = format!("  {} · {}", entry.date.format("%b %d"), entry.source_title);
         draw_text(
@@ -336,7 +363,11 @@ fn draw_timeline(
             area.x,
             y,
             truncate_text(&header, max_chars),
-            rgb_to_color(if selected { &theme.strong } else { &theme.foreground }),
+            rgb_to_color(if selected {
+                &theme.strong
+            } else {
+                &theme.foreground
+            }),
         );
         row += 1;
 
@@ -369,7 +400,10 @@ fn draw_page_history(
         area.x,
         area.y,
         truncate_text(
-            &format!(" {} — History ({} versions)", history.page_title, history.total_versions),
+            &format!(
+                " {} — History ({} versions)",
+                history.page_title, history.total_versions
+            ),
             max_chars,
         ),
         rgb_to_color(&theme.strong),
@@ -383,7 +417,11 @@ fn draw_page_history(
         }
         let selected = index == history.selected_index;
         if selected {
-            fill_rect(frame, rect(area.x, y, area.width, LINE_HEIGHT), rgb_to_color(&theme.mild));
+            fill_rect(
+                frame,
+                rect(area.x, y, area.width, LINE_HEIGHT),
+                rgb_to_color(&theme.mild),
+            );
         }
 
         let left = format!(" {} {}", if selected { "▸" } else { " " }, entry.date);
@@ -393,14 +431,22 @@ fn draw_page_history(
             area.x,
             y,
             truncate_text(&left, max_chars),
-            rgb_to_color(if selected { &theme.strong } else { &theme.foreground }),
+            rgb_to_color(if selected {
+                &theme.strong
+            } else {
+                &theme.foreground
+            }),
         );
         draw_text_right(
             frame,
             area.x + area.width - CHAR_WIDTH / 2.0,
             y,
             &entry.diff_stat,
-            rgb_to_color(if selected { &theme.foreground } else { &theme.faded }),
+            rgb_to_color(if selected {
+                &theme.foreground
+            } else {
+                &theme.faded
+            }),
         );
 
         let desc_y = area.y + (row + 1) as f32 * LINE_HEIGHT;
@@ -413,7 +459,11 @@ fn draw_page_history(
             area.x,
             desc_y,
             truncate_text(&format!("     {}", entry.description), desc_max),
-            rgb_to_color(if selected { &theme.foreground } else { &theme.faded }),
+            rgb_to_color(if selected {
+                &theme.foreground
+            } else {
+                &theme.faded
+            }),
         );
         row += 3;
     }
@@ -435,7 +485,11 @@ fn draw_undo_tree(
         }
         let selected = node.id == undo_tree.selected;
         if selected {
-            fill_rect(frame, rect(area.x, y, area.width, LINE_HEIGHT), rgb_to_color(&theme.mild));
+            fill_rect(
+                frame,
+                rect(area.x, y, area.width, LINE_HEIGHT),
+                rgb_to_color(&theme.mild),
+            );
         }
         let indent = "  ".repeat(node.depth);
         let marker = if node.is_current { "●" } else { "○" };
@@ -447,7 +501,13 @@ fn draw_undo_tree(
         } else {
             &theme.foreground
         };
-        draw_text(frame, area.x, y, truncate_text(&line, max_chars), rgb_to_color(color));
+        draw_text(
+            frame,
+            area.x,
+            y,
+            truncate_text(&line, max_chars),
+            rgb_to_color(color),
+        );
         row += 1;
     }
 

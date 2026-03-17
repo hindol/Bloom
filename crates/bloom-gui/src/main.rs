@@ -12,16 +12,20 @@ use bloom_core::render::RenderFrame;
 use bloom_core::BloomEditor;
 use bloom_md::theme::{ThemePalette, BLOOM_DARK};
 use crossbeam::channel::{Receiver, Sender};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use iced::widget::canvas::{Cache, Canvas};
 use iced::{keyboard, window, Element, Length, Size, Subscription, Task};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use crate::canvas::EditorCanvas;
 use crate::keys::convert_key;
 
-pub(crate) const FONT_SIZE: f32 = 14.0;
-pub(crate) const LINE_HEIGHT: f32 = FONT_SIZE * 1.6;
+pub(crate) const FONT_SIZE: f32 = 13.0;
+pub(crate) const LINE_HEIGHT: f32 = FONT_SIZE * 1.4;
+/// Vertical offset to center text within a LINE_HEIGHT row.
+pub(crate) const TEXT_Y_OFFSET: f32 = (LINE_HEIGHT - FONT_SIZE) / 2.0;
+/// Status bar is taller than content lines for visual prominence.
+pub(crate) const STATUS_BAR_HEIGHT: f32 = LINE_HEIGHT * 1.35;
 pub(crate) const CHAR_WIDTH: f32 = FONT_SIZE * 0.6;
 pub(crate) const GUTTER_CHARS: usize = 5;
 pub(crate) const GUTTER_WIDTH: f32 = GUTTER_CHARS as f32 * CHAR_WIDTH;
@@ -133,7 +137,12 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
             state.canvas_cache.clear();
         }
         Message::KeyboardEvent(event) => {
-            if let keyboard::Event::KeyPressed { modified_key, modifiers, .. } = event {
+            if let keyboard::Event::KeyPressed {
+                modified_key,
+                modifiers,
+                ..
+            } = event
+            {
                 if let Some(key_event) = convert_key(modified_key, modifiers) {
                     let _ = state.frontend_tx.send(FrontendEvent::Key(key_event));
                 }

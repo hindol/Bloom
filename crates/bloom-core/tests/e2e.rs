@@ -3,7 +3,7 @@
 //! Each test drives BloomEditor through key sequences and asserts on the
 //! visual output. No terminal, no GUI — runs in CI.
 
-use bloom_test_harness::{SimInput, TestVault, linked_vault, task_vault, tagged_vault};
+use bloom_test_harness::{linked_vault, tagged_vault, task_vault, SimInput, TestVault};
 
 // -----------------------------------------------------------------------
 // UC-01: Open today's journal
@@ -44,7 +44,10 @@ fn uc08_find_page_opens_picker() {
     sim.keys("SPC f f");
     let screen = sim.screen(80, 24);
     assert!(screen.has_picker(), "picker should be open after SPC f f");
-    assert!(screen.picker_results().len() >= 2, "should show at least 2 pages");
+    assert!(
+        screen.picker_results().len() >= 2,
+        "should show at least 2 pages"
+    );
 
     // Close picker
     sim.keys("<Esc>");
@@ -61,7 +64,11 @@ fn uc14_insert_mode_typing() {
     let mut sim = SimInput::with_content("");
 
     let screen = sim.screen(80, 24);
-    assert!(screen.mode() == "NORMAL" || screen.mode() == "JRNL", "expected NORMAL or JRNL, got {}", screen.mode());
+    assert!(
+        screen.mode() == "NORMAL" || screen.mode() == "JRNL",
+        "expected NORMAL or JRNL, got {}",
+        screen.mode()
+    );
 
     // Enter insert mode, type text
     sim.keys("i");
@@ -72,7 +79,11 @@ fn uc14_insert_mode_typing() {
     sim.keys("<Esc>");
 
     let screen = sim.screen(80, 24);
-    assert!(screen.mode() == "NORMAL" || screen.mode() == "JRNL", "expected NORMAL or JRNL, got {}", screen.mode());
+    assert!(
+        screen.mode() == "NORMAL" || screen.mode() == "JRNL",
+        "expected NORMAL or JRNL, got {}",
+        screen.mode()
+    );
     assert_eq!(sim.buffer_text(), "Hello world");
 }
 
@@ -109,7 +120,9 @@ fn cursor_does_not_wrap_to_line_zero() {
         assert!(
             line >= last.saturating_sub(1),
             "after {}x j from line {}, cursor jumped to line {}",
-            i + 1, last, line,
+            i + 1,
+            last,
+            line,
         );
     }
 
@@ -158,7 +171,8 @@ fn cursor_does_not_wrap_with_vault_page() {
     assert!(
         line > 0 || last == 0,
         "cursor should not wrap to 0, got line {} (last was {})",
-        line, last,
+        line,
+        last,
     );
 }
 
@@ -174,7 +188,10 @@ fn cursor_does_not_go_past_eof_no_trailing_newline() {
         sim.keys("j");
     }
     let after = sim.screen(80, 24).cursor().0;
-    assert_eq!(after, last_line, "cursor should stay on last line without trailing newline");
+    assert_eq!(
+        after, last_line,
+        "cursor should stay on last line without trailing newline"
+    );
 }
 
 #[test]
@@ -186,7 +203,11 @@ fn cursor_does_not_go_past_eof_single_line() {
     for _ in 0..5 {
         sim.keys("j");
     }
-    assert_eq!(sim.screen(80, 24).cursor().0, 0, "single line: j should be no-op");
+    assert_eq!(
+        sim.screen(80, 24).cursor().0,
+        0,
+        "single line: j should be no-op"
+    );
 }
 
 #[test]
@@ -245,7 +266,10 @@ fn uc15_d_dollar_deletes_to_eol() {
 
     let text = sim.buffer_text();
     assert!(text.contains("delete "), "should keep 'delete '");
-    assert!(!text.contains("here to end"), "should delete 'from here to end'");
+    assert!(
+        !text.contains("here to end"),
+        "should delete 'from here to end'"
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -264,10 +288,17 @@ fn uc17_visual_select_and_delete() {
     sim.keys("d"); // delete selection
 
     let screen = sim.screen(80, 24);
-    assert!(screen.mode() == "NORMAL" || screen.mode() == "JRNL", "expected NORMAL or JRNL, got {}", screen.mode());
+    assert!(
+        screen.mode() == "NORMAL" || screen.mode() == "JRNL",
+        "expected NORMAL or JRNL, got {}",
+        screen.mode()
+    );
     // "hello" should be deleted
     let text = sim.buffer_text();
-    assert!(!text.starts_with("hello"), "selection should be deleted: '{text}'");
+    assert!(
+        !text.starts_with("hello"),
+        "selection should be deleted: '{text}'"
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -307,7 +338,11 @@ fn uc20_command_mode() {
 
     sim.keys("<Esc>");
     let screen = sim.screen(80, 24);
-    assert!(screen.mode() == "NORMAL" || screen.mode() == "JRNL", "expected NORMAL or JRNL, got {}", screen.mode());
+    assert!(
+        screen.mode() == "NORMAL" || screen.mode() == "JRNL",
+        "expected NORMAL or JRNL, got {}",
+        screen.mode()
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -324,7 +359,11 @@ fn uc23_dot_repeat() {
 
     // Dot repeat — should delete next word
     sim.keys(".");
-    assert_eq!(sim.buffer_text(), "ccc\n", "dot repeat should delete next word");
+    assert_eq!(
+        sim.buffer_text(),
+        "ccc\n",
+        "dot repeat should delete next word"
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -430,7 +469,10 @@ fn open_line_below() {
     sim.keys("<Esc>");
 
     let text = sim.buffer_text();
-    assert!(text.contains("line one\nnew line\nline two"), "o should insert below: '{text}'");
+    assert!(
+        text.contains("line one\nnew line\nline two"),
+        "o should insert below: '{text}'"
+    );
 }
 
 #[test]
@@ -443,7 +485,10 @@ fn open_line_above() {
     sim.keys("<Esc>");
 
     let text = sim.buffer_text();
-    assert!(text.contains("line one\ninserted\nline two"), "O should insert above: '{text}'");
+    assert!(
+        text.contains("line one\ninserted\nline two"),
+        "O should insert above: '{text}'"
+    );
 }
 
 #[test]
@@ -490,7 +535,11 @@ fn uc02_quick_capture_journal_append() {
     sim.keys("SPC j a");
     let screen = sim.screen(80, 24);
     // Quick capture shows in the status bar content area
-    assert!(screen.mode() == "NORMAL" || screen.mode() == "JRNL", "expected NORMAL or JRNL, got {}", screen.mode()); // mode stays normal, capture is an overlay
+    assert!(
+        screen.mode() == "NORMAL" || screen.mode() == "JRNL",
+        "expected NORMAL or JRNL, got {}",
+        screen.mode()
+    ); // mode stays normal, capture is an overlay
 }
 
 // -----------------------------------------------------------------------
@@ -578,7 +627,10 @@ fn uc12_close_buffer() {
 
     // After close, a new buffer should be open (journal or scratch)
     let screen = sim.screen(80, 24);
-    assert!(screen.title().len() > 0, "new buffer should be open after close");
+    assert!(
+        screen.title().len() > 0,
+        "new buffer should be open after close"
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -593,7 +645,10 @@ fn uc16_delete_inside_word() {
     sim.keys("diw"); // delete inner word
 
     let text = sim.buffer_text();
-    assert!(!text.contains("world"), "diw should delete 'world': '{text}'");
+    assert!(
+        !text.contains("world"),
+        "diw should delete 'world': '{text}'"
+    );
     assert!(text.contains("hello"), "should keep 'hello'");
 }
 
@@ -607,7 +662,10 @@ fn uc16_change_inner_word() {
     sim.keys("<Esc>");
 
     let text = sim.buffer_text();
-    assert!(text.contains("QUX"), "ciw should replace 'bar' with 'QUX': '{text}'");
+    assert!(
+        text.contains("QUX"),
+        "ciw should replace 'bar' with 'QUX': '{text}'"
+    );
     assert!(!text.contains("bar"), "original word should be gone");
 }
 
@@ -640,7 +698,10 @@ fn uc21_dd_yank_line_and_paste() {
 
     sim.keys("p"); // paste below
     let text = sim.buffer_text();
-    assert!(text.contains("line one"), "p should paste the deleted line back: '{text}'");
+    assert!(
+        text.contains("line one"),
+        "p should paste the deleted line back: '{text}'"
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -658,12 +719,18 @@ fn uc22_macro_record_replay() {
 
     // First dd should work
     let text = sim.buffer_text();
-    assert!(!text.contains("aaa"), "first dd should remove aaa: '{text}'");
+    assert!(
+        !text.contains("aaa"),
+        "first dd should remove aaa: '{text}'"
+    );
 
     // Replay
     sim.keys("@a");
     let text = sim.buffer_text();
-    assert!(!text.contains("bbb"), "macro replay should remove bbb: '{text}'");
+    assert!(
+        !text.contains("bbb"),
+        "macro replay should remove bbb: '{text}'"
+    );
     assert!(text.contains("ccc"), "ccc should remain: '{text}'");
 }
 
@@ -722,7 +789,11 @@ fn uc56_close_window() {
 
     // Close one
     sim.keys("SPC w d");
-    assert_eq!(sim.screen(80, 24).pane_count(), 1, "close should remove a pane");
+    assert_eq!(
+        sim.screen(80, 24).pane_count(),
+        1,
+        "close should remove a pane"
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -749,7 +820,10 @@ fn vim_change_word() {
     sim.keys("<Esc>");
 
     let text = sim.buffer_text();
-    assert!(text.starts_with("new"), "cw should replace first word: '{text}'");
+    assert!(
+        text.starts_with("new"),
+        "cw should replace first word: '{text}'"
+    );
     assert!(!text.contains("old"), "old word should be gone");
 }
 
@@ -848,7 +922,11 @@ fn uc90_ctrl_s_saves() {
     sim.keys("C-s");
     // Should not crash
     let screen = sim.screen(80, 24);
-    assert!(screen.mode() == "NORMAL" || screen.mode() == "JRNL", "expected NORMAL or JRNL, got {}", screen.mode());
+    assert!(
+        screen.mode() == "NORMAL" || screen.mode() == "JRNL",
+        "expected NORMAL or JRNL, got {}",
+        screen.mode()
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -864,7 +942,10 @@ fn enter_creates_newline_in_insert() {
     sim.keys("<Esc>");
 
     let text = sim.buffer_text();
-    assert!(text.contains('\n'), "Enter in Insert mode should create newline: '{text}'");
+    assert!(
+        text.contains('\n'),
+        "Enter in Insert mode should create newline: '{text}'"
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -934,8 +1015,14 @@ fn vim_D_delete_to_eol() {
     sim.keys("w"); // move to 'world'
     sim.keys("D");
     let text = sim.buffer_text();
-    assert!(text.starts_with("hello"), "D should keep text before cursor: '{text}'");
-    assert!(!text.contains("world"), "D should delete to end of line: '{text}'");
+    assert!(
+        text.starts_with("hello"),
+        "D should keep text before cursor: '{text}'"
+    );
+    assert!(
+        !text.contains("world"),
+        "D should delete to end of line: '{text}'"
+    );
 }
 
 #[test]
@@ -947,7 +1034,10 @@ fn vim_C_change_to_eol() {
     sim.type_text("rust");
     sim.keys("<Esc>");
     let text = sim.buffer_text();
-    assert!(text.contains("hello rust"), "C should change to EOL: '{text}'");
+    assert!(
+        text.contains("hello rust"),
+        "C should change to EOL: '{text}'"
+    );
 }
 
 #[test]
@@ -955,8 +1045,14 @@ fn vim_dd_delete_line() {
     let mut sim = SimInput::with_content("line one\nline two\nline three\n");
     sim.keys("dd");
     let text = sim.buffer_text();
-    assert!(!text.contains("line one"), "dd should delete first line: '{text}'");
-    assert!(text.starts_with("line two"), "remaining lines should shift up: '{text}'");
+    assert!(
+        !text.contains("line one"),
+        "dd should delete first line: '{text}'"
+    );
+    assert!(
+        text.starts_with("line two"),
+        "remaining lines should shift up: '{text}'"
+    );
 }
 
 #[test]
@@ -966,9 +1062,18 @@ fn vim_cc_change_line() {
     sim.type_text("new line");
     sim.keys("<Esc>");
     let text = sim.buffer_text();
-    assert!(text.contains("new line"), "cc should replace line content: '{text}'");
-    assert!(!text.contains("old line"), "old content should be gone: '{text}'");
-    assert!(text.contains("second"), "other lines should remain: '{text}'");
+    assert!(
+        text.contains("new line"),
+        "cc should replace line content: '{text}'"
+    );
+    assert!(
+        !text.contains("old line"),
+        "old content should be gone: '{text}'"
+    );
+    assert!(
+        text.contains("second"),
+        "other lines should remain: '{text}'"
+    );
 }
 
 #[test]
@@ -1032,9 +1137,15 @@ fn vim_visual_line_mode() {
     sim.keys("j"); // extend selection
     sim.keys("d"); // delete selected lines
     let text = sim.buffer_text();
-    assert!(!text.contains("line one"), "V + j + d should delete 2 lines");
+    assert!(
+        !text.contains("line one"),
+        "V + j + d should delete 2 lines"
+    );
     assert!(!text.contains("line two"), "both selected lines deleted");
-    assert!(text.contains("line three"), "unselected line remains: '{text}'");
+    assert!(
+        text.contains("line three"),
+        "unselected line remains: '{text}'"
+    );
 }
 
 // =======================================================================
@@ -1062,7 +1173,10 @@ fn uc52_horizontal_split() {
     let mut sim = SimInput::with_content("hello");
     sim.keys("SPC w s"); // horizontal split
     let screen = sim.screen(80, 24);
-    assert!(screen.pane_count() >= 2, "SPC w s should create horizontal split");
+    assert!(
+        screen.pane_count() >= 2,
+        "SPC w s should create horizontal split"
+    );
 }
 
 // =======================================================================
@@ -1123,7 +1237,9 @@ fn uc37_search_finds_content() {
     // Search should find the Rust Notes page
     let results = screen.picker_results();
     assert!(
-        results.iter().any(|r| r.to_lowercase().contains("memory") || r.to_lowercase().contains("rust")),
+        results
+            .iter()
+            .any(|r| r.to_lowercase().contains("memory") || r.to_lowercase().contains("rust")),
         "search for 'memory' should find results: {:?}",
         results
     );
@@ -1167,7 +1283,11 @@ fn uc76_rebuild_index_via_command() {
 
     // Should not crash, should return to normal mode
     let screen = sim.screen(80, 24);
-    assert!(screen.mode() == "NORMAL" || screen.mode() == "JRNL", "expected NORMAL or JRNL, got {}", screen.mode());
+    assert!(
+        screen.mode() == "NORMAL" || screen.mode() == "JRNL",
+        "expected NORMAL or JRNL, got {}",
+        screen.mode()
+    );
 }
 
 #[test]
@@ -1181,7 +1301,11 @@ fn ex_command_theme_switch() {
 
     // Should cycle theme without crashing
     let screen = sim.screen(80, 24);
-    assert!(screen.mode() == "NORMAL" || screen.mode() == "JRNL", "expected NORMAL or JRNL, got {}", screen.mode());
+    assert!(
+        screen.mode() == "NORMAL" || screen.mode() == "JRNL",
+        "expected NORMAL or JRNL, got {}",
+        screen.mode()
+    );
 }
 
 // Regression: entering Command mode (:) must not hide the status bar.
@@ -1413,7 +1537,10 @@ fn linked_vault_unlinked_mentions() {
 
     sim.keys("SPC s u");
     let screen = sim.screen(80, 24);
-    assert!(screen.has_picker(), "SPC s u should open unlinked mentions picker");
+    assert!(
+        screen.has_picker(),
+        "SPC s u should open unlinked mentions picker"
+    );
     sim.keys("<Esc>");
 }
 
@@ -1428,7 +1555,10 @@ fn task_vault_find_pages() {
 
     sim.keys("SPC f f");
     let screen = sim.screen(80, 24);
-    assert!(screen.picker_results().len() >= 2, "should have at least 2 pages");
+    assert!(
+        screen.picker_results().len() >= 2,
+        "should have at least 2 pages"
+    );
     sim.keys("<Esc>");
 }
 
@@ -1442,7 +1572,10 @@ fn task_vault_open_project_a() {
     sim.keys("Enter");
 
     let text = sim.buffer_text();
-    assert!(text.contains("- [ ] Review the API"), "should have unchecked task");
+    assert!(
+        text.contains("- [ ] Review the API"),
+        "should have unchecked task"
+    );
     assert!(text.contains("- [x] Set up CI"), "should have checked task");
 }
 
@@ -1465,7 +1598,10 @@ fn task_vault_agenda_opens() {
 
     sim.keys("SPC a a");
     let screen = sim.screen(80, 24);
-    assert!(screen.title().len() > 0 || screen.has_picker(), "agenda should open");
+    assert!(
+        screen.title().len() > 0 || screen.has_picker(),
+        "agenda should open"
+    );
 }
 
 #[test]
@@ -1478,14 +1614,22 @@ fn task_vault_toggle_task() {
     sim.keys("Enter");
 
     let text = sim.buffer_text();
-    let task_line = text.lines().position(|l| l.contains("- [ ] Review")).unwrap_or(0);
-    for _ in 0..task_line { sim.keys("j"); }
+    let task_line = text
+        .lines()
+        .position(|l| l.contains("- [ ] Review"))
+        .unwrap_or(0);
+    for _ in 0..task_line {
+        sim.keys("j");
+    }
     sim.keys("3l");
     sim.keys("r");
     sim.type_text("x");
 
     let text = sim.buffer_text();
-    assert!(text.contains("- [x] Review the API"), "task should be toggled");
+    assert!(
+        text.contains("- [x] Review the API"),
+        "task should be toggled"
+    );
 }
 
 // =======================================================================
@@ -1509,7 +1653,10 @@ fn tagged_vault_find_all_pages() {
     let mut sim = SimInput::with_vault(vault);
 
     sim.keys("SPC f f");
-    assert!(sim.screen(80, 24).picker_results().len() >= 4, "should show 4 pages");
+    assert!(
+        sim.screen(80, 24).picker_results().len() >= 4,
+        "should show 4 pages"
+    );
     sim.keys("<Esc>");
 }
 
@@ -1522,7 +1669,10 @@ fn tagged_vault_open_meeting_notes() {
     sim.type_text("Meeting");
     sim.keys("Enter");
 
-    assert!(sim.buffer_text().contains("Discussed Rust"), "should load content");
+    assert!(
+        sim.buffer_text().contains("Discussed Rust"),
+        "should load content"
+    );
 }
 
 // =======================================================================
@@ -1659,7 +1809,10 @@ fn jr05_day_hopping_skips_empty() {
     sim.type_text("[d");
     let prev_title = sim.screen(80, 24).title().to_string();
 
-    assert_ne!(today_title, prev_title, "should navigate to a different day");
+    assert_ne!(
+        today_title, prev_title,
+        "should navigate to a different day"
+    );
     assert!(
         prev_title.contains("2026-03-05"),
         "should skip to March 5 (only existing journal), got: '{}'",
@@ -1757,7 +1910,10 @@ fn jr10_spc_j_c_opens_calendar() {
     sim.keys("SPC j c");
 
     let screen = sim.screen(80, 24);
-    assert!(screen.has_date_picker(), "SPC j c should open journal calendar");
+    assert!(
+        screen.has_date_picker(),
+        "SPC j c should open journal calendar"
+    );
 }
 
 // JR-11: Calendar closes on Escape
@@ -1770,7 +1926,10 @@ fn jr11_calendar_closes_on_escape() {
     assert!(sim.screen(80, 24).has_date_picker());
 
     sim.keys("<Esc>");
-    assert!(!sim.screen(80, 24).has_date_picker(), "Esc should close calendar");
+    assert!(
+        !sim.screen(80, 24).has_date_picker(),
+        "Esc should close calendar"
+    );
 }
 
 // JR-12: Quick capture appends to journal (smoke test)
@@ -1789,7 +1948,11 @@ fn jr12_quick_capture_smoke() {
     // Should return to normal (not have quick capture open)
     let screen = sim.screen(80, 24);
     // If journal was written successfully, we should see a notification
-    assert_ne!(screen.mode(), "COMMAND", "should return to normal after quick capture");
+    assert_ne!(
+        screen.mode(),
+        "COMMAND",
+        "should return to normal after quick capture"
+    );
 }
 
 // Regression: auto-align should align @due timestamps in task blocks on Esc
@@ -1800,8 +1963,8 @@ fn auto_align_tasks_on_esc() {
 
     // Open a page and enter insert mode
     sim.keys("SPC p p");
-    sim.keys("Enter");  // open the page
-    // Go to end of file and enter insert mode
+    sim.keys("Enter"); // open the page
+                       // Go to end of file and enter insert mode
     sim.keys("G");
     sim.keys("o"); // open new line below in Insert mode
 
@@ -1820,17 +1983,17 @@ fn auto_align_tasks_on_esc() {
     let task_lines: Vec<&str> = text.lines().filter(|l| l.contains("@due")).collect();
 
     if task_lines.len() >= 2 {
-        let positions: Vec<usize> = task_lines
-            .iter()
-            .filter_map(|l| l.find("@due"))
-            .collect();
+        let positions: Vec<usize> = task_lines.iter().filter_map(|l| l.find("@due")).collect();
         // All @due should be at the same column
         let first = positions[0];
         for (i, pos) in positions.iter().enumerate() {
             assert_eq!(
-                *pos, first,
+                *pos,
+                first,
                 "line {} has @due at col {} but expected col {} — alignment failed.\nLines:\n{}",
-                i, pos, first,
+                i,
+                pos,
+                first,
                 task_lines.join("\n")
             );
         }
@@ -1854,7 +2017,11 @@ fn lv01_query_prompt_opens() {
     let screen = sim.screen(80, 24);
     // The view frame may or may not be present in overlay mode
     // but the editor should accept input
-    assert!(screen.mode() == "NORMAL" || screen.mode() == "JRNL", "expected NORMAL or JRNL, got {}", screen.mode());
+    assert!(
+        screen.mode() == "NORMAL" || screen.mode() == "JRNL",
+        "expected NORMAL or JRNL, got {}",
+        screen.mode()
+    );
 }
 
 // LV-02: SPC a a opens the Agenda view as a read-only buffer
@@ -1880,7 +2047,11 @@ fn lv03_view_closes_on_kill() {
     assert_eq!(sim.screen(80, 24).title(), "Agenda");
 
     sim.keys("SPC b k");
-    assert_ne!(sim.screen(80, 24).title(), "Agenda", "SPC b k should kill the view buffer");
+    assert_ne!(
+        sim.screen(80, 24).title(),
+        "Agenda",
+        "SPC b k should kill the view buffer"
+    );
 }
 
 // LV-04: View closes via SPC b d (like any buffer)
@@ -1893,7 +2064,11 @@ fn lv04_view_closes_on_bd() {
     assert_eq!(sim.screen(80, 24).title(), "Agenda");
 
     sim.keys("SPC b k");
-    assert_ne!(sim.screen(80, 24).title(), "Agenda", "SPC b k should close the view buffer");
+    assert_ne!(
+        sim.screen(80, 24).title(),
+        "Agenda",
+        "SPC b k should close the view buffer"
+    );
 }
 
 // LV-05: SPC v l opens the views list picker
@@ -1905,7 +2080,10 @@ fn lv05_view_list_opens_picker() {
     sim.keys("SPC v l");
 
     let screen = sim.screen(80, 24);
-    assert!(screen.has_picker(), "SPC v l should open a picker of saved views");
+    assert!(
+        screen.has_picker(),
+        "SPC v l should open a picker of saved views"
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -1944,7 +2122,11 @@ fn ex_q_multi_pane_closes_pane() {
     sim.keys(":");
     sim.type_text("q");
     sim.keys("Enter");
-    assert_eq!(sim.screen(80, 24).pane_count(), 1, ":q should close the pane");
+    assert_eq!(
+        sim.screen(80, 24).pane_count(),
+        1,
+        ":q should close the pane"
+    );
 }
 
 // :qa always quits regardless of buffer count
@@ -1965,10 +2147,7 @@ fn ex_qa_always_quits() {
 // SPC b d closes buffer
 #[test]
 fn spc_bd_closes_buffer() {
-    let vault = TestVault::new()
-        .page("Page A")
-        .page("Page B")
-        .build();
+    let vault = TestVault::new().page("Page A").page("Page B").build();
     let mut sim = SimInput::with_vault(vault);
 
     // Open two pages
@@ -1981,7 +2160,11 @@ fn spc_bd_closes_buffer() {
 
     // SPC b d closes current
     sim.keys("SPC b k");
-    assert_ne!(sim.screen(80, 24).title(), title, "SPC b k should close the buffer");
+    assert_ne!(
+        sim.screen(80, 24).title(),
+        title,
+        "SPC b k should close the buffer"
+    );
 }
 
 // View buffer navigation works (j/k)
@@ -2034,7 +2217,9 @@ fn agenda_cursor_moves_with_j() {
         assert!(
             line1 > line0,
             "j should move cursor down in agenda (before={}, after={})\nlines: {}",
-            line0, line1, lines,
+            line0,
+            line1,
+            lines,
         );
     }
 }
@@ -2064,7 +2249,8 @@ fn vim_o_at_eof_with_trailing_newline() {
     assert!(
         line_after > line_before,
         "cursor should move to the new line below (before={}, after={})",
-        line_before, line_after,
+        line_before,
+        line_after,
     );
 }
 
@@ -2088,7 +2274,11 @@ fn agenda_toggle_task() {
 
     // The view should have refreshed
     let screen = sim.screen(80, 24);
-    assert_eq!(screen.title(), "Agenda", "should still be in Agenda after toggle");
+    assert_eq!(
+        screen.title(),
+        "Agenda",
+        "should still be in Agenda after toggle"
+    );
 }
 
 // =======================================================================
@@ -2108,7 +2298,10 @@ fn index_is_fully_derivable() {
 
     // Verify initial state: pages picker works
     sim.keys("SPC p p");
-    assert!(sim.screen(80, 24).has_picker(), "pages picker should open initially");
+    assert!(
+        sim.screen(80, 24).has_picker(),
+        "pages picker should open initially"
+    );
     sim.keys("<Esc>");
 
     // Delete the index directory completely
@@ -2163,8 +2356,16 @@ fn mirror_marker_parsed_and_indexed() {
     sim.keys("Enter");
 
     let text = sim.buffer_text();
-    assert!(text.contains("^=k7m2x"), "^= marker should be preserved in buffer: {}", text);
-    assert!(text.contains("^abc01"), "solo block ID should be preserved: {}", text);
+    assert!(
+        text.contains("^=k7m2x"),
+        "^= marker should be preserved in buffer: {}",
+        text
+    );
+    assert!(
+        text.contains("^abc01"),
+        "solo block ID should be preserved: {}",
+        text
+    );
 }
 
 // =======================================================================
@@ -2219,7 +2420,10 @@ fn retired_ids_recovered_from_broken_links() {
     // We can't directly query retired_block_ids from e2e, but we can
     // verify the index rebuilt correctly
     sim.keys("SPC p p");
-    assert!(sim.screen(80, 24).has_picker(), "pages picker works after retirement");
+    assert!(
+        sim.screen(80, 24).has_picker(),
+        "pages picker works after retirement"
+    );
 }
 
 // =======================================================================
@@ -2237,7 +2441,11 @@ fn undo_reverts_insert_session() {
 
     // One undo should revert the entire insert session
     sim.keys("u");
-    assert_eq!(sim.buffer_text().trim(), "hello", "u should undo entire insert session");
+    assert_eq!(
+        sim.buffer_text().trim(),
+        "hello",
+        "u should undo entire insert session"
+    );
 }
 
 #[test]
@@ -2252,7 +2460,10 @@ fn undo_redo_round_trip() {
     assert_eq!(sim.buffer_text().trim(), "original", "undo should revert");
 
     sim.keys("C-r");
-    assert!(sim.buffer_text().contains("original added"), "redo should restore");
+    assert!(
+        sim.buffer_text().contains("original added"),
+        "redo should restore"
+    );
 }
 
 #[test]
@@ -2272,11 +2483,19 @@ fn undo_multiple_insert_sessions() {
 
     // First undo → reverts "bbb"
     sim.keys("u");
-    assert_eq!(sim.buffer_text().trim(), "aaa", "first u should undo second session");
+    assert_eq!(
+        sim.buffer_text().trim(),
+        "aaa",
+        "first u should undo second session"
+    );
 
     // Second undo → reverts "aaa"
     sim.keys("u");
-    assert_eq!(sim.buffer_text().trim(), "", "second u should undo first session");
+    assert_eq!(
+        sim.buffer_text().trim(),
+        "",
+        "second u should undo first session"
+    );
 }
 
 #[test]
@@ -2284,10 +2503,16 @@ fn undo_delete_line() {
     let mut sim = SimInput::with_content("line one\nline two\nline three");
     // dd deletes "line one"
     sim.keys("dd");
-    assert!(!sim.buffer_text().contains("line one"), "dd should delete first line");
+    assert!(
+        !sim.buffer_text().contains("line one"),
+        "dd should delete first line"
+    );
 
     sim.keys("u");
-    assert!(sim.buffer_text().contains("line one"), "u should restore deleted line");
+    assert!(
+        sim.buffer_text().contains("line one"),
+        "u should restore deleted line"
+    );
 }
 
 #[test]
@@ -2330,12 +2555,19 @@ fn mirror_propagation_two_panes() {
     // After indexing, verify both files still have ^=mir01 (not double-assigned)
     let source = std::fs::read_to_string(vault_root.join("pages/source.md")).unwrap();
     let mirror = std::fs::read_to_string(vault_root.join("pages/mirror.md")).unwrap();
-    assert!(source.contains("^=mir01"), "Source should have ^=mir01 after indexing");
-    assert!(mirror.contains("^=mir01"), "Mirror should have ^=mir01 after indexing");
+    assert!(
+        source.contains("^=mir01"),
+        "Source should have ^=mir01 after indexing"
+    );
+    assert!(
+        mirror.contains("^=mir01"),
+        "Mirror should have ^=mir01 after indexing"
+    );
     // No double block IDs
     let source_task_line = source.lines().find(|l| l.contains("original")).unwrap();
     assert_eq!(
-        source_task_line.matches(" ^").count(), 1,
+        source_task_line.matches(" ^").count(),
+        1,
         "Source task should have exactly one block ID, got: {}",
         source_task_line
     );
@@ -2359,7 +2591,11 @@ fn cursor_after_dd_middle_line() {
 
     let (line_after, _) = sim.screen(80, 24).cursor();
     assert_eq!(line_after, 1, "cursor should stay on line 1 (now ccc)");
-    assert_eq!(sim.screen(80, 24).line_text(1), "ccc", "line 1 should now be ccc");
+    assert_eq!(
+        sim.screen(80, 24).line_text(1),
+        "ccc",
+        "line 1 should now be ccc"
+    );
 }
 
 // dd on last line → cursor moves up to new last line
@@ -2388,7 +2624,11 @@ fn cursor_after_dd_first_line() {
 
     let (line_after, _) = sim.screen(80, 24).cursor();
     assert_eq!(line_after, 0, "cursor should be on line 0");
-    assert_eq!(sim.screen(80, 24).line_text(0), "bbb", "line 0 should now be bbb");
+    assert_eq!(
+        sim.screen(80, 24).line_text(0),
+        "bbb",
+        "line 0 should now be bbb"
+    );
 }
 
 // dd on only line → cursor stays on line 0 with empty content
@@ -2411,7 +2651,11 @@ fn cursor_after_big_d() {
     assert!(!text.contains("world"), "world should be deleted");
     let (line, col) = sim.screen(80, 24).cursor();
     assert_eq!(line, 0, "cursor on line 0");
-    assert!(col <= 5, "cursor should be at or before end of 'hello', got col {}", col);
+    assert!(
+        col <= 5,
+        "cursor should be at or before end of 'hello', got col {}",
+        col
+    );
 }
 
 // x on last char of line → cursor moves left
@@ -2434,7 +2678,10 @@ fn cursor_after_open_below() {
     sim.keys("o"); // open line below, enters Insert
     sim.keys("<Esc>");
     let (line, _) = sim.screen(80, 24).cursor();
-    assert_eq!(line, 1, "cursor should be on new line 1 (between aaa and bbb)");
+    assert_eq!(
+        line, 1,
+        "cursor should be on new line 1 (between aaa and bbb)"
+    );
 }
 
 // O (open above) → cursor on new empty line above
@@ -2445,7 +2692,10 @@ fn cursor_after_open_above() {
     sim.keys("O"); // open line above, enters Insert
     sim.keys("<Esc>");
     let (line, _) = sim.screen(80, 24).cursor();
-    assert_eq!(line, 1, "cursor should be on new line 1 (between aaa and bbb)");
+    assert_eq!(
+        line, 1,
+        "cursor should be on new line 1 (between aaa and bbb)"
+    );
 }
 
 // J (join lines) → cursor at join point
@@ -2472,7 +2722,11 @@ fn cursor_after_paste_line() {
     sim.keys("p"); // paste below current line
     let text = sim.buffer_text();
     // Verify aaa was pasted back
-    assert!(text.contains("aaa"), "aaa should be pasted back, got: {}", text);
+    assert!(
+        text.contains("aaa"),
+        "aaa should be pasted back, got: {}",
+        text
+    );
     let (line, _) = sim.screen(80, 24).cursor();
     // Vim: p pastes below, cursor goes to pasted line
     assert!(line < 10, "cursor should be on a valid line, got {}", line);
@@ -2505,7 +2759,10 @@ fn cursor_after_undo_insert() {
     sim.type_text(" world");
     sim.keys("<Esc>");
     let (_, col_after_edit) = sim.screen(80, 24).cursor();
-    assert!(col_after_edit > 4, "cursor should be past 'hello' after edit");
+    assert!(
+        col_after_edit > 4,
+        "cursor should be past 'hello' after edit"
+    );
 
     sim.keys("u"); // undo — should restore "hello" and cursor near end
     let text = sim.buffer_text();
@@ -2595,7 +2852,10 @@ fn search_esc_cancels_and_restores_cursor() {
     // Live search should have jumped cursor, but Esc cancels
     sim.keys("<Esc>");
     let (line_after, _) = sim.screen(80, 24).cursor();
-    assert_eq!(line_after, line_before, "Esc should restore cursor to pre-search position");
+    assert_eq!(
+        line_after, line_before,
+        "Esc should restore cursor to pre-search position"
+    );
 }
 
 #[test]
@@ -2637,9 +2897,7 @@ fn spc_star_searches_word_under_cursor() {
 
 #[test]
 fn theme_persists_to_config_without_corrupting_views() {
-    let vault = TestVault::new()
-        .page("Test")
-        .build();
+    let vault = TestVault::new().page("Test").build();
     let vault_root = vault.root().to_path_buf();
     // Write config at vault root BEFORE init
     std::fs::write(
@@ -2781,7 +3039,11 @@ fn page_history_opens_with_hist_mode() {
     sim.keys("SPC H h");
 
     let screen = sim.screen(80, 24);
-    assert_eq!(screen.mode(), "HIST", "SPC H h should show HIST mode in status bar");
+    assert_eq!(
+        screen.mode(),
+        "HIST",
+        "SPC H h should show HIST mode in status bar"
+    );
 
     // Status bar should be at the bottom, not the top
     // The last visible line should contain the status bar mode
@@ -2810,7 +3072,7 @@ fn page_history_opens_with_hist_mode() {
 #[test]
 fn history_scrub_shows_undo_preview() {
     let mut sim = SimInput::with_content("original line");
-    
+
     // Make an edit to create undo history
     sim.keys("A");
     sim.type_text(" edited");
@@ -2820,15 +3082,25 @@ fn history_scrub_shows_undo_preview() {
     // Open history
     sim.keys("SPC H h");
     let screen = sim.screen(80, 24);
-    assert!(screen.mode() == "HIST", "should be in HIST mode, got: {}", screen.mode());
+    assert!(
+        screen.mode() == "HIST",
+        "should be in HIST mode, got: {}",
+        screen.mode()
+    );
 
     // Scrub left (older — should show original version)
     sim.keys("h");
     let screen = sim.screen(80, 24);
     // The temporal strip should have preview lines with the diff
-    assert!(screen.frame.temporal_strip.is_some(), "strip should exist after h");
+    assert!(
+        screen.frame.temporal_strip.is_some(),
+        "strip should exist after h"
+    );
     if let Some(ts) = &screen.frame.temporal_strip {
-        assert!(!ts.preview_lines.is_empty(), "preview should have diff lines after scrubbing");
+        assert!(
+            !ts.preview_lines.is_empty(),
+            "preview should have diff lines after scrubbing"
+        );
     }
 
     // Dismiss
@@ -2836,13 +3108,16 @@ fn history_scrub_shows_undo_preview() {
     let screen = sim.screen(80, 24);
     assert!(screen.mode() != "HIST", "q should dismiss history");
     // Buffer should be unchanged (preview was read-only)
-    assert!(sim.buffer_text().contains("original line edited"), "buffer should be unchanged after dismiss");
+    assert!(
+        sim.buffer_text().contains("original line edited"),
+        "buffer should be unchanged after dismiss"
+    );
 }
 
 #[test]
 fn history_restore_changes_buffer() {
     let mut sim = SimInput::with_content("version one");
-    
+
     sim.keys("A");
     sim.type_text(" plus two");
     sim.keys("<Esc>");
@@ -2883,9 +3158,15 @@ fn block_history_opens_on_block_id() {
     assert_eq!(screen.mode(), "HIST", "SPC H b should open HIST mode");
 
     // Should have temporal strip
-    assert!(screen.frame.temporal_strip.is_some(), "should have temporal strip");
+    assert!(
+        screen.frame.temporal_strip.is_some(),
+        "should have temporal strip"
+    );
     if let Some(ts) = &screen.frame.temporal_strip {
-        assert!(ts.items.len() >= 1, "should have at least 1 version of the block");
+        assert!(
+            ts.items.len() >= 1,
+            "should have at least 1 version of the block"
+        );
         assert_eq!(ts.mode, bloom_core::render::TemporalMode::BlockHistory);
     }
 
@@ -2900,7 +3181,10 @@ fn block_history_not_on_line_without_id() {
     sim.keys("SPC H b");
     // Should show warning, not open strip
     let screen = sim.screen(80, 24);
-    assert!(screen.frame.temporal_strip.is_none(), "should not open strip on line without block ID");
+    assert!(
+        screen.frame.temporal_strip.is_none(),
+        "should not open strip on line without block ID"
+    );
 }
 
 // =======================================================================
@@ -2941,7 +3225,8 @@ fn day_hopping_reuses_buffers() {
 
 #[test]
 fn block_history_diff_contains_only_block_content() {
-    let mut sim = SimInput::with_content("- [ ] My task ^abc01\nUnrelated line two\nUnrelated line three\n");
+    let mut sim =
+        SimInput::with_content("- [ ] My task ^abc01\nUnrelated line two\nUnrelated line three\n");
 
     // Edit the task — change "My" to "Edited"
     sim.keys("03w"); // on "My" (skip "- [ ] ")
@@ -2952,7 +3237,11 @@ fn block_history_diff_contains_only_block_content() {
     // Verify edit happened
     let text = sim.buffer_text();
     eprintln!("BUFFER AFTER EDIT: {}", text);
-    assert!(text.contains("Edited"), "edit should have happened, got: {}", text);
+    assert!(
+        text.contains("Edited"),
+        "edit should have happened, got: {}",
+        text
+    );
 
     // Go to line 0 and open block history
     sim.keys("gg");
@@ -2970,23 +3259,42 @@ fn block_history_diff_contains_only_block_content() {
         eprintln!("SELECTED: {} / {}", ts.selected, ts.items.len());
 
         // The preview should be about the block line, not unrelated content
-        assert!(!ts.block_diff_segments.is_empty(), "should have diff segments");
+        assert!(
+            !ts.block_diff_segments.is_empty(),
+            "should have diff segments"
+        );
 
         // Collect all segment text
-        let all_text: String = ts.block_diff_segments.iter().map(|s| s.text.as_str()).collect();
+        let all_text: String = ts
+            .block_diff_segments
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect();
         eprintln!("DIFF TEXT: '{}'", all_text);
 
         // Should contain task content
-        assert!(all_text.contains("task"), "diff should contain 'task', got: {}", all_text);
+        assert!(
+            all_text.contains("task"),
+            "diff should contain 'task', got: {}",
+            all_text
+        );
         // Should NOT contain unrelated lines
-        assert!(!all_text.contains("Unrelated"), "diff should NOT contain 'Unrelated', got: {}", all_text);
+        assert!(
+            !all_text.contains("Unrelated"),
+            "diff should NOT contain 'Unrelated', got: {}",
+            all_text
+        );
 
         // Check diff coloring
-        let removed: String = ts.block_diff_segments.iter()
+        let removed: String = ts
+            .block_diff_segments
+            .iter()
             .filter(|s| s.kind == bloom_core::render::DiffLineKind::Removed)
             .map(|s| s.text.as_str())
             .collect();
-        let added: String = ts.block_diff_segments.iter()
+        let added: String = ts
+            .block_diff_segments
+            .iter()
             .filter(|s| s.kind == bloom_core::render::DiffLineKind::Added)
             .map(|s| s.text.as_str())
             .collect();
@@ -3040,7 +3348,11 @@ Another paragraph.\n";
 
     let screen = sim.screen(80, 24);
     if let Some(ts) = &screen.frame.temporal_strip {
-        let all_text: String = ts.block_diff_segments.iter().map(|s| s.text.as_str()).collect();
+        let all_text: String = ts
+            .block_diff_segments
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect();
         eprintln!("BLOCK DIFF TEXT: '{}'", all_text);
         eprintln!("SEGMENT COUNT: {}", ts.block_diff_segments.len());
         for (i, seg) in ts.block_diff_segments.iter().enumerate() {
@@ -3048,13 +3360,31 @@ Another paragraph.\n";
         }
 
         // Should only contain the target task line content
-        assert!(!all_text.contains("First task"), "should not contain 'First task'");
-        assert!(!all_text.contains("Second task"), "should not contain 'Second task'");
-        assert!(!all_text.contains("Fourth task"), "should not contain 'Fourth task'");
-        assert!(!all_text.contains("paragraph"), "should not contain paragraph text");
+        assert!(
+            !all_text.contains("First task"),
+            "should not contain 'First task'"
+        );
+        assert!(
+            !all_text.contains("Second task"),
+            "should not contain 'Second task'"
+        );
+        assert!(
+            !all_text.contains("Fourth task"),
+            "should not contain 'Fourth task'"
+        );
+        assert!(
+            !all_text.contains("paragraph"),
+            "should not contain paragraph text"
+        );
         assert!(!all_text.contains("Heading"), "should not contain heading");
-        assert!(all_text.contains("task"), "should contain 'task' from the target line");
-        assert!(all_text.contains("target1"), "should contain block ID 'target1'");
+        assert!(
+            all_text.contains("task"),
+            "should contain 'task' from the target line"
+        );
+        assert!(
+            all_text.contains("target1"),
+            "should contain block ID 'target1'"
+        );
     } else {
         panic!("temporal strip should be open");
     }
@@ -3075,7 +3405,7 @@ fn block_history_git_blob_extracts_block_line_only() {
 
     // Edit so there's undo history — change "Overview" to "Summary"
     // (don't append after block ID — it must stay at line end)
-    sim.keys("w");  // on "Overview"
+    sim.keys("w"); // on "Overview"
     sim.keys("ciw");
     sim.type_text("Summary");
     sim.keys("<Esc>");
@@ -3093,11 +3423,11 @@ fn block_history_git_blob_extracts_block_line_only() {
     let entries = vec![bloom_core::history::PageHistoryEntry {
         oid: "abc123".to_string(),
         message: "old commit".to_string(),
-        timestamp: 1000000, changed_files: vec![],
+        timestamp: 1000000,
+        changed_files: vec![],
     }];
-    sim.editor.handle_history_complete(
-        bloom_core::history::HistoryComplete::PageHistory { entries },
-    );
+    sim.editor
+        .handle_history_complete(bloom_core::history::HistoryComplete::PageHistory { entries });
 
     // Navigate to the git entry (leftmost = oldest, so press h to go left)
     sim.keys("h");
@@ -3105,28 +3435,43 @@ fn block_history_git_blob_extracts_block_line_only() {
     sim.keys("h");
 
     // Simulate the blob arriving — this is the FULL page content from git
-    let old_page = "---\nid: rp01\ntitle: \"Page\"\n---\n\n## Overview ^blk01\n\nOld paragraph text.\n";
-    sim.editor.handle_history_complete(
-        bloom_core::history::HistoryComplete::BlobAt {
+    let old_page =
+        "---\nid: rp01\ntitle: \"Page\"\n---\n\n## Overview ^blk01\n\nOld paragraph text.\n";
+    sim.editor
+        .handle_history_complete(bloom_core::history::HistoryComplete::BlobAt {
             oid: "abc123".to_string(),
             uuid: "rp01".to_string(),
             content: Some(old_page.to_string()),
-        },
-    );
+        });
 
     // Now render and check the diff segments
     let screen = sim.screen(80, 24);
     if let Some(ts) = &screen.frame.temporal_strip {
-        let all_text: String = ts.block_diff_segments.iter().map(|s| s.text.as_str()).collect();
+        let all_text: String = ts
+            .block_diff_segments
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect();
         eprintln!("GIT BLOB DIFF TEXT: '{}'", all_text);
         for (i, seg) in ts.block_diff_segments.iter().enumerate() {
             eprintln!("  seg[{}]: kind={:?} text='{}'", i, seg.kind, seg.text);
         }
 
         // Should contain only block line content, NOT other page content
-        assert!(!all_text.contains("paragraph"), "should NOT contain paragraph text, got: {}", all_text);
-        assert!(!all_text.contains("---"), "should NOT contain frontmatter, got: {}", all_text);
-        assert!(all_text.contains("Overview"), "should contain 'Overview' from the block line");
+        assert!(
+            !all_text.contains("paragraph"),
+            "should NOT contain paragraph text, got: {}",
+            all_text
+        );
+        assert!(
+            !all_text.contains("---"),
+            "should NOT contain frontmatter, got: {}",
+            all_text
+        );
+        assert!(
+            all_text.contains("Overview"),
+            "should contain 'Overview' from the block line"
+        );
         assert!(all_text.contains("blk01"), "should contain block ID");
     } else {
         panic!("temporal strip should be open after block history");
@@ -3152,44 +3497,64 @@ fn block_history_git_blob_falls_back_to_line_number() {
     let entries = vec![bloom_core::history::PageHistoryEntry {
         oid: "def456".to_string(),
         message: "before ID assignment".to_string(),
-        timestamp: 900000, changed_files: vec![],
+        timestamp: 900000,
+        changed_files: vec![],
     }];
-    sim.editor.handle_history_complete(
-        bloom_core::history::HistoryComplete::PageHistory { entries },
-    );
+    sim.editor
+        .handle_history_complete(bloom_core::history::HistoryComplete::PageHistory { entries });
     sim.keys("h");
     sim.keys("h");
 
     // Simulate blob with NO block ID — the old version before indexer assigned it
     let old_page = "---\nid: pg01\ntitle: \"Page\"\n---\n\n## Overview\n\nSome text.\n";
-    sim.editor.handle_history_complete(
-        bloom_core::history::HistoryComplete::BlobAt {
+    sim.editor
+        .handle_history_complete(bloom_core::history::HistoryComplete::BlobAt {
             oid: "def456".to_string(),
             uuid: "pg01".to_string(),
             content: Some(old_page.to_string()),
-        },
-    );
+        });
 
     let screen = sim.screen(80, 24);
     if let Some(ts) = &screen.frame.temporal_strip {
-        let all_text: String = ts.block_diff_segments.iter().map(|s| s.text.as_str()).collect();
+        let all_text: String = ts
+            .block_diff_segments
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect();
         eprintln!("FALLBACK DIFF TEXT: '{}'", all_text);
         for (i, seg) in ts.block_diff_segments.iter().enumerate() {
             eprintln!("  seg[{}]: kind={:?} text='{}'", i, seg.kind, seg.text);
         }
 
         // Should show "## Overview" (from line-number fallback), NOT full page
-        assert!(all_text.contains("Overview"), "should contain 'Overview' via line fallback");
-        assert!(!all_text.contains("---"), "should NOT contain frontmatter, got: {}", all_text);
-        assert!(!all_text.contains("Some text"), "should NOT contain other lines, got: {}", all_text);
+        assert!(
+            all_text.contains("Overview"),
+            "should contain 'Overview' via line fallback"
+        );
+        assert!(
+            !all_text.contains("---"),
+            "should NOT contain frontmatter, got: {}",
+            all_text
+        );
+        assert!(
+            !all_text.contains("Some text"),
+            "should NOT contain other lines, got: {}",
+            all_text
+        );
 
         // The diff should show ^blk01 as added (present in current, absent in old)
-        let added: String = ts.block_diff_segments.iter()
+        let added: String = ts
+            .block_diff_segments
+            .iter()
             .filter(|s| s.kind == bloom_core::render::DiffLineKind::Added)
             .map(|s| s.text.as_str())
             .collect();
         eprintln!("ADDED: '{}'", added);
-        assert!(added.contains("blk01"), "block ID should appear as added, got: {}", added);
+        assert!(
+            added.contains("blk01"),
+            "block ID should appear as added, got: {}",
+            added
+        );
     } else {
         panic!("temporal strip should be open");
     }
@@ -3219,22 +3584,24 @@ fn block_history_skips_unchanged_git_commits() {
         bloom_core::history::PageHistoryEntry {
             oid: "aaa".to_string(),
             message: "commit A".to_string(),
-            timestamp: 100, changed_files: vec![],
+            timestamp: 100,
+            changed_files: vec![],
         },
         bloom_core::history::PageHistoryEntry {
             oid: "bbb".to_string(),
             message: "commit B".to_string(),
-            timestamp: 200, changed_files: vec![],
+            timestamp: 200,
+            changed_files: vec![],
         },
         bloom_core::history::PageHistoryEntry {
             oid: "ccc".to_string(),
             message: "commit C".to_string(),
-            timestamp: 300, changed_files: vec![],
+            timestamp: 300,
+            changed_files: vec![],
         },
     ];
-    sim.editor.handle_history_complete(
-        bloom_core::history::HistoryComplete::PageHistory { entries },
-    );
+    sim.editor
+        .handle_history_complete(bloom_core::history::HistoryComplete::PageHistory { entries });
 
     // Strip: [git_C(0), git_B(1), git_A(2), undo_root(3), undo_mid(4), undo_current(5)]
     // (entries were oldest-first in the test, .rev() made them newest-first in array)
@@ -3242,13 +3609,12 @@ fn block_history_skips_unchanged_git_commits() {
     // Responses arrive in FIFO order, so right neighbors are loaded first.
     let same_page = "---\nid: pg02\ntitle: \"Page\"\n---\n\n## Heading ^hd001\n\nBody text.\n";
     for oid in &["aaa", "bbb", "ccc"] {
-        sim.editor.handle_history_complete(
-            bloom_core::history::HistoryComplete::BlobAt {
+        sim.editor
+            .handle_history_complete(bloom_core::history::HistoryComplete::BlobAt {
                 oid: oid.to_string(),
                 uuid: "pg02".to_string(),
                 content: Some(same_page.to_string()),
-            },
-        );
+            });
     }
 
     let screen = sim.screen(80, 24);
@@ -3256,13 +3622,20 @@ fn block_history_skips_unchanged_git_commits() {
     let skip_count = ts.items.iter().filter(|n| n.skip).count();
     eprintln!("SKIP COUNT: {} / {} items", skip_count, ts.items.len());
     for (i, node) in ts.items.iter().enumerate() {
-        eprintln!("  item[{}]: skip={} kind={:?} label={}", i, node.skip, node.kind, node.label);
+        eprintln!(
+            "  item[{}]: skip={} kind={:?} label={}",
+            i, node.skip, node.kind, node.label
+        );
     }
 
     // git_A loads → right neighbor git_B has same content → git_B.skip=true
     // git_B loads → right neighbor git_C has same content → git_C.skip=true
     // git_C loads → right neighbor is undo (never skipped)
-    assert!(skip_count >= 2, "at least 2 git commits should be skip=true, got {}", skip_count);
+    assert!(
+        skip_count >= 2,
+        "at least 2 git commits should be skip=true, got {}",
+        skip_count
+    );
 
     // Navigation should skip over the dimmed items
     // Start at rightmost (undo). Press h — should skip past git_C and git_B to git_A.
@@ -3280,4 +3653,655 @@ fn block_history_skips_unchanged_git_commits() {
     assert!(!landed.skip, "should land on a non-skip item");
 
     sim.keys("q");
+}
+
+// -----------------------------------------------------------------------
+// Additional use-case coverage requested by docs/test/USE_CASES.md
+// -----------------------------------------------------------------------
+
+fn flush_background(editor: &mut bloom_core::BloomEditor) {
+    for _ in 0..60 {
+        let mut progressed = false;
+        let channels = editor.channels();
+
+        if let Some(rx) = &channels.write_result_rx {
+            while let Ok(result) = rx.try_recv() {
+                editor.handle_write_result(result);
+                progressed = true;
+            }
+        }
+
+        if let Some(rx) = &channels.indexer_rx {
+            while let Ok(complete) = rx.try_recv() {
+                editor.handle_index_complete(complete);
+                progressed = true;
+            }
+        }
+
+        if !progressed {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+}
+
+fn render_screen(
+    editor: &mut bloom_core::BloomEditor,
+    width: u16,
+    height: u16,
+) -> bloom_test_harness::TestScreen {
+    editor.update_layout(width, height);
+    let frame = editor.render(width, height);
+    bloom_test_harness::TestScreen::from_frame(frame, width, height)
+}
+
+fn send_keys(editor: &mut bloom_core::BloomEditor, sequence: &str) {
+    for key in bloom_test_harness::parse_key_sequence(sequence) {
+        editor.handle_key(key);
+    }
+}
+
+fn type_text(editor: &mut bloom_core::BloomEditor, text: &str) {
+    for ch in text.chars() {
+        editor.handle_key(bloom_core::types::KeyEvent::char(ch));
+    }
+}
+
+// -----------------------------------------------------------------------
+// Daily workflow and page management
+// -----------------------------------------------------------------------
+
+#[test]
+#[ignore = "quick-capture submit returns Action::SubmitQuickCapture but handle_key does not execute it yet"]
+fn uc03_quick_capture_task_appends_to_todays_journal() {
+    let vault = TestVault::new()
+        .page("Inbox")
+        .with_content("seed\n")
+        .build();
+    let journal_path = vault
+        .root()
+        .join("journal")
+        .join(format!("{}.md", chrono::Local::now().format("%Y-%m-%d")));
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC p p");
+    sim.type_text("Inbox");
+    sim.keys("Enter");
+    let original_title = sim.screen(80, 24).title().to_string();
+
+    // Current binding is SPC x a in the implemented keymap.
+    sim.keys("SPC x a");
+    assert!(
+        !sim.screen(80, 24).has_picker(),
+        "quick capture should use the status bar input"
+    );
+    sim.type_text("Review the ropey crate API");
+    sim.keys("Enter");
+    flush_background(&mut sim.editor);
+
+    let screen = sim.screen(80, 24);
+    assert_eq!(screen.title(), original_title);
+    let journal = std::fs::read_to_string(&journal_path)
+        .expect("today's journal should exist after quick capture");
+    assert!(journal.contains("- [ ] Review the ropey crate API"));
+}
+
+#[test]
+fn uc05_jump_to_journal_by_date_opens_date_picker() {
+    let vault = TestVault::new().page("Scratch").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // Current implementation uses SPC j c for the journal date picker.
+    sim.keys("SPC j c");
+    assert!(sim.screen(80, 24).has_date_picker());
+}
+
+#[test]
+fn uc07_create_page_from_template_with_frontmatter() {
+    let vault = TestVault::new().page("Seed").build();
+    let templates_dir = vault.root().join("templates");
+    std::fs::create_dir_all(&templates_dir).unwrap();
+    std::fs::write(
+        templates_dir.join("meeting-notes.md"),
+        "---\nid: ${AUTO}\ntitle: \"${TITLE}\"\ncreated: ${DATE}\ntags: [meeting]\n---\n\n## Attendees\n${1:Attendees}\n",
+    )
+    .unwrap();
+
+    let mut sim = SimInput::with_vault(vault);
+    sim.keys("SPC n");
+    let picker = sim.screen(80, 24);
+    assert!(picker.has_picker());
+    assert!(picker
+        .picker_results()
+        .iter()
+        .any(|label| label.contains("meeting-notes")));
+
+    sim.keys("Enter");
+    let text = sim.buffer_text();
+    assert!(text.contains("id: "));
+    assert!(text.contains("title: \"meeting-notes\""));
+    assert!(text.contains("created: "));
+    assert!(text.contains("tags: [meeting]"));
+}
+
+#[test]
+#[ignore = "rename_page currently maps to Action::Noop in bloom-core/src/editor/commands.rs"]
+fn uc09_rename_page_opens_input() {
+    let vault = linked_vault();
+    let mut sim = SimInput::with_vault(vault);
+    sim.keys("SPC f r");
+    assert!(sim.screen(80, 24).has_picker() || sim.screen(80, 24).frame.inline_menu.is_some());
+}
+
+#[test]
+#[ignore = "delete_page currently maps to Action::Noop in bloom-core/src/editor/commands.rs"]
+fn uc10_delete_page_shows_confirmation_dialog() {
+    let vault = linked_vault();
+    let mut sim = SimInput::with_vault(vault);
+    sim.keys("SPC f D");
+    assert!(sim.screen(80, 24).has_dialog());
+}
+
+#[test]
+#[ignore = "blank-page built-in template/title prompt is not implemented in the current template picker"]
+fn uc13_create_blank_page() {
+    let vault = TestVault::new().page("Seed").build();
+    let mut sim = SimInput::with_vault(vault);
+    sim.keys("SPC n");
+    sim.keys("Enter");
+    assert!(sim.buffer_text().contains("title:"));
+}
+
+#[test]
+#[ignore = "OpenUndoTree is dispatched but not rendered into a pane yet"]
+fn uc19_undo_tree_visualization_opens_pane() {
+    let mut sim = SimInput::with_content("hello");
+    sim.keys("A");
+    sim.type_text(" world");
+    sim.keys("<Esc>");
+    sim.keys("SPC u u");
+    assert!(sim.screen(80, 24).pane_count() > 1);
+}
+
+// -----------------------------------------------------------------------
+// Linking, tags, and search
+// -----------------------------------------------------------------------
+
+#[test]
+fn uc24_create_link_while_writing_shows_inline_menu() {
+    let vault = linked_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    sim.type_text("Rust Notes");
+    sim.keys("Enter");
+    sim.keys("A");
+    sim.type_text(" [[");
+
+    let screen = sim.screen(80, 24);
+    assert!(
+        screen.frame.inline_menu.is_some(),
+        "[[ should trigger the inline link menu"
+    );
+}
+
+#[test]
+#[ignore = "inline link creation for non-existent pages via Alt+Enter is not implemented yet"]
+fn uc25_create_link_to_nonexistent_page() {
+    let vault = linked_vault();
+    let mut sim = SimInput::with_vault(vault);
+    sim.keys("A");
+    sim.type_text("[[New Topic");
+    sim.editor.handle_key(bloom_core::types::KeyEvent {
+        code: bloom_core::types::KeyCode::Enter,
+        modifiers: bloom_core::types::Modifiers::alt(),
+    });
+    assert!(sim.buffer_text().contains("[["));
+}
+
+#[test]
+fn uc27_backlinks_picker() {
+    let vault = linked_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    sim.type_text("Text Editor Theory");
+    sim.keys("Enter");
+    sim.keys("SPC s l");
+
+    let screen = sim.screen(80, 24);
+    assert!(screen.has_picker());
+}
+
+#[test]
+fn uc30_yank_link_to_clipboard_smoke() {
+    let vault = linked_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    sim.type_text("Text Editor Theory");
+    sim.keys("Enter");
+
+    let mut actions = Vec::new();
+    for key in bloom_test_harness::parse_key_sequence("SPC l y") {
+        actions = sim.editor.handle_key(key);
+    }
+
+    assert!(actions.iter().any(|action| matches!(
+        action,
+        bloom_core::keymap::dispatch::Action::CopyToClipboard(text)
+        if text.contains("Text Editor Theory")
+    )));
+}
+
+#[test]
+#[ignore = "SPC t a currently inserts a literal # instead of opening a dedicated tag input"]
+fn uc32_add_tag_to_page() {
+    let vault = tagged_vault();
+    let mut sim = SimInput::with_vault(vault);
+    sim.keys("SPC t a");
+    assert!(sim.screen(80, 24).frame.inline_menu.is_some());
+}
+
+#[test]
+fn uc33_remove_tag_opens_picker() {
+    let vault = tagged_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    sim.type_text("Rust Notes");
+    sim.keys("Enter");
+    sim.keys("SPC t r");
+
+    let screen = sim.screen(80, 24);
+    assert!(screen.has_picker());
+    assert!(screen
+        .picker_results()
+        .iter()
+        .any(|label| label.contains("#rust")));
+}
+
+#[test]
+fn uc35_inline_tag() {
+    let mut sim = SimInput::with_content("");
+    sim.keys("i");
+    sim.type_text("#rust");
+    sim.keys("<Esc>");
+    assert!(sim.buffer_text().contains("#rust"));
+}
+
+#[test]
+#[ignore = "tag rename action menu from the tags picker is not implemented yet"]
+fn uc36_tag_rename() {
+    let vault = tagged_vault();
+    let mut sim = SimInput::with_vault(vault);
+    sim.keys("SPC s t");
+    sim.keys("<Tab>");
+    assert!(sim.screen(80, 24).has_picker());
+}
+
+#[test]
+fn uc38_search_with_filters_opens_search_picker() {
+    let vault = linked_vault();
+    let mut sim = SimInput::with_vault(vault);
+    sim.keys("SPC s s");
+    assert!(sim.screen(80, 24).has_picker());
+}
+
+#[test]
+fn uc39_search_journal_opens_picker() {
+    let vault = task_vault();
+    let mut sim = SimInput::with_vault(vault);
+    sim.keys("SPC s j");
+    let screen = sim.screen(80, 24);
+    assert!(screen.has_picker());
+    assert!(!screen.picker_results().is_empty());
+}
+
+// -----------------------------------------------------------------------
+// Tasks, agenda, and timeline
+// -----------------------------------------------------------------------
+
+#[test]
+fn uc41_create_a_task() {
+    let mut sim = SimInput::with_content("");
+    sim.keys("i");
+    sim.type_text("- [ ] Review API");
+    sim.keys("<Esc>");
+    assert!(sim.buffer_text().contains("- [ ] Review API"));
+}
+
+#[test]
+fn uc43_open_agenda() {
+    let vault = task_vault();
+    let mut sim = SimInput::with_vault(vault);
+    sim.keys("SPC a a");
+
+    let screen = sim.screen(80, 24);
+    // The current implementation renders Agenda into a read-only buffer.
+    assert_eq!(screen.title(), "Agenda");
+    assert!(screen.line_count() > 0);
+}
+
+#[test]
+fn uc44_act_on_task_from_agenda() {
+    let vault = task_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC a a");
+    let screen = sim.screen(80, 24);
+    let target_row = (0..screen.line_count())
+        .find(|&row| {
+            screen.line_text(row).contains("Review") || screen.line_text(row).contains("Design")
+        })
+        .expect("agenda should show at least one actionable task row");
+    for _ in 0..target_row {
+        sim.keys("j");
+    }
+    sim.keys("x");
+
+    let after = sim.screen(80, 24);
+    assert_eq!(after.title(), "Agenda");
+}
+
+#[test]
+#[ignore = "agenda tag filtering is not implemented in handle_view_key yet"]
+fn uc46_filter_agenda_by_tag() {
+    let vault = task_vault();
+    let mut sim = SimInput::with_vault(vault);
+    sim.keys("SPC a a");
+    sim.keys("t");
+    assert!(sim.screen(80, 24).frame.inline_menu.is_some() || sim.screen(80, 24).has_picker());
+}
+
+#[test]
+#[ignore = "SPC i d currently inserts @due() directly instead of opening the date picker"]
+fn uc47_insert_timestamp() {
+    let mut sim = SimInput::with_content("");
+    sim.keys("SPC i d");
+    assert!(sim.screen(80, 24).has_date_picker());
+}
+
+#[test]
+#[ignore = "OpenTimeline is dispatched but not executed in bloom-core's action handler yet"]
+fn uc48_open_timeline() {
+    let vault = linked_vault();
+    let mut sim = SimInput::with_vault(vault);
+    sim.keys("SPC f f");
+    sim.type_text("Text Editor Theory");
+    sim.keys("Enter");
+    sim.keys("SPC l t");
+    assert!(sim.screen(80, 24).pane_count() > 1);
+}
+
+// -----------------------------------------------------------------------
+// Windows and templates
+// -----------------------------------------------------------------------
+
+#[test]
+fn uc57_move_buffer_to_another_window() {
+    let vault = linked_vault();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    sim.type_text("Rust Notes");
+    sim.keys("Enter");
+    sim.keys("SPC w v");
+    sim.keys("SPC f f");
+    sim.type_text("Orphan Page");
+    sim.keys("Enter");
+    sim.keys("SPC w h");
+    sim.keys("SPC w L");
+
+    let screen = sim.screen(80, 24);
+    let titles: Vec<&str> = screen
+        .frame
+        .panes
+        .iter()
+        .map(|pane| pane.title.as_str())
+        .collect();
+    assert_eq!(screen.pane_count(), 2);
+    assert!(titles.iter().any(|title| title.contains("Rust")));
+    assert!(titles.iter().any(|title| title.contains("Orphan")));
+}
+
+#[test]
+#[ignore = "template tab-stop advancement is not wired through execute_actions yet"]
+fn uc58_template_with_tab_stops() {
+    let vault = TestVault::new().page("Seed").build();
+    let templates_dir = vault.root().join("templates");
+    std::fs::create_dir_all(&templates_dir).unwrap();
+    std::fs::write(
+        templates_dir.join("meeting.md"),
+        "${1:Attendees}\n${2:Topics}\n$0\n",
+    )
+    .unwrap();
+    let mut sim = SimInput::with_vault(vault);
+    sim.keys("SPC n");
+    sim.keys("Enter");
+    sim.keys("<Tab>");
+    assert_ne!(sim.screen(80, 24).cursor(), (0, 0));
+}
+
+// -----------------------------------------------------------------------
+// Session restore, undo persistence, and file integrity
+// -----------------------------------------------------------------------
+
+#[test]
+fn uc77_session_restore() {
+    let vault = TestVault::new()
+        .page("Alpha")
+        .with_content("line one\nline two\nline three\n")
+        .page("Beta")
+        .with_content("beta\n")
+        .build();
+    let root = vault.root().to_path_buf();
+
+    let config = bloom_core::config::Config::defaults();
+    let mut editor = bloom_core::BloomEditor::new(config.clone()).unwrap();
+    let _ = editor.init_vault(&root);
+    flush_background(&mut editor);
+    editor.startup();
+
+    send_keys(&mut editor, "SPC f f");
+    type_text(&mut editor, "Alpha");
+    send_keys(&mut editor, "Enter");
+    send_keys(&mut editor, "SPC w v");
+    send_keys(&mut editor, "SPC f f");
+    type_text(&mut editor, "Beta");
+    send_keys(&mut editor, "Enter");
+    send_keys(&mut editor, "SPC w h");
+    send_keys(&mut editor, "j j");
+
+    editor.save_session().unwrap();
+    flush_background(&mut editor);
+
+    let mut restored = bloom_core::BloomEditor::new(config).unwrap();
+    let _ = restored.init_vault(&root);
+    flush_background(&mut restored);
+    restored.restore_session().unwrap();
+
+    let screen = render_screen(&mut restored, 80, 24);
+    assert_eq!(screen.pane_count(), 2);
+    assert!(screen.title().contains("Alpha"));
+    assert_eq!(screen.cursor().0, 2);
+}
+
+#[test]
+#[ignore = "broken-link styling is not exposed on the rendered display text for orphaned links yet"]
+fn uc79_broken_link_detection() {
+    let vault = TestVault::new()
+        .raw_file(
+            "broken.md",
+            "---\nid: deaa0001\ntitle: \"Broken\"\ncreated: 2026-01-01\ntags: []\n---\n\nSee [[deadbeef|Deleted Page]] here.\n",
+        )
+        .page("Existing")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    sim.type_text("Broken");
+    sim.keys("Enter");
+
+    let screen = sim.screen(80, 24);
+    let pane = screen
+        .frame
+        .panes
+        .iter()
+        .find(|pane| pane.is_active)
+        .unwrap();
+    let line = pane
+        .visible_lines
+        .iter()
+        .find(|line| line.text.contains("Deleted Page"))
+        .expect("broken link line should be visible");
+
+    assert!(line
+        .spans
+        .iter()
+        .any(|span| span.style == bloom_core::render::Style::BrokenLink));
+}
+
+#[test]
+#[ignore = "merge-conflict degraded mode and warning banner are not surfaced through RenderFrame yet"]
+fn uc82_git_merge_conflict_detection() {
+    let vault = TestVault::new()
+        .raw_file(
+            "conflicted.md",
+            "<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> branch\n",
+        )
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+    sim.keys("SPC f f");
+    sim.type_text("conflicted");
+    sim.keys("Enter");
+    assert!(sim.screen(80, 24).all_lines().contains("Merge conflict"));
+}
+
+#[test]
+fn uc86_auto_save_dirty_flag() {
+    let vault = TestVault::new()
+        .page("Autosave")
+        .with_content("hello\n")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC p p");
+    sim.type_text("Autosave");
+    sim.keys("Enter");
+    assert!(!sim.screen(80, 24).is_dirty());
+
+    sim.keys("A");
+    sim.type_text(" world");
+    sim.keys("<Esc>");
+    assert!(sim.screen(80, 24).is_dirty());
+
+    flush_background(&mut sim.editor);
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    flush_background(&mut sim.editor);
+
+    assert!(!sim.screen(80, 24).is_dirty());
+}
+
+#[test]
+#[ignore = "vim-operator which-key entries are gated behind leader-popup visibility in the current renderer"]
+fn uc88_which_key_during_vim_grammar() {
+    let mut sim = SimInput::with_content("hello world");
+    sim.keys("d");
+    sim.tick(600);
+    assert!(sim.screen(80, 24).has_which_key());
+}
+
+#[test]
+#[ignore = "persisted undo trees restore linearly, but branch-aware restart behavior still fails in e2e"]
+fn uc92_persistent_undo_across_restart() {
+    let vault = TestVault::new().page("Undo Tree").build();
+    let root = vault.root().to_path_buf();
+
+    let config = bloom_core::config::Config::defaults();
+    let mut editor = bloom_core::BloomEditor::new(config.clone()).unwrap();
+    let _ = editor.init_vault(&root);
+    flush_background(&mut editor);
+    editor.startup();
+
+    send_keys(&mut editor, "SPC p p");
+    type_text(&mut editor, "Undo Tree");
+    send_keys(&mut editor, "Enter");
+    send_keys(&mut editor, "A");
+    type_text(&mut editor, "alpha");
+    send_keys(&mut editor, "<Esc>");
+    send_keys(&mut editor, "A");
+    type_text(&mut editor, "beta");
+    send_keys(&mut editor, "<Esc>");
+    send_keys(&mut editor, "A");
+    type_text(&mut editor, "gamma");
+    send_keys(&mut editor, "<Esc>");
+    send_keys(&mut editor, "u");
+    send_keys(&mut editor, "A");
+    type_text(&mut editor, "delta");
+    send_keys(&mut editor, "<Esc>");
+
+    editor.save_session().unwrap();
+    flush_background(&mut editor);
+
+    let mut restored = bloom_core::BloomEditor::new(config).unwrap();
+    let _ = restored.init_vault(&root);
+    flush_background(&mut restored);
+    restored.restore_session().unwrap();
+
+    send_keys(&mut restored, "u");
+    let after_undo = restored.active_buffer_text().unwrap_or_default();
+    assert!(after_undo.contains("alphabeta"));
+    assert!(!after_undo.contains("delta"));
+
+    send_keys(&mut restored, "C-r");
+    let after_redo = restored.active_buffer_text().unwrap_or_default();
+    assert!(after_redo.contains("alphabetadelta"));
+}
+
+#[test]
+fn uc94_picker_scrolling_in_large_vault() {
+    let mut builder = TestVault::new();
+    for n in 0..60 {
+        builder = builder.page(&format!("Page {n:02}"));
+    }
+    let vault = builder.build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    let first_selected = sim.screen(80, 24).picker_selected().map(str::to_string);
+    for _ in 0..50 {
+        sim.keys("C-n");
+    }
+    let after_scroll = sim.screen(80, 24);
+    let scrolled_selected = after_scroll.picker_selected().map(str::to_string);
+    assert_ne!(scrolled_selected, first_selected);
+
+    sim.type_text("Page 5");
+    let filtered = sim.screen(80, 24);
+    assert_eq!(filtered.picker_query(), "Page 5");
+    assert!(filtered.picker_selected().is_some());
+}
+
+#[test]
+fn uc95_block_id_assignment() {
+    let vault = TestVault::new().raw_file(
+        "blocks.md",
+        "---\nid: bd950001\ntitle: \"Blocks\"\ncreated: 2026-01-01\ntags: []\n---\n\n# Heading\n\nParagraph body\n\n- [ ] Task item\n",
+    ).build();
+    let page_path = vault.root().join("pages/blocks.md");
+    let mut sim = SimInput::with_vault(vault);
+    flush_background(&mut sim.editor);
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    flush_background(&mut sim.editor);
+
+    let saved = std::fs::read_to_string(page_path).unwrap();
+    assert!(saved
+        .lines()
+        .any(|line| line.starts_with("# Heading") && line.contains(" ^")));
+    assert!(saved
+        .lines()
+        .any(|line| line.starts_with("Paragraph body") && line.contains(" ^")));
+    assert!(saved
+        .lines()
+        .any(|line| line.starts_with("- [ ] Task item") && line.contains(" ^")));
 }

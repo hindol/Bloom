@@ -4,7 +4,7 @@ use iced::Size;
 
 use crate::draw::{draw_text, fill_rect, rect, stroke_rect, text_width, truncate_text};
 use crate::theme::rgb_to_color;
-use crate::{CHAR_WIDTH, LINE_HEIGHT};
+use crate::{CHAR_WIDTH, LINE_HEIGHT, STATUS_BAR_HEIGHT};
 
 pub(crate) fn draw_notifications(
     frame: &mut iced::widget::canvas::Frame,
@@ -12,17 +12,26 @@ pub(crate) fn draw_notifications(
     notifications: &[Notification],
     theme: &ThemePalette,
 ) {
-    let mut y = size.height - LINE_HEIGHT * 2.0;
+    // Position above the status bar, with a small gap.
+    let mut y = size.height - STATUS_BAR_HEIGHT - LINE_HEIGHT - 4.0;
 
     for notification in notifications.iter().rev().take(3) {
         let (prefix, bg, fg) = match notification.level {
-            NotificationLevel::Info => ("✓", rgb_to_color(&theme.subtle), rgb_to_color(&theme.foreground)),
+            NotificationLevel::Info => (
+                "✓",
+                rgb_to_color(&theme.subtle),
+                rgb_to_color(&theme.foreground),
+            ),
             NotificationLevel::Warning => (
                 "⚠",
                 rgb_to_color(&theme.accent_yellow),
                 rgb_to_color(&theme.background),
             ),
-            NotificationLevel::Error => ("✗", rgb_to_color(&theme.critical), rgb_to_color(&theme.background)),
+            NotificationLevel::Error => (
+                "✗",
+                rgb_to_color(&theme.critical),
+                rgb_to_color(&theme.background),
+            ),
         };
 
         let text = truncate_text(&format!(" {prefix} {} ", notification.message), 48);
