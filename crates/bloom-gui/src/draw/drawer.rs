@@ -190,6 +190,13 @@ pub(crate) fn draw_temporal_strip_drawer(
         let selected = start + visual_index == strip.selected;
         let x = CHAR_WIDTH + (visual_index * node_chars) as f32 * CHAR_WIDTH;
         let y = panel_y + LINE_HEIGHT + 2.0;
+
+        // Selected node gets a background fill instead of a triangle prefix.
+        if selected {
+            let node_w = node_chars as f32 * CHAR_WIDTH;
+            fill_rect(frame, rect(x, y, node_w, LINE_HEIGHT), rgb_to_color(&theme.mild));
+        }
+
         let marker = if node.branch_count > 1 {
             "◆"
         } else if node.skip {
@@ -200,8 +207,7 @@ pub(crate) fn draw_temporal_strip_drawer(
                 StripNodeKind::GitCommit => "○",
             }
         };
-        let prefix = if selected { "▸" } else { " " };
-        let cell = format!("{prefix}{marker} {}", truncate_text(&node.label, node_chars.saturating_sub(3)));
+        let cell = format!(" {marker} {}", truncate_text(&node.label, node_chars.saturating_sub(3)));
         let color = if selected {
             rgb_to_color(&theme.strong)
         } else if node.skip {
@@ -215,7 +221,7 @@ pub(crate) fn draw_temporal_strip_drawer(
     }
 
     let selected_visual = strip.selected.saturating_sub(start).min(end.saturating_sub(start));
-    let indicator_x = CHAR_WIDTH + (selected_visual * node_chars) as f32 * CHAR_WIDTH + 2.0 * CHAR_WIDTH;
+    let detail_x = CHAR_WIDTH + (selected_visual * node_chars) as f32 * CHAR_WIDTH;
     let detail = strip
         .items
         .get(strip.selected)
@@ -223,16 +229,9 @@ pub(crate) fn draw_temporal_strip_drawer(
         .unwrap_or("");
     draw_text(
         frame,
-        indicator_x,
+        detail_x,
         panel_y + 2.0 * LINE_HEIGHT + 2.0,
-        "▲",
-        rgb_to_color(&theme.accent_yellow),
-    );
-    draw_text(
-        frame,
-        indicator_x + 2.0 * CHAR_WIDTH,
-        panel_y + 2.0 * LINE_HEIGHT + 2.0,
-        truncate_text(detail, total_chars.saturating_sub(selected_visual * node_chars + 6)),
+        truncate_text(detail, total_chars.saturating_sub(selected_visual * node_chars + 2)),
         rgb_to_color(&theme.accent_yellow),
     );
 
