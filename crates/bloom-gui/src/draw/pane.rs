@@ -12,6 +12,28 @@ use crate::draw::{
 use crate::theme::{rgb_to_color, style_to_color};
 use crate::{CHAR_WIDTH, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, STATUS_BAR_HEIGHT};
 
+/// Draw only the pane background and status bar — no editor content.
+/// Used when the temporal diff preview replaces the content area.
+pub(crate) fn draw_pane_shell(
+    frame: &mut iced::widget::canvas::Frame,
+    pane: &PaneFrame,
+    theme: &ThemePalette,
+) {
+    let rect_frame = &pane.rect;
+    let pane_x = rect_frame.x as f32 * CHAR_WIDTH;
+    let pane_y = rect_frame.y as f32 * LINE_HEIGHT;
+    let pane_w = rect_frame.width as f32 * CHAR_WIDTH;
+    let content_h = rect_frame.content_height as f32 * LINE_HEIGHT;
+
+    fill_rect(frame, rect(pane_x, pane_y, pane_w, content_h), rgb_to_color(&theme.background));
+
+    if pane.is_active {
+        draw_active_status_bar(frame, pane, theme, pane_x, pane_y, pane_w);
+    } else {
+        draw_inactive_status_bar(frame, pane, theme, pane_x, pane_y, pane_w);
+    }
+}
+
 /// Draw a pane. `anim` is `Some((cursor_y, highlight_y))` in absolute pixels
 /// for the active pane (smooth animated positions), or `None` for inactive panes.
 pub(crate) fn draw_pane(

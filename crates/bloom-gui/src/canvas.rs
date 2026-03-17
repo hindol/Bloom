@@ -115,13 +115,32 @@ impl<'a> canvas::Program<Message> for EditorCanvas<'a> {
                 return;
             }
 
+            // When the temporal strip has a diff preview, skip drawing the
+            // active pane's editor content — the diff overlay replaces it.
+            let skip_active_editor = render_frame
+                .temporal_strip
+                .as_ref()
+                .map(|s| {
+                    matches!(
+                        s.mode,
+                        bloom_core::render::TemporalMode::PageHistory
+                            | bloom_core::render::TemporalMode::BlockHistory
+                    ) && !s.preview_lines.is_empty()
+                })
+                .unwrap_or(false);
+
             for pane_frame in &render_frame.panes {
                 let anim = if pane_frame.is_active {
                     Some((self.anim.cursor_y(), self.anim.highlight_y()))
                 } else {
                     None
                 };
-                pane::draw_pane(frame, pane_frame, self.theme, anim);
+                if skip_active_editor && pane_frame.is_active {
+                    // Draw only the status bar and background, not editor content.
+                    pane::draw_pane_shell(frame, pane_frame, self.theme);
+                } else {
+                    pane::draw_pane(frame, pane_frame, self.theme, anim);
+                }
             }
 
             self.draw_split_borders(frame, &render_frame.panes);
