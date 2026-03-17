@@ -3,6 +3,7 @@
 mod canvas;
 mod draw;
 mod keys;
+mod remote;
 mod theme;
 
 use bloom_core::config::Config;
@@ -19,6 +20,7 @@ use std::sync::Arc;
 
 use crate::canvas::{AnimationState, BaseCanvas, DiffCanvas, OverlayCanvas};
 use crate::keys::convert_key;
+use crate::remote::RemoteHints;
 
 pub(crate) const FONT_SIZE: f32 = 13.0;
 pub(crate) const LINE_HEIGHT: f32 = FONT_SIZE * 1.4;
@@ -58,6 +60,8 @@ struct BloomApp {
     animating: bool,
     /// Last window size sent to core (for resize detection).
     last_size: (u16, u16),
+    /// Remote session rendering hints (detected once at startup).
+    remote: RemoteHints,
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +123,8 @@ fn boot() -> (BloomApp, Task<Message>) {
         rows: initial_rows,
     });
 
+    let remote = RemoteHints::detect();
+
     (
         BloomApp {
             frontend_tx,
@@ -132,6 +138,7 @@ fn boot() -> (BloomApp, Task<Message>) {
             anim: AnimationState::default(),
             animating: true,
             last_size: (initial_cols, initial_rows),
+            remote,
         },
         Task::none(),
     )
@@ -149,6 +156,7 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
     match message {
         Message::AnimTick => {
             // Advance animation toward logical cursor/scroll positions.
+            // Remote sessions: snap instantly (no lerp), stop after one tick.
             let still_moving = if let Some(frame) = &state.frame {
                 if let Some(pane) = frame.panes.iter().find(|p| p.is_active) {
                     let status_bars_above = frame.panes.iter()
@@ -159,7 +167,12 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
                     let cursor_row = pane.cursor.line.saturating_sub(pane.scroll_offset);
                     let target_cursor_y = pane_y + cursor_row as f32 * LINE_HEIGHT;
                     let target_scroll_y = pane.scroll_offset as f32 * LINE_HEIGHT;
-                    state.anim.advance(target_cursor_y, target_scroll_y)
+                    if state.remote.skip_animation() {
+                        state.anim.snap(target_cursor_y, target_scroll_y);
+                        false
+                    } else {
+                        state.anim.advance(target_cursor_y, target_scroll_y)
+                    }
                 } else {
                     false
                 }
@@ -205,6 +218,7 @@ fn view(state: &BloomApp) -> Element<'_, Message> {
         theme: state.theme,
         cache: &state.base_cache,
         anim: &state.anim,
+        remote: state.remote,
     })
     .width(Length::Fill)
     .height(Length::Fill);
@@ -221,6 +235,7 @@ fn view(state: &BloomApp) -> Element<'_, Message> {
         frame: state.frame.as_deref(),
         theme: state.theme,
         cache: &state.overlay_cache,
+        remote: state.remote,
     })
     .width(Length::Fill)
     .height(Length::Fill);

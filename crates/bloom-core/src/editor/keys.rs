@@ -59,22 +59,22 @@ impl BloomEditor {
 
         // If inline completion is active, intercept navigation/accept keys
         if self.inline_completion.is_some() {
-            match &key.code {
-                types::KeyCode::Enter | types::KeyCode::Tab => {
+            match (&key.code, key.modifiers.ctrl) {
+                (types::KeyCode::Enter | types::KeyCode::Tab, _) => {
                     self.accept_inline_completion();
                     return vec![keymap::dispatch::Action::Noop];
                 }
-                types::KeyCode::Esc => {
+                (types::KeyCode::Esc, _) => {
                     self.inline_completion = None;
                     // fall through to vim (Esc exits insert mode)
                 }
-                types::KeyCode::Up => {
+                (types::KeyCode::Up, _) | (types::KeyCode::Char('p'), true) | (types::KeyCode::Char('k'), true) => {
                     if let Some(ic) = &mut self.inline_completion {
                         ic.selected = ic.selected.saturating_sub(1);
                     }
                     return vec![keymap::dispatch::Action::Noop];
                 }
-                types::KeyCode::Down => {
+                (types::KeyCode::Down, _) | (types::KeyCode::Char('n'), true) | (types::KeyCode::Char('j'), true) => {
                     if let Some(ic) = &mut self.inline_completion {
                         ic.selected += 1; // clamped during render
                     }
@@ -2008,52 +2008,49 @@ impl BloomEditor {
         &mut self,
         key: types::KeyEvent,
     ) -> Vec<keymap::dispatch::Action> {
-        match key.code {
-            types::KeyCode::Esc | types::KeyCode::Char('q') => {
-                self.mirror_menu = None;
-            }
-            types::KeyCode::Up | types::KeyCode::Char('k') => {
-                if let Some(menu) = &mut self.mirror_menu {
-                    if menu.selected > 0 {
-                        menu.selected -= 1;
-                    }
+        let ctrl_p = key.modifiers.ctrl && matches!(key.code, types::KeyCode::Char('p') | types::KeyCode::Char('k'));
+        let ctrl_n = key.modifiers.ctrl && matches!(key.code, types::KeyCode::Char('n') | types::KeyCode::Char('j'));
+
+        if matches!(key.code, types::KeyCode::Esc | types::KeyCode::Char('q')) && !key.modifiers.ctrl {
+            self.mirror_menu = None;
+        } else if matches!(key.code, types::KeyCode::Up | types::KeyCode::Char('k')) && !key.modifiers.ctrl || ctrl_p {
+            if let Some(menu) = &mut self.mirror_menu {
+                if menu.selected > 0 {
+                    menu.selected -= 1;
                 }
             }
-            types::KeyCode::Down | types::KeyCode::Char('j') => {
-                if let Some(menu) = &mut self.mirror_menu {
-                    if menu.selected + 1 < menu.items.len() {
-                        menu.selected += 1;
-                    }
+        } else if matches!(key.code, types::KeyCode::Down | types::KeyCode::Char('j')) && !key.modifiers.ctrl || ctrl_n {
+            if let Some(menu) = &mut self.mirror_menu {
+                if menu.selected + 1 < menu.items.len() {
+                    menu.selected += 1;
                 }
             }
-            types::KeyCode::Enter => {
-                if let Some(menu) = self.mirror_menu.take() {
-                    if let Some(item) = menu.items.get(menu.selected) {
-                        let pid = item.page_id.clone();
-                        let line = item.line;
-                        let title = item.title.clone();
-                        if let Some(idx) = &self.index {
-                            if let Some(meta) = idx.find_page_by_id(&pid) {
-                                let full = self
-                                    .vault_root
-                                    .as_ref()
-                                    .map(|r| r.join(&meta.path))
-                                    .unwrap_or_else(|| meta.path.clone());
-                                if let Ok(content) = std::fs::read_to_string(&full) {
-                                    self.open_page_with_content(&pid, &title, &full, &content);
-                                    if let Some(buf) = self.writer.buffers().get(&pid) {
-                                        let target = buf
-                                            .text()
-                                            .line_to_char(line.min(buf.len_lines().saturating_sub(1)));
-                                        self.set_cursor(target);
-                                    }
+        } else if key.code == types::KeyCode::Enter {
+            if let Some(menu) = self.mirror_menu.take() {
+                if let Some(item) = menu.items.get(menu.selected) {
+                    let pid = item.page_id.clone();
+                    let line = item.line;
+                    let title = item.title.clone();
+                    if let Some(idx) = &self.index {
+                        if let Some(meta) = idx.find_page_by_id(&pid) {
+                            let full = self
+                                .vault_root
+                                .as_ref()
+                                .map(|r| r.join(&meta.path))
+                                .unwrap_or_else(|| meta.path.clone());
+                            if let Ok(content) = std::fs::read_to_string(&full) {
+                                self.open_page_with_content(&pid, &title, &full, &content);
+                                if let Some(buf) = self.writer.buffers().get(&pid) {
+                                    let target = buf
+                                        .text()
+                                        .line_to_char(line.min(buf.len_lines().saturating_sub(1)));
+                                    self.set_cursor(target);
                                 }
                             }
                         }
                     }
                 }
             }
-            _ => {}
         }
         vec![keymap::dispatch::Action::Noop]
     }

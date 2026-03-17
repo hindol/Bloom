@@ -6,6 +6,7 @@ use iced::widget::canvas::{self, Cache, Geometry};
 use iced::{Rectangle, Renderer, Size, Theme};
 
 use crate::draw::{drawer, inline, notification, overlay, pane, draw_text_right};
+use crate::remote::RemoteHints;
 use crate::theme::rgb_to_color;
 use crate::{CHAR_WIDTH, Message};
 
@@ -49,6 +50,13 @@ impl AnimationState {
         self.scroll_y = lerp_snap(self.scroll_y, target_scroll_y);
         (self.cursor_y - prev_c).abs() > 0.01 || (self.scroll_y - prev_s).abs() > 0.01
     }
+    /// Jump to target instantly (no lerp). Used for remote sessions.
+    pub fn snap(&mut self, target_cursor_y: f32, target_scroll_y: f32) {
+        self.cursor_y = target_cursor_y;
+        self.highlight_y = target_cursor_y;
+        self.scroll_y = target_scroll_y;
+        self.initialized = true;
+    }
     pub fn cursor_y(&self) -> f32 { self.cursor_y }
     pub fn highlight_y(&self) -> f32 { self.highlight_y }
 }
@@ -62,6 +70,7 @@ pub(crate) struct BaseCanvas<'a> {
     pub(crate) theme: &'a ThemePalette,
     pub(crate) cache: &'a Cache,
     pub(crate) anim: &'a AnimationState,
+    pub(crate) remote: RemoteHints,
 }
 
 impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
@@ -95,7 +104,7 @@ impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
                 let (px, py, pw, ch) = pane::pane_pixel_rect(
                     &pf.rect, status_bars_above, bounds.size(),
                 );
-                let anim = if pf.is_active {
+                let anim = if pf.is_active && !self.remote.skip_animation() {
                     Some((self.anim.cursor_y(), self.anim.highlight_y()))
                 } else { None };
                 pane::draw_pane(frame, pf, self.theme, anim, px, py, pw, ch);
@@ -121,7 +130,7 @@ impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
 
             // Scroll progress bar in the bottom safe area.
             if let Some(pane) = active {
-                draw_scroll_progress(frame, bounds.size(), pane, self.theme);
+                draw_scroll_progress(frame, bounds.size(), pane, self.theme, self.remote);
             }
         });
         vec![geometry]
@@ -175,6 +184,7 @@ pub(crate) struct OverlayCanvas<'a> {
     pub(crate) frame: Option<&'a RenderFrame>,
     pub(crate) theme: &'a ThemePalette,
     pub(crate) cache: &'a Cache,
+    pub(crate) remote: RemoteHints,
 }
 
 impl<'a> canvas::Program<Message> for OverlayCanvas<'a> {
@@ -197,21 +207,22 @@ impl<'a> canvas::Program<Message> for OverlayCanvas<'a> {
 
         let geometry = self.cache.draw(renderer, bounds.size(), |frame| {
             let active = rf.panes.iter().find(|p| p.is_active);
+            let scrim_alpha = if self.remote.opaque_scrim() { 1.0 } else { 0.50 };
 
             if let Some(m) = &rf.inline_menu {
                 inline::draw_inline_menu(frame, bounds.size(), active, m, self.theme);
             }
             if let Some(dp) = &rf.date_picker {
-                overlay::draw_date_picker(frame, bounds.size(), dp, self.theme);
+                overlay::draw_date_picker(frame, bounds.size(), dp, self.theme, scrim_alpha);
             }
             if let Some(p) = &rf.picker {
-                overlay::draw_picker(frame, bounds.size(), p, self.theme);
+                overlay::draw_picker(frame, bounds.size(), p, self.theme, scrim_alpha);
             }
             if let Some(d) = &rf.dialog {
-                overlay::draw_dialog(frame, bounds.size(), d, self.theme);
+                overlay::draw_dialog(frame, bounds.size(), d, self.theme, scrim_alpha);
             }
             if let Some(v) = &rf.view {
-                overlay::draw_view(frame, bounds.size(), v, self.theme);
+                overlay::draw_view(frame, bounds.size(), v, self.theme, scrim_alpha);
             }
             if !rf.notifications.is_empty() {
                 notification::draw_notifications(frame, bounds.size(), &rf.notifications, self.theme);
@@ -262,7 +273,7 @@ fn draw_hidden_count(frame: &mut canvas::Frame, size: Size, count: usize, theme:
 }
 
 /// Thin scroll progress bar in the bottom safe area (macOS window corner radius zone).
-fn draw_scroll_progress(frame: &mut canvas::Frame, size: Size, pane: &PaneFrame, theme: &ThemePalette) {
+fn draw_scroll_progress(frame: &mut canvas::Frame, size: Size, pane: &PaneFrame, theme: &ThemePalette, remote: RemoteHints) {
     use crate::draw::{fill_rect, rect};
     use crate::BOTTOM_SAFE_AREA;
 
@@ -275,10 +286,11 @@ fn draw_scroll_progress(frame: &mut canvas::Frame, size: Size, pane: &PaneFrame,
     fill_rect(frame, rect(0.0, bar_y, size.width, bar_h), rgb_to_color(&theme.subtle));
 
     if total <= pane.visible_lines.len() {
-        // Entire file visible — just show the cursor tick.
-        let cursor_frac = pane.cursor.line as f32 / total as f32;
-        let tick_x = (size.width * cursor_frac).clamp(0.0, size.width - 2.0);
-        fill_rect(frame, rect(tick_x, bar_y, 2.0, bar_h), rgb_to_color(&theme.salient));
+        if !remote.skip_scroll_tick() {
+            let cursor_frac = pane.cursor.line as f32 / total as f32;
+            let tick_x = (size.width * cursor_frac).clamp(0.0, size.width - 2.0);
+            fill_rect(frame, rect(tick_x, bar_y, 2.0, bar_h), rgb_to_color(&theme.salient));
+        }
         return;
     }
 
@@ -290,8 +302,10 @@ fn draw_scroll_progress(frame: &mut canvas::Frame, size: Size, pane: &PaneFrame,
 
     fill_rect(frame, rect(thumb_x, bar_y, thumb_w, bar_h), rgb_to_color(&theme.faded));
 
-    // Cursor position tick — shows where the cursor line sits in the full buffer.
-    let cursor_frac = pane.cursor.line as f32 / total as f32;
-    let tick_x = (size.width * cursor_frac).clamp(0.0, size.width - 2.0);
-    fill_rect(frame, rect(tick_x, bar_y, 2.0, bar_h), rgb_to_color(&theme.salient));
+    // Cursor position tick — skip on remote sessions.
+    if !remote.skip_scroll_tick() {
+        let cursor_frac = pane.cursor.line as f32 / total as f32;
+        let tick_x = (size.width * cursor_frac).clamp(0.0, size.width - 2.0);
+        fill_rect(frame, rect(tick_x, bar_y, 2.0, bar_h), rgb_to_color(&theme.salient));
+    }
 }
