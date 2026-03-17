@@ -93,8 +93,22 @@ pub(crate) fn draw_temporal_diff_preview(
 
     let max_chars = chars_that_fit(pane_w);
     let max_rows = (preview_h / LINE_HEIGHT) as usize;
+    // Gutter width: "old | new" → e.g. " 42 │ 43 " = 11 chars
+    let gutter_chars = 11;
+    let gutter_w = gutter_chars as f32 * CHAR_WIDTH;
+    let content_x = pane_x + gutter_w;
+    let content_chars = max_chars.saturating_sub(gutter_chars);
+
     for (i, dl) in strip.preview_lines.iter().take(max_rows).enumerate() {
         let y = pane_y + i as f32 * LINE_HEIGHT;
+
+        // Line number gutter: "old │ new"
+        let old_num = dl.old_line.map(|n| format!("{:>4}", n + 1)).unwrap_or_else(|| "    ".to_string());
+        let new_num = dl.new_line.map(|n| format!("{:<4}", n + 1)).unwrap_or_else(|| "    ".to_string());
+        let gutter_text = format!("{}│{}", old_num, new_num);
+        draw_text(frame, pane_x, y, gutter_text, rgb_to_color(&theme.faded));
+
+        // +/- prefix
         let prefix = match dl.kind {
             DiffLineKind::Context => "  ",
             DiffLineKind::Added => "+ ",
@@ -107,8 +121,10 @@ pub(crate) fn draw_temporal_diff_preview(
             DiffLineKind::Removed => &theme.accent_red,
             DiffLineKind::Modified => &theme.accent_yellow,
         };
-        draw_text(frame, pane_x + CHAR_WIDTH, y, prefix, rgb_to_color(line_color));
-        let mut x = pane_x + CHAR_WIDTH * 3.0;
+        draw_text(frame, content_x, y, prefix, rgb_to_color(line_color));
+
+        // Content with word-level diff segments
+        let mut x = content_x + CHAR_WIDTH * 2.0;
         for seg in &dl.segments {
             let seg_color = match seg.kind {
                 DiffLineKind::Context => &theme.foreground,
@@ -116,7 +132,7 @@ pub(crate) fn draw_temporal_diff_preview(
                 DiffLineKind::Removed => &theme.accent_red,
                 DiffLineKind::Modified => &theme.accent_yellow,
             };
-            let text = truncate_text(&seg.text, max_chars.saturating_sub(4));
+            let text = truncate_text(&seg.text, content_chars.saturating_sub(2));
             draw_text(frame, x, y, &text, rgb_to_color(seg_color));
             x += text.chars().count() as f32 * CHAR_WIDTH;
         }

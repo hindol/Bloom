@@ -197,20 +197,12 @@ fn draw_active_status_bar(
     let status_y = pane_y + pane.rect.content_height as f32 * LINE_HEIGHT;
     let text_y = status_y + (STATUS_BAR_HEIGHT - LINE_HEIGHT) / 2.0;
 
-    // Background color follows the mode per THEMING.md:
-    // Normal → highlight, Insert → accent_green, Visual → popout,
-    // Command → accent_blue, temporal modes → accent_yellow.
-    let bar_bg = match pane.status_bar.mode.as_str() {
-        "INSERT" => rgb_to_color(&theme.accent_green),
-        "VISUAL" => rgb_to_color(&theme.popout),
-        "COMMAND" => rgb_to_color(&theme.accent_blue),
-        "HIST" | "DAY" | "JRNL" => rgb_to_color(&theme.accent_yellow),
-        _ => rgb_to_color(&theme.highlight),
-    };
+    // Status bar background — always `highlight`, not mode-coloured.
+    // Only the mode badge gets the mode colour.
     fill_rect(
         frame,
         rect(pane_x, status_y, pane_w, STATUS_BAR_HEIGHT),
-        bar_bg,
+        rgb_to_color(&theme.highlight),
     );
     // Top border for visual anchor.
     crate::draw::draw_hline(
