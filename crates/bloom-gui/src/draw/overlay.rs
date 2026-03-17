@@ -19,7 +19,7 @@ pub(crate) fn draw_picker(
     picker: &PickerFrame,
     theme: &ThemePalette,
 ) {
-    draw_overlay_scrim(frame, size, rgb_to_color(&theme.background), 0.45);
+    draw_overlay_scrim(frame, size, rgb_to_color(&theme.background), 0.85);
 
     let width = (size.width * if picker.wide { 0.72 } else { 0.60 }).max(40.0 * CHAR_WIDTH);
     let height = (size.height * 0.70).max(12.0 * LINE_HEIGHT);
@@ -213,7 +213,7 @@ pub(crate) fn draw_dialog(
     dialog: &DialogFrame,
     theme: &ThemePalette,
 ) {
-    draw_overlay_scrim(frame, size, rgb_to_color(&theme.background), 0.45);
+    draw_overlay_scrim(frame, size, rgb_to_color(&theme.background), 0.85);
 
     let width = (size.width * 0.5).max(30.0 * CHAR_WIDTH).min(size.width - 8.0);
     let height = (4.5 * LINE_HEIGHT).min(size.height - 8.0);
@@ -265,7 +265,7 @@ pub(crate) fn draw_date_picker(
     picker: &DatePickerFrame,
     theme: &ThemePalette,
 ) {
-    draw_overlay_scrim(frame, size, rgb_to_color(&theme.background), 0.35);
+    draw_overlay_scrim(frame, size, rgb_to_color(&theme.background), 0.80);
 
     let width = 34.0 * CHAR_WIDTH;
     let height = 11.0 * LINE_HEIGHT;
@@ -733,7 +733,7 @@ pub(crate) fn draw_view(
     view_frame: &ViewFrame,
     theme: &ThemePalette,
 ) {
-    draw_overlay_scrim(frame, size, rgb_to_color(&theme.background), 0.45);
+    draw_overlay_scrim(frame, size, rgb_to_color(&theme.background), 0.85);
     let margin = 2.0 * CHAR_WIDTH;
     let panel = rect(margin, margin, size.width - 2.0 * margin, size.height - 2.0 * margin);
     fill_panel(frame, panel, rgb_to_color(&theme.subtle), rgb_to_color(&theme.faded));

@@ -1,5 +1,5 @@
 use bloom_core::render::{
-    ContextStripDay, ContextStripFrame, DiffLineKind, StripNodeKind, TemporalMode,
+    ContextStripDay, ContextStripFrame, DiffLineKind, PaneFrame, StripNodeKind, TemporalMode,
     TemporalStripFrame, WhichKeyFrame,
 };
 use bloom_md::theme::ThemePalette;
@@ -69,6 +69,7 @@ pub(crate) fn draw_temporal_strip(
     size: Size,
     strip: &TemporalStripFrame,
     theme: &ThemePalette,
+    active_pane: Option<&PaneFrame>,
 ) {
     if strip.items.is_empty() {
         return;
@@ -78,23 +79,33 @@ pub(crate) fn draw_temporal_strip(
     let panel_h = lines as f32 * LINE_HEIGHT;
     let panel_y = (size.height - panel_h).max(0.0);
 
-    // --- Diff preview in the pane area above the strip ---
+    // --- Diff preview in the active pane area above the strip ---
     if matches!(strip.mode, TemporalMode::PageHistory | TemporalMode::BlockHistory)
         && !strip.preview_lines.is_empty()
     {
-        let preview_y_start = 0.0;
-        let preview_h = panel_y;
-        // Fill background over the pane content.
+        // Compute the pane content area to overlay.
+        let (pane_x, pane_y, pane_w) = if let Some(pane) = active_pane {
+            (
+                pane.rect.x as f32 * CHAR_WIDTH,
+                pane.rect.y as f32 * LINE_HEIGHT,
+                pane.rect.width as f32 * CHAR_WIDTH,
+            )
+        } else {
+            (0.0, 0.0, size.width)
+        };
+        let preview_h = (panel_y - pane_y).max(0.0);
+
+        // Opaque background fill over the pane content.
         fill_rect(
             frame,
-            rect(0.0, preview_y_start, size.width, preview_h),
+            rect(pane_x, pane_y, pane_w, preview_h),
             rgb_to_color(&theme.background),
         );
 
-        let max_chars = chars_that_fit(size.width);
+        let max_chars = chars_that_fit(pane_w);
         let max_rows = (preview_h / LINE_HEIGHT) as usize;
         for (i, dl) in strip.preview_lines.iter().take(max_rows).enumerate() {
-            let y = preview_y_start + i as f32 * LINE_HEIGHT;
+            let y = pane_y + i as f32 * LINE_HEIGHT;
             let prefix = match dl.kind {
                 DiffLineKind::Context => "  ",
                 DiffLineKind::Added => "+ ",
@@ -107,10 +118,8 @@ pub(crate) fn draw_temporal_strip(
                 DiffLineKind::Removed => &theme.accent_red,
                 DiffLineKind::Modified => &theme.accent_yellow,
             };
-            // Prefix (gutter-like).
-            draw_text(frame, CHAR_WIDTH, y, prefix, rgb_to_color(line_color));
-            // Content with word-level diff segments.
-            let mut x = CHAR_WIDTH * 3.0;
+            draw_text(frame, pane_x + CHAR_WIDTH, y, prefix, rgb_to_color(line_color));
+            let mut x = pane_x + CHAR_WIDTH * 3.0;
             for seg in &dl.segments {
                 let seg_color = match seg.kind {
                     DiffLineKind::Context => &theme.foreground,

@@ -133,7 +133,7 @@ impl<'a> canvas::Program<Message> for EditorCanvas<'a> {
                 drawer::draw_context_strip(frame, bounds.size(), strip, self.theme);
             }
             if let Some(strip) = &render_frame.temporal_strip {
-                drawer::draw_temporal_strip(frame, bounds.size(), strip, self.theme);
+                drawer::draw_temporal_strip(frame, bounds.size(), strip, self.theme, active_pane);
             }
             if let Some(which_key) = &render_frame.which_key {
                 drawer::draw_which_key(frame, bounds.size(), which_key, self.theme);
