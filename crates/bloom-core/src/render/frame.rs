@@ -32,6 +32,9 @@ pub struct RenderFrame {
     pub scrolloff: usize,
     /// Active theme name — frontends resolve to a palette each frame for live preview.
     pub theme_name: String,
+    /// Split tree snapshot — the GUI computes pixel rects from ratios + font
+    /// metrics; the TUI uses [`PaneRectFrame`] cell coords instead.
+    pub layout_tree: super::LayoutTree,
 }
 
 // ---------------------------------------------------------------------------

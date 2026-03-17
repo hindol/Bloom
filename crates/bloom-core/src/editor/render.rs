@@ -8,6 +8,32 @@
 use crate::editor::commands::EX_COMMANDS;
 use crate::*;
 
+/// Convert the window manager's binary split tree into the render module's
+/// serializable multi-child tree for GUI consumption.
+fn wm_tree_to_render(tree: &window::LayoutTree) -> render::LayoutTree {
+    match tree {
+        window::LayoutTree::Leaf(id) => render::LayoutTree::Leaf(*id),
+        window::LayoutTree::Split {
+            direction,
+            ratio,
+            left,
+            right,
+        } => {
+            let dir = match direction {
+                window::SplitDirection::Vertical => render::SplitDirection::Vertical,
+                window::SplitDirection::Horizontal => render::SplitDirection::Horizontal,
+            };
+            render::LayoutTree::Split {
+                direction: dir,
+                children: vec![
+                    (*ratio, wm_tree_to_render(left)),
+                    (1.0 - ratio, wm_tree_to_render(right)),
+                ],
+            }
+        }
+    }
+}
+
 /// Compute ghost text (the untyped suffix) for command-line completion.
 fn command_ghost_text(input: &str) -> Option<String> {
     if input.is_empty() {
@@ -66,6 +92,7 @@ impl BloomEditor {
                 notifications: Vec::new(),
                 scrolloff: self.config.scrolloff,
                 theme_name: self.active_theme.name.to_string(),
+                layout_tree: render::LayoutTree::Leaf(types::PaneId(0)),
             };
         }
 
@@ -696,6 +723,7 @@ impl BloomEditor {
                 .collect(),
             scrolloff: self.config.scrolloff,
             theme_name: self.active_theme.name.to_string(),
+            layout_tree: wm_tree_to_render(self.window_mgr.layout()),
         }
     }
 

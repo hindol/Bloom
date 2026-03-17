@@ -7,9 +7,11 @@
 
 mod frame;
 mod layout;
+mod measure;
 pub mod search_highlight;
 mod viewport;
 
 pub use frame::*;
 pub use layout::*;
+pub use measure::*;
 pub use viewport::*;

@@ -6,11 +6,7 @@ license = "AGPL-3.0-or-later"
 
 [dependencies]
 bloom-core = { path = "../bloom-core" }
+bloom-md = { path = "../bloom-md" }
 crossbeam = "0.8.4"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
-tauri = { version = "2", features = ["devtools"] }
+iced = { version = "0.14", features = ["canvas", "advanced", "tokio"] }
 tracing = "0.1"
-
-[build-dependencies]
-tauri-build = "2"

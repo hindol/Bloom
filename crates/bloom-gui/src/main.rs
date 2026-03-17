@@ -1,32 +1,61 @@
-//! Bloom GUI — Tauri frontend over bloom-core.
-//!
-//! The editor runs on a dedicated thread using the shared event loop.
-//! Tauri commands send events via channels — no Mutex on the editor.
+//! Bloom GUI — Iced (Canvas) frontend over bloom-core.
 
-use std::sync::{Arc, Mutex};
+mod canvas;
+mod draw;
+mod keys;
+mod theme;
 
 use bloom_core::config::Config;
 use bloom_core::default_vault_path;
 use bloom_core::event_loop::{FrontendEvent, LoopAction};
+use bloom_core::render::RenderFrame;
 use bloom_core::BloomEditor;
-use crossbeam::channel::Sender;
-use serde::Deserialize;
-use tauri::{AppHandle, Emitter};
+use bloom_md::theme::{ThemePalette, BLOOM_DARK};
+use crossbeam::channel::{Receiver, Sender};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use iced::widget::canvas::{Cache, Canvas};
+use iced::{keyboard, window, Element, Length, Size, Subscription, Task};
 
-/// Key event from the frontend.
-#[derive(Debug, Deserialize)]
-struct KeyInput {
-    code: String,
-    ctrl: bool,
-    alt: bool,
-    shift: bool,
-    meta: bool,
+use crate::canvas::EditorCanvas;
+use crate::keys::convert_key;
+
+pub(crate) const FONT_SIZE: f32 = 14.0;
+pub(crate) const LINE_HEIGHT: f32 = FONT_SIZE * 1.6;
+pub(crate) const CHAR_WIDTH: f32 = FONT_SIZE * 0.6;
+pub(crate) const GUTTER_CHARS: usize = 5;
+pub(crate) const GUTTER_WIDTH: f32 = GUTTER_CHARS as f32 * CHAR_WIDTH;
+
+fn main() -> iced::Result {
+    iced::application(boot, update, view)
+        .title("Bloom")
+        .subscription(subscription)
+        .window(window::Settings {
+            size: Size::new(1200.0, 800.0),
+            min_size: Some(Size::new(400.0, 300.0)),
+            ..Default::default()
+        })
+        .antialiasing(true)
+        .run()
 }
 
-/// Channel sender for frontend events, shared via Tauri state.
-struct FrontendTx(Sender<FrontendEvent>);
+struct BloomApp {
+    frontend_tx: Sender<FrontendEvent>,
+    frame_rx: Receiver<Box<RenderFrame>>,
+    frame: Option<Box<RenderFrame>>,
+    theme: &'static ThemePalette,
+    canvas_cache: Cache,
+    /// Set to true when the editor thread exits (on :q / :qa).
+    quit_flag: Arc<AtomicBool>,
+}
 
-fn main() {
+#[derive(Debug, Clone)]
+enum Message {
+    KeyboardEvent(keyboard::Event),
+    Tick,
+}
+
+fn boot() -> (BloomApp, Task<Message>) {
     let config_path_str = default_vault_path();
     let config_path = std::path::Path::new(&config_path_str).join("config.toml");
     let config = if config_path.exists() {
@@ -37,7 +66,6 @@ fn main() {
 
     let mut editor = BloomEditor::new(config).expect("failed to create editor");
 
-    // Initialize vault if it exists
     let vault_path = default_vault_path();
     let vault_root = std::path::Path::new(&vault_path);
     if vault_root.join("config.toml").exists() {
@@ -46,10 +74,10 @@ fn main() {
     }
 
     let (frontend_tx, frontend_rx) = crossbeam::channel::unbounded();
-    let app_handle: Arc<Mutex<Option<AppHandle>>> = Arc::new(Mutex::new(None));
-    let app_handle_for_loop = app_handle.clone();
+    let (frame_tx, frame_rx) = crossbeam::channel::unbounded::<Box<RenderFrame>>();
+    let quit_flag = Arc::new(AtomicBool::new(false));
+    let quit_flag_thread = quit_flag.clone();
 
-    // Editor loop runs on a dedicated thread — no Mutex on editor
     std::thread::Builder::new()
         .name("bloom-editor".into())
         .spawn(move || {
@@ -58,15 +86,11 @@ fn main() {
                 &frontend_rx,
                 |action| match action {
                     LoopAction::Render(frame) => {
-                        if let Some(app) = app_handle_for_loop.lock().unwrap().as_ref() {
-                            let _ = app.emit("render", &frame);
-                        }
+                        let _ = frame_tx.send(frame);
                         true
                     }
                     LoopAction::Quit => {
-                        if let Some(app) = app_handle_for_loop.lock().unwrap().as_ref() {
-                            let _ = app.emit("quit", ());
-                        }
+                        quit_flag_thread.store(true, Ordering::SeqCst);
                         false
                     }
                 },
@@ -74,70 +98,66 @@ fn main() {
         })
         .expect("failed to spawn editor thread");
 
-    let tx_for_state = frontend_tx.clone();
+    let initial_cols = (1200.0 / CHAR_WIDTH) as u16;
+    let initial_rows = (800.0 / LINE_HEIGHT) as u16;
+    let _ = frontend_tx.send(FrontendEvent::Resize {
+        cols: initial_cols,
+        rows: initial_rows,
+    });
 
-    tauri::Builder::default()
-        .manage(FrontendTx(tx_for_state))
-        .setup(move |app| {
-            *app_handle.lock().unwrap() = Some(app.handle().clone());
-            // Trigger initial render by sending a resize
-            let _ = frontend_tx.send(FrontendEvent::Resize {
-                cols: 120,
-                rows: 40,
-            });
-            Ok(())
-        })
-        .invoke_handler(tauri::generate_handler![key_event, resize])
-        .run(tauri::generate_context!())
-        .expect("failed to run Bloom GUI");
+    (
+        BloomApp {
+            frontend_tx,
+            frame_rx,
+            frame: None,
+            theme: &BLOOM_DARK,
+            canvas_cache: Cache::default(),
+            quit_flag,
+        },
+        Task::none(),
+    )
 }
 
-/// Handle a key event from the frontend — sends to the editor loop channel.
-#[tauri::command]
-fn key_event(key: KeyInput, state: tauri::State<FrontendTx>) {
-    if let Some(bloom_key) = convert_key(&key) {
-        let _ = state.0.send(FrontendEvent::Key(bloom_key));
-    }
-}
-
-/// Handle window resize from the frontend.
-#[tauri::command]
-fn resize(cols: u16, rows: u16, state: tauri::State<FrontendTx>) {
-    let _ = state.0.send(FrontendEvent::Resize { cols, rows });
-}
-
-/// Convert a frontend KeyInput to a bloom-core KeyEvent.
-fn convert_key(key: &KeyInput) -> Option<bloom_core::types::KeyEvent> {
-    use bloom_core::types::{KeyCode, Modifiers};
-
-    let code = match key.code.as_str() {
-        "Escape" => KeyCode::Esc,
-        "Enter" => KeyCode::Enter,
-        "Backspace" => KeyCode::Backspace,
-        "Delete" => KeyCode::Delete,
-        "Tab" => KeyCode::Tab,
-        "ArrowUp" => KeyCode::Up,
-        "ArrowDown" => KeyCode::Down,
-        "ArrowLeft" => KeyCode::Left,
-        "ArrowRight" => KeyCode::Right,
-        "Home" => KeyCode::Home,
-        "End" => KeyCode::End,
-        "PageUp" => KeyCode::PageUp,
-        "PageDown" => KeyCode::PageDown,
-        " " => KeyCode::Char(' '),
-        s if s.len() == 1 => {
-            let ch = s.chars().next()?;
-            KeyCode::Char(ch)
+fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
+    match message {
+        Message::Tick => {
+            if state.quit_flag.load(Ordering::SeqCst) {
+                return iced::exit();
+            }
+            while let Ok(frame) = state.frame_rx.try_recv() {
+                if let Some(palette) = bloom_md::theme::palette_by_name(&frame.theme_name) {
+                    state.theme = palette;
+                }
+                state.frame = Some(frame);
+            }
+            state.canvas_cache.clear();
         }
-        _ => return None,
-    };
+        Message::KeyboardEvent(event) => {
+            if let keyboard::Event::KeyPressed { modified_key, modifiers, .. } = event {
+                if let Some(key_event) = convert_key(modified_key, modifiers) {
+                    let _ = state.frontend_tx.send(FrontendEvent::Key(key_event));
+                }
+            }
+        }
+    }
 
-    let modifiers = Modifiers {
-        ctrl: key.ctrl,
-        alt: key.alt,
-        shift: key.shift,
-        meta: key.meta,
-    };
+    Task::none()
+}
 
-    Some(bloom_core::types::KeyEvent { code, modifiers })
+fn view(state: &BloomApp) -> Element<'_, Message> {
+    Canvas::new(EditorCanvas {
+        frame: state.frame.as_deref(),
+        theme: state.theme,
+        cache: &state.canvas_cache,
+    })
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+fn subscription(_state: &BloomApp) -> Subscription<Message> {
+    Subscription::batch([
+        iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick),
+        keyboard::listen().map(Message::KeyboardEvent),
+    ])
 }

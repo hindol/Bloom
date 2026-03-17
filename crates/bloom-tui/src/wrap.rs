@@ -1,11 +1,5 @@
-use bloom_core::render::RenderedLine;
+use bloom_core::render::{MeasureWidth, RenderedLine};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-
-/// Measure the display width of a text slice.
-/// Returns a unit appropriate for the frontend — columns for TUI, pixels for GUI.
-pub trait MeasureWidth {
-    fn width(&self, text: &str) -> usize;
-}
 
 pub struct MonospaceWidth;
 
