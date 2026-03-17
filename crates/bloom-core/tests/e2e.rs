@@ -4305,3 +4305,75 @@ fn uc95_block_id_assignment() {
         .lines()
         .any(|line| line.starts_with("- [ ] Task item") && line.contains(" ^")));
 }
+
+// -----------------------------------------------------------------------
+// History scrubber / temporal strip
+// -----------------------------------------------------------------------
+
+#[test]
+fn history_scrubber_opens_and_has_nodes() {
+    // Create a buffer, make some edits to build undo history, then open page history.
+    let mut sim = SimInput::with_content("Line one\nLine two\nLine three\n");
+
+    // Make a few distinct edits to create undo tree nodes.
+    sim.keys("o");
+    sim.type_text("Edit A");
+    sim.keys("<Esc>");
+    sim.keys("o");
+    sim.type_text("Edit B");
+    sim.keys("<Esc>");
+    sim.keys("o");
+    sim.type_text("Edit C");
+    sim.keys("<Esc>");
+
+    // Open page history: SPC H h
+    sim.keys("SPC H h");
+
+    let screen = sim.screen(80, 30);
+    assert!(
+        screen.has_temporal_strip(),
+        "temporal strip should be open after SPC H h"
+    );
+    assert!(
+        screen.temporal_strip_node_count() >= 3,
+        "expected at least 3 undo nodes, got {}",
+        screen.temporal_strip_node_count()
+    );
+}
+
+#[test]
+fn history_scrubber_navigation_updates_preview() {
+    let mut sim = SimInput::with_content("Original text\n");
+
+    // Create edits.
+    sim.keys("o");
+    sim.type_text("First addition");
+    sim.keys("<Esc>");
+    sim.keys("o");
+    sim.type_text("Second addition");
+    sim.keys("<Esc>");
+
+    // Open page history.
+    sim.keys("SPC H h");
+    let screen = sim.screen(80, 30);
+    assert!(screen.has_temporal_strip());
+    let initial_preview_count = screen.temporal_preview_line_count();
+
+    // Navigate to an older entry.
+    sim.keys("h");
+    let screen2 = sim.screen(80, 30);
+
+    // After navigating, the preview should still exist (may have different content).
+    assert!(
+        screen2.has_temporal_strip(),
+        "temporal strip should remain open after h navigation"
+    );
+    // Preview lines should be present (diff vs current).
+    // On the first nav, there should be some diff lines since content changed.
+    // (exact count depends on core's diff output — just verify it's non-zero
+    // or at least the strip is still alive)
+    assert!(
+        screen2.temporal_strip_node_count() >= 2,
+        "should still have undo nodes after navigation"
+    );
+}

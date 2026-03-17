@@ -426,6 +426,29 @@ impl TestScreen {
         self.frame.context_strip.is_some()
     }
 
+    /// Whether a temporal strip (history scrubber) is visible.
+    pub fn has_temporal_strip(&self) -> bool {
+        self.frame.temporal_strip.is_some()
+    }
+
+    /// Number of diff preview lines in the temporal strip.
+    pub fn temporal_preview_line_count(&self) -> usize {
+        self.frame
+            .temporal_strip
+            .as_ref()
+            .map(|s| s.preview_lines.len())
+            .unwrap_or(0)
+    }
+
+    /// Number of nodes in the temporal strip.
+    pub fn temporal_strip_node_count(&self) -> usize {
+        self.frame
+            .temporal_strip
+            .as_ref()
+            .map(|s| s.items.len())
+            .unwrap_or(0)
+    }
+
     /// Whether a date picker / calendar is visible.
     pub fn has_date_picker(&self) -> bool {
         self.frame.date_picker.is_some()

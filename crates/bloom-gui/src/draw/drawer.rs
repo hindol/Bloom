@@ -1,6 +1,6 @@
 use bloom_core::render::{
-    ContextStripDay, ContextStripFrame, StripNodeKind, TemporalMode, TemporalStripFrame,
-    WhichKeyFrame,
+    ContextStripDay, ContextStripFrame, DiffLineKind, StripNodeKind, TemporalMode,
+    TemporalStripFrame, WhichKeyFrame,
 };
 use bloom_md::theme::ThemePalette;
 use iced::Size;
@@ -77,6 +77,54 @@ pub(crate) fn draw_temporal_strip(
     let lines = if strip.compact { 4 } else { 6 };
     let panel_h = lines as f32 * LINE_HEIGHT;
     let panel_y = (size.height - panel_h).max(0.0);
+
+    // --- Diff preview in the pane area above the strip ---
+    if matches!(strip.mode, TemporalMode::PageHistory | TemporalMode::BlockHistory)
+        && !strip.preview_lines.is_empty()
+    {
+        let preview_y_start = 0.0;
+        let preview_h = panel_y;
+        // Fill background over the pane content.
+        fill_rect(
+            frame,
+            rect(0.0, preview_y_start, size.width, preview_h),
+            rgb_to_color(&theme.background),
+        );
+
+        let max_chars = chars_that_fit(size.width);
+        let max_rows = (preview_h / LINE_HEIGHT) as usize;
+        for (i, dl) in strip.preview_lines.iter().take(max_rows).enumerate() {
+            let y = preview_y_start + i as f32 * LINE_HEIGHT;
+            let prefix = match dl.kind {
+                DiffLineKind::Context => "  ",
+                DiffLineKind::Added => "+ ",
+                DiffLineKind::Removed => "- ",
+                DiffLineKind::Modified => "~ ",
+            };
+            let line_color = match dl.kind {
+                DiffLineKind::Context => &theme.foreground,
+                DiffLineKind::Added => &theme.accent_green,
+                DiffLineKind::Removed => &theme.accent_red,
+                DiffLineKind::Modified => &theme.accent_yellow,
+            };
+            // Prefix (gutter-like).
+            draw_text(frame, CHAR_WIDTH, y, prefix, rgb_to_color(line_color));
+            // Content with word-level diff segments.
+            let mut x = CHAR_WIDTH * 3.0;
+            for seg in &dl.segments {
+                let seg_color = match seg.kind {
+                    DiffLineKind::Context => &theme.foreground,
+                    DiffLineKind::Added => &theme.accent_green,
+                    DiffLineKind::Removed => &theme.accent_red,
+                    DiffLineKind::Modified => &theme.accent_yellow,
+                };
+                let text = truncate_text(&seg.text, max_chars.saturating_sub(4));
+                draw_text(frame, x, y, &text, rgb_to_color(seg_color));
+                x += text.chars().count() as f32 * CHAR_WIDTH;
+            }
+        }
+    }
+
     let panel = rect(0.0, panel_y, size.width, panel_h);
     fill_rect(frame, panel, rgb_to_color(&theme.highlight));
     draw_hline(frame, 0.0, size.width, panel_y, rgb_to_color(&theme.faded));

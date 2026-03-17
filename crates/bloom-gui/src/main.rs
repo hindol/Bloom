@@ -58,7 +58,8 @@ struct BloomApp {
 #[derive(Debug, Clone)]
 enum Message {
     KeyboardEvent(keyboard::Event),
-    Tick,
+    /// Animation tick (~120Hz, only while animating).
+    AnimTick,
 }
 
 fn boot() -> (BloomApp, Task<Message>) {
@@ -120,25 +121,25 @@ fn boot() -> (BloomApp, Task<Message>) {
             canvas_cache: Cache::default(),
             quit_flag,
             anim: AnimationState::default(),
-            animating: false,
+            // Start animating so the tick subscription fires and picks up
+            // the initial render frame from the editor thread.
+            animating: true,
         },
         Task::none(),
     )
 }
 
 fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
-    match message {
-        Message::Tick => {
-            if state.quit_flag.load(Ordering::SeqCst) {
-                return iced::exit();
-            }
-            while let Ok(frame) = state.frame_rx.try_recv() {
-                if let Some(palette) = bloom_md::theme::palette_by_name(&frame.theme_name) {
-                    state.theme = palette;
-                }
-                state.frame = Some(frame);
-            }
+    // Always drain pending frames — catches background events (indexer, file
+    // watcher) promptly regardless of which message woke us.
+    state.drain_frames();
 
+    if state.quit_flag.load(Ordering::SeqCst) {
+        return iced::exit();
+    }
+
+    match message {
+        Message::AnimTick => {
             // Advance animation toward logical cursor/scroll positions.
             let still_moving = if let Some(frame) = &state.frame {
                 if let Some(pane) = frame.panes.iter().find(|p| p.is_active) {
@@ -154,7 +155,6 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
                 false
             };
             state.animating = still_moving;
-
             state.canvas_cache.clear();
         }
         Message::KeyboardEvent(event) => {
@@ -166,11 +166,12 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
             {
                 if let Some(key_event) = convert_key(modified_key, modifiers) {
                     let _ = state.frontend_tx.send(FrontendEvent::Key(key_event));
-                    // Key was sent — bump to animation speed so the response
-                    // frame is picked up quickly (within 8ms, not 250ms).
-                    state.animating = true;
                 }
             }
+            // Key sent — bump to animation speed so response frame is picked up
+            // on the next tick (8ms), and start the animation subscription.
+            state.animating = true;
+            state.canvas_cache.clear();
         }
     }
 
@@ -190,15 +191,31 @@ fn view(state: &BloomApp) -> Element<'_, Message> {
 }
 
 fn subscription(state: &BloomApp) -> Subscription<Message> {
-    // ~120Hz while animating, ~4Hz while idle (just polling for editor frames).
-    let tick_interval = if state.animating {
-        std::time::Duration::from_millis(8)
-    } else {
-        std::time::Duration::from_millis(250)
-    };
-
-    Subscription::batch([
-        iced::time::every(tick_interval).map(|_| Message::Tick),
+    let mut subs = vec![
+        // Keyboard — always active, event-driven (zero cost when idle).
         keyboard::listen().map(Message::KeyboardEvent),
-    ])
+    ];
+
+    // Animation tick — only while animating (~120Hz). Absent when idle = zero CPU.
+    if state.animating {
+        subs.push(
+            iced::time::every(std::time::Duration::from_millis(8)).map(|_| Message::AnimTick),
+        );
+    }
+
+    Subscription::batch(subs)
+}
+
+impl BloomApp {
+    /// Drain any pending frames from the editor thread (non-blocking).
+    /// Called on every update to catch frames promptly.
+    fn drain_frames(&mut self) {
+        while let Ok(frame) = self.frame_rx.try_recv() {
+            if let Some(palette) = bloom_md::theme::palette_by_name(&frame.theme_name) {
+                self.theme = palette;
+            }
+            self.frame = Some(frame);
+            self.animating = true;
+        }
+    }
 }
