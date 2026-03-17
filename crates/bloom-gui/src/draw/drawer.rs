@@ -64,12 +64,72 @@ pub(crate) fn draw_which_key(
     }
 }
 
-pub(crate) fn draw_temporal_strip(
+/// Draw the diff preview on its own layer (DiffCanvas).
+/// Fills the active pane content area with an opaque background and renders diff lines.
+pub(crate) fn draw_temporal_diff_preview(
     frame: &mut iced::widget::canvas::Frame,
     size: Size,
     strip: &TemporalStripFrame,
     theme: &ThemePalette,
     active_pane: Option<&PaneFrame>,
+) {
+    let lines = if strip.compact { 4 } else { 6 };
+    let panel_h = lines as f32 * LINE_HEIGHT;
+    let panel_y = (size.height - panel_h).max(0.0);
+
+    let (pane_x, pane_y, pane_w) = if let Some(pane) = active_pane {
+        (
+            pane.rect.x as f32 * CHAR_WIDTH,
+            pane.rect.y as f32 * LINE_HEIGHT,
+            pane.rect.width as f32 * CHAR_WIDTH,
+        )
+    } else {
+        (0.0, 0.0, size.width)
+    };
+    let preview_h = (panel_y - pane_y).max(0.0);
+
+    // Opaque background fill — fully covers pane content below.
+    fill_rect(frame, rect(pane_x, pane_y, pane_w, preview_h), rgb_to_color(&theme.background));
+
+    let max_chars = chars_that_fit(pane_w);
+    let max_rows = (preview_h / LINE_HEIGHT) as usize;
+    for (i, dl) in strip.preview_lines.iter().take(max_rows).enumerate() {
+        let y = pane_y + i as f32 * LINE_HEIGHT;
+        let prefix = match dl.kind {
+            DiffLineKind::Context => "  ",
+            DiffLineKind::Added => "+ ",
+            DiffLineKind::Removed => "- ",
+            DiffLineKind::Modified => "~ ",
+        };
+        let line_color = match dl.kind {
+            DiffLineKind::Context => &theme.foreground,
+            DiffLineKind::Added => &theme.accent_green,
+            DiffLineKind::Removed => &theme.accent_red,
+            DiffLineKind::Modified => &theme.accent_yellow,
+        };
+        draw_text(frame, pane_x + CHAR_WIDTH, y, prefix, rgb_to_color(line_color));
+        let mut x = pane_x + CHAR_WIDTH * 3.0;
+        for seg in &dl.segments {
+            let seg_color = match seg.kind {
+                DiffLineKind::Context => &theme.foreground,
+                DiffLineKind::Added => &theme.accent_green,
+                DiffLineKind::Removed => &theme.accent_red,
+                DiffLineKind::Modified => &theme.accent_yellow,
+            };
+            let text = truncate_text(&seg.text, max_chars.saturating_sub(4));
+            draw_text(frame, x, y, &text, rgb_to_color(seg_color));
+            x += text.chars().count() as f32 * CHAR_WIDTH;
+        }
+    }
+}
+
+/// Draw the temporal strip drawer only (nodes, title, hints).
+/// Diff preview is rendered on a separate Canvas layer.
+pub(crate) fn draw_temporal_strip_drawer(
+    frame: &mut iced::widget::canvas::Frame,
+    size: Size,
+    strip: &TemporalStripFrame,
+    theme: &ThemePalette,
 ) {
     if strip.items.is_empty() {
         return;
@@ -78,61 +138,6 @@ pub(crate) fn draw_temporal_strip(
     let lines = if strip.compact { 4 } else { 6 };
     let panel_h = lines as f32 * LINE_HEIGHT;
     let panel_y = (size.height - panel_h).max(0.0);
-
-    // --- Diff preview in the active pane area above the strip ---
-    if matches!(strip.mode, TemporalMode::PageHistory | TemporalMode::BlockHistory)
-        && !strip.preview_lines.is_empty()
-    {
-        // Compute the pane content area to overlay.
-        let (pane_x, pane_y, pane_w) = if let Some(pane) = active_pane {
-            (
-                pane.rect.x as f32 * CHAR_WIDTH,
-                pane.rect.y as f32 * LINE_HEIGHT,
-                pane.rect.width as f32 * CHAR_WIDTH,
-            )
-        } else {
-            (0.0, 0.0, size.width)
-        };
-        let preview_h = (panel_y - pane_y).max(0.0);
-
-        // Opaque background fill over the pane content.
-        fill_rect(
-            frame,
-            rect(pane_x, pane_y, pane_w, preview_h),
-            rgb_to_color(&theme.background),
-        );
-
-        let max_chars = chars_that_fit(pane_w);
-        let max_rows = (preview_h / LINE_HEIGHT) as usize;
-        for (i, dl) in strip.preview_lines.iter().take(max_rows).enumerate() {
-            let y = pane_y + i as f32 * LINE_HEIGHT;
-            let prefix = match dl.kind {
-                DiffLineKind::Context => "  ",
-                DiffLineKind::Added => "+ ",
-                DiffLineKind::Removed => "- ",
-                DiffLineKind::Modified => "~ ",
-            };
-            let line_color = match dl.kind {
-                DiffLineKind::Context => &theme.foreground,
-                DiffLineKind::Added => &theme.accent_green,
-                DiffLineKind::Removed => &theme.accent_red,
-                DiffLineKind::Modified => &theme.accent_yellow,
-            };
-            draw_text(frame, pane_x + CHAR_WIDTH, y, prefix, rgb_to_color(line_color));
-            let mut x = pane_x + CHAR_WIDTH * 3.0;
-            for seg in &dl.segments {
-                let seg_color = match seg.kind {
-                    DiffLineKind::Context => &theme.foreground,
-                    DiffLineKind::Added => &theme.accent_green,
-                    DiffLineKind::Removed => &theme.accent_red,
-                    DiffLineKind::Modified => &theme.accent_yellow,
-                };
-                let text = truncate_text(&seg.text, max_chars.saturating_sub(4));
-                draw_text(frame, x, y, &text, rgb_to_color(seg_color));
-                x += text.chars().count() as f32 * CHAR_WIDTH;
-            }
-        }
-    }
 
     let panel = rect(0.0, panel_y, size.width, panel_h);
     fill_rect(frame, panel, rgb_to_color(&theme.highlight));

@@ -17,7 +17,7 @@ use iced::{keyboard, window, Element, Length, Size, Subscription, Task};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::canvas::{AnimationState, BaseCanvas, OverlayCanvas};
+use crate::canvas::{AnimationState, BaseCanvas, DiffCanvas, OverlayCanvas};
 use crate::keys::convert_key;
 
 pub(crate) const FONT_SIZE: f32 = 13.0;
@@ -29,6 +29,8 @@ pub(crate) const STATUS_BAR_HEIGHT: f32 = LINE_HEIGHT * 1.5;
 pub(crate) const CHAR_WIDTH: f32 = FONT_SIZE * 0.6;
 pub(crate) const GUTTER_CHARS: usize = 5;
 pub(crate) const GUTTER_WIDTH: f32 = GUTTER_CHARS as f32 * CHAR_WIDTH;
+/// Bottom safe area to avoid macOS window corner radius clipping.
+pub(crate) const BOTTOM_SAFE_AREA: f32 = 6.0;
 
 fn main() -> iced::Result {
     iced::application(boot, update, view)
@@ -50,9 +52,12 @@ struct BloomApp {
     theme: &'static ThemePalette,
     base_cache: Cache,
     overlay_cache: Cache,
+    diff_cache: Cache,
     quit_flag: Arc<AtomicBool>,
     anim: AnimationState,
     animating: bool,
+    /// Last window size sent to core (for resize detection).
+    last_size: (u16, u16),
 }
 
 #[derive(Debug, Clone)]
@@ -60,6 +65,8 @@ enum Message {
     KeyboardEvent(keyboard::Event),
     /// Animation tick (~120Hz, only while animating).
     AnimTick,
+    /// Window was resized.
+    WindowResized(Size),
 }
 
 fn boot() -> (BloomApp, Task<Message>) {
@@ -106,7 +113,7 @@ fn boot() -> (BloomApp, Task<Message>) {
         .expect("failed to spawn editor thread");
 
     let initial_cols = (1200.0 / CHAR_WIDTH) as u16;
-    let initial_rows = (800.0 / LINE_HEIGHT) as u16;
+    let initial_rows = ((800.0 - BOTTOM_SAFE_AREA) / LINE_HEIGHT) as u16;
     let _ = frontend_tx.send(FrontendEvent::Resize {
         cols: initial_cols,
         rows: initial_rows,
@@ -119,10 +126,12 @@ fn boot() -> (BloomApp, Task<Message>) {
             frame: None,
             theme: &BLOOM_DARK,
             base_cache: Cache::default(),
+            diff_cache: Cache::default(),
             overlay_cache: Cache::default(),
             quit_flag,
             anim: AnimationState::default(),
             animating: true,
+            last_size: (initial_cols, initial_rows),
         },
         Task::none(),
     )
@@ -142,9 +151,13 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
             // Advance animation toward logical cursor/scroll positions.
             let still_moving = if let Some(frame) = &state.frame {
                 if let Some(pane) = frame.panes.iter().find(|p| p.is_active) {
+                    let status_bars_above = frame.panes.iter()
+                        .filter(|other| other.rect.y + other.rect.total_height <= pane.rect.y)
+                        .count();
+                    let pane_y = pane.rect.y as f32 * LINE_HEIGHT
+                        + status_bars_above as f32 * (STATUS_BAR_HEIGHT - LINE_HEIGHT);
                     let cursor_row = pane.cursor.line.saturating_sub(pane.scroll_offset);
-                    let target_cursor_y =
-                        pane.rect.y as f32 * LINE_HEIGHT + cursor_row as f32 * LINE_HEIGHT;
+                    let target_cursor_y = pane_y + cursor_row as f32 * LINE_HEIGHT;
                     let target_scroll_y = pane.scroll_offset as f32 * LINE_HEIGHT;
                     state.anim.advance(target_cursor_y, target_scroll_y)
                 } else {
@@ -154,7 +167,7 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
                 false
             };
             state.animating = still_moving;
-            state.base_cache.clear(); state.overlay_cache.clear();
+            state.base_cache.clear(); state.diff_cache.clear(); state.overlay_cache.clear();
         }
         Message::KeyboardEvent(event) => {
             if let keyboard::Event::KeyPressed {
@@ -170,7 +183,16 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
             // Key sent — bump to animation speed so response frame is picked up
             // on the next tick (8ms), and start the animation subscription.
             state.animating = true;
-            state.base_cache.clear(); state.overlay_cache.clear();
+            state.base_cache.clear(); state.diff_cache.clear(); state.overlay_cache.clear();
+        }
+        Message::WindowResized(size) => {
+            let cols = (size.width / CHAR_WIDTH).max(1.0) as u16;
+            let rows = ((size.height - BOTTOM_SAFE_AREA) / LINE_HEIGHT).max(1.0) as u16;
+            if (cols, rows) != state.last_size {
+                state.last_size = (cols, rows);
+                let _ = state.frontend_tx.send(FrontendEvent::Resize { cols, rows });
+                state.animating = true;
+            }
         }
     }
 
@@ -187,6 +209,14 @@ fn view(state: &BloomApp) -> Element<'_, Message> {
     .width(Length::Fill)
     .height(Length::Fill);
 
+    let diff = Canvas::new(DiffCanvas {
+        frame: state.frame.as_deref(),
+        theme: state.theme,
+        cache: &state.diff_cache,
+    })
+    .width(Length::Fill)
+    .height(Length::Fill);
+
     let overlay = Canvas::new(OverlayCanvas {
         frame: state.frame.as_deref(),
         theme: state.theme,
@@ -195,7 +225,7 @@ fn view(state: &BloomApp) -> Element<'_, Message> {
     .width(Length::Fill)
     .height(Length::Fill);
 
-    iced::widget::stack![base, overlay]
+    iced::widget::stack![base, diff, overlay]
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
@@ -203,15 +233,15 @@ fn view(state: &BloomApp) -> Element<'_, Message> {
 
 fn subscription(state: &BloomApp) -> Subscription<Message> {
     let mut subs = vec![
-        // Keyboard — always active, event-driven (zero cost when idle).
         keyboard::listen().map(Message::KeyboardEvent),
+        window::resize_events().map(|(_, size)| Message::WindowResized(size)),
     ];
 
-    // Animation tick — only while animating (~120Hz). Absent when idle = zero CPU.
+    // VSync-aligned frame tick — fires at the display's native refresh rate
+    // (60Hz, 120Hz, etc.). Automatically adapts when the window moves between
+    // monitors. Only active while animating — zero CPU when idle.
     if state.animating {
-        subs.push(
-            iced::time::every(std::time::Duration::from_millis(8)).map(|_| Message::AnimTick),
-        );
+        subs.push(window::frames().map(|_| Message::AnimTick));
     }
 
     Subscription::batch(subs)

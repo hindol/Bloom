@@ -83,11 +83,22 @@ impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
                 return;
             }
 
+            // Compute how many status bars are above each pane's Y origin.
+            // Panes are sorted by Y in the frame. For each pane, count panes
+            // whose total_height boundary is at or above this pane's Y.
             for pf in &rf.panes {
+                let status_bars_above = rf.panes.iter()
+                    .filter(|other| {
+                        other.rect.y + other.rect.total_height <= pf.rect.y
+                    })
+                    .count();
+                let (px, py, pw, ch) = pane::pane_pixel_rect(
+                    &pf.rect, status_bars_above, bounds.size(),
+                );
                 let anim = if pf.is_active {
                     Some((self.anim.cursor_y(), self.anim.highlight_y()))
                 } else { None };
-                pane::draw_pane(frame, pf, self.theme, anim);
+                pane::draw_pane(frame, pf, self.theme, anim, px, py, pw, ch);
             }
 
             draw_split_borders(frame, &rf.panes, self.theme);
@@ -99,11 +110,57 @@ impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
                 drawer::draw_context_strip(frame, bounds.size(), s, self.theme);
             }
             if let Some(s) = &rf.temporal_strip {
-                drawer::draw_temporal_strip(frame, bounds.size(), s, self.theme, active);
+                // Draw only the strip drawer (nodes, hints) — NOT the diff preview.
+                // Diff preview is on a separate layer (DiffCanvas) to avoid
+                // text blending issues within a single Canvas.
+                drawer::draw_temporal_strip_drawer(frame, bounds.size(), s, self.theme);
             }
             if let Some(wk) = &rf.which_key {
                 drawer::draw_which_key(frame, bounds.size(), wk, self.theme);
             }
+
+            // Scroll progress bar in the bottom safe area.
+            if let Some(pane) = active {
+                draw_scroll_progress(frame, bounds.size(), pane, self.theme);
+            }
+        });
+        vec![geometry]
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Diff preview layer: renders between base and overlay.
+// Opaque fill over the active pane content area when temporal history is active.
+// ---------------------------------------------------------------------------
+
+pub(crate) struct DiffCanvas<'a> {
+    pub(crate) frame: Option<&'a RenderFrame>,
+    pub(crate) theme: &'a ThemePalette,
+    pub(crate) cache: &'a Cache,
+}
+
+impl<'a> canvas::Program<Message> for DiffCanvas<'a> {
+    type State = ();
+
+    fn draw(
+        &self, _state: &(), renderer: &Renderer, _theme: &Theme,
+        bounds: Rectangle, _cursor: iced::mouse::Cursor,
+    ) -> Vec<Geometry> {
+        let Some(rf) = self.frame else { return vec![] };
+        let Some(strip) = &rf.temporal_strip else { return vec![] };
+
+        use bloom_core::render::TemporalMode;
+        if !matches!(strip.mode, TemporalMode::PageHistory | TemporalMode::BlockHistory) {
+            return vec![];
+        }
+        if strip.preview_lines.is_empty() {
+            return vec![];
+        }
+
+        let active = rf.panes.iter().find(|p| p.is_active);
+
+        let geometry = self.cache.draw(renderer, bounds.size(), |frame| {
+            drawer::draw_temporal_diff_preview(frame, bounds.size(), strip, self.theme, active);
         });
         vec![geometry]
     }
@@ -202,4 +259,32 @@ fn draw_split_borders(frame: &mut canvas::Frame, panes: &[PaneFrame], theme: &Th
 fn draw_hidden_count(frame: &mut canvas::Frame, size: Size, count: usize, theme: &ThemePalette) {
     if count == 0 { return }
     draw_text_right(frame, size.width - CHAR_WIDTH, 2.0, &format!("[{count} hidden]"), rgb_to_color(&theme.faded));
+}
+
+/// Thin scroll progress bar in the bottom safe area (macOS window corner radius zone).
+fn draw_scroll_progress(frame: &mut canvas::Frame, size: Size, pane: &PaneFrame, theme: &ThemePalette) {
+    use crate::draw::{fill_rect, rect};
+    use crate::BOTTOM_SAFE_AREA;
+
+    let bar_h = (BOTTOM_SAFE_AREA - 2.0).max(2.0); // 2px inset top and bottom
+    let bar_y = size.height - BOTTOM_SAFE_AREA + 1.0;
+
+    // Compute scroll fraction from the active pane.
+    let total_lines = pane.visible_lines.len() + pane.scroll_offset;
+    if total_lines <= pane.visible_lines.len() {
+        // Entire file visible — fill the whole bar subtly to indicate "100%".
+        fill_rect(frame, rect(0.0, bar_y, size.width, bar_h), rgb_to_color(&theme.subtle));
+        return;
+    }
+
+    // Background track.
+    fill_rect(frame, rect(0.0, bar_y, size.width, bar_h), rgb_to_color(&theme.subtle));
+
+    // Thumb: proportional to viewport / total, positioned by scroll offset.
+    let viewport_frac = pane.visible_lines.len() as f32 / total_lines as f32;
+    let scroll_frac = pane.scroll_offset as f32 / total_lines as f32;
+    let thumb_w = (size.width * viewport_frac).max(20.0).min(size.width);
+    let thumb_x = (size.width - thumb_w) * scroll_frac;
+
+    fill_rect(frame, rect(thumb_x, bar_y, thumb_w, bar_h), rgb_to_color(&theme.faded));
 }

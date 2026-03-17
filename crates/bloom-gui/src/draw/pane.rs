@@ -1,6 +1,7 @@
 use bloom_core::render::{
     CommandLineSlot, CursorShape, LineSource, McpIndicator, NormalStatus, PageHistoryFrame,
-    PaneFrame, PaneKind, QuickCaptureSlot, StatusBarContent, TimelineFrame, UndoTreeFrame,
+    PaneFrame, PaneKind, PaneRectFrame, QuickCaptureSlot, StatusBarContent, TimelineFrame,
+    UndoTreeFrame,
 };
 use bloom_md::theme::ThemePalette;
 use iced::{Color, Rectangle};
@@ -12,6 +13,30 @@ use crate::draw::{
 use crate::theme::{rgb_to_color, style_to_color};
 use crate::{CHAR_WIDTH, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, STATUS_BAR_HEIGHT};
 
+/// Extra pixels the GUI status bar adds beyond what core allocates (1 cell row).
+const STATUS_BAR_EXTRA: f32 = STATUS_BAR_HEIGHT - LINE_HEIGHT;
+
+/// Convert a cell-based PaneRectFrame to pixel coordinates.
+/// `status_bars_above` is the number of panes whose status bars are stacked
+/// above this pane's Y origin (accounts for the taller GUI status bar).
+pub(crate) fn pane_pixel_rect(
+    r: &PaneRectFrame,
+    status_bars_above: usize,
+    window_size: iced::Size,
+) -> (f32, f32, f32, f32) {
+    let pane_x = r.x as f32 * CHAR_WIDTH;
+    let pane_y = r.y as f32 * LINE_HEIGHT + status_bars_above as f32 * STATUS_BAR_EXTRA;
+    let grid_w = r.width as f32 * CHAR_WIDTH;
+    // Extend rightmost pane to window pixel edge.
+    let pane_w = if pane_x + grid_w + CHAR_WIDTH >= window_size.width {
+        window_size.width - pane_x
+    } else {
+        grid_w
+    };
+    let content_h = r.content_height as f32 * LINE_HEIGHT;
+    (pane_x, pane_y, pane_w, content_h)
+}
+
 /// Draw a pane. `anim` is `Some((cursor_y, highlight_y))` in absolute pixels
 /// for the active pane (smooth animated positions), or `None` for inactive panes.
 pub(crate) fn draw_pane(
@@ -19,18 +44,17 @@ pub(crate) fn draw_pane(
     pane: &PaneFrame,
     theme: &ThemePalette,
     anim: Option<(f32, f32)>,
+    pane_x: f32,
+    pane_y: f32,
+    pane_w: f32,
+    content_h: f32,
 ) {
-    let rect_frame = &pane.rect;
-    let pane_x = rect_frame.x as f32 * CHAR_WIDTH;
-    let pane_y = rect_frame.y as f32 * LINE_HEIGHT;
-    let pane_w = rect_frame.width as f32 * CHAR_WIDTH;
-    let content_h = rect_frame.content_height as f32 * LINE_HEIGHT;
     let content_rect = rect(pane_x, pane_y, pane_w, content_h);
 
     fill_rect(frame, content_rect, rgb_to_color(&theme.background));
 
     match &pane.kind {
-        PaneKind::Editor => draw_editor_content(frame, pane, theme, anim),
+        PaneKind::Editor => draw_editor_content(frame, pane, theme, anim, pane_x, pane_y, pane_w),
         PaneKind::UndoTree(undo_tree) => draw_undo_tree(frame, content_rect, undo_tree, theme),
         PaneKind::Timeline(timeline) => draw_timeline(frame, content_rect, timeline, theme),
         PaneKind::PageHistory(page_history) => {
@@ -51,12 +75,11 @@ fn draw_editor_content(
     pane: &PaneFrame,
     theme: &ThemePalette,
     anim: Option<(f32, f32)>,
+    pane_x: f32,
+    pane_y: f32,
+    pane_w: f32,
 ) {
-    let rect_frame = &pane.rect;
-    let pane_x = rect_frame.x as f32 * CHAR_WIDTH;
-    let pane_y = rect_frame.y as f32 * LINE_HEIGHT;
-    let pane_w = rect_frame.width as f32 * CHAR_WIDTH;
-    let content_chars = rect_frame.width as usize;
+    let content_chars = pane.rect.width as usize;
     let text_chars = content_chars.saturating_sub(GUTTER_CHARS);
 
     let logical_cursor_row = pane.cursor.line.saturating_sub(pane.scroll_offset);
