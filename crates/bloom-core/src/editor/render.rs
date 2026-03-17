@@ -73,6 +73,7 @@ impl BloomEditor {
                     visible_lines: Vec::new(),
                     cursor: render::CursorState::default(),
                     scroll_offset: 0,
+                    total_lines: 0,
                     is_active: true,
                     title: String::new(),
                     dirty: false,
@@ -143,7 +144,7 @@ impl BloomEditor {
                 continue;
             }
 
-            let (title, dirty, visible_lines, pane_cursor_line, pane_cursor_col, scroll_offset): (String, bool, Vec<_>, usize, usize, usize) =
+            let (title, dirty, visible_lines, pane_cursor_line, pane_cursor_col, scroll_offset, buf_total_lines): (String, bool, Vec<_>, usize, usize, usize, usize) =
                 if let Some(ps) = pane_state {
                     if let Some(page_id) = &ps.page_id {
                         if let Some(buf) = self.writer.buffers().get(page_id) {
@@ -167,15 +168,16 @@ impl BloomEditor {
                                 cl,
                                 cc,
                                 ps.viewport.first_visible_line,
+                                buf.len_lines(),
                             )
                         } else {
-                            (String::new(), false, Vec::new(), 0, 0, 0)
+                            (String::new(), false, Vec::new(), 0, 0, 0, 0)
                         }
                     } else {
-                        (String::new(), false, Vec::new(), 0, 0, 0)
+                        (String::new(), false, Vec::new(), 0, 0, 0, 0)
                     }
                 } else {
-                    (String::new(), false, Vec::new(), 0, 0, 0)
+                    (String::new(), false, Vec::new(), 0, 0, 0, 0)
                 };
 
             // Build per-pane status bar
@@ -298,6 +300,7 @@ impl BloomEditor {
                     },
                 },
                 scroll_offset,
+                total_lines: buf_total_lines,
                 is_active,
                 title: title.clone(),
                 dirty,
@@ -953,6 +956,7 @@ impl BloomEditor {
             visible_lines: vec![],
             cursor: render::CursorState::default(),
             scroll_offset: 0,
+            total_lines: 0,
             is_active,
             title,
             dirty: false,

@@ -10,7 +10,7 @@ use crate::draw::{
     chars_that_fit, draw_bar_cursor, draw_text, draw_text_right, fill_rect, rect, text_width,
     truncate_text,
 };
-use crate::theme::{rgb_to_color, style_to_color};
+use crate::theme::{rgb_to_color, style_to_bg, style_to_color};
 use crate::{CHAR_WIDTH, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, STATUS_BAR_HEIGHT};
 
 /// Extra pixels the GUI status bar adds beyond what core allocates (1 cell row).
@@ -143,6 +143,13 @@ fn draw_editor_content(
 
                 let slice = &visible_text[start..end];
                 let span_x = start as f32 * CHAR_WIDTH;
+                let span_w = slice.chars().count() as f32 * CHAR_WIDTH;
+
+                // Background wash for styles that need it (Code, LinkText, SearchMatch, etc.)
+                if let Some(bg) = style_to_bg(&span.style, theme) {
+                    fill_rect(frame, rect(text_x + span_x, y, span_w, LINE_HEIGHT), bg);
+                }
+
                 draw_text(
                     frame,
                     text_x + span_x,
@@ -190,11 +197,20 @@ fn draw_active_status_bar(
     let status_y = pane_y + pane.rect.content_height as f32 * LINE_HEIGHT;
     let text_y = status_y + (STATUS_BAR_HEIGHT - LINE_HEIGHT) / 2.0;
 
-    // Background — use highlight for better contrast against editor bg.
+    // Background color follows the mode per THEMING.md:
+    // Normal → highlight, Insert → accent_green, Visual → popout,
+    // Command → accent_blue, temporal modes → accent_yellow.
+    let bar_bg = match pane.status_bar.mode.as_str() {
+        "INSERT" => rgb_to_color(&theme.accent_green),
+        "VISUAL" => rgb_to_color(&theme.popout),
+        "COMMAND" => rgb_to_color(&theme.accent_blue),
+        "HIST" | "DAY" | "JRNL" => rgb_to_color(&theme.accent_yellow),
+        _ => rgb_to_color(&theme.highlight),
+    };
     fill_rect(
         frame,
         rect(pane_x, status_y, pane_w, STATUS_BAR_HEIGHT),
-        rgb_to_color(&theme.highlight),
+        bar_bg,
     );
     // Top border for visual anchor.
     crate::draw::draw_hline(
@@ -287,34 +303,60 @@ fn draw_normal_status(
         draw_text(frame, dirty_x, status_y, " [+]", rgb_to_color(&theme.salient));
     }
 
-    // Right-aligned info.
-    let right = if let Some(hints) = &pane.status_bar.right_hints {
-        hints.clone()
+    // Right-aligned elements — each drawn individually with its spec color.
+    if let Some(hints) = &pane.status_bar.right_hints {
+        draw_text_right(
+            frame,
+            pane_x + pane_w - CHAR_WIDTH,
+            status_y,
+            &truncate_text(hints, chars_that_fit((pane_w * 0.35).max(0.0))),
+            rgb_to_color(&theme.faded),
+        );
     } else {
-        let mut parts = Vec::new();
-        if let Some(recording) = normal.recording_macro {
-            parts.push(format!("@{recording}"));
-        }
-        if !normal.pending_keys.is_empty() {
-            parts.push(normal.pending_keys.clone());
-        }
-        if normal.indexing {
-            parts.push("⟳".to_string());
-        }
-        if let Some(mcp) = mcp_indicator_text(&normal.mcp) {
-            parts.push(mcp);
-        }
-        parts.push(format!("{}:{}", normal.line + 1, normal.column + 1));
-        parts.join("  ")
-    };
+        // Build segments with individual colors, draw right-to-left.
+        let mut segments: Vec<(&str, String, Color)> = Vec::new();
 
-    draw_text_right(
-        frame,
-        pane_x + pane_w - CHAR_WIDTH,
-        status_y,
-        &truncate_text(&right, chars_that_fit((pane_w * 0.35).max(0.0))),
-        rgb_to_color(&theme.faded),
-    );
+        // Line:col — faded (rightmost).
+        segments.push(("linecol", format!("{}:{}", normal.line + 1, normal.column + 1), rgb_to_color(&theme.faded)));
+
+        // MCP indicator — faded when idle, salient when editing.
+        match &normal.mcp {
+            McpIndicator::Off => {}
+            McpIndicator::Idle => {
+                segments.push(("mcp", "⚡".to_string(), rgb_to_color(&theme.faded)));
+            }
+            McpIndicator::Editing { tick } => {
+                const FRAMES: &[&str] = &["⚡", "◐", "◑", "◒", "◓"];
+                segments.push(("mcp", FRAMES[(*tick as usize) % FRAMES.len()].to_string(), rgb_to_color(&theme.salient)));
+            }
+        }
+
+        // Indexer — salient when active.
+        if normal.indexing {
+            segments.push(("indexer", "⟳".to_string(), rgb_to_color(&theme.salient)));
+        }
+
+        // Pending keys — salient.
+        if !normal.pending_keys.is_empty() {
+            segments.push(("pending", normal.pending_keys.clone(), rgb_to_color(&theme.salient)));
+        }
+
+        // Macro recording — accent_red.
+        if let Some(recording) = normal.recording_macro {
+            segments.push(("macro", format!("@{recording}"), rgb_to_color(&theme.accent_red)));
+        }
+
+        // Draw right-to-left: last segment rightmost.
+        let gap = 2.0 * CHAR_WIDTH;
+        let right_edge = pane_x + pane_w - CHAR_WIDTH;
+        let mut cursor_x = right_edge;
+        for (_id, text, color) in &segments {
+            let w = text_width(text);
+            cursor_x -= w;
+            draw_text(frame, cursor_x, status_y, text, *color);
+            cursor_x -= gap;
+        }
+    }
 }
 
 fn draw_command_line(
@@ -590,17 +632,6 @@ fn draw_undo_tree(
                 rgb_to_color(&theme.faded),
             );
             row += 1;
-        }
-    }
-}
-
-fn mcp_indicator_text(indicator: &McpIndicator) -> Option<String> {
-    match indicator {
-        McpIndicator::Off => None,
-        McpIndicator::Idle => Some("⚡".to_string()),
-        McpIndicator::Editing { tick } => {
-            const FRAMES: &[&str] = &["⚡", "◐", "◑", "◒", "◓"];
-            Some(FRAMES[(*tick as usize) % FRAMES.len()].to_string())
         }
     }
 }

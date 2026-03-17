@@ -22,7 +22,8 @@ pub(crate) fn style_to_color(style: &Style, theme: &ThemePalette) -> Color {
         Style::BlockId | Style::BlockIdCaret => &theme.faded,
         Style::ListMarker => &theme.foreground,
         Style::CheckboxUnchecked => &theme.accent_yellow,
-        Style::CheckboxChecked | Style::CheckedTaskText => &theme.accent_green,
+        Style::CheckboxChecked => &theme.accent_green,
+        Style::CheckedTaskText => &theme.faded,
         Style::Blockquote => &theme.foreground,
         Style::BlockquoteMarker | Style::TablePipe | Style::TableAlignmentRow => &theme.faded,
         Style::Frontmatter
@@ -38,4 +39,15 @@ pub(crate) fn style_to_color(style: &Style, theme: &ThemePalette) -> Color {
     };
 
     rgb_to_color(rgb)
+}
+
+/// Return an optional background color for styles that need a bg wash.
+pub(crate) fn style_to_bg(style: &Style, theme: &ThemePalette) -> Option<Color> {
+    match style {
+        Style::Code | Style::CodeBlock => Some(rgb_to_color(&theme.subtle)),
+        Style::LinkText => Some(rgb_to_color(&theme.modeline)),
+        Style::SearchMatch => Some(rgb_to_color(&theme.ultralight)),
+        Style::SearchMatchCurrent => Some(rgb_to_color(&theme.popout)),
+        _ => None,
+    }
 }

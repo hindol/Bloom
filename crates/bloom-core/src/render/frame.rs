@@ -52,6 +52,8 @@ pub struct PaneFrame {
     pub visible_lines: Vec<RenderedLine>,
     pub cursor: CursorState,
     pub scroll_offset: usize,
+    /// Total number of lines in the buffer (for scroll/position indicators).
+    pub total_lines: usize,
     pub is_active: bool,
     pub title: String,
     pub dirty: bool,

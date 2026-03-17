@@ -90,21 +90,23 @@ The **status bar** is an exception: `STATUS_BAR_HEIGHT = LINE_HEIGHT × 1.5` (27
 
 ## Layers & Compositing
 
-The GUI uses `iced::widget::Stack` with two Canvas layers:
+The GUI uses `iced::widget::Stack` with three Canvas layers:
 
 ```
 Stack [
     BaseCanvas      ← Layer 0: panes, status bars, borders, drawers
-    OverlayCanvas   ← Layer 1: picker, dialog, date picker, view, inline menu, notifications
+    DiffCanvas      ← Layer 1: temporal diff preview (opaque fill over active pane)
+    OverlayCanvas   ← Layer 2: picker, dialog, date picker, view, inline menu, notifications
 ]
 ```
 
 | Layer | Contents | Background treatment |
 |-------|----------|---------------------|
 | **Base** | Editor panes with content, gutter, cursor. Bottom drawers (which-key, temporal strip, context strip). Split borders. | Opaque `background` fill per pane rect. |
-| **Overlay** | Modal overlays that cover base content. | 85% opacity `background` scrim over entire canvas, then opaque panel. |
+| **Diff** | Temporal history diff preview (page history, block history). Renders only when a temporal strip is active and has preview lines. | Opaque fill over the active pane's content area — replaces editor text with diff-highlighted content. |
+| **Overlay** | Modal overlays that cover base content. | 50% opacity `background` scrim over entire canvas, then opaque panel. |
 
-**Why two layers:** Iced Canvas `fill_rectangle` blends within a single geometry. Text drawn first cannot be "overwritten" by a later fill in the same Canvas. Separate Canvas widgets in a Stack composite correctly — the overlay layer's opaque regions fully cover the base.
+**Why three layers:** Iced Canvas `fill_rectangle` blends within a single geometry. Text drawn first cannot be "overwritten" by a later fill in the same Canvas. The diff preview needs to opaquely replace pane content (not blend with it), so it lives on its own layer between base and overlay. Separate Canvas widgets in a Stack composite correctly — each layer's opaque regions fully cover the layers below.
 
 ---
 
@@ -166,10 +168,10 @@ Only the filename in `faded` on `subtle` background. No badge, no position, no i
 
 ### Scrim
 
-When an overlay opens, the entire base canvas is dimmed with an 85% opacity `background` wash. This:
+When an overlay opens, the entire base canvas is dimmed with a 50% opacity `background` wash. This:
 - Visually separates the overlay from base content
 - Signals "modal — base content is not interactive"
-- Maintains readability of the overlay panel
+- Keeps the base panes visible enough for live theme preview (`SPC T t`)
 
 ### Panel
 

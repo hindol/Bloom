@@ -266,25 +266,32 @@ fn draw_scroll_progress(frame: &mut canvas::Frame, size: Size, pane: &PaneFrame,
     use crate::draw::{fill_rect, rect};
     use crate::BOTTOM_SAFE_AREA;
 
-    let bar_h = (BOTTOM_SAFE_AREA - 2.0).max(2.0); // 2px inset top and bottom
+    let bar_h = (BOTTOM_SAFE_AREA - 2.0).max(2.0);
     let bar_y = size.height - BOTTOM_SAFE_AREA + 1.0;
 
-    // Compute scroll fraction from the active pane.
-    let total_lines = pane.visible_lines.len() + pane.scroll_offset;
-    if total_lines <= pane.visible_lines.len() {
-        // Entire file visible — fill the whole bar subtly to indicate "100%".
-        fill_rect(frame, rect(0.0, bar_y, size.width, bar_h), rgb_to_color(&theme.subtle));
-        return;
-    }
+    let total = pane.total_lines.max(1);
 
     // Background track.
     fill_rect(frame, rect(0.0, bar_y, size.width, bar_h), rgb_to_color(&theme.subtle));
 
+    if total <= pane.visible_lines.len() {
+        // Entire file visible — just show the cursor tick.
+        let cursor_frac = pane.cursor.line as f32 / total as f32;
+        let tick_x = (size.width * cursor_frac).clamp(0.0, size.width - 2.0);
+        fill_rect(frame, rect(tick_x, bar_y, 2.0, bar_h), rgb_to_color(&theme.salient));
+        return;
+    }
+
     // Thumb: proportional to viewport / total, positioned by scroll offset.
-    let viewport_frac = pane.visible_lines.len() as f32 / total_lines as f32;
-    let scroll_frac = pane.scroll_offset as f32 / total_lines as f32;
+    let viewport_frac = pane.visible_lines.len() as f32 / total as f32;
+    let scroll_frac = pane.scroll_offset as f32 / total as f32;
     let thumb_w = (size.width * viewport_frac).max(20.0).min(size.width);
     let thumb_x = (size.width - thumb_w) * scroll_frac;
 
     fill_rect(frame, rect(thumb_x, bar_y, thumb_w, bar_h), rgb_to_color(&theme.faded));
+
+    // Cursor position tick — shows where the cursor line sits in the full buffer.
+    let cursor_frac = pane.cursor.line as f32 / total as f32;
+    let tick_x = (size.width * cursor_frac).clamp(0.0, size.width - 2.0);
+    fill_rect(frame, rect(tick_x, bar_y, 2.0, bar_h), rgb_to_color(&theme.salient));
 }
