@@ -17,7 +17,7 @@ use iced::{keyboard, window, Element, Length, Size, Subscription, Task};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::canvas::EditorCanvas;
+use crate::canvas::{AnimationState, EditorCanvas};
 use crate::keys::convert_key;
 
 pub(crate) const FONT_SIZE: f32 = 13.0;
@@ -49,8 +49,10 @@ struct BloomApp {
     frame: Option<Box<RenderFrame>>,
     theme: &'static ThemePalette,
     canvas_cache: Cache,
-    /// Set to true when the editor thread exits (on :q / :qa).
     quit_flag: Arc<AtomicBool>,
+    anim: AnimationState,
+    /// True while animation is in flight — drives high-frequency ticks.
+    animating: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +119,8 @@ fn boot() -> (BloomApp, Task<Message>) {
             theme: &BLOOM_DARK,
             canvas_cache: Cache::default(),
             quit_flag,
+            anim: AnimationState::default(),
+            animating: false,
         },
         Task::none(),
     )
@@ -134,6 +138,23 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
                 }
                 state.frame = Some(frame);
             }
+
+            // Advance animation toward logical cursor/scroll positions.
+            let still_moving = if let Some(frame) = &state.frame {
+                if let Some(pane) = frame.panes.iter().find(|p| p.is_active) {
+                    let cursor_row = pane.cursor.line.saturating_sub(pane.scroll_offset);
+                    let target_cursor_y =
+                        pane.rect.y as f32 * LINE_HEIGHT + cursor_row as f32 * LINE_HEIGHT;
+                    let target_scroll_y = pane.scroll_offset as f32 * LINE_HEIGHT;
+                    state.anim.advance(target_cursor_y, target_scroll_y)
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            state.animating = still_moving;
+
             state.canvas_cache.clear();
         }
         Message::KeyboardEvent(event) => {
@@ -145,6 +166,9 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
             {
                 if let Some(key_event) = convert_key(modified_key, modifiers) {
                     let _ = state.frontend_tx.send(FrontendEvent::Key(key_event));
+                    // Key was sent — bump to animation speed so the response
+                    // frame is picked up quickly (within 8ms, not 250ms).
+                    state.animating = true;
                 }
             }
         }
@@ -158,15 +182,23 @@ fn view(state: &BloomApp) -> Element<'_, Message> {
         frame: state.frame.as_deref(),
         theme: state.theme,
         cache: &state.canvas_cache,
+        anim: &state.anim,
     })
     .width(Length::Fill)
     .height(Length::Fill)
     .into()
 }
 
-fn subscription(_state: &BloomApp) -> Subscription<Message> {
+fn subscription(state: &BloomApp) -> Subscription<Message> {
+    // ~120Hz while animating, ~4Hz while idle (just polling for editor frames).
+    let tick_interval = if state.animating {
+        std::time::Duration::from_millis(8)
+    } else {
+        std::time::Duration::from_millis(250)
+    };
+
     Subscription::batch([
-        iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick),
+        iced::time::every(tick_interval).map(|_| Message::Tick),
         keyboard::listen().map(Message::KeyboardEvent),
     ])
 }

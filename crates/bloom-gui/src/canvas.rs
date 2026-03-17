@@ -5,16 +5,84 @@ use bloom_md::theme::ThemePalette;
 use iced::widget::canvas::{self, Cache, Geometry};
 use iced::{Rectangle, Renderer, Size, Theme};
 
-use crate::draw::{
-    drawer, inline, notification, overlay, pane, draw_text_right,
-};
+use crate::draw::{drawer, inline, notification, overlay, pane, draw_text_right};
 use crate::theme::rgb_to_color;
 use crate::{CHAR_WIDTH, Message};
+
+/// Animation speed: fraction of remaining distance covered per frame.
+/// 0.6 at 60fps ≈ 50ms to converge (3 frames to reach 94% of target).
+const LERP_FACTOR: f32 = 0.6;
+/// Snap threshold: if within this many pixels, jump to target (no sub-pixel jitter).
+const SNAP_THRESHOLD: f32 = 0.5;
+
+fn lerp_snap(current: f32, target: f32) -> f32 {
+    let diff = target - current;
+    if diff.abs() < SNAP_THRESHOLD {
+        target
+    } else {
+        current + diff * LERP_FACTOR
+    }
+}
+
+/// Smooth animation state for cursor and scroll, driven by the app update loop.
+pub(crate) struct AnimationState {
+    cursor_y: f32,
+    highlight_y: f32,
+    scroll_y: f32,
+    initialized: bool,
+}
+
+impl Default for AnimationState {
+    fn default() -> Self {
+        Self {
+            cursor_y: 0.0,
+            highlight_y: 0.0,
+            scroll_y: 0.0,
+            initialized: false,
+        }
+    }
+}
+
+impl AnimationState {
+    /// Advance visual positions toward logical targets. Returns true if still animating.
+    pub fn advance(
+        &mut self,
+        target_cursor_y: f32,
+        target_scroll_y: f32,
+    ) -> bool {
+        if !self.initialized {
+            self.cursor_y = target_cursor_y;
+            self.highlight_y = target_cursor_y;
+            self.scroll_y = target_scroll_y;
+            self.initialized = true;
+            return false;
+        }
+
+        let prev_cursor = self.cursor_y;
+        let prev_scroll = self.scroll_y;
+
+        self.cursor_y = lerp_snap(self.cursor_y, target_cursor_y);
+        self.highlight_y = lerp_snap(self.highlight_y, target_cursor_y);
+        self.scroll_y = lerp_snap(self.scroll_y, target_scroll_y);
+
+        // Still animating if any value changed.
+        (self.cursor_y - prev_cursor).abs() > 0.01
+            || (self.scroll_y - prev_scroll).abs() > 0.01
+    }
+
+    pub fn cursor_y(&self) -> f32 {
+        self.cursor_y
+    }
+    pub fn highlight_y(&self) -> f32 {
+        self.highlight_y
+    }
+}
 
 pub(crate) struct EditorCanvas<'a> {
     pub(crate) frame: Option<&'a RenderFrame>,
     pub(crate) theme: &'a ThemePalette,
     pub(crate) cache: &'a Cache,
+    pub(crate) anim: &'a AnimationState,
 }
 
 impl<'a> canvas::Program<Message> for EditorCanvas<'a> {
@@ -48,7 +116,12 @@ impl<'a> canvas::Program<Message> for EditorCanvas<'a> {
             }
 
             for pane_frame in &render_frame.panes {
-                pane::draw_pane(frame, pane_frame, self.theme);
+                let anim = if pane_frame.is_active {
+                    Some((self.anim.cursor_y(), self.anim.highlight_y()))
+                } else {
+                    None
+                };
+                pane::draw_pane(frame, pane_frame, self.theme, anim);
             }
 
             self.draw_split_borders(frame, &render_frame.panes);

@@ -12,10 +12,13 @@ use crate::draw::{
 use crate::theme::{rgb_to_color, style_to_color};
 use crate::{CHAR_WIDTH, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, STATUS_BAR_HEIGHT};
 
+/// Draw a pane. `anim` is `Some((cursor_y, highlight_y))` in absolute pixels
+/// for the active pane (smooth animated positions), or `None` for inactive panes.
 pub(crate) fn draw_pane(
     frame: &mut iced::widget::canvas::Frame,
     pane: &PaneFrame,
     theme: &ThemePalette,
+    anim: Option<(f32, f32)>,
 ) {
     let rect_frame = &pane.rect;
     let pane_x = rect_frame.x as f32 * CHAR_WIDTH;
@@ -27,7 +30,7 @@ pub(crate) fn draw_pane(
     fill_rect(frame, content_rect, rgb_to_color(&theme.background));
 
     match &pane.kind {
-        PaneKind::Editor => draw_editor_content(frame, pane, theme),
+        PaneKind::Editor => draw_editor_content(frame, pane, theme, anim),
         PaneKind::UndoTree(undo_tree) => draw_undo_tree(frame, content_rect, undo_tree, theme),
         PaneKind::Timeline(timeline) => draw_timeline(frame, content_rect, timeline, theme),
         PaneKind::PageHistory(page_history) => {
@@ -47,6 +50,7 @@ fn draw_editor_content(
     frame: &mut iced::widget::canvas::Frame,
     pane: &PaneFrame,
     theme: &ThemePalette,
+    anim: Option<(f32, f32)>,
 ) {
     let rect_frame = &pane.rect;
     let pane_x = rect_frame.x as f32 * CHAR_WIDTH;
@@ -55,16 +59,20 @@ fn draw_editor_content(
     let content_chars = rect_frame.width as usize;
     let text_chars = content_chars.saturating_sub(GUTTER_CHARS);
 
+    let logical_cursor_row = pane.cursor.line.saturating_sub(pane.scroll_offset);
+
+    // Use animated Y for highlight if available, otherwise logical.
+    if pane.is_active {
+        let hl_y = anim.map(|(_, hl)| hl).unwrap_or(pane_y + logical_cursor_row as f32 * LINE_HEIGHT);
+        fill_rect(
+            frame,
+            rect(pane_x, hl_y, pane_w, LINE_HEIGHT),
+            rgb_to_color(&theme.highlight),
+        );
+    }
+
     for (i, line) in pane.visible_lines.iter().enumerate() {
         let y = pane_y + i as f32 * LINE_HEIGHT;
-
-        if pane.is_active && i == pane.cursor.line.saturating_sub(pane.scroll_offset) {
-            fill_rect(
-                frame,
-                rect(pane_x, y, pane_w, LINE_HEIGHT),
-                rgb_to_color(&theme.highlight),
-            );
-        }
 
         match line.source {
             LineSource::Buffer(buf_line) => {
@@ -124,9 +132,10 @@ fn draw_editor_content(
     }
 
     if pane.is_active {
-        let cursor_row = pane.cursor.line.saturating_sub(pane.scroll_offset);
         let cx = pane_x + GUTTER_WIDTH + pane.cursor.column as f32 * CHAR_WIDTH;
-        let cy = pane_y + cursor_row as f32 * LINE_HEIGHT;
+        let cy = anim.map(|(c, _)| c).unwrap_or(
+            pane_y + pane.cursor.line.saturating_sub(pane.scroll_offset) as f32 * LINE_HEIGHT,
+        );
 
         match pane.cursor.shape {
             CursorShape::Block => fill_rect(
