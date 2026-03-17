@@ -10,21 +10,16 @@ use crate::theme::rgb_to_color;
 use crate::{CHAR_WIDTH, Message};
 
 /// Animation speed: fraction of remaining distance covered per frame.
-/// 0.6 at 60fps ≈ 50ms to converge (3 frames to reach 94% of target).
 const LERP_FACTOR: f32 = 0.6;
-/// Snap threshold: if within this many pixels, jump to target (no sub-pixel jitter).
+/// Snap threshold: if within this many pixels, jump to target.
 const SNAP_THRESHOLD: f32 = 0.5;
 
 fn lerp_snap(current: f32, target: f32) -> f32 {
     let diff = target - current;
-    if diff.abs() < SNAP_THRESHOLD {
-        target
-    } else {
-        current + diff * LERP_FACTOR
-    }
+    if diff.abs() < SNAP_THRESHOLD { target } else { current + diff * LERP_FACTOR }
 }
 
-/// Smooth animation state for cursor and scroll, driven by the app update loop.
+/// Smooth animation state for cursor and scroll.
 pub(crate) struct AnimationState {
     cursor_y: f32,
     highlight_y: f32,
@@ -34,22 +29,12 @@ pub(crate) struct AnimationState {
 
 impl Default for AnimationState {
     fn default() -> Self {
-        Self {
-            cursor_y: 0.0,
-            highlight_y: 0.0,
-            scroll_y: 0.0,
-            initialized: false,
-        }
+        Self { cursor_y: 0.0, highlight_y: 0.0, scroll_y: 0.0, initialized: false }
     }
 }
 
 impl AnimationState {
-    /// Advance visual positions toward logical targets. Returns true if still animating.
-    pub fn advance(
-        &mut self,
-        target_cursor_y: f32,
-        target_scroll_y: f32,
-    ) -> bool {
+    pub fn advance(&mut self, target_cursor_y: f32, target_scroll_y: f32) -> bool {
         if !self.initialized {
             self.cursor_y = target_cursor_y;
             self.highlight_y = target_cursor_y;
@@ -57,208 +42,164 @@ impl AnimationState {
             self.initialized = true;
             return false;
         }
-
-        let prev_cursor = self.cursor_y;
-        let prev_scroll = self.scroll_y;
-
+        let prev_c = self.cursor_y;
+        let prev_s = self.scroll_y;
         self.cursor_y = lerp_snap(self.cursor_y, target_cursor_y);
         self.highlight_y = lerp_snap(self.highlight_y, target_cursor_y);
         self.scroll_y = lerp_snap(self.scroll_y, target_scroll_y);
-
-        // Still animating if any value changed.
-        (self.cursor_y - prev_cursor).abs() > 0.01
-            || (self.scroll_y - prev_scroll).abs() > 0.01
+        (self.cursor_y - prev_c).abs() > 0.01 || (self.scroll_y - prev_s).abs() > 0.01
     }
-
-    pub fn cursor_y(&self) -> f32 {
-        self.cursor_y
-    }
-    pub fn highlight_y(&self) -> f32 {
-        self.highlight_y
-    }
+    pub fn cursor_y(&self) -> f32 { self.cursor_y }
+    pub fn highlight_y(&self) -> f32 { self.highlight_y }
 }
 
-pub(crate) struct EditorCanvas<'a> {
+// ---------------------------------------------------------------------------
+// Base layer: panes + bottom drawers
+// ---------------------------------------------------------------------------
+
+pub(crate) struct BaseCanvas<'a> {
     pub(crate) frame: Option<&'a RenderFrame>,
     pub(crate) theme: &'a ThemePalette,
     pub(crate) cache: &'a Cache,
     pub(crate) anim: &'a AnimationState,
 }
 
-impl<'a> canvas::Program<Message> for EditorCanvas<'a> {
+impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
     type State = ();
 
     fn draw(
-        &self,
-        _state: &(),
-        renderer: &Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: iced::mouse::Cursor,
+        &self, _state: &(), renderer: &Renderer, _theme: &Theme,
+        bounds: Rectangle, _cursor: iced::mouse::Cursor,
     ) -> Vec<Geometry> {
         let geometry = self.cache.draw(renderer, bounds.size(), |frame| {
-            frame.fill_rectangle(
-                iced::Point::ORIGIN,
-                bounds.size(),
-                rgb_to_color(&self.theme.background),
-            );
+            frame.fill_rectangle(iced::Point::ORIGIN, bounds.size(), rgb_to_color(&self.theme.background));
 
-            let Some(render_frame) = self.frame else {
-                return;
-            };
+            let Some(rf) = self.frame else { return };
 
-            if let Some(wizard) = render_frame.panes.iter().find_map(|pane| match &pane.kind {
-                PaneKind::SetupWizard(wizard) => Some(wizard),
-                _ => None,
+            if let Some(wizard) = rf.panes.iter().find_map(|p| match &p.kind {
+                PaneKind::SetupWizard(w) => Some(w), _ => None,
             }) {
                 overlay::draw_setup_wizard(frame, bounds.size(), wizard, self.theme);
                 return;
             }
 
-            // When the temporal strip has a diff preview, skip drawing the
-            // active pane's editor content — the diff overlay replaces it.
-            let skip_active_editor = render_frame
-                .temporal_strip
-                .as_ref()
-                .map(|s| {
-                    matches!(
-                        s.mode,
-                        bloom_core::render::TemporalMode::PageHistory
-                            | bloom_core::render::TemporalMode::BlockHistory
-                    ) && !s.preview_lines.is_empty()
-                })
-                .unwrap_or(false);
-
-            for pane_frame in &render_frame.panes {
-                let anim = if pane_frame.is_active {
+            for pf in &rf.panes {
+                let anim = if pf.is_active {
                     Some((self.anim.cursor_y(), self.anim.highlight_y()))
-                } else {
-                    None
-                };
-                if skip_active_editor && pane_frame.is_active {
-                    // Draw only the status bar and background, not editor content.
-                    pane::draw_pane_shell(frame, pane_frame, self.theme);
-                } else {
-                    pane::draw_pane(frame, pane_frame, self.theme, anim);
-                }
+                } else { None };
+                pane::draw_pane(frame, pf, self.theme, anim);
             }
 
-            self.draw_split_borders(frame, &render_frame.panes);
-            self.draw_hidden_pane_count(frame, bounds.size(), render_frame.hidden_pane_count);
+            draw_split_borders(frame, &rf.panes, self.theme);
+            draw_hidden_count(frame, bounds.size(), rf.hidden_pane_count, self.theme);
 
-            let active_pane = render_frame.panes.iter().find(|pane| pane.is_active);
+            let active = rf.panes.iter().find(|p| p.is_active);
 
-            if let Some(strip) = &render_frame.context_strip {
-                drawer::draw_context_strip(frame, bounds.size(), strip, self.theme);
+            if let Some(s) = &rf.context_strip {
+                drawer::draw_context_strip(frame, bounds.size(), s, self.theme);
             }
-            if let Some(strip) = &render_frame.temporal_strip {
-                drawer::draw_temporal_strip(frame, bounds.size(), strip, self.theme, active_pane);
+            if let Some(s) = &rf.temporal_strip {
+                drawer::draw_temporal_strip(frame, bounds.size(), s, self.theme, active);
             }
-            if let Some(which_key) = &render_frame.which_key {
-                drawer::draw_which_key(frame, bounds.size(), which_key, self.theme);
-            }
-            if let Some(menu) = &render_frame.inline_menu {
-                inline::draw_inline_menu(frame, bounds.size(), active_pane, menu, self.theme);
-            }
-            if let Some(date_picker) = &render_frame.date_picker {
-                overlay::draw_date_picker(frame, bounds.size(), date_picker, self.theme);
-            }
-            if let Some(picker) = &render_frame.picker {
-                overlay::draw_picker(frame, bounds.size(), picker, self.theme);
-            }
-            if let Some(dialog) = &render_frame.dialog {
-                overlay::draw_dialog(frame, bounds.size(), dialog, self.theme);
-            }
-            if let Some(view) = &render_frame.view {
-                overlay::draw_view(frame, bounds.size(), view, self.theme);
-            }
-            if !render_frame.notifications.is_empty() {
-                notification::draw_notifications(
-                    frame,
-                    bounds.size(),
-                    &render_frame.notifications,
-                    self.theme,
-                );
+            if let Some(wk) = &rf.which_key {
+                drawer::draw_which_key(frame, bounds.size(), wk, self.theme);
             }
         });
-
         vec![geometry]
     }
 }
 
-impl<'a> EditorCanvas<'a> {
-    fn draw_split_borders(&self, frame: &mut canvas::Frame, panes: &[PaneFrame]) {
-        let mut vertical = BTreeSet::new();
-        let mut horizontal = BTreeSet::new();
+// ---------------------------------------------------------------------------
+// Overlay layer: picker, dialog, date picker, view, inline menu, notifications
+// Separate Canvas ⇒ composites cleanly over the base via Iced Stack.
+// ---------------------------------------------------------------------------
 
-        for (index, left) in panes.iter().enumerate() {
-            for right in panes.iter().skip(index + 1) {
-                let left_right = left.rect.x + left.rect.width;
-                let right_right = right.rect.x + right.rect.width;
-                let left_bottom = left.rect.y + left.rect.total_height;
-                let right_bottom = right.rect.y + right.rect.total_height;
+pub(crate) struct OverlayCanvas<'a> {
+    pub(crate) frame: Option<&'a RenderFrame>,
+    pub(crate) theme: &'a ThemePalette,
+    pub(crate) cache: &'a Cache,
+}
 
-                if left_right == right.rect.x || right_right == left.rect.x {
-                    let x = if left_right == right.rect.x {
-                        left_right
-                    } else {
-                        right_right
-                    };
-                    let y1 = left.rect.y.max(right.rect.y);
-                    let y2 = left_bottom.min(right_bottom);
-                    if y2 > y1 {
-                        vertical.insert((x, y1, y2));
-                    }
-                }
+impl<'a> canvas::Program<Message> for OverlayCanvas<'a> {
+    type State = ();
 
-                if left_bottom == right.rect.y || right_bottom == left.rect.y {
-                    let y = if left_bottom == right.rect.y {
-                        left_bottom
-                    } else {
-                        right_bottom
-                    };
-                    let x1 = left.rect.x.max(right.rect.x);
-                    let x2 = (left.rect.x + left.rect.width).min(right.rect.x + right.rect.width);
-                    if x2 > x1 {
-                        horizontal.insert((y, x1, x2));
-                    }
-                }
+    fn draw(
+        &self, _state: &(), renderer: &Renderer, _theme: &Theme,
+        bounds: Rectangle, _cursor: iced::mouse::Cursor,
+    ) -> Vec<Geometry> {
+        let Some(rf) = self.frame else { return vec![] };
+
+        let has_any = rf.picker.is_some()
+            || rf.dialog.is_some()
+            || rf.date_picker.is_some()
+            || rf.view.is_some()
+            || rf.inline_menu.is_some()
+            || !rf.notifications.is_empty();
+
+        if !has_any { return vec![] }
+
+        let geometry = self.cache.draw(renderer, bounds.size(), |frame| {
+            let active = rf.panes.iter().find(|p| p.is_active);
+
+            if let Some(m) = &rf.inline_menu {
+                inline::draw_inline_menu(frame, bounds.size(), active, m, self.theme);
+            }
+            if let Some(dp) = &rf.date_picker {
+                overlay::draw_date_picker(frame, bounds.size(), dp, self.theme);
+            }
+            if let Some(p) = &rf.picker {
+                overlay::draw_picker(frame, bounds.size(), p, self.theme);
+            }
+            if let Some(d) = &rf.dialog {
+                overlay::draw_dialog(frame, bounds.size(), d, self.theme);
+            }
+            if let Some(v) = &rf.view {
+                overlay::draw_view(frame, bounds.size(), v, self.theme);
+            }
+            if !rf.notifications.is_empty() {
+                notification::draw_notifications(frame, bounds.size(), &rf.notifications, self.theme);
+            }
+        });
+        vec![geometry]
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+fn draw_split_borders(frame: &mut canvas::Frame, panes: &[PaneFrame], theme: &ThemePalette) {
+    let mut vert = BTreeSet::new();
+    let mut horiz = BTreeSet::new();
+    for (i, l) in panes.iter().enumerate() {
+        for r in panes.iter().skip(i + 1) {
+            let lr = l.rect.x + l.rect.width;
+            let rr = r.rect.x + r.rect.width;
+            let lb = l.rect.y + l.rect.total_height;
+            let rb = r.rect.y + r.rect.total_height;
+            if lr == r.rect.x || rr == l.rect.x {
+                let x = if lr == r.rect.x { lr } else { rr };
+                let y1 = l.rect.y.max(r.rect.y);
+                let y2 = lb.min(rb);
+                if y2 > y1 { vert.insert((x, y1, y2)); }
+            }
+            if lb == r.rect.y || rb == l.rect.y {
+                let y = if lb == r.rect.y { lb } else { rb };
+                let x1 = l.rect.x.max(r.rect.x);
+                let x2 = (l.rect.x + l.rect.width).min(r.rect.x + r.rect.width);
+                if x2 > x1 { horiz.insert((y, x1, x2)); }
             }
         }
-
-        for (x, y1, y2) in vertical {
-            crate::draw::draw_vline(
-                frame,
-                x as f32 * CHAR_WIDTH,
-                y1 as f32 * crate::LINE_HEIGHT,
-                y2 as f32 * crate::LINE_HEIGHT,
-                rgb_to_color(&self.theme.faded),
-            );
-        }
-
-        for (y, x1, x2) in horizontal {
-            crate::draw::draw_hline(
-                frame,
-                x1 as f32 * CHAR_WIDTH,
-                x2 as f32 * CHAR_WIDTH,
-                y as f32 * crate::LINE_HEIGHT,
-                rgb_to_color(&self.theme.faded),
-            );
-        }
     }
-
-    fn draw_hidden_pane_count(&self, frame: &mut canvas::Frame, size: Size, hidden_count: usize) {
-        if hidden_count == 0 {
-            return;
-        }
-
-        let indicator = format!("[{hidden_count} hidden]");
-        draw_text_right(
-            frame,
-            size.width - CHAR_WIDTH,
-            2.0,
-            &indicator,
-            rgb_to_color(&self.theme.faded),
-        );
+    for (x, y1, y2) in vert {
+        crate::draw::draw_vline(frame, x as f32 * CHAR_WIDTH, y1 as f32 * crate::LINE_HEIGHT, y2 as f32 * crate::LINE_HEIGHT, rgb_to_color(&theme.faded));
     }
+    for (y, x1, x2) in horiz {
+        crate::draw::draw_hline(frame, x1 as f32 * CHAR_WIDTH, x2 as f32 * CHAR_WIDTH, y as f32 * crate::LINE_HEIGHT, rgb_to_color(&theme.faded));
+    }
+}
+
+fn draw_hidden_count(frame: &mut canvas::Frame, size: Size, count: usize, theme: &ThemePalette) {
+    if count == 0 { return }
+    draw_text_right(frame, size.width - CHAR_WIDTH, 2.0, &format!("[{count} hidden]"), rgb_to_color(&theme.faded));
 }

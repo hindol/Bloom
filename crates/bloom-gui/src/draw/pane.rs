@@ -12,28 +12,6 @@ use crate::draw::{
 use crate::theme::{rgb_to_color, style_to_color};
 use crate::{CHAR_WIDTH, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, STATUS_BAR_HEIGHT};
 
-/// Draw only the pane background and status bar — no editor content.
-/// Used when the temporal diff preview replaces the content area.
-pub(crate) fn draw_pane_shell(
-    frame: &mut iced::widget::canvas::Frame,
-    pane: &PaneFrame,
-    theme: &ThemePalette,
-) {
-    let rect_frame = &pane.rect;
-    let pane_x = rect_frame.x as f32 * CHAR_WIDTH;
-    let pane_y = rect_frame.y as f32 * LINE_HEIGHT;
-    let pane_w = rect_frame.width as f32 * CHAR_WIDTH;
-    let content_h = rect_frame.content_height as f32 * LINE_HEIGHT;
-
-    fill_rect(frame, rect(pane_x, pane_y, pane_w, content_h), rgb_to_color(&theme.background));
-
-    if pane.is_active {
-        draw_active_status_bar(frame, pane, theme, pane_x, pane_y, pane_w);
-    } else {
-        draw_inactive_status_bar(frame, pane, theme, pane_x, pane_y, pane_w);
-    }
-}
-
 /// Draw a pane. `anim` is `Some((cursor_y, highlight_y))` in absolute pixels
 /// for the active pane (smooth animated positions), or `None` for inactive panes.
 pub(crate) fn draw_pane(
@@ -187,18 +165,26 @@ fn draw_active_status_bar(
     pane_w: f32,
 ) {
     let status_y = pane_y + pane.rect.content_height as f32 * LINE_HEIGHT;
+    let text_y = status_y + (STATUS_BAR_HEIGHT - LINE_HEIGHT) / 2.0;
+
+    // Background — use highlight for better contrast against editor bg.
     fill_rect(
         frame,
         rect(pane_x, status_y, pane_w, STATUS_BAR_HEIGHT),
-        rgb_to_color(&theme.modeline),
+        rgb_to_color(&theme.highlight),
     );
-
-    // Center text vertically within the taller status bar.
-    let text_y = status_y + (STATUS_BAR_HEIGHT - LINE_HEIGHT) / 2.0;
+    // Top border for visual anchor.
+    crate::draw::draw_hline(
+        frame,
+        pane_x,
+        pane_x + pane_w,
+        status_y,
+        rgb_to_color(&theme.faded),
+    );
 
     match &pane.status_bar.content {
         StatusBarContent::Normal(normal) => {
-            draw_normal_status(frame, pane, normal, theme, pane_x, text_y, pane_w)
+            draw_normal_status(frame, pane, normal, theme, pane_x, text_y, pane_w, status_y)
         }
         StatusBarContent::CommandLine(command) => {
             draw_command_line(frame, command, theme, pane_x, pane_y, pane_w, text_y)
@@ -243,18 +229,42 @@ fn draw_normal_status(
     pane_x: f32,
     status_y: f32,
     pane_w: f32,
+    bar_y: f32,
 ) {
+    // Mode badge with coloured background per THEMING.md.
+    let mode = &pane.status_bar.mode;
+    let (badge_fg, badge_bg) = match mode.as_str() {
+        "INSERT" => (rgb_to_color(&theme.background), rgb_to_color(&theme.accent_green)),
+        "VISUAL" => (rgb_to_color(&theme.background), rgb_to_color(&theme.popout)),
+        "COMMAND" => (rgb_to_color(&theme.background), rgb_to_color(&theme.accent_blue)),
+        "HIST" | "DAY" | "JRNL" => (rgb_to_color(&theme.background), rgb_to_color(&theme.accent_yellow)),
+        _ => (rgb_to_color(&theme.foreground), rgb_to_color(&theme.mild)),
+    };
+    let badge_text = format!(" {} ", mode);
+    let badge_w = badge_text.chars().count() as f32 * CHAR_WIDTH;
+    fill_rect(frame, rect(pane_x, bar_y, badge_w, STATUS_BAR_HEIGHT), badge_bg);
+    draw_text(frame, pane_x, status_y, &badge_text, badge_fg);
+
+    // Title + dirty flag after the badge.
     let dirty = if normal.dirty { " [+]" } else { "" };
-    let left = format!(" {} │ {}{}", pane.status_bar.mode, normal.title, dirty);
-    let left_max = chars_that_fit((pane_w * 0.6).max(0.0));
+    let after_badge_x = pane_x + badge_w + CHAR_WIDTH;
+    let title_text = format!("{}{}", normal.title, dirty);
+    let title_max = chars_that_fit((pane_w - badge_w - 2.0 * CHAR_WIDTH).max(0.0));
     draw_text(
         frame,
-        pane_x,
+        after_badge_x,
         status_y,
-        truncate_text(&left, left_max),
+        truncate_text(&title_text, title_max),
         rgb_to_color(&theme.foreground),
     );
 
+    // Dirty indicator in salient.
+    if normal.dirty {
+        let dirty_x = after_badge_x + (normal.title.chars().count()) as f32 * CHAR_WIDTH;
+        draw_text(frame, dirty_x, status_y, " [+]", rgb_to_color(&theme.salient));
+    }
+
+    // Right-aligned info.
     let right = if let Some(hints) = &pane.status_bar.right_hints {
         hints.clone()
     } else {
@@ -277,7 +287,7 @@ fn draw_normal_status(
 
     draw_text_right(
         frame,
-        pane_x + pane_w - CHAR_WIDTH / 2.0,
+        pane_x + pane_w - CHAR_WIDTH,
         status_y,
         &truncate_text(&right, chars_that_fit((pane_w * 0.35).max(0.0))),
         rgb_to_color(&theme.faded),
