@@ -273,39 +273,20 @@ fn draw_hidden_count(frame: &mut canvas::Frame, size: Size, count: usize, theme:
 }
 
 /// Thin scroll progress bar in the bottom safe area (macOS window corner radius zone).
-fn draw_scroll_progress(frame: &mut canvas::Frame, size: Size, pane: &PaneFrame, theme: &ThemePalette, remote: RemoteHints) {
+fn draw_scroll_progress(frame: &mut canvas::Frame, size: Size, pane: &PaneFrame, theme: &ThemePalette, _remote: RemoteHints) {
     use crate::draw::{fill_rect, rect};
     use crate::BOTTOM_SAFE_AREA;
 
     let bar_h = (BOTTOM_SAFE_AREA - 2.0).max(2.0);
     let bar_y = size.height - BOTTOM_SAFE_AREA + 1.0;
 
-    let total = pane.total_lines.max(1);
-
     // Background track.
     fill_rect(frame, rect(0.0, bar_y, size.width, bar_h), rgb_to_color(&theme.subtle));
 
-    if total <= pane.visible_lines.len() {
-        if !remote.skip_scroll_tick() {
-            let cursor_frac = pane.cursor.line as f32 / total as f32;
-            let tick_x = (size.width * cursor_frac).clamp(0.0, size.width - 2.0);
-            fill_rect(frame, rect(tick_x, bar_y, 2.0, bar_h), rgb_to_color(&theme.salient));
-        }
-        return;
-    }
-
-    // Thumb: proportional to viewport / total, positioned by scroll offset.
-    let viewport_frac = pane.visible_lines.len() as f32 / total as f32;
-    let scroll_frac = pane.scroll_offset as f32 / total as f32;
-    let thumb_w = (size.width * viewport_frac).max(20.0).min(size.width);
-    let thumb_x = (size.width - thumb_w) * scroll_frac;
-
-    fill_rect(frame, rect(thumb_x, bar_y, thumb_w, bar_h), rgb_to_color(&theme.faded));
-
-    // Cursor position tick — skip on remote sessions.
-    if !remote.skip_scroll_tick() {
-        let cursor_frac = pane.cursor.line as f32 / total as f32;
-        let tick_x = (size.width * cursor_frac).clamp(0.0, size.width - 2.0);
-        fill_rect(frame, rect(tick_x, bar_y, 2.0, bar_h), rgb_to_color(&theme.salient));
-    }
+    // Fill bar: width proportional to cursor position in the file.
+    // Cursor on line 0 = minimal fill, cursor on last line = full width.
+    let total = pane.total_lines.max(1);
+    let progress = (pane.cursor.line + 1) as f32 / total as f32;
+    let fill_w = (size.width * progress).clamp(1.0, size.width);
+    fill_rect(frame, rect(0.0, bar_y, fill_w, bar_h), rgb_to_color(&theme.faded));
 }

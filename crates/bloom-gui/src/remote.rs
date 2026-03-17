@@ -32,6 +32,7 @@ impl RemoteHints {
     }
 
     /// Whether the scroll-bar cursor tick should be hidden.
+    #[allow(dead_code)]
     pub fn skip_scroll_tick(&self) -> bool {
         self.is_remote
     }
