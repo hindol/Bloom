@@ -599,6 +599,141 @@ Brief confirmation that the edit propagated. Same transient notification style a
 
 ---
 
+## Section Mirroring — Heading-Level `^=`
+
+> Status: **Design** — not yet implemented.
+
+### The Problem
+
+When a user copies a full section (heading + body + tasks) to another file, each block gets `^=` and mirrors independently. Content edits propagate per-block — that works. But **structural changes** (adding a paragraph, deleting a task, reordering items) within the section don't propagate. The peer's section drifts structurally while individual blocks stay in sync.
+
+### The Design: Structural Sync via Heading Anchors
+
+A `^=` heading acts as a **section mirror anchor**. Two propagation modes coexist:
+
+1. **Structural sync** (new) — fires when the ordered list of child block IDs under a `^=` heading changes (add, delete, reorder). Compares child ID sequences between source and peers. Applies insert/delete/move of individual lines to bring peers into structural alignment.
+
+2. **Content sync** (existing) — fires per-block via `^=` leaf mirroring. Each block within the section is a standard `^=` mirror. No changes to existing machinery.
+
+### How It Works
+
+#### Initial section copy
+
+User copies `## Design` section from page A to page B (via paste, `SPC r b`, or manual copy):
+
+```markdown
+Page A:                          Page B:
+## Design ^=abc01                ## Design ^=abc01
+Body paragraph. ^=abc02          Body paragraph. ^=abc02
+- [ ] Review API ^=abc03         - [ ] Review API ^=abc03
+```
+
+All block IDs preserved → indexer detects duplicates → auto-promotes all to `^=`. Standard behavior, no changes needed.
+
+#### Adding a block
+
+User adds "New paragraph" in page A under `## Design`:
+
+```markdown
+## Design ^=abc01
+Body paragraph. ^=abc02
+New paragraph.                   ← no ID yet
+- [ ] Review API ^=abc03
+```
+
+On save:
+1. **EnsureBlockIds** assigns `^=xyz04` to "New paragraph" (under a `^=` heading → gets `^=` immediately).
+2. **Structural sync** for `^=abc01`: source children are `[abc02, xyz04, abc03]`. Page B has `[abc02, abc03]`. Diff: insert `xyz04` between `abc02` and `abc03` in page B.
+
+Page B after sync:
+```markdown
+## Design ^=abc01
+Body paragraph. ^=abc02
+New paragraph. ^=xyz04           ← inserted by structural sync
+- [ ] Review API ^=abc03
+```
+
+After this, `^=xyz04` is a leaf mirror — future content edits propagate per-block.
+
+#### Deleting a block
+
+User deletes `^=abc02` in page A. Structural sync sees children `[abc03]` vs peer's `[abc02, abc03]`. Removes the `abc02` line from page B. `abc02` goes to `retired_block_ids`.
+
+#### Reordering blocks
+
+User moves `^=abc03` above `^=abc02` in page A. Structural sync sees `[abc03, abc02]` vs peer's `[abc02, abc03]`. Reorders lines in page B.
+
+### Algorithm
+
+```
+On Insert→Normal (same trigger as content mirror):
+
+1. EnsureBlockIds — assign IDs to new blocks under ^= headings.
+   New blocks under a ^= heading get ^= (not ^).
+
+2. StructuralSync — for each ^= heading in the edited page:
+   source_children = [ordered block IDs within section scope]
+   for each peer page with same ^= heading:
+     peer_children = [ordered block IDs within section scope in peer]
+     if source_children != peer_children:
+       diff(peer_children → source_children)
+       apply inserts/deletes/moves as individual line operations
+
+3. LeafMirrorSync — existing per-block ^= content propagation.
+```
+
+Order matters: EnsureBlockIds → StructuralSync → LeafMirrorSync.
+
+### Section Scope
+
+"Children of `^=abc01`" = all blocks from the heading line to (but not including) the next heading of equal or higher level, or EOF. This is the same range as the `ah` text object.
+
+Children are a **flat list** of block IDs in document order — no tree recursion. Nested sub-headings and their content are included:
+
+```markdown
+## Design ^=abc01
+Body. ^=abc02           ← child
+### Sub ^=def01         ← child
+Sub body. ^=def02       ← child
+```
+
+Children of `abc01` = `[abc02, def01, def02]`.
+
+### Why This Avoids the Range Replacement Problem
+
+Section range replacement (`MirrorEdit` with a line range) was rejected because:
+- Line counts differ between peers → shifts all content below
+- Stale index ranges between mirror write and re-index
+- Nested mirrors create ambiguous propagation scope
+
+Structural sync avoids all of these:
+- **No range replacement** — each mutation is a single-line insert or delete
+- **No line shift cascade** — bounded to the inserted/deleted line
+- **No scope ambiguity** — diff operates on block ID lists, not line ranges
+- **Idempotent** — if children already match, no writes
+
+### Stress Test Results
+
+| Scenario | Result |
+|----------|--------|
+| Add block within section | ✅ Structural sync inserts line in peers |
+| Delete block | ✅ Structural sync removes line from peers |
+| Reorder blocks | ✅ Structural sync reorders lines in peers |
+| Content edit to existing block | ✅ Leaf mirror (existing, unchanged) |
+| Nested sub-heading within section | ✅ Flat child list, no recursion |
+| `^=` block also mirrored to a third page without the heading | ✅ Independent — leaf mirror continues working |
+| New block gets ID via EnsureBlockIds | ✅ Gets `^=` (not `^`) because parent heading is `^=` |
+| Heading level change | ✅ No scope concept in structural sync — just compares child lists at sync time |
+| Edit + structural change in same session | ✅ Order: EnsureBlockIds → StructuralSync → LeafMirrorSync |
+
+### What This Does NOT Handle
+
+- **Non-block content** (blank lines, horizontal rules) — not tracked by block IDs, not synced. Peers may diverge in whitespace. Acceptable.
+- **Block content within code fences** — code blocks don't get IDs, not synced. By design.
+- **Conflicting structural changes in two peers** — if page A adds a block and page B deletes a different block simultaneously, both changes propagate cleanly (non-overlapping ID sets). If both add blocks at the same position, insertion order is non-deterministic. Acceptable for single-user local-first.
+
+---
+
 ## References
 
 - [UNIFIED_BUFFER.md](UNIFIED_BUFFER.md) — BufferWriter architecture, MirrorEdit design, event bus
