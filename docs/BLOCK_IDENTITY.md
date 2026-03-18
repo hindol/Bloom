@@ -72,19 +72,36 @@ The ID is appended to the **last line of the block** — end of the thought, nev
 
 ### What Gets an ID
 
-| Block type | Auto-ID? | Rationale |
-|-----------|----------|-----------|
-| Task (`- [ ]` / `- [x]`) | ✅ | Actionable from views, toggleable |
-| List item (`- text`) | ✅ | Referenceable, movable |
-| Paragraph | ✅ | Emergence detection needs stable identity |
-| Heading | ✅ | Already linkable, needs guaranteed assignment |
-| Blockquote | ✅ | Referenceable content |
-| Code block | ❌ | Not a semantic "thought" |
-| Frontmatter / blank lines | ❌ | Not content |
+| Block type | Auto-ID? | Mirrorable (`^=`)? | Rationale |
+|-----------|----------|-------------------|-----------|
+| Heading (`##`+) | ✅ | ✅ | Section identity, linkable, foldable, section mirror anchor |
+| Task (`- [ ]` / `- [x]`) | ✅ | ✅ | Actionable, toggleable from views, has lifecycle |
+| List item (`- text`) | ❌ | — | Prose with a bullet — link to the heading instead |
+| Paragraph | ❌ | — | Prose — no semantic identity worth tracking |
+| Blockquote | ❌ | — | Prose |
+| Code block | ❌ | — | Not a semantic "thought" |
+| Frontmatter / blank lines | ❌ | — | Not content |
+
+**No manual IDs.** Users cannot manually assign `^id` to arbitrary lines. If you need to reference a specific piece of content, promote it to a heading — headings are Bloom's unit of addressable content. This keeps the ID space clean, prevents orphaned IDs on prose that gets rewritten, and avoids complicating mirror/self-healing logic with user-authored IDs on block types that don't support mirroring.
+
+### Mirror Type Gating
+
+Only headings and tasks can be mirrored (`^=`). When the indexer detects duplicate `^` IDs, it only promotes to `^=` if the block is a heading or task. Duplicate IDs on paragraphs are treated as collisions (different content with the same ID), not mirrors.
+
+### Sever on Type Change
+
+Mirroring is tied to the block's semantic type. Changing the type severs the mirror:
+
+| Change | Result |
+|--------|--------|
+| Task → paragraph (remove `- [ ]`) | Sever mirror: propagate final edit, demote `^=` → `^` in all peers |
+| Heading → paragraph (remove `##`) | Sever mirror: propagate final edit, demote `^=` → `^` in all peers |
+| Task → done (`- [x]`) | **No sever** — still a task, mirror continues |
+| Paragraph → task (add `- [ ]`) | Does NOT auto-create mirror. User must copy to another file. |
 
 ### Visual Treatment
 
-Block IDs render as `SyntaxNoise` — faded + dim, Tier 3 (same as `**` bold markers and `[[` link brackets). Nearly invisible in practice.
+Block IDs render as `SyntaxNoise` — faded + dim, Tier 3 (same as `**` bold markers and `[[` link brackets). With IDs limited to headings and tasks, most body text has no `^` markers — cleaner pages.
 
 ### Assignment Strategy
 
@@ -92,8 +109,9 @@ Block IDs render as `SyntaxNoise` — faded + dim, Tier 3 (same as `**` bold mar
 |------|-----------|
 | Random 5-char base36 | Uniform distribution, no information leakage |
 | Collision check on generation | `SELECT EXISTS` against index — microseconds |
-| Auto-assigned on first index | Every block gets an ID when the indexer processes the page |
+| Auto-assigned on first index | Headings and tasks get IDs when the indexer processes the page |
 | Never reused | Retired IDs in `retired_block_ids` — avoids stale references |
+| User `^id` on non-heading/task lines | **Stripped by the indexer.** Bloom does not support user-authored IDs on arbitrary lines. Promote content to a heading if it needs an ID. |
 
 ### Retired IDs and Never-Reuse
 
@@ -451,17 +469,18 @@ CREATE TABLE block_ids (
 
 1. **Vault-scoped, not page-scoped.** Eliminates cross-page move breakage. Cost: 3 extra chars per ID.
 2. **5-char base36, fixed length.** 60.5M space for 5M lifetime target. Lowercase-only.
-3. **No opt-out.** Block IDs are fundamental. Nearly invisible (Tier 3 noise).
-4. **Eager assignment on first run.** 10K pages → ~170ms. Fingerprint-based self-write detection suppresses re-index.
-5. **`^=` marker in file content.** Files are source of truth. Index is derivable. Survives rebuild.
-6. **`^=` is symmetric.** All copies are equal co-owners. No primary/secondary.
-7. **Content comparison only at promotion.** `^` + `^` → compare once. After `^=`, trust the marker.
-8. **`MirrorEdit` as separate message.** One-flag circular prevention.
-9. **Propagation on Insert→Normal.** Buffer is in final state. Same trigger as auto-save.
-10. **Self-healing via git.** Detection in indexer, repair on history thread.
-11. **Never reused.** Retired IDs reserved permanently. Recovered from git history or broken links on index rebuild.
-12. **No CRDT, no merge logic.** Single-user, local-first. Git is the safety net.
-13. **Stale rows are transient.** Cleaned on re-index of the source page. MirrorEdit to stale target is a no-op.
+3. **Headings and tasks only.** Auto-IDs limited to blocks with semantic identity. Paragraphs, list items, blockquotes don't get IDs. User-authored `^id` on non-heading/task lines is stripped. Need to reference prose? Promote it to a heading.
+4. **`^=` marker in file content.** Files are source of truth. Index is derivable. Survives rebuild.
+5. **`^=` is symmetric.** All copies are equal co-owners. No primary/secondary.
+6. **Mirror gated by type.** Only headings and tasks can be `^=` mirrored. Duplicate IDs on other block types are collisions, not mirrors.
+7. **Sever on type change.** Removing `- [ ]` from a task or `##` from a heading severs the mirror. Mirroring is tied to semantic type, not arbitrary content.
+8. **Content comparison only at promotion.** `^` + `^` → compare once. After `^=`, trust the marker.
+9. **`MirrorEdit` as separate message.** One-flag circular prevention.
+10. **Propagation on Insert→Normal.** Buffer is in final state. Same trigger as auto-save.
+11. **Self-healing via git.** Detection in indexer, repair on history thread.
+12. **Never reused.** Retired IDs reserved permanently. Recovered from git history or broken links on index rebuild.
+13. **No CRDT, no merge logic.** Single-user, local-first. Git is the safety net.
+14. **Stale rows are transient.** Cleaned on re-index of the source page. MirrorEdit to stale target is a no-op.
 
 ---
 
