@@ -44,6 +44,7 @@ pub(crate) fn draw_pane(
     pane: &PaneFrame,
     theme: &ThemePalette,
     anim: Option<(f32, f32)>,
+    cursor_visible: bool,
     pane_x: f32,
     pane_y: f32,
     pane_w: f32,
@@ -54,7 +55,9 @@ pub(crate) fn draw_pane(
     fill_rect(frame, content_rect, rgb_to_color(&theme.background));
 
     match &pane.kind {
-        PaneKind::Editor => draw_editor_content(frame, pane, theme, anim, pane_x, pane_y, pane_w),
+        PaneKind::Editor => {
+            draw_editor_content(frame, pane, theme, anim, cursor_visible, pane_x, pane_y, pane_w)
+        }
         PaneKind::UndoTree(undo_tree) => draw_undo_tree(frame, content_rect, undo_tree, theme),
         PaneKind::Timeline(timeline) => draw_timeline(frame, content_rect, timeline, theme),
         PaneKind::PageHistory(page_history) => {
@@ -75,6 +78,7 @@ fn draw_editor_content(
     pane: &PaneFrame,
     theme: &ThemePalette,
     anim: Option<(f32, f32)>,
+    cursor_visible: bool,
     pane_x: f32,
     pane_y: f32,
     pane_w: f32,
@@ -161,7 +165,7 @@ fn draw_editor_content(
         }
     }
 
-    if pane.is_active {
+    if pane.is_active && cursor_visible {
         let cx = pane_x + GUTTER_WIDTH + pane.cursor.column as f32 * CHAR_WIDTH;
         let cy = anim.map(|(c, _)| c).unwrap_or(
             pane_y + pane.cursor.line.saturating_sub(pane.scroll_offset) as f32 * LINE_HEIGHT,

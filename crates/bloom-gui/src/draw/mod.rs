@@ -5,9 +5,9 @@ pub mod overlay;
 pub mod pane;
 
 use iced::widget::canvas::{self, Frame, Path, Stroke};
-use iced::{Color, Font, Point, Rectangle, Size};
+use iced::{Color, Point, Rectangle, Size};
 
-use crate::{CHAR_WIDTH, FONT_SIZE, LINE_HEIGHT, TEXT_Y_OFFSET};
+use crate::{CHAR_WIDTH, EDITOR_FONT, FONT_SIZE, LINE_HEIGHT, TEXT_Y_OFFSET};
 
 pub(crate) fn rect(x: f32, y: f32, width: f32, height: f32) -> Rectangle {
     Rectangle {
@@ -39,7 +39,7 @@ pub(crate) fn draw_text(
         position: Point::new(x, y + TEXT_Y_OFFSET),
         color,
         size: FONT_SIZE.into(),
-        font: Font::MONOSPACE,
+        font: EDITOR_FONT,
         ..Default::default()
     });
 }

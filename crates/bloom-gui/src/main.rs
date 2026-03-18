@@ -10,13 +10,15 @@ use bloom_core::config::Config;
 use bloom_core::default_vault_path;
 use bloom_core::event_loop::{FrontendEvent, LoopAction};
 use bloom_core::render::RenderFrame;
+use bloom_core::types::KeyEvent;
 use bloom_core::BloomEditor;
 use bloom_md::theme::{ThemePalette, BLOOM_DARK};
 use crossbeam::channel::{Receiver, Sender};
 use iced::widget::canvas::{Cache, Canvas};
-use iced::{keyboard, window, Element, Length, Size, Subscription, Task};
+use iced::{keyboard, window, Element, Font, Length, Size, Subscription, Task};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use crate::canvas::{AnimationState, BaseCanvas, DiffCanvas, OverlayCanvas};
 use crate::keys::convert_key;
@@ -33,10 +35,23 @@ pub(crate) const GUTTER_CHARS: usize = 5;
 pub(crate) const GUTTER_WIDTH: f32 = GUTTER_CHARS as f32 * CHAR_WIDTH;
 /// Bottom safe area to avoid macOS window corner radius clipping.
 pub(crate) const BOTTOM_SAFE_AREA: f32 = 6.0;
+pub(crate) const EDITOR_FONT: Font = Font::with_name("JetBrains Mono");
+const JETBRAINS_MONO: &[u8] = include_bytes!("../fonts/JetBrainsMono-Regular.ttf");
+const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(530);
+
+fn title(state: &BloomApp) -> String {
+    state
+        .frame
+        .as_ref()
+        .and_then(|frame| frame.panes.iter().find(|pane| pane.is_active))
+        .map(|pane| format!("{} — Bloom", pane.title))
+        .unwrap_or_else(|| "Bloom".to_string())
+}
 
 fn main() -> iced::Result {
     iced::application(boot, update, view)
-        .title("Bloom")
+        .title(title)
+        .font(JETBRAINS_MONO)
         .subscription(subscription)
         .window(window::Settings {
             size: Size::new(1200.0, 800.0),
@@ -58,6 +73,8 @@ struct BloomApp {
     quit_flag: Arc<AtomicBool>,
     anim: AnimationState,
     animating: bool,
+    cursor_visible: bool,
+    blink_timer: Option<Instant>,
     /// Last window size sent to core (for resize detection).
     last_size: (u16, u16),
     /// Remote session rendering hints (detected once at startup).
@@ -71,6 +88,8 @@ enum Message {
     AnimTick,
     /// Window was resized.
     WindowResized(Size),
+    /// Mouse wheel scroll in the editor area.
+    Scroll(i32),
 }
 
 fn boot() -> (BloomApp, Task<Message>) {
@@ -137,6 +156,8 @@ fn boot() -> (BloomApp, Task<Message>) {
             quit_flag,
             anim: AnimationState::default(),
             animating: true,
+            cursor_visible: true,
+            blink_timer: None,
             last_size: (initial_cols, initial_rows),
             remote,
         },
@@ -159,7 +180,9 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
             // Remote sessions: snap instantly (no lerp), stop after one tick.
             let still_moving = if let Some(frame) = &state.frame {
                 if let Some(pane) = frame.panes.iter().find(|p| p.is_active) {
-                    let status_bars_above = frame.panes.iter()
+                    let status_bars_above = frame
+                        .panes
+                        .iter()
                         .filter(|other| other.rect.y + other.rect.total_height <= pane.rect.y)
                         .count();
                     let pane_y = pane.rect.y as f32 * LINE_HEIGHT
@@ -179,24 +202,41 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
             } else {
                 false
             };
-            state.animating = still_moving;
-            state.base_cache.clear(); state.diff_cache.clear(); state.overlay_cache.clear();
+            let insert_mode = state.is_insert_mode();
+            let blink_changed = state.tick_cursor_blink(insert_mode);
+            state.animating = still_moving || insert_mode;
+            if still_moving || blink_changed {
+                state.clear_caches();
+            }
         }
         Message::KeyboardEvent(event) => {
             if let keyboard::Event::KeyPressed {
+                key,
                 modified_key,
                 modifiers,
                 ..
             } = event
             {
-                if let Some(key_event) = convert_key(modified_key, modifiers) {
-                    let _ = state.frontend_tx.send(FrontendEvent::Key(key_event));
+                state.reset_cursor_blink();
+
+                if !state.handle_platform_shortcut(&key, &modified_key, modifiers) {
+                    if let Some(key_event) = convert_key(modified_key, modifiers) {
+                        state.send_key_event(key_event);
+                    }
                 }
+
+                // Key sent — bump to animation speed so response frame is picked up
+                // on the next tick (8ms), and start the animation subscription.
+                state.animating = true;
+                state.clear_caches();
             }
-            // Key sent — bump to animation speed so response frame is picked up
-            // on the next tick (8ms), and start the animation subscription.
-            state.animating = true;
-            state.base_cache.clear(); state.diff_cache.clear(); state.overlay_cache.clear();
+        }
+        Message::Scroll(lines) => {
+            if lines != 0 {
+                state.scroll(lines);
+                state.animating = true;
+                state.clear_caches();
+            }
         }
         Message::WindowResized(size) => {
             let cols = (size.width / CHAR_WIDTH).max(1.0) as u16;
@@ -219,6 +259,7 @@ fn view(state: &BloomApp) -> Element<'_, Message> {
         cache: &state.base_cache,
         anim: &state.anim,
         remote: state.remote,
+        cursor_visible: !state.is_insert_mode() || state.cursor_visible,
     })
     .width(Length::Fill)
     .height(Length::Fill);
@@ -262,7 +303,119 @@ fn subscription(state: &BloomApp) -> Subscription<Message> {
     Subscription::batch(subs)
 }
 
+fn key_matches_any(key: &keyboard::Key, expected: &[&str]) -> bool {
+    match key.as_ref() {
+        keyboard::Key::Character(value) => expected
+            .iter()
+            .any(|candidate| value.eq_ignore_ascii_case(candidate)),
+        _ => false,
+    }
+}
+
+fn is_primary_shortcut(modifiers: keyboard::Modifiers) -> bool {
+    if cfg!(target_os = "macos") {
+        modifiers.macos_command()
+    } else {
+        modifiers.control()
+    }
+}
+
 impl BloomApp {
+    fn clear_caches(&mut self) {
+        self.base_cache.clear();
+        self.diff_cache.clear();
+        self.overlay_cache.clear();
+    }
+
+    fn is_insert_mode(&self) -> bool {
+        self.frame
+            .as_ref()
+            .and_then(|frame| frame.panes.iter().find(|pane| pane.is_active))
+            .map(|pane| pane.status_bar.mode.as_str())
+            == Some("INSERT")
+    }
+
+    fn tick_cursor_blink(&mut self, insert_mode: bool) -> bool {
+        if !insert_mode {
+            let changed = !self.cursor_visible || self.blink_timer.is_some();
+            self.cursor_visible = true;
+            self.blink_timer = None;
+            return changed;
+        }
+
+        let now = Instant::now();
+
+        match self.blink_timer {
+            Some(last) if now.duration_since(last) >= CURSOR_BLINK_INTERVAL => {
+                self.cursor_visible = !self.cursor_visible;
+                self.blink_timer = Some(now);
+                true
+            }
+            Some(_) => false,
+            None => {
+                let changed = !self.cursor_visible;
+                self.cursor_visible = true;
+                self.blink_timer = Some(now);
+                changed
+            }
+        }
+    }
+
+    fn reset_cursor_blink(&mut self) {
+        self.cursor_visible = true;
+        self.blink_timer = Some(Instant::now());
+    }
+
+    fn send_key_event(&self, key_event: KeyEvent) {
+        let _ = self.frontend_tx.send(FrontendEvent::Key(key_event));
+    }
+
+    fn scroll(&self, lines: i32) {
+        let key = if lines > 0 { 'j' } else { 'k' };
+
+        for _ in 0..lines.abs() {
+            self.send_key_event(KeyEvent::char(key));
+        }
+    }
+
+    fn handle_platform_shortcut(
+        &mut self,
+        key: &keyboard::Key,
+        modified_key: &keyboard::Key,
+        modifiers: keyboard::Modifiers,
+    ) -> bool {
+        if !is_primary_shortcut(modifiers) {
+            return false;
+        }
+
+        if key_matches_any(key, &["s"]) || key_matches_any(modified_key, &["s"]) {
+            self.send_key_event(KeyEvent::ctrl('s'));
+            return true;
+        }
+
+        if key_matches_any(key, &["q"]) || key_matches_any(modified_key, &["q"]) {
+            let _ = self.frontend_tx.send(FrontendEvent::Quit);
+            return true;
+        }
+
+        if key_matches_any(key, &["+", "="]) || key_matches_any(modified_key, &["+", "="]) {
+            eprintln!("TODO: increase font size shortcut");
+            return true;
+        }
+
+        if key_matches_any(key, &["-"]) || key_matches_any(modified_key, &["-"]) {
+            eprintln!("TODO: decrease font size shortcut");
+            return true;
+        }
+
+        if key_matches_any(key, &["0"]) || key_matches_any(modified_key, &["0"]) {
+            eprintln!("TODO: reset font size shortcut");
+            return true;
+        }
+
+        false
+    }
+
     /// Drain any pending frames from the editor thread (non-blocking).
     /// Called on every update to catch frames promptly.
     fn drain_frames(&mut self) {
