@@ -204,7 +204,7 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
             };
             let insert_mode = state.is_insert_mode();
             let blink_changed = state.tick_cursor_blink(insert_mode);
-            state.animating = still_moving || insert_mode;
+            state.animating = still_moving || insert_mode || state.frame.is_none();
             if still_moving || blink_changed {
                 state.clear_caches();
             }
