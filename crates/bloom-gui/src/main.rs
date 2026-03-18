@@ -419,12 +419,17 @@ impl BloomApp {
     /// Drain any pending frames from the editor thread (non-blocking).
     /// Called on every update to catch frames promptly.
     fn drain_frames(&mut self) {
+        let mut got_frame = false;
         while let Ok(frame) = self.frame_rx.try_recv() {
             if let Some(palette) = bloom_md::theme::palette_by_name(&frame.theme_name) {
                 self.theme = palette;
             }
             self.frame = Some(frame);
+            got_frame = true;
+        }
+        if got_frame {
             self.animating = true;
+            self.clear_caches();
         }
     }
 }
