@@ -86,7 +86,7 @@ The ID is appended to the **last line of the block** — end of the thought, nev
 
 ### Mirror Type Gating
 
-Only headings and tasks can be mirrored (`^=`). When the indexer detects duplicate `^` IDs, it only promotes to `^=` if the block is a heading or task. Duplicate IDs on paragraphs are treated as collisions (different content with the same ID), not mirrors.
+Since only headings and tasks receive IDs, any duplicate `^` detected by the indexer is always a valid mirror candidate. Promotion to `^=` proceeds as before — no type check needed.
 
 ### Sever on Type Change
 
@@ -472,7 +472,7 @@ CREATE TABLE block_ids (
 3. **Headings and tasks only.** Auto-IDs limited to blocks with semantic identity. Paragraphs, list items, blockquotes don't get IDs. User-authored `^id` on non-heading/task lines is stripped. Need to reference prose? Promote it to a heading.
 4. **`^=` marker in file content.** Files are source of truth. Index is derivable. Survives rebuild.
 5. **`^=` is symmetric.** All copies are equal co-owners. No primary/secondary.
-6. **Mirror gated by type.** Only headings and tasks can be `^=` mirrored. Duplicate IDs on other block types are collisions, not mirrors.
+6. **Mirror needs no type gate.** Since only headings and tasks get IDs, any duplicate `^` is always a valid mirror. Promotion logic is unchanged.
 7. **Sever on type change.** Removing `- [ ]` from a task or `##` from a heading severs the mirror. Mirroring is tied to semantic type, not arbitrary content.
 8. **Content comparison only at promotion.** `^` + `^` → compare once. After `^=`, trust the marker.
 9. **`MirrorEdit` as separate message.** One-flag circular prevention.
