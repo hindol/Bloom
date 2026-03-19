@@ -338,10 +338,19 @@ fn draw_active_status_bar(
     window_height: f32,
 ) {
     let content_bottom = pane_y + pane.rect.content_height as f32 * LINE_HEIGHT;
-    // Anchor to window bottom edge — fill from content bottom to window edge.
-    let bar_h = (window_height - content_bottom).max(STATUS_BAR_HEIGHT);
-    let status_y = window_height - bar_h;
-    let text_y = status_y + (bar_h - LINE_HEIGHT) / 2.0;
+    // Fixed bar height — anchored to window bottom.
+    let bar_h = STATUS_BAR_HEIGHT + 4.0; // +4px for macOS corner clearance
+    let status_y = (window_height - bar_h).max(content_bottom);
+    let actual_h = window_height - status_y;
+    // Fill any gap between content and status bar with background.
+    if status_y > content_bottom + 0.5 {
+        fill_rect(
+            frame,
+            rect(pane_x, content_bottom, pane_w, status_y - content_bottom),
+            rgb_to_color(&theme.background),
+        );
+    }
+    let text_y = status_y + (actual_h - LINE_HEIGHT) / 2.0;
 
     // 1px top border.
     crate::draw::draw_hline(
@@ -354,12 +363,12 @@ fn draw_active_status_bar(
 
     match &pane.status_bar.content {
         StatusBarContent::Normal(normal) => {
-            draw_normal_status(frame, pane, normal, theme, pane_x, text_y, pane_w, status_y, bar_h)
+            draw_normal_status(frame, pane, normal, theme, pane_x, text_y, pane_w, status_y, actual_h)
         }
         StatusBarContent::CommandLine(command) => {
             fill_rect(
                 frame,
-                rect(pane_x, status_y, pane_w, bar_h),
+                rect(pane_x, status_y, pane_w, actual_h),
                 rgb_to_color(&theme.highlight),
             );
             draw_command_line(frame, command, theme, pane_x, pane_y, pane_w, text_y)
@@ -367,7 +376,7 @@ fn draw_active_status_bar(
         StatusBarContent::QuickCapture(capture) => {
             fill_rect(
                 frame,
-                rect(pane_x, status_y, pane_w, bar_h),
+                rect(pane_x, status_y, pane_w, actual_h),
                 rgb_to_color(&theme.highlight),
             );
             draw_quick_capture(frame, capture, theme, pane_x, pane_w, text_y)
@@ -385,11 +394,19 @@ fn draw_inactive_status_bar(
     window_height: f32,
 ) {
     let content_bottom = pane_y + pane.rect.content_height as f32 * LINE_HEIGHT;
-    let bar_h = (window_height - content_bottom).max(STATUS_BAR_HEIGHT);
-    let status_y = window_height - bar_h;
+    let target_h = STATUS_BAR_HEIGHT + 4.0;
+    let status_y = (window_height - target_h).max(content_bottom);
+    let actual_h = window_height - status_y;
+    if status_y > content_bottom + 0.5 {
+        fill_rect(
+            frame,
+            rect(pane_x, content_bottom, pane_w, status_y - content_bottom),
+            rgb_to_color(&theme.background),
+        );
+    }
     fill_rect(
         frame,
-        rect(pane_x, status_y, pane_w, bar_h),
+        rect(pane_x, status_y, pane_w, actual_h),
         rgb_to_color(&theme.subtle),
     );
     crate::draw::draw_hline(
@@ -400,7 +417,7 @@ fn draw_inactive_status_bar(
         rgb_to_color(&theme.faded),
     );
 
-    let text_y = status_y + (bar_h - LINE_HEIGHT) / 2.0;
+    let text_y = status_y + (actual_h - LINE_HEIGHT) / 2.0;
     let max_chars = chars_that_fit((pane_w - SPACING_MD * 2.0).max(0.0));
     let title = truncate_text(&pane.title, max_chars);
     draw_text(
