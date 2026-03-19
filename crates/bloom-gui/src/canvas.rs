@@ -511,14 +511,16 @@ fn draw_scroll_progress(
         rgb_to_color(&theme.subtle),
     );
 
-    // Fill bar: width proportional to cursor position in the file.
-    // Cursor on line 0 = minimal fill, cursor on last line = full width.
+    // Fill bar: cursor on first line = 0, cursor on last line = full width.
     let total = pane.total_lines.max(1);
-    let progress = (pane.cursor.line + 1) as f32 / total as f32;
-    let fill_w = (size.width * progress).clamp(1.0, size.width);
-    fill_rect(
-        frame,
-        rect(0.0, bar_y, fill_w, bar_h),
-        rgb_to_color(&theme.faded),
-    );
+    let last = (total as f32 - 1.0).max(0.0);
+    let progress = if last == 0.0 { 1.0 } else { pane.cursor.line as f32 / last };
+    let fill_w = size.width * progress;
+    if fill_w > 0.5 {
+        fill_rect(
+            frame,
+            rect(0.0, bar_y, fill_w, bar_h),
+            rgb_to_color(&theme.faded),
+        );
+    }
 }
