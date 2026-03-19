@@ -63,10 +63,10 @@ pub(super) fn draw_temporal_strip(
             };
             let ln_style = match dl.kind {
                 bloom_core::render::DiffLineKind::Added => {
-                    RStyle::default().fg(theme.accent_green()).bg(bg)
+                    RStyle::default().fg(theme.diff_added()).bg(bg)
                 }
                 bloom_core::render::DiffLineKind::Removed => {
-                    RStyle::default().fg(theme.accent_red()).bg(bg)
+                    RStyle::default().fg(theme.diff_removed()).bg(bg)
                 }
                 bloom_core::render::DiffLineKind::Modified => {
                     RStyle::default().fg(theme.salient()).bg(bg)
@@ -90,10 +90,10 @@ pub(super) fn draw_temporal_strip(
                     RStyle::default().fg(theme.faded()).bg(bg)
                 }
                 bloom_core::render::DiffLineKind::Added => {
-                    RStyle::default().fg(theme.accent_green()).bg(bg)
+                    RStyle::default().fg(theme.diff_added()).bg(bg)
                 }
                 bloom_core::render::DiffLineKind::Removed => {
-                    RStyle::default().fg(theme.accent_red()).bg(bg)
+                    RStyle::default().fg(theme.diff_removed()).bg(bg)
                 }
                 bloom_core::render::DiffLineKind::Modified => {
                     RStyle::default().fg(theme.salient()).bg(bg)
@@ -108,11 +108,11 @@ pub(super) fn draw_temporal_strip(
                         RStyle::default().fg(theme.foreground()).bg(bg)
                     }
                     bloom_core::render::DiffLineKind::Added => {
-                        RStyle::default().fg(theme.accent_green()).bg(bg)
+                        RStyle::default().fg(theme.diff_added()).bg(bg)
                     }
                     bloom_core::render::DiffLineKind::Removed => {
                         RStyle::default()
-                            .fg(theme.accent_red())
+                            .fg(theme.diff_removed())
                             .bg(bg)
                             .add_modifier(Modifier::CROSSED_OUT)
                     }

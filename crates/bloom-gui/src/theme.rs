@@ -41,8 +41,8 @@ pub(crate) fn style_to_color(style: &Style, theme: &ThemePalette) -> Color {
         Style::FrontmatterTitle => rgb_to_color(&theme.foreground),
         Style::BrokenLink => rgb_to_color(&theme.critical),
         Style::SearchMatch | Style::SearchMatchCurrent => rgb_to_color(&theme.foreground),
-        Style::DiffAdded => rgb_to_color(&theme.accent_green),
-        Style::DiffRemoved => rgb_to_color(&theme.accent_red),
+        Style::DiffAdded => rgb_to_color(&theme.diff_added),
+        Style::DiffRemoved => rgb_to_color(&theme.diff_removed),
     }
 }
 

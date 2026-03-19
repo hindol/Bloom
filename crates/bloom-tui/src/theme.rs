@@ -113,6 +113,16 @@ impl<'a> TuiTheme<'a> {
         rgb(self.palette.accent_red)
     }
 
+    /// Diff added text — brighter green, tuned for readability on full lines.
+    pub fn diff_added(&self) -> Color {
+        rgb(self.palette.diff_added)
+    }
+
+    /// Diff removed text — brighter red, tuned for readability on full lines.
+    pub fn diff_removed(&self) -> Color {
+        rgb(self.palette.diff_removed)
+    }
+
     /// Highlight colour.
     pub fn highlight(&self) -> Color {
         rgb(self.palette.highlight)

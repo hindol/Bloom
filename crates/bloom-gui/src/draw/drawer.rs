@@ -135,8 +135,8 @@ pub(crate) fn draw_temporal_diff_preview(
         };
         let line_color = match dl.kind {
             DiffLineKind::Context => &theme.foreground,
-            DiffLineKind::Added => &theme.accent_green,
-            DiffLineKind::Removed => &theme.accent_red,
+            DiffLineKind::Added => &theme.diff_added,
+            DiffLineKind::Removed => &theme.diff_removed,
             DiffLineKind::Modified => &theme.accent_yellow,
         };
         draw_text(frame, content_x, y, prefix, rgb_to_color(line_color));
@@ -146,8 +146,8 @@ pub(crate) fn draw_temporal_diff_preview(
         for seg in &dl.segments {
             let seg_color = match seg.kind {
                 DiffLineKind::Context => &theme.foreground,
-                DiffLineKind::Added => &theme.accent_green,
-                DiffLineKind::Removed => &theme.accent_red,
+                DiffLineKind::Added => &theme.diff_added,
+                DiffLineKind::Removed => &theme.diff_removed,
                 DiffLineKind::Modified => &theme.accent_yellow,
             };
             let text = truncate_text(&seg.text, content_chars.saturating_sub(2));
