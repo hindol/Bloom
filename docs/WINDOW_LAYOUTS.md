@@ -611,6 +611,94 @@ All borders use `faded` colour — they recede visually, letting the content and
 
 ---
 
+## Centralized Layout Manager
+
+> Status: **Design** — not yet implemented. Currently each draw function computes
+> its own position from window size. This design replaces that with a single
+> layout pass that allocates rects before any drawing begins.
+
+### Problem
+
+Every draw function independently calculates "where am I?" using window height, LINE_HEIGHT, and ad-hoc offsets. This causes overlap bugs: the status bar, drawer, picker, and content area all guess where the others are. Adding a new surface (or changing a height) requires fixing every other surface's positioning code.
+
+### Design
+
+A `FrameLayout` struct computed **once** per frame, before any drawing:
+
+```rust
+struct FrameLayout {
+    content: Rect,          // editor panes — fills remaining space
+    modeline: Rect,         // status bar — always adjacent to content bottom
+    drawer: Option<Rect>,   // which-key / picker / calendar / temporal strip / view
+}
+```
+
+### Vertical Stack (bottom-up)
+
+```
+┌──────────────────────────┐
+│                          │
+│       content            │  ← shrinks when drawer opens
+│                          │
+├──────────────────────────┤
+│       modeline           │  ← always adjacent to content
+├──────────────────────────┤
+│       drawer             │  ← transient, slides up from bottom edge
+└──────────────────────────┘
+```
+
+The modeline stays visually attached to the content area — it's the editor's footer. The drawer pushes down below the modeline, at the very bottom of the window.
+
+### Layout Algorithm
+
+```
+1. modeline_h = LINE_HEIGHT + bottom_clearance (macOS corner radius)
+2. drawer_h = active_drawer.requested_height()  // 0 if no drawer
+3. drawer.y = window_height - drawer_h
+4. modeline.y = drawer.y - modeline_h
+5. content.y = 0
+6. content.height = modeline.y
+```
+
+### Dynamic Drawer Height
+
+Each drawer surface reports its needed height — the layout manager allocates it:
+
+| Drawer | Height calculation |
+|--------|-------------------|
+| Which-key | `(entry_count / cols).ceil() + 2` rows × LINE_HEIGHT |
+| Picker | `min(result_count, 10) + 2` rows × LINE_HEIGHT |
+| Calendar | 10 rows × LINE_HEIGHT (header + 6 weeks + hints) |
+| Temporal strip | 4 or 6 rows × LINE_HEIGHT (compact vs rich) |
+| View (BQL) | `min(row_count, 12) + 3` rows × LINE_HEIGHT |
+| None | 0 (no drawer) |
+
+### What Draws Into Each Rect
+
+| Rect | Drawn by | Layer |
+|------|----------|-------|
+| `content` | `pane::draw_pane()` for each pane, split borders | BaseCanvas |
+| `modeline` | `pane::draw_active_status_bar()` / `draw_inactive_status_bar()` | BaseCanvas |
+| `drawer` | `drawer::draw_which_key()`, `overlay::draw_picker()`, `overlay::draw_date_picker()`, etc. | BaseCanvas |
+| Floating (dialog, inline menu, notifications) | Not part of the stack — positioned independently | OverlayCanvas |
+
+### Benefits
+
+- **No overlap** — each surface draws within its allocated rect, never beyond
+- **One place to change layout** — adding a surface or changing a height is a one-line change in the layout computation
+- **Content area auto-shrinks** — when a drawer opens, content.height decreases, no manual adjustment needed
+- **Consistent modeline position** — always at `content.y + content.height`, adjacent to editor text
+
+### Implementation Notes
+
+- `FrameLayout` computed in `BaseCanvas::draw()` before any `draw_*` calls
+- Passed as a parameter (or fields) to each draw function
+- Replaces all `window_height`, `STATUS_BAR_HEIGHT + offset`, and ad-hoc position calculations
+- DiffCanvas and OverlayCanvas also receive the layout for consistent positioning
+- Floating elements (dialog, inline menu, notifications) use window size directly — they're not part of the stack
+
+---
+
 ## GUI Chrome — Modeline, Picker, Drawers
 
 > Pixel-level specs for the GUI (Iced Canvas). The TUI maps the same logical
