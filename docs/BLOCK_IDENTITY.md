@@ -79,10 +79,10 @@ The ID is appended to the **last line of the block** — end of the thought, nev
 | List item (`- text`) | ✅ | ✅ | Referenceable, movable, history-trackable |
 | Paragraph | ✅ | ✅ | History tracking, emergence detection, stable chunk identity |
 | Blockquote | ✅ | ✅ | Referenceable content |
-| Code block | ❌ | — | Not a semantic "thought" |
+| Code block | ✅ | ✅ | Section mirroring requires tracking all children |
 | Frontmatter / blank lines | ❌ | — | Not content |
 
-Every content block gets an ID. IDs serve history tracking (per-block git pickaxe), BQL result targeting, move-block operations, and emergence detection — even for paragraphs.
+**ID placement:** Last line of the block for all types — except **code blocks**, where the ID goes on the **opening fence** line (```` ```rust ^abc01 ````). The opening fence is metadata (language hint), making the ID natural there. The closing fence is fragile (easily deleted). For paragraphs, the last line keeps the ID out of the reading flow.
 
 ### Mirror Promotion
 
