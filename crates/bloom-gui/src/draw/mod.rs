@@ -51,10 +51,12 @@ pub(crate) fn draw_text_sized(
     content: impl Into<String>,
     color: Color,
     size: f32,
+    row_height: f32,
 ) {
+    let y_offset = (row_height - size) / 2.0;
     frame.fill_text(canvas::Text {
         content: content.into(),
-        position: Point::new(x, y + (size * 0.2).min(TEXT_Y_OFFSET)),
+        position: Point::new(x, y + y_offset.max(0.0)),
         color,
         size: size.into(),
         font: EDITOR_FONT,

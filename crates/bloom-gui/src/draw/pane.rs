@@ -95,20 +95,44 @@ fn draw_editor_content(
     let content_chars = pane.rect.width as usize;
     let text_chars = content_chars.saturating_sub(GUTTER_CHARS);
 
+    // Pre-compute per-line Y offsets and heights (headings get taller rows).
+    let mut line_ys: Vec<f32> = Vec::with_capacity(pane.visible_lines.len());
+    let mut line_heights: Vec<f32> = Vec::with_capacity(pane.visible_lines.len());
+    let mut y_acc = pane_y;
+    for line in &pane.visible_lines {
+        let h_level = line.spans.iter().find_map(|s| match s.style {
+            Style::Heading { level } => Some(level),
+            _ => None,
+        });
+        let row_h = match h_level {
+            Some(level) => heading_font_size(level) * 1.4,
+            None => LINE_HEIGHT,
+        };
+        line_ys.push(y_acc);
+        line_heights.push(row_h);
+        y_acc += row_h;
+    }
+
     let logical_cursor_row = pane.cursor.line.saturating_sub(pane.scroll_offset);
 
-    // Use animated Y for highlight if available, otherwise logical.
+    // Current line highlight.
     if pane.is_active {
-        let hl_y = anim.map(|(_, hl)| hl).unwrap_or(pane_y + logical_cursor_row as f32 * LINE_HEIGHT);
+        let hl_y = if let Some((_, hl)) = anim {
+            hl
+        } else {
+            line_ys.get(logical_cursor_row).copied().unwrap_or(pane_y)
+        };
+        let hl_h = line_heights.get(logical_cursor_row).copied().unwrap_or(LINE_HEIGHT);
         fill_rect(
             frame,
-            rect(pane_x, hl_y, pane_w, LINE_HEIGHT),
+            rect(pane_x, hl_y, pane_w, hl_h),
             rgb_to_color(&theme.highlight),
         );
     }
 
     for (i, line) in pane.visible_lines.iter().enumerate() {
-        let y = pane_y + i as f32 * LINE_HEIGHT;
+        let y = line_ys[i];
+        let row_h = line_heights[i];
 
         match line.source {
             LineSource::Buffer(buf_line) => {
@@ -179,6 +203,7 @@ fn draw_editor_content(
                         slice.to_string(),
                         style_to_color(&span.style, theme),
                         line_font_size,
+                        row_h,
                     );
                 } else {
                     draw_text(
@@ -214,7 +239,6 @@ fn draw_editor_content(
     }
 
     if pane.is_active && cursor_visible {
-        // Detect if cursor is on a heading line — use scaled char width.
         let cursor_row_idx = pane.cursor.line.saturating_sub(pane.scroll_offset);
         let cursor_char_width = pane.visible_lines.get(cursor_row_idx)
             .and_then(|line| line.spans.iter().find_map(|s| match s.style {
@@ -223,16 +247,17 @@ fn draw_editor_content(
             }))
             .map(|level| CHAR_WIDTH * (heading_font_size(level) / FONT_SIZE))
             .unwrap_or(CHAR_WIDTH);
+        let cursor_row_h = line_heights.get(cursor_row_idx).copied().unwrap_or(LINE_HEIGHT);
 
         let cx = pane_x + GUTTER_WIDTH + pane.cursor.column as f32 * cursor_char_width;
         let cy = anim.map(|(c, _)| c).unwrap_or(
-            pane_y + cursor_row_idx as f32 * LINE_HEIGHT,
+            line_ys.get(cursor_row_idx).copied().unwrap_or(pane_y),
         );
 
         match pane.cursor.shape {
             CursorShape::Block => fill_rect(
                 frame,
-                rect(cx, cy, cursor_char_width, LINE_HEIGHT),
+                rect(cx, cy, cursor_char_width, cursor_row_h),
                 Color {
                     a: 0.45,
                     ..rgb_to_color(&theme.foreground)
@@ -241,7 +266,7 @@ fn draw_editor_content(
             CursorShape::Bar => draw_bar_cursor(frame, cx, cy, rgb_to_color(&theme.foreground)),
             CursorShape::Underline => fill_rect(
                 frame,
-                rect(cx, cy + LINE_HEIGHT - 2.0, cursor_char_width, 2.0),
+                rect(cx, cy + cursor_row_h - 2.0, cursor_char_width, 2.0),
                 rgb_to_color(&theme.foreground),
             ),
         }
