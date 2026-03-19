@@ -1347,19 +1347,42 @@ fn compute_diff_lines(historical: &str, current: &str) -> Vec<render::DiffLine> 
                 new_index,
                 new_len,
             } => {
-                // Paired lines: single inline line with word-level diff
                 let paired = old_len.min(new_len);
                 for i in 0..paired {
                     let old_text = old_lines.get(old_index + i).unwrap_or(&"");
                     let new_text = new_lines.get(new_index + i).unwrap_or(&"");
-                    let segments = word_diff(old_text, new_text);
 
-                    result.push(render::DiffLine {
-                        segments,
-                        kind: render::DiffLineKind::Modified,
-                        old_line: Some(old_index + i + 1),
-                        new_line: Some(new_index + i + 1),
-                    });
+                    // If lines are <40% similar, show as separate remove+add
+                    // (cleaner than noisy word-level diff on mostly-changed lines).
+                    let similarity = similar::TextDiff::from_chars(*old_text, *new_text).ratio();
+                    if similarity < 0.4 {
+                        result.push(render::DiffLine {
+                            segments: vec![render::DiffSegment {
+                                text: old_text.to_string(),
+                                kind: render::DiffLineKind::Removed,
+                            }],
+                            kind: render::DiffLineKind::Removed,
+                            old_line: Some(old_index + i + 1),
+                            new_line: None,
+                        });
+                        result.push(render::DiffLine {
+                            segments: vec![render::DiffSegment {
+                                text: new_text.to_string(),
+                                kind: render::DiffLineKind::Added,
+                            }],
+                            kind: render::DiffLineKind::Added,
+                            old_line: None,
+                            new_line: Some(new_index + i + 1),
+                        });
+                    } else {
+                        let segments = word_diff(old_text, new_text);
+                        result.push(render::DiffLine {
+                            segments,
+                            kind: render::DiffLineKind::Modified,
+                            old_line: Some(old_index + i + 1),
+                            new_line: Some(new_index + i + 1),
+                        });
+                    }
                 }
                 for i in paired..old_len {
                     let text = old_lines.get(old_index + i).unwrap_or(&"").to_string();
