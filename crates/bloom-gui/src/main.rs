@@ -33,8 +33,11 @@ pub(crate) const STATUS_BAR_HEIGHT: f32 = LINE_HEIGHT * 1.2;
 pub(crate) const CHAR_WIDTH: f32 = FONT_SIZE * 0.6;
 pub(crate) const GUTTER_CHARS: usize = 5;
 pub(crate) const GUTTER_WIDTH: f32 = GUTTER_CHARS as f32 * CHAR_WIDTH;
-/// Bottom safe area to avoid macOS window corner radius clipping.
-pub(crate) const BOTTOM_SAFE_AREA: f32 = 6.0;
+/// Bottom inset for macOS window corner radius — the modeline extends into
+/// this zone with horizontal padding so text avoids the rounded corners.
+pub(crate) const BOTTOM_INSET: f32 = 6.0;
+/// Horizontal padding inside the modeline to clear macOS rounded corners.
+pub(crate) const MODELINE_H_PAD: f32 = 8.0;
 pub(crate) const EDITOR_FONT: Font = Font::with_name("JetBrains Mono");
 
 #[allow(unused)]
@@ -167,7 +170,7 @@ fn boot() -> (BloomApp, Task<Message>) {
         .expect("failed to spawn editor thread");
 
     let initial_cols = (1200.0 / CHAR_WIDTH) as u16;
-    let initial_rows = ((800.0 - BOTTOM_SAFE_AREA) / LINE_HEIGHT) as u16;
+    let initial_rows = (800.0 / LINE_HEIGHT) as u16;
     let _ = frontend_tx.send(FrontendEvent::Resize {
         cols: initial_cols,
         rows: initial_rows,
@@ -289,7 +292,7 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
         }
         Message::WindowResized(size) => {
             let cols = (size.width / CHAR_WIDTH).max(1.0) as u16;
-            let rows = ((size.height - BOTTOM_SAFE_AREA) / LINE_HEIGHT).max(1.0) as u16;
+            let rows = (size.height / LINE_HEIGHT).max(1.0) as u16;
             if (cols, rows) != state.last_size {
                 state.last_size = (cols, rows);
                 let _ = state.frontend_tx.send(FrontendEvent::Resize { cols, rows });

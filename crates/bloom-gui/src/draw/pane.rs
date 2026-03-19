@@ -7,13 +7,13 @@ use bloom_md::theme::ThemePalette;
 use iced::{Color, Rectangle};
 
 use crate::draw::{
-    chars_that_fit, draw_bar_cursor, draw_text, draw_text_right, draw_text_sized,
+    chars_that_fit, draw_bar_cursor, draw_text, draw_text_right, draw_text_sized, draw_vline,
     fill_rect, rect, text_width, truncate_text,
 };
 use crate::theme::{rgb_to_color, style_to_bg, style_to_color};
 use crate::{
-    CHAR_WIDTH, FONT_SIZE, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, SPACING_MD,
-    STATUS_BAR_HEIGHT,
+    BOTTOM_INSET, CHAR_WIDTH, FONT_SIZE, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, MODELINE_H_PAD,
+    SPACING_MD, SPACING_SM, STATUS_BAR_HEIGHT,
 };
 
 /// Extra pixels the GUI status bar adds beyond what core allocates (1 cell row).
@@ -336,14 +336,10 @@ fn draw_active_status_bar(
     pane_w: f32,
 ) {
     let status_y = pane_y + pane.rect.content_height as f32 * LINE_HEIGHT;
+    // Extend bar to absorb macOS bottom corner radius.
+    let bar_h = STATUS_BAR_HEIGHT + BOTTOM_INSET;
     let text_y = status_y + (STATUS_BAR_HEIGHT - LINE_HEIGHT) / 2.0;
 
-    // Modeline background.
-    fill_rect(
-        frame,
-        rect(pane_x, status_y, pane_w, STATUS_BAR_HEIGHT),
-        rgb_to_color(&theme.highlight),
-    );
     // 1px top border.
     crate::draw::draw_hline(
         frame,
@@ -355,12 +351,22 @@ fn draw_active_status_bar(
 
     match &pane.status_bar.content {
         StatusBarContent::Normal(normal) => {
-            draw_normal_status(frame, pane, normal, theme, pane_x, text_y, pane_w, status_y)
+            draw_normal_status(frame, pane, normal, theme, pane_x, text_y, pane_w, status_y, bar_h)
         }
         StatusBarContent::CommandLine(command) => {
+            fill_rect(
+                frame,
+                rect(pane_x, status_y, pane_w, bar_h),
+                rgb_to_color(&theme.highlight),
+            );
             draw_command_line(frame, command, theme, pane_x, pane_y, pane_w, text_y)
         }
         StatusBarContent::QuickCapture(capture) => {
+            fill_rect(
+                frame,
+                rect(pane_x, status_y, pane_w, bar_h),
+                rgb_to_color(&theme.highlight),
+            );
             draw_quick_capture(frame, capture, theme, pane_x, pane_w, text_y)
         }
     }
@@ -375,10 +381,10 @@ fn draw_inactive_status_bar(
     pane_w: f32,
 ) {
     let status_y = pane_y + pane.rect.content_height as f32 * LINE_HEIGHT;
-    // Subtle bg so it's distinguishable from content, but thinner feel.
+    let bar_h = STATUS_BAR_HEIGHT + BOTTOM_INSET;
     fill_rect(
         frame,
-        rect(pane_x, status_y, pane_w, STATUS_BAR_HEIGHT),
+        rect(pane_x, status_y, pane_w, bar_h),
         rgb_to_color(&theme.subtle),
     );
     crate::draw::draw_hline(
@@ -411,115 +417,133 @@ fn draw_normal_status(
     status_y: f32,
     pane_w: f32,
     bar_y: f32,
+    bar_h: f32,
 ) {
-    // ── Mode dot (6px filled circle) ──
+    let text_y = status_y;
+    let h_pad = MODELINE_H_PAD; // horizontal padding for rounded corners
+
+    // ── 1. Mode segment (left-aligned, fixed width) ──
     let mode = &pane.status_bar.mode;
-    let dot_color = match mode.as_str() {
+    let mode_text = format!(" {} ", mode);
+    let mode_w = mode_text.chars().count() as f32 * CHAR_WIDTH + SPACING_SM * 2.0 + h_pad;
+    let mode_bg = match mode.as_str() {
         "INSERT" => rgb_to_color(&theme.accent_green),
         "VISUAL" => rgb_to_color(&theme.popout),
         "COMMAND" => rgb_to_color(&theme.accent_blue),
         "HIST" | "DAY" | "JRNL" => rgb_to_color(&theme.accent_yellow),
-        _ => rgb_to_color(&theme.foreground),
+        _ => rgb_to_color(&theme.mild),
     };
-    let dot_radius = 3.0_f32;
-    let dot_cx = pane_x + SPACING_MD + dot_radius;
-    let dot_cy = bar_y + STATUS_BAR_HEIGHT / 2.0;
-    frame.fill(
-        &iced::widget::canvas::Path::circle(
-            iced::Point::new(dot_cx, dot_cy),
-            dot_radius,
-        ),
-        dot_color,
-    );
-
-    // ── Filename ──
-    let after_dot_x = dot_cx + dot_radius + SPACING_MD;
-    let title = &normal.title;
-    let title_max = chars_that_fit((pane_x + pane_w - after_dot_x - CHAR_WIDTH * 10.0).max(0.0));
-    let title_text = truncate_text(title, title_max);
+    fill_rect(frame, rect(pane_x, bar_y, mode_w, bar_h), mode_bg);
     draw_text(
         frame,
-        after_dot_x,
-        status_y,
-        &title_text,
-        rgb_to_color(&theme.foreground),
+        pane_x + SPACING_SM + h_pad,
+        text_y,
+        &mode_text,
+        rgb_to_color(&theme.background),
     );
 
-    // ── Dirty [+] in salient ──
+    // ── 2. Position segment (right-aligned, fixed width) ──
+    let pos_text = format!(" {}:{} ", normal.line + 1, normal.column + 1);
+    let pos_w = pos_text.chars().count() as f32 * CHAR_WIDTH + SPACING_SM + h_pad;
+    let pos_x = pane_x + pane_w - pos_w;
+    fill_rect(frame, rect(pos_x, bar_y, pos_w, bar_h), rgb_to_color(&theme.subtle));
+    draw_text(frame, pos_x, text_y, &pos_text, rgb_to_color(&theme.faded));
+
+    // ── 3. File + middle segment (fill between mode and position) ──
+    let file_x = pane_x + mode_w;
+    let file_w = (pos_x - file_x).max(0.0);
+    fill_rect(
+        frame,
+        rect(file_x, bar_y, file_w, bar_h),
+        rgb_to_color(&theme.highlight),
+    );
+
+    // File info: " filename [+]"
+    let dirty_suffix = if normal.dirty { " [+]" } else { "" };
+    let file_label = format!(" {}{}", normal.title, dirty_suffix);
+    let file_max = chars_that_fit(file_w * 0.5);
+    // Draw full file text in foreground first.
+    draw_text(
+        frame,
+        file_x + SPACING_SM,
+        text_y,
+        &truncate_text(&file_label, file_max),
+        rgb_to_color(&theme.foreground),
+    );
+    // Overdraw the " [+]" portion in salient if dirty.
     if normal.dirty {
-        let dirty_x = after_dot_x + text_width(&title_text);
-        draw_text(frame, dirty_x, status_y, " [+]", rgb_to_color(&theme.salient));
+        let title_chars = normal.title.chars().count();
+        let dirty_prefix_chars = 1 + title_chars; // leading space + title
+        if dirty_prefix_chars < file_max {
+            let dirty_x = file_x + SPACING_SM + (dirty_prefix_chars as f32) * CHAR_WIDTH;
+            draw_text(frame, dirty_x, text_y, " [+]", rgb_to_color(&theme.salient));
+        }
     }
 
-    // ── Right-aligned elements ──
+    // Middle area: pending keys, indicators, or right hints (right-aligned within file segment).
+    let middle_right_edge = pos_x - SPACING_SM;
     if let Some(hints) = &pane.status_bar.right_hints {
-        draw_text_right(
-            frame,
-            pane_x + pane_w - SPACING_MD,
-            status_y,
-            &truncate_text(hints, chars_that_fit((pane_w * 0.35).max(0.0))),
-            rgb_to_color(&theme.faded),
-        );
+        let max = chars_that_fit((file_w * 0.45).max(0.0));
+        let hint_text = truncate_text(hints, max);
+        let hint_w = text_width(&hint_text);
+        let hint_x = (middle_right_edge - hint_w).max(file_x + SPACING_SM);
+        draw_text(frame, hint_x, text_y, &hint_text, rgb_to_color(&theme.faded));
     } else {
-        // Build segments right-to-left.
-        let mut segments: Vec<(&str, String, Color)> = Vec::new();
+        // Build middle segments right-to-left.
+        let mut segments: Vec<(String, Color)> = Vec::new();
 
-        // Line:col — faded (rightmost).
-        segments.push((
-            "linecol",
-            format!("{}:{}", normal.line + 1, normal.column + 1),
-            rgb_to_color(&theme.faded),
-        ));
-
+        // Pending keys — salient.
+        if !normal.pending_keys.is_empty() {
+            segments.push((
+                normal.pending_keys.clone(),
+                rgb_to_color(&theme.salient),
+            ));
+        }
+        // Macro recording.
+        if let Some(recording) = normal.recording_macro {
+            segments.push((
+                format!("@{recording}"),
+                rgb_to_color(&theme.accent_red),
+            ));
+        }
         // MCP indicator.
         match &normal.mcp {
             McpIndicator::Off => {}
             McpIndicator::Idle => {
-                segments.push(("mcp", "⚡".to_string(), rgb_to_color(&theme.faded)));
+                segments.push(("⚡".to_string(), rgb_to_color(&theme.faded)));
             }
             McpIndicator::Editing { tick } => {
                 const FRAMES: &[&str] = &["⚡", "◐", "◑", "◒", "◓"];
                 segments.push((
-                    "mcp",
                     FRAMES[(*tick as usize) % FRAMES.len()].to_string(),
                     rgb_to_color(&theme.salient),
                 ));
             }
         }
-
         // Indexer.
         if normal.indexing {
-            segments.push(("indexer", "⟳".to_string(), rgb_to_color(&theme.salient)));
-        }
-
-        // Pending keys — salient, shown before position.
-        if !normal.pending_keys.is_empty() {
-            segments.push((
-                "pending",
-                normal.pending_keys.clone(),
-                rgb_to_color(&theme.salient),
-            ));
-        }
-
-        // Macro recording.
-        if let Some(recording) = normal.recording_macro {
-            segments.push((
-                "macro",
-                format!("@{recording}"),
-                rgb_to_color(&theme.accent_red),
-            ));
+            segments.push(("⟳".to_string(), rgb_to_color(&theme.salient)));
         }
 
         let gap = 2.0 * CHAR_WIDTH;
-        let right_edge = pane_x + pane_w - SPACING_MD;
-        let mut cursor_x = right_edge;
-        for (_id, text, color) in &segments {
+        let mut cursor_x = middle_right_edge;
+        for (text, color) in &segments {
             let w = text_width(text);
             cursor_x -= w;
-            draw_text(frame, cursor_x, status_y, text, *color);
+            if cursor_x < file_x + SPACING_SM {
+                break;
+            }
+            draw_text(frame, cursor_x, text_y, text, *color);
             cursor_x -= gap;
         }
     }
+
+    // ── 4. Separators (thin vertical lines, 60% height, centered) ──
+    let sep_top = bar_y + STATUS_BAR_HEIGHT * 0.2;
+    let sep_bot = bar_y + STATUS_BAR_HEIGHT * 0.8;
+    let sep_color = rgb_to_color(&theme.faded);
+    draw_vline(frame, pane_x + mode_w, sep_top, sep_bot, sep_color);
+    draw_vline(frame, pos_x, sep_top, sep_bot, sep_color);
 }
 
 fn draw_command_line(

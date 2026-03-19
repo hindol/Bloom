@@ -204,8 +204,6 @@ impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
             draw_split_borders(frame, &rf.panes, self.theme);
             draw_hidden_count(frame, bounds.size(), rf.hidden_pane_count, self.theme);
 
-            let active = rf.panes.iter().find(|p| p.is_active);
-
             if let Some(s) = &rf.context_strip {
                 drawer::draw_context_strip(frame, bounds.size(), s, self.theme);
             }
@@ -217,11 +215,6 @@ impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
             }
             if let Some(wk) = &rf.which_key {
                 drawer::draw_which_key(frame, bounds.size(), wk, self.theme);
-            }
-
-            // Scroll progress bar in the bottom safe area.
-            if let Some(pane) = active {
-                draw_scroll_progress(frame, bounds.size(), pane, self.theme, self.remote);
             }
         });
         vec![geometry]
@@ -490,37 +483,4 @@ fn draw_hidden_count(frame: &mut canvas::Frame, size: Size, count: usize, theme:
     );
 }
 
-/// Thin scroll progress bar in the bottom safe area (macOS window corner radius zone).
-fn draw_scroll_progress(
-    frame: &mut canvas::Frame,
-    size: Size,
-    pane: &PaneFrame,
-    theme: &ThemePalette,
-    _remote: RemoteHints,
-) {
-    use crate::BOTTOM_SAFE_AREA;
-    use crate::draw::{fill_rect, rect};
 
-    let bar_h = (BOTTOM_SAFE_AREA - 2.0).max(2.0);
-    let bar_y = size.height - BOTTOM_SAFE_AREA + 1.0;
-
-    // Background track.
-    fill_rect(
-        frame,
-        rect(0.0, bar_y, size.width, bar_h),
-        rgb_to_color(&theme.subtle),
-    );
-
-    // Fill bar: cursor on first line = 0, cursor on last line = full width.
-    let total = pane.total_lines.max(1);
-    let last = (total as f32 - 1.0).max(0.0);
-    let progress = if last == 0.0 { 1.0 } else { pane.cursor.line as f32 / last };
-    let fill_w = size.width * progress;
-    if fill_w > 0.5 {
-        fill_rect(
-            frame,
-            rect(0.0, bar_y, fill_w, bar_h),
-            rgb_to_color(&theme.faded),
-        );
-    }
-}
