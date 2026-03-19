@@ -11,6 +11,15 @@ pub fn highlight_line(line: &str, context: &LineContext) -> Vec<StyledSpan> {
         return highlight_frontmatter_line(line);
     }
 
+    // Code fence lines (``` or ~~~): always SyntaxNoise, whether opening or closing.
+    let trimmed_for_fence = line.trim_start();
+    if trimmed_for_fence.starts_with("```") || trimmed_for_fence.starts_with("~~~") {
+        return vec![StyledSpan {
+            range: 0..line.len(),
+            style: Style::SyntaxNoise,
+        }];
+    }
+
     // Inside code block: everything is CodeBlock style
     if context.in_code_block {
         return vec![StyledSpan {
@@ -132,10 +141,49 @@ pub fn highlight_line(line: &str, context: &LineContext) -> Vec<StyledSpan> {
             style: Style::CheckboxChecked,
         });
         if len > indent + 6 {
-            spans.push(StyledSpan {
-                range: indent + 6..len,
-                style: Style::CheckedTaskText,
-            });
+            // Check for trailing block ID: " ^xxxxx" or " ^=xxxxx"
+            let rest = &line[indent + 6..];
+            if let Some(caret_pos) = rest.rfind(" ^") {
+                let text_end = indent + 6 + caret_pos;
+                let block_start = text_end + 1; // position of ^
+                // CheckedTaskText for the body, then BlockId spans for the ID
+                if text_end > indent + 6 {
+                    spans.push(StyledSpan {
+                        range: indent + 6..text_end,
+                        style: Style::CheckedTaskText,
+                    });
+                }
+                // Space before block ID
+                spans.push(StyledSpan {
+                    range: text_end..block_start,
+                    style: Style::CheckedTaskText,
+                });
+                // Caret (^ or ^=)
+                let id_start = if line.as_bytes().get(block_start + 1) == Some(&b'=') {
+                    spans.push(StyledSpan {
+                        range: block_start..block_start + 2,
+                        style: Style::BlockIdCaret,
+                    });
+                    block_start + 2
+                } else {
+                    spans.push(StyledSpan {
+                        range: block_start..block_start + 1,
+                        style: Style::BlockIdCaret,
+                    });
+                    block_start + 1
+                };
+                if id_start < len {
+                    spans.push(StyledSpan {
+                        range: id_start..len,
+                        style: Style::BlockId,
+                    });
+                }
+            } else {
+                spans.push(StyledSpan {
+                    range: indent + 6..len,
+                    style: Style::CheckedTaskText,
+                });
+            }
         }
         return spans;
     }
