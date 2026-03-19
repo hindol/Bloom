@@ -706,34 +706,72 @@ Each drawer surface reports its needed height — the layout manager allocates i
 
 ### Modeline (Status Bar)
 
-Doom Emacs-inspired minimal modeline replacing the traditional status bar:
+Neovim lualine-inspired segmented modeline with coloured mode indicator:
 
 ```
- ● filename.md [+]                                42:15
+ NORMAL │ filename.md [+] │              pending │ 42:15 
+ ▲ mode    ▲ file info       ▲ middle area        ▲ position
+   bg:mode   bg:highlight      bg:highlight          bg:subtle
 ```
 
-| Element | Colour | Notes |
-|---------|--------|-------|
-| Mode dot (6px circle) | Insert: `accent_green`, Visual: `popout`, Command: `accent_blue`, Temporal: `accent_yellow`, Normal: `foreground` | Communicates mode without text |
-| Filename | `foreground` | |
-| Dirty `[+]` | `salient` | |
-| Pending keys | `salient` | Right-aligned |
-| Line:col | `faded` | Right-aligned |
+#### Segments
+
+| Segment | Content | Background | Foreground |
+|---------|---------|-----------|------------|
+| **Mode** | ` NORMAL ` / ` INSERT ` / ` VISUAL ` / ` COMMAND ` / ` JRNL ` | Mode colour (see below) | `background` (dark text on coloured bg) |
+| **File** | ` filename.md [+] ` | `highlight` | `foreground`, dirty `[+]` in `salient` |
+| **Middle** | Pending keys, right hints, thread indicators, or empty | `highlight` | `salient` (pending), `faded` (hints/indicators) |
+| **Position** | ` 42:15 ` | `subtle` | `faded` |
+
+#### Mode Colours
+
+| Mode | Segment background |
+|------|--------------------|
+| NORMAL | `mild` |
+| INSERT | `accent_green` |
+| VISUAL | `popout` |
+| COMMAND | `accent_blue` |
+| HIST / DAY / JRNL | `accent_yellow` |
+
+#### Separators
+
+No drawn lines or gaps — the background colour change between adjacent segments is the separator. The contrast between `mild`/`highlight`/`subtle` backgrounds creates implicit visual boundaries.
+
+#### Dimensions
 
 | Property | Value |
 |----------|-------|
-| Height | `LINE_HEIGHT × 1.2` |
-| Background | `highlight` (active), `subtle` (inactive) |
-| Top border | 1px `faded` |
+| Height | `LINE_HEIGHT` (same as a content row) |
+| Bottom clearance | Extends to window edge to absorb macOS corner radius |
+| Horizontal padding | `MODELINE_H_PAD` (8px) on mode and position segments to clear rounded corners |
+| No top border | Colour contrast with content area is sufficient |
 
-Inactive pane: just filename in `faded`, no dot, no position.
+#### Inactive Pane
+
+Single flat bar — filename only, no segments, no mode, no position:
+
+```
+ filename.md
+```
+
+Background: `subtle`. Text: `faded`.
+
+#### Thread Indicators (middle segment)
+
+When background threads are active, indicators appear in the middle segment:
+
+| Thread | Indicator | When shown |
+|--------|-----------|------------|
+| Indexer | `⟳` | During index rebuild |
+| MCP | `⚡` | When MCP is editing |
+
+Idle/static: `faded`. Animating: `salient`.
 
 ### Borders
 
 | Element | Colour | Width |
 |---------|--------|-------|
 | Pane splits | `subtle` | 1px |
-| Modeline top edge | `faded` | 1px |
 | Drawer top edge | `faded` | 1px |
 | Overlay separators | `faded` | 1px |
 | Inline menu border | `faded` | 1px |
