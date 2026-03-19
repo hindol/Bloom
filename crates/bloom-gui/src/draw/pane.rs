@@ -256,6 +256,18 @@ fn draw_editor_content(
                     row_h,
                 );
 
+                // Strikethrough for checked task text (not the checkbox or block ID).
+                if span.style == Style::CheckedTaskText {
+                    let strike_y = y + row_h / 2.0;
+                    crate::draw::draw_hline(
+                        frame,
+                        text_x + x_cursor,
+                        text_x + x_cursor + span_w,
+                        strike_y,
+                        style_to_color(&span.style, theme),
+                    );
+                }
+
                 x_cursor += span_w;
                 last_end = end;
             }
