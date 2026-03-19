@@ -172,15 +172,17 @@ fn draw_editor_content(
                     // stays within the semantic theme system.
                     rgb_to_color(&theme.faded.blend(theme.background, 0.4))
                 };
-                draw_text(frame, pane_x, y, num_str, gutter_color);
+                draw_text_sized(frame, pane_x, y, num_str, gutter_color, FONT_SIZE, row_h);
             }
             LineSource::BeyondEof => {
-                draw_text(
+                draw_text_sized(
                     frame,
                     pane_x + CHAR_WIDTH,
                     y,
                     "~",
                     rgb_to_color(&theme.faded.blend(theme.background, 0.4)),
+                    FONT_SIZE,
+                    row_h,
                 );
             }
         }
