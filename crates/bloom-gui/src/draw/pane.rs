@@ -7,7 +7,7 @@ use bloom_md::theme::ThemePalette;
 use iced::{Color, Rectangle};
 
 use crate::draw::{
-    chars_that_fit, draw_bar_cursor, draw_text, draw_text_right, draw_text_sized, draw_vline,
+    chars_that_fit, draw_bar_cursor, draw_text, draw_text_right, draw_text_sized,
     fill_rect, rect, text_width, truncate_text,
 };
 use crate::theme::{rgb_to_color, style_to_bg, style_to_color};
@@ -538,12 +538,11 @@ fn draw_normal_status(
         }
     }
 
-    // ── 4. Separators (thin vertical lines, 60% height, centered) ──
-    let sep_top = bar_y + STATUS_BAR_HEIGHT * 0.2;
-    let sep_bot = bar_y + STATUS_BAR_HEIGHT * 0.8;
-    let sep_color = rgb_to_color(&theme.faded);
-    draw_vline(frame, pane_x + mode_w, sep_top, sep_bot, sep_color);
-    draw_vline(frame, pos_x, sep_top, sep_bot, sep_color);
+    // ── 4. Separators — thin background-coloured gaps between segments ──
+    let sep_w = 2.0;
+    let sep_color = rgb_to_color(&theme.background);
+    fill_rect(frame, rect(pane_x + mode_w - sep_w / 2.0, bar_y, sep_w, bar_h), sep_color);
+    fill_rect(frame, rect(pos_x - sep_w / 2.0, bar_y, sep_w, bar_h), sep_color);
 }
 
 fn draw_command_line(
