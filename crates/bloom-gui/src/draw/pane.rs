@@ -214,15 +214,25 @@ fn draw_editor_content(
     }
 
     if pane.is_active && cursor_visible {
-        let cx = pane_x + GUTTER_WIDTH + pane.cursor.column as f32 * CHAR_WIDTH;
+        // Detect if cursor is on a heading line — use scaled char width.
+        let cursor_row_idx = pane.cursor.line.saturating_sub(pane.scroll_offset);
+        let cursor_char_width = pane.visible_lines.get(cursor_row_idx)
+            .and_then(|line| line.spans.iter().find_map(|s| match s.style {
+                Style::Heading { level } => Some(level),
+                _ => None,
+            }))
+            .map(|level| CHAR_WIDTH * (heading_font_size(level) / FONT_SIZE))
+            .unwrap_or(CHAR_WIDTH);
+
+        let cx = pane_x + GUTTER_WIDTH + pane.cursor.column as f32 * cursor_char_width;
         let cy = anim.map(|(c, _)| c).unwrap_or(
-            pane_y + pane.cursor.line.saturating_sub(pane.scroll_offset) as f32 * LINE_HEIGHT,
+            pane_y + cursor_row_idx as f32 * LINE_HEIGHT,
         );
 
         match pane.cursor.shape {
             CursorShape::Block => fill_rect(
                 frame,
-                rect(cx, cy, CHAR_WIDTH, LINE_HEIGHT),
+                rect(cx, cy, cursor_char_width, LINE_HEIGHT),
                 Color {
                     a: 0.45,
                     ..rgb_to_color(&theme.foreground)
@@ -231,7 +241,7 @@ fn draw_editor_content(
             CursorShape::Bar => draw_bar_cursor(frame, cx, cy, rgb_to_color(&theme.foreground)),
             CursorShape::Underline => fill_rect(
                 frame,
-                rect(cx, cy + LINE_HEIGHT - 2.0, CHAR_WIDTH, 2.0),
+                rect(cx, cy + LINE_HEIGHT - 2.0, cursor_char_width, 2.0),
                 rgb_to_color(&theme.foreground),
             ),
         }
