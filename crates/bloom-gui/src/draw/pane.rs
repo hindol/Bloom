@@ -16,13 +16,38 @@ use crate::{CHAR_WIDTH, FONT_SIZE, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, STAT
 /// Extra pixels the GUI status bar adds beyond what core allocates (1 cell row).
 const STATUS_BAR_EXTRA: f32 = STATUS_BAR_HEIGHT - LINE_HEIGHT;
 
-fn heading_font_size(level: u8) -> f32 {
+pub(crate) fn heading_font_size(level: u8) -> f32 {
     match level {
         1 => FONT_SIZE * 1.5,
         2 => FONT_SIZE * 1.3,
         3 => FONT_SIZE * 1.1,
         _ => FONT_SIZE,
     }
+}
+
+/// Row height for a line — taller for headings.
+pub(crate) fn line_row_height(line: &bloom_core::render::RenderedLine) -> f32 {
+    line.spans.iter().find_map(|s| match s.style {
+        Style::Heading { level } => Some(heading_font_size(level) * 1.4),
+        _ => None,
+    }).unwrap_or(LINE_HEIGHT)
+}
+
+/// Compute the Y offset of a given visible line index, accounting for
+/// variable row heights (headings are taller).
+pub(crate) fn cursor_y_in_pane(
+    visible_lines: &[bloom_core::render::RenderedLine],
+    target_row: usize,
+    pane_y: f32,
+) -> f32 {
+    let mut y = pane_y;
+    for (i, line) in visible_lines.iter().enumerate() {
+        if i >= target_row {
+            break;
+        }
+        y += line_row_height(line);
+    }
+    y
 }
 
 /// Convert a cell-based PaneRectFrame to pixel coordinates.

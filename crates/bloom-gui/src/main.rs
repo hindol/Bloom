@@ -210,7 +210,9 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
                     let pane_y = pane.rect.y as f32 * LINE_HEIGHT
                         + status_bars_above as f32 * (STATUS_BAR_HEIGHT - LINE_HEIGHT);
                     let cursor_row = pane.cursor.line.saturating_sub(pane.scroll_offset);
-                    let target_cursor_y = pane_y + cursor_row as f32 * LINE_HEIGHT;
+                    let target_cursor_y = crate::draw::pane::cursor_y_in_pane(
+                        &pane.visible_lines, cursor_row, pane_y,
+                    );
                     let target_scroll_y = pane.scroll_offset as f32 * LINE_HEIGHT;
                     if state.remote.skip_animation() {
                         state.anim.snap(target_cursor_y, target_scroll_y);
