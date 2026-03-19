@@ -10,3 +10,9 @@ bloom-md = { path = "../bloom-md" }
 crossbeam = "0.8.4"
 iced = { version = "0.14", features = ["canvas", "advanced"] }
 tracing = "0.1"
+
+# Packaging prep for cargo-bundle / CI-based .dmg/.msi builds.
+[package.metadata.bundle]
+name = "Bloom"
+identifier = "com.bloom.editor"
+icon = ["icons/icon.icns"]

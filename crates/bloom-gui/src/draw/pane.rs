@@ -189,6 +189,26 @@ fn draw_editor_content(
                 }
             }
         }
+
+        // Image placeholder: render a box with alt text for `![alt](path)` lines.
+        if line_text.starts_with("![") {
+            if let Some(alt_end) = line_text.find("](") {
+                let alt = &line_text[2..alt_end];
+                let box_w = pane_w - GUTTER_WIDTH;
+                fill_rect(
+                    frame,
+                    rect(text_x, y, box_w, LINE_HEIGHT),
+                    rgb_to_color(&theme.subtle),
+                );
+                draw_text(
+                    frame,
+                    text_x + CHAR_WIDTH,
+                    y,
+                    format!("\u{1F5BC} {alt}"),
+                    rgb_to_color(&theme.faded),
+                );
+            }
+        }
     }
 
     if pane.is_active && cursor_visible {

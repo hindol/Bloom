@@ -134,6 +134,11 @@ impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
             return mouse::Interaction::default();
         };
 
+        // Check if cursor is near a split border — show resize arrow.
+        if let Some(dir) = split_border_hit(frame, position) {
+            return dir;
+        }
+
         if editor_pane_at_position(frame, bounds.size(), position).is_some() {
             mouse::Interaction::Text
         } else {
@@ -378,6 +383,51 @@ fn scroll_lines(delta: &mouse::ScrollDelta) -> i32 {
     } else {
         lines
     }
+}
+
+/// Hit-test pixel position against split borders.
+/// Returns the appropriate resize cursor if within `BORDER_HIT_PX` of a border.
+const BORDER_HIT_PX: f32 = 4.0;
+
+fn split_border_hit(rf: &RenderFrame, pos: iced::Point) -> Option<mouse::Interaction> {
+    let panes = &rf.panes;
+    for (i, l) in panes.iter().enumerate() {
+        for r in panes.iter().skip(i + 1) {
+            let lr = l.rect.x + l.rect.width;
+            let rr = r.rect.x + r.rect.width;
+            let lb = l.rect.y + l.rect.total_height;
+            let rb = r.rect.y + r.rect.total_height;
+            // Vertical border (left-right split).
+            if lr == r.rect.x || rr == l.rect.x {
+                let x = if lr == r.rect.x { lr } else { rr };
+                let y1 = l.rect.y.max(r.rect.y);
+                let y2 = lb.min(rb);
+                if y2 > y1 {
+                    let px = x as f32 * CHAR_WIDTH;
+                    let py1 = y1 as f32 * crate::LINE_HEIGHT;
+                    let py2 = y2 as f32 * crate::LINE_HEIGHT;
+                    if (pos.x - px).abs() < BORDER_HIT_PX && pos.y >= py1 && pos.y <= py2 {
+                        return Some(mouse::Interaction::ResizingHorizontally);
+                    }
+                }
+            }
+            // Horizontal border (top-bottom split).
+            if lb == r.rect.y || rb == l.rect.y {
+                let y = if lb == r.rect.y { lb } else { rb };
+                let x1 = l.rect.x.max(r.rect.x);
+                let x2 = (l.rect.x + l.rect.width).min(r.rect.x + r.rect.width);
+                if x2 > x1 {
+                    let py = y as f32 * crate::LINE_HEIGHT;
+                    let px1 = x1 as f32 * CHAR_WIDTH;
+                    let px2 = x2 as f32 * CHAR_WIDTH;
+                    if (pos.y - py).abs() < BORDER_HIT_PX && pos.x >= px1 && pos.x <= px2 {
+                        return Some(mouse::Interaction::ResizingVertically);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 fn draw_split_borders(frame: &mut canvas::Frame, panes: &[PaneFrame], theme: &ThemePalette) {

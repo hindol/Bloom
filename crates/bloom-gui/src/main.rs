@@ -392,6 +392,11 @@ impl BloomApp {
         let _ = self.frontend_tx.send(FrontendEvent::Key(key_event));
     }
 
+    /// Scroll the viewport by `lines` (positive = down, negative = up).
+    /// Each line generates a `j`/`k` key event that moves the cursor, which in
+    /// turn updates `scroll_offset` in core when the cursor crosses a viewport
+    /// edge. The VSync animation system (`AnimationState`) lerps both the cursor
+    /// and scroll positions, providing smooth visual transitions.
     fn scroll(&self, lines: i32) {
         let key = if lines > 0 { 'j' } else { 'k' };
 
