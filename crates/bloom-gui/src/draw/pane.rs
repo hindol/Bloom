@@ -284,14 +284,36 @@ fn draw_editor_content(
         );
 
         match pane.cursor.shape {
-            CursorShape::Block => fill_rect(
-                frame,
-                rect(cx, cy, cursor_char_width, cursor_row_h),
-                Color {
-                    a: 0.45,
-                    ..rgb_to_color(&theme.foreground)
-                },
-            ),
+            CursorShape::Block => {
+                // Opaque block cursor — then redraw the character in background
+                // colour so it's always readable (terminal-style inverse).
+                fill_rect(
+                    frame,
+                    rect(cx, cy, cursor_char_width, cursor_row_h),
+                    rgb_to_color(&theme.foreground),
+                );
+                // Extract the character under the cursor and redraw it inverted.
+                if let Some(line) = pane.visible_lines.get(cursor_row_idx) {
+                    let line_text = line.text.trim_end_matches(['\n', '\r']);
+                    if let Some(ch) = line_text.chars().nth(pane.cursor.column) {
+                        let font_size = pane.visible_lines.get(cursor_row_idx)
+                            .and_then(|l| l.spans.iter().find_map(|s| match s.style {
+                                Style::Heading { level } => Some(heading_font_size(level)),
+                                _ => None,
+                            }))
+                            .unwrap_or(FONT_SIZE);
+                        draw_text_sized(
+                            frame,
+                            cx,
+                            cy,
+                            ch.to_string(),
+                            rgb_to_color(&theme.background),
+                            font_size,
+                            cursor_row_h,
+                        );
+                    }
+                }
+            }
             CursorShape::Bar => draw_bar_cursor(frame, cx, cy, rgb_to_color(&theme.foreground)),
             CursorShape::Underline => fill_rect(
                 frame,
