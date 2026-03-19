@@ -336,9 +336,9 @@ fn draw_active_status_bar(
     pane_w: f32,
 ) {
     let status_y = pane_y + pane.rect.content_height as f32 * LINE_HEIGHT;
-    // Extend bar to absorb macOS bottom corner radius.
     let bar_h = STATUS_BAR_HEIGHT + BOTTOM_INSET;
-    let text_y = status_y + (STATUS_BAR_HEIGHT - LINE_HEIGHT) / 2.0;
+    // Center text vertically within the full bar (including bottom inset).
+    let text_y = status_y + (bar_h - LINE_HEIGHT) / 2.0;
 
     // 1px top border.
     crate::draw::draw_hline(
@@ -537,12 +537,6 @@ fn draw_normal_status(
             cursor_x -= gap;
         }
     }
-
-    // ── 4. Separators — thin background-coloured gaps between segments ──
-    let sep_w = 2.0;
-    let sep_color = rgb_to_color(&theme.background);
-    fill_rect(frame, rect(pane_x + mode_w - sep_w / 2.0, bar_y, sep_w, bar_h), sep_color);
-    fill_rect(frame, rect(pos_x - sep_w / 2.0, bar_y, sep_w, bar_h), sep_color);
 }
 
 fn draw_command_line(
