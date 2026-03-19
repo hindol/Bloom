@@ -198,6 +198,7 @@ impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
                     py,
                     pw,
                     ch,
+                    bounds.size().height,
                 );
             }
 

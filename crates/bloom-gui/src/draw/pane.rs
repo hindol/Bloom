@@ -12,7 +12,7 @@ use crate::draw::{
 };
 use crate::theme::{rgb_to_color, style_to_bg, style_to_color};
 use crate::{
-    BOTTOM_INSET, CHAR_WIDTH, FONT_SIZE, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, MODELINE_H_PAD,
+    CHAR_WIDTH, FONT_SIZE, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, MODELINE_H_PAD,
     SPACING_MD, SPACING_SM, STATUS_BAR_HEIGHT,
 };
 
@@ -86,6 +86,7 @@ pub(crate) fn draw_pane(
     pane_y: f32,
     pane_w: f32,
     content_h: f32,
+    window_height: f32,
 ) {
     let content_rect = rect(pane_x, pane_y, pane_w, content_h);
 
@@ -104,9 +105,9 @@ pub(crate) fn draw_pane(
     }
 
     if pane.is_active {
-        draw_active_status_bar(frame, pane, theme, pane_x, pane_y, pane_w);
+        draw_active_status_bar(frame, pane, theme, pane_x, pane_y, pane_w, window_height);
     } else {
-        draw_inactive_status_bar(frame, pane, theme, pane_x, pane_y, pane_w);
+        draw_inactive_status_bar(frame, pane, theme, pane_x, pane_y, pane_w, window_height);
     }
 }
 
@@ -334,10 +335,12 @@ fn draw_active_status_bar(
     pane_x: f32,
     pane_y: f32,
     pane_w: f32,
+    window_height: f32,
 ) {
-    let status_y = pane_y + pane.rect.content_height as f32 * LINE_HEIGHT;
-    let bar_h = STATUS_BAR_HEIGHT + BOTTOM_INSET;
-    // Center text vertically within the full bar (including bottom inset).
+    let content_bottom = pane_y + pane.rect.content_height as f32 * LINE_HEIGHT;
+    // Anchor to window bottom edge — fill from content bottom to window edge.
+    let bar_h = (window_height - content_bottom).max(STATUS_BAR_HEIGHT);
+    let status_y = window_height - bar_h;
     let text_y = status_y + (bar_h - LINE_HEIGHT) / 2.0;
 
     // 1px top border.
@@ -379,9 +382,11 @@ fn draw_inactive_status_bar(
     pane_x: f32,
     pane_y: f32,
     pane_w: f32,
+    window_height: f32,
 ) {
-    let status_y = pane_y + pane.rect.content_height as f32 * LINE_HEIGHT;
-    let bar_h = STATUS_BAR_HEIGHT + BOTTOM_INSET;
+    let content_bottom = pane_y + pane.rect.content_height as f32 * LINE_HEIGHT;
+    let bar_h = (window_height - content_bottom).max(STATUS_BAR_HEIGHT);
+    let status_y = window_height - bar_h;
     fill_rect(
         frame,
         rect(pane_x, status_y, pane_w, bar_h),
@@ -395,8 +400,7 @@ fn draw_inactive_status_bar(
         rgb_to_color(&theme.faded),
     );
 
-    // No dot — just filename in faded.
-    let text_y = status_y + (STATUS_BAR_HEIGHT - LINE_HEIGHT) / 2.0;
+    let text_y = status_y + (bar_h - LINE_HEIGHT) / 2.0;
     let max_chars = chars_that_fit((pane_w - SPACING_MD * 2.0).max(0.0));
     let title = truncate_text(&pane.title, max_chars);
     draw_text(

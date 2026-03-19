@@ -33,10 +33,7 @@ pub(crate) const STATUS_BAR_HEIGHT: f32 = LINE_HEIGHT;
 pub(crate) const CHAR_WIDTH: f32 = FONT_SIZE * 0.6;
 pub(crate) const GUTTER_CHARS: usize = 5;
 pub(crate) const GUTTER_WIDTH: f32 = GUTTER_CHARS as f32 * CHAR_WIDTH;
-/// Bottom inset for macOS window corner radius — the modeline extends into
-/// this zone with horizontal padding so text avoids the rounded corners.
-pub(crate) const BOTTOM_INSET: f32 = 6.0;
-/// Horizontal padding inside the modeline to clear macOS rounded corners.
+/// Horizontal padding inside the modeline to clear macOS rounded window corners.
 pub(crate) const MODELINE_H_PAD: f32 = 8.0;
 pub(crate) const EDITOR_FONT: Font = Font::with_name("JetBrains Mono");
 
