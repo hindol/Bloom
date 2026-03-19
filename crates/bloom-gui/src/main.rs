@@ -313,7 +313,16 @@ fn view(state: &BloomApp) -> Element<'_, Message> {
 
 fn subscription(state: &BloomApp) -> Subscription<Message> {
     let mut subs = vec![
-        keyboard::listen().map(Message::KeyboardEvent),
+        // Use listen_raw to get keyboard events regardless of widget capture
+        // status. keyboard::listen() filters to Status::Ignored, which misses
+        // events when Canvas widgets are in the Stack.
+        iced::event::listen_raw(|event, _status, _window| {
+            if let iced::Event::Keyboard(kb_event) = event {
+                Some(Message::KeyboardEvent(kb_event))
+            } else {
+                None
+            }
+        }),
         window::resize_events().map(|(_, size)| Message::WindowResized(size)),
     ];
 
