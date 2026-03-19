@@ -407,3 +407,73 @@ accent_green = "#A3BE8C"
 - [bespoke-themes](https://github.com/mclear-tools/bespoke-themes) — 6 core + 5 accent colour expansion of nano's approach.
 - [Nord](https://www.nordtheme.com/) — Arctic, north-bluish colour palette (influences Lambda dark-faded).
 - [Material Design colour system](https://material.io/design/color/) — Google's colour guidelines (influences Lambda light).
+
+---
+
+## GUI Rendering
+
+> Pixel-level specifications for the Iced Canvas GUI. The TUI maps the same semantic
+> colours to terminal attributes; the GUI maps them to pixel coordinates, spacing tokens, and animation parameters.
+
+### Spacing Scale
+
+| Token | Value | Usage |
+|-------|-------|-------|
+| `xs` | 2px | Hairline gaps, border insets |
+| `sm` | 4px | Inner padding within compact elements |
+| `md` | 8px | Standard padding (status bar sides, gutter margin, overlay insets) |
+| `lg` | 16px | Section gaps within overlays, pane-to-drawer spacing |
+| `xl` | 24px | Outer margins for centered overlays |
+
+### Row Model
+
+```
+┌──────────────────────────────────────┐
+│ TEXT_Y_OFFSET (2.6px)                │
+│ ── text baseline ──────────────────  │  ← FONT_SIZE (13px)
+│ TEXT_Y_OFFSET (2.6px)                │
+├──────────────────────────────────────┤  ← LINE_HEIGHT (18.2px)
+```
+
+Heading rows are taller: H1 = 27.3px, H2 = 23.7px, H3 = 20.0px. Text is centred within each row.
+
+### Layers & Compositing
+
+Three Canvas layers via `iced::widget::Stack`:
+
+| Layer | Contents | Background |
+|-------|----------|------------|
+| **BaseCanvas** | Panes, borders, drawers (which-key, temporal strip) | Opaque `background` per pane |
+| **DiffCanvas** | Temporal diff preview (active only during history) | Opaque fill replacing pane content |
+| **OverlayCanvas** | Picker (bottom minibuffer), dialog, date picker, inline menu, notifications | Bottom-anchored with `faded` separators |
+
+### Cursor & Animation
+
+| Mode | Shape | Colour |
+|------|-------|--------|
+| Normal | Opaque block + inverted character | `foreground` block, `background` char |
+| Insert | 2px bar | `foreground`, blinks 530ms on/off |
+| Visual | Opaque block | Same as Normal |
+
+Animation: lerp factor 0.6, snap at 0.5px, ~50ms convergence. VSync-aligned (`window::frames()`). Horizontal motion instant.
+
+### Refresh Rate
+
+| State | Ticks | Subscriptions |
+|-------|-------|---------------|
+| Idle | 0 Hz | `event::listen_raw` (keyboard only) |
+| After keystroke | VSync (~60-120 Hz) | + `window::frames()` for 600ms |
+| Animating | VSync | Until cursor settles |
+| Insert mode | VSync | Continuous (cursor blink) |
+
+### Constants
+
+| Constant | Value | Derivation |
+|----------|-------|-----------|
+| `FONT_SIZE` | 13.0 | Base |
+| `LINE_HEIGHT` | 18.2 | `FONT_SIZE × 1.4` |
+| `TEXT_Y_OFFSET` | 2.6 | `(LINE_HEIGHT - FONT_SIZE) / 2` |
+| `STATUS_BAR_HEIGHT` | 21.8 | `LINE_HEIGHT × 1.2` |
+| `CHAR_WIDTH` | 7.8 | `FONT_SIZE × 0.6` |
+| `GUTTER_CHARS` | 5 | 4-digit line number + 1 space |
+| `BOTTOM_SAFE_AREA` | 6.0 | macOS window corner radius |

@@ -611,11 +611,145 @@ All borders use `faded` colour — they recede visually, letting the content and
 
 ---
 
+## GUI Chrome — Modeline, Picker, Drawers
+
+> Pixel-level specs for the GUI (Iced Canvas). The TUI maps the same logical
+> layout to terminal cells; the GUI maps it to pixel coordinates and spacing tokens.
+
+### Modeline (Status Bar)
+
+Doom Emacs-inspired minimal modeline replacing the traditional status bar:
+
+```
+ ● filename.md [+]                                42:15
+```
+
+| Element | Colour | Notes |
+|---------|--------|-------|
+| Mode dot (6px circle) | Insert: `accent_green`, Visual: `popout`, Command: `accent_blue`, Temporal: `accent_yellow`, Normal: `foreground` | Communicates mode without text |
+| Filename | `foreground` | |
+| Dirty `[+]` | `salient` | |
+| Pending keys | `salient` | Right-aligned |
+| Line:col | `faded` | Right-aligned |
+
+| Property | Value |
+|----------|-------|
+| Height | `LINE_HEIGHT × 1.2` |
+| Background | `highlight` (active), `subtle` (inactive) |
+| Top border | 1px `faded` |
+
+Inactive pane: just filename in `faded`, no dot, no position.
+
+### Borders
+
+| Element | Colour | Width |
+|---------|--------|-------|
+| Pane splits | `subtle` | 1px |
+| Modeline top edge | `faded` | 1px |
+| Drawer top edge | `faded` | 1px |
+| Overlay separators | `faded` | 1px |
+| Inline menu border | `faded` | 1px |
+
+### Picker (Bottom Minibuffer)
+
+Bottom-anchored above modeline. No scrim, no panel border. Editor content stays visible above.
+
+```
+editor content
+────────────────────── faded separator
+  selected result      #tag    date    ← mild bg
+  result               #tag    date
+  5 of 120 pages                       ← faded
+────────────────────── faded separator
+Find Page > query█
+────────────────────── modeline
+```
+
+| Property | Value |
+|----------|-------|
+| Max visible results | 10 |
+| Selected row | `mild` background |
+| Query format | `{title} > {query}` |
+| Separators | 1px `faded` horizontal lines above and below |
+
+### Which-Key Drawer
+
+```
+────────────────────── faded separator
+ f +files     s +search     l +links     j +journal
+ t +tags      a +agenda     n  new page  w +windows
+────────────────────── (bottom of window)
+```
+
+| Property | Value |
+|----------|-------|
+| Background | `subtle` |
+| Top border | 1px `faded` |
+| Columns | 20 chars each, up to 4 |
+| Key | `strong` |
+| Label | `foreground`, `+` prefix for groups |
+
+### Temporal Strip Drawer
+
+| Property | Value |
+|----------|-------|
+| Background | `highlight` |
+| Top border | 1px `faded` |
+| Compact height | 4 × LINE_HEIGHT |
+| Rich height | 6 × LINE_HEIGHT |
+| Selected node | `mild` background fill |
+| Detail text | `accent_yellow` |
+
+### Context Strip (Journal)
+
+| Property | Value |
+|----------|-------|
+| Background | `background` |
+| Top border | 1px `faded` |
+| Height | 3 × LINE_HEIGHT |
+| Three columns | prev (`faded`), current (`foreground`), next (`faded`) |
+
+### Dialog
+
+Centered panel with scrim (85% opacity `background` wash).
+
+| Property | Value |
+|----------|-------|
+| Background | `background` |
+| Border | 1px `faded` |
+| Selected choice | `mild` background |
+
+### Inline Menu
+
+Anchored to cursor or command line. No scrim.
+
+| Property | Value |
+|----------|-------|
+| Background | `background` |
+| Border | 1px `faded` |
+| Max width | 40 chars |
+| Max items | 8 |
+| Selected row | `mild` background |
+
+### Notifications
+
+Bottom-right stack, above modeline.
+
+| Property | Value |
+|----------|-------|
+| Max visible | 3 |
+| Info | `highlight` bg, `foreground` text, `✓` prefix |
+| Warning | `accent_yellow` bg, `background` text, `⚠` prefix |
+| Error | `critical` bg, `background` text, `✗` prefix |
+| Auto-expire | 4s (info), 8s (warning), never (error) |
+
+---
+
 ## Related Documents
 
 | Document | Contents |
 |----------|----------|
 | [GOALS.md G11](GOALS.md) | Window management goal and keybindings |
 | [KEYBINDINGS.md](KEYBINDINGS.md) | Full window keybinding reference |
+| [THEMING.md](THEMING.md) | Colour palette, semantic roles, spacing scale, GUI rendering constants |
 | [USE_CASES.md](test/USE_CASES.md) | UC-52 through UC-57 |
-| [API_SURFACES.md](API_SURFACES.md) | `WindowManager` and `LayoutTree` types |
