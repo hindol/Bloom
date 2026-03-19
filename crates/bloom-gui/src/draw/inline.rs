@@ -34,7 +34,7 @@ pub(crate) fn draw_inline_menu(
         .unwrap_or(0);
     let visible_items = menu.items.len().min(8);
     let hint_rows = usize::from(menu.hint.is_some());
-    let menu_chars = (max_label + max_right + 6).clamp(16, 56);
+    let menu_chars = (max_label + max_right + 6).clamp(16, 40);
     let menu_w = menu_chars as f32 * CHAR_WIDTH;
     let menu_h = (visible_items + hint_rows) as f32 * LINE_HEIGHT + LINE_HEIGHT * 0.5;
 
@@ -105,7 +105,7 @@ pub(crate) fn draw_inline_menu(
             inner_x,
             item_y,
             format!(" {}", label),
-            rgb_to_color(if selected { &theme.strong } else { &theme.foreground }),
+            rgb_to_color(&theme.foreground),
         );
         if let Some(right) = &item.right {
             let right = truncate_text(right, max_right);
@@ -114,7 +114,7 @@ pub(crate) fn draw_inline_menu(
                 right_edge,
                 item_y,
                 &right,
-                rgb_to_color(if selected { &theme.foreground } else { &theme.faded }),
+                rgb_to_color(&theme.faded),
             );
         }
     }

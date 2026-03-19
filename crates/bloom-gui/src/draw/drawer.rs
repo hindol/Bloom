@@ -59,7 +59,7 @@ pub(crate) fn draw_which_key(
             x + 5.0 * CHAR_WIDTH,
             y,
             label,
-            rgb_to_color(if entry.is_group { &theme.salient } else { &theme.foreground }),
+            rgb_to_color(&theme.foreground),
         );
     }
 }

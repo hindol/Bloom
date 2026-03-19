@@ -33,7 +33,7 @@ pub(crate) fn draw_picker(
     fill_panel(
         frame,
         area,
-        rgb_to_color(&theme.subtle),
+        rgb_to_color(&theme.background),
         rgb_to_color(&theme.faded),
     );
 
@@ -134,7 +134,7 @@ pub(crate) fn draw_picker(
             inner.x,
             y,
             format!(" {}", truncate_text(&row.label, label_chars)),
-            rgb_to_color(if selected { &theme.strong } else { &theme.foreground }),
+            rgb_to_color(&theme.foreground),
         );
         if let Some(middle) = &row.middle {
             draw_text(
@@ -142,7 +142,7 @@ pub(crate) fn draw_picker(
                 inner.x + (label_chars + 3) as f32 * CHAR_WIDTH,
                 y,
                 truncate_text(middle, middle_chars),
-                rgb_to_color(if selected { &theme.foreground } else { &theme.faded }),
+                rgb_to_color(&theme.faded),
             );
         }
         if let Some(right) = &row.right {
@@ -151,7 +151,7 @@ pub(crate) fn draw_picker(
                 inner.x + inner.width,
                 y,
                 &truncate_text(right, right_chars),
-                rgb_to_color(if selected { &theme.foreground } else { &theme.faded }),
+                rgb_to_color(&theme.faded),
             );
         }
     }
@@ -740,7 +740,7 @@ pub(crate) fn draw_view(
     draw_overlay_scrim(frame, size, rgb_to_color(&theme.background), scrim_alpha);
     let margin = 2.0 * CHAR_WIDTH;
     let panel = rect(margin, margin, size.width - 2.0 * margin, size.height - 2.0 * margin);
-    fill_panel(frame, panel, rgb_to_color(&theme.subtle), rgb_to_color(&theme.faded));
+    fill_panel(frame, panel, rgb_to_color(&theme.background), rgb_to_color(&theme.faded));
 
     let inner = inset(panel, CHAR_WIDTH);
     let max_chars = chars_that_fit(inner.width);

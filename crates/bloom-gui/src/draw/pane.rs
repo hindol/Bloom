@@ -356,6 +356,13 @@ fn draw_inactive_status_bar(
         rect(pane_x, status_y, pane_w, STATUS_BAR_HEIGHT),
         rgb_to_color(&theme.subtle),
     );
+    crate::draw::draw_hline(
+        frame,
+        pane_x,
+        pane_x + pane_w,
+        status_y,
+        rgb_to_color(&theme.faded),
+    );
 
     let text_y = status_y + (STATUS_BAR_HEIGHT - LINE_HEIGHT) / 2.0;
     let title = truncate_text(&pane.title, chars_that_fit((pane_w - CHAR_WIDTH).max(0.0)));
