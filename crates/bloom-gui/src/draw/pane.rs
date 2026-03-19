@@ -211,8 +211,12 @@ fn draw_editor_content(
                 _ => None,
             });
             let line_font_size = heading_level.map(heading_font_size).unwrap_or(FONT_SIZE);
-            // Scale char width proportionally for heading lines.
-            let line_char_width = CHAR_WIDTH * (line_font_size / FONT_SIZE);
+            let heading_cw = CHAR_WIDTH * (line_font_size / FONT_SIZE);
+
+            // Accumulate X position — heading spans use wider char width,
+            // non-heading spans (block IDs, syntax noise) use base CHAR_WIDTH.
+            let mut x_cursor = 0.0_f32;
+            let mut last_end = 0usize;
 
             for span in &line.spans {
                 let start = span.range.start.min(visible_text.len());
@@ -221,34 +225,39 @@ fn draw_editor_content(
                     continue;
                 }
 
+                // Advance x_cursor for any gap between last span end and this span start.
+                if start > last_end {
+                    let gap = &visible_text[last_end..start];
+                    let gap_is_heading = heading_level.is_some(); // gaps inherit heading width
+                    let gap_cw = if gap_is_heading { heading_cw } else { CHAR_WIDTH };
+                    x_cursor += gap.chars().count() as f32 * gap_cw;
+                }
+
                 let slice = &visible_text[start..end];
-                let span_x = start as f32 * line_char_width;
-                let span_w = slice.chars().count() as f32 * line_char_width;
+                let is_heading_span = matches!(span.style, Style::Heading { .. } | Style::SyntaxNoise)
+                    && heading_level.is_some();
+                // Block IDs, tags, timestamps etc. on heading lines use base size.
+                let span_cw = if is_heading_span { heading_cw } else { CHAR_WIDTH };
+                let span_font = if is_heading_span { line_font_size } else { FONT_SIZE };
+                let span_w = slice.chars().count() as f32 * span_cw;
 
-                // Background wash for styles that need it (Code, LinkText, SearchMatch, etc.)
+                // Background wash for styles that need it.
                 if let Some(bg) = style_to_bg(&span.style, theme) {
-                    fill_rect(frame, rect(text_x + span_x, y, span_w, LINE_HEIGHT), bg);
+                    fill_rect(frame, rect(text_x + x_cursor, y, span_w, row_h), bg);
                 }
 
-                if heading_level.is_some() {
-                    draw_text_sized(
-                        frame,
-                        text_x + span_x,
-                        y,
-                        slice.to_string(),
-                        style_to_color(&span.style, theme),
-                        line_font_size,
-                        row_h,
-                    );
-                } else {
-                    draw_text(
-                        frame,
-                        text_x + span_x,
-                        y,
-                        slice.to_string(),
-                        style_to_color(&span.style, theme),
-                    );
-                }
+                draw_text_sized(
+                    frame,
+                    text_x + x_cursor,
+                    y,
+                    slice.to_string(),
+                    style_to_color(&span.style, theme),
+                    span_font,
+                    row_h,
+                );
+
+                x_cursor += span_w;
+                last_end = end;
             }
         }
 
