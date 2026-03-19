@@ -183,8 +183,8 @@ pub static BLOOM_LIGHT: ThemePalette = ThemePalette {
     accent_green: Rgb(0x1C, 0x78, 0x20),
     accent_blue: Rgb(0x2E, 0x5C, 0xA8),
     accent_yellow: Rgb(0x90, 0x68, 0x00),
-    diff_added: Rgb(0x28, 0x6E, 0x20),
-    diff_removed: Rgb(0xB0, 0x30, 0x30),
+    diff_added: Rgb(0x1A, 0x7F, 0x37),
+    diff_removed: Rgb(0xCF, 0x22, 0x2E),
 };
 
 /// Frost — cool ice-blue light, crystalline clarity of a winter morning.
@@ -206,8 +206,8 @@ pub static FROST: ThemePalette = ThemePalette {
     accent_green: Rgb(0x1E, 0x72, 0x48),
     accent_blue: Rgb(0x2E, 0x5C, 0xA8),
     accent_yellow: Rgb(0x88, 0x64, 0x00),
-    diff_added: Rgb(0x28, 0x6E, 0x20),
-    diff_removed: Rgb(0xB0, 0x30, 0x30),
+    diff_added: Rgb(0x1A, 0x7F, 0x37),
+    diff_removed: Rgb(0xCF, 0x22, 0x2E),
 };
 
 /// Solarium — warm golden light, a sunlit study with honey-toned wood.
@@ -229,8 +229,8 @@ pub static SOLARIUM: ThemePalette = ThemePalette {
     accent_green: Rgb(0x38, 0x70, 0x28),
     accent_blue: Rgb(0x38, 0x60, 0x8C),
     accent_yellow: Rgb(0x88, 0x62, 0x00),
-    diff_added: Rgb(0x28, 0x6E, 0x20),
-    diff_removed: Rgb(0xB0, 0x30, 0x30),
+    diff_added: Rgb(0x1A, 0x7F, 0x37),
+    diff_removed: Rgb(0xCF, 0x22, 0x2E),
 };
 
 /// Sakura — soft pink-tinted light, cherry blossoms in spring morning light.
@@ -252,8 +252,8 @@ pub static SAKURA: ThemePalette = ThemePalette {
     accent_green: Rgb(0x20, 0x78, 0x44),
     accent_blue: Rgb(0x38, 0x58, 0xA8),
     accent_yellow: Rgb(0x84, 0x6A, 0x00),
-    diff_added: Rgb(0x28, 0x6E, 0x20),
-    diff_removed: Rgb(0xB0, 0x30, 0x30),
+    diff_added: Rgb(0x1A, 0x7F, 0x37),
+    diff_removed: Rgb(0xCF, 0x22, 0x2E),
 };
 
 /// Lichen — sage green light, quiet stone garden covered in pale moss.
@@ -275,8 +275,8 @@ pub static LICHEN: ThemePalette = ThemePalette {
     accent_green: Rgb(0x2A, 0x74, 0x38),
     accent_blue: Rgb(0x2E, 0x5C, 0x88),
     accent_yellow: Rgb(0x7E, 0x68, 0x18),
-    diff_added: Rgb(0x28, 0x6E, 0x20),
-    diff_removed: Rgb(0xB0, 0x30, 0x30),
+    diff_added: Rgb(0x1A, 0x7F, 0x37),
+    diff_removed: Rgb(0xCF, 0x22, 0x2E),
 };
 
 /// Paper — pure monochrome light. Black ink on white paper, zero-colour minimalism.
@@ -298,6 +298,6 @@ pub static PAPER: ThemePalette = ThemePalette {
     accent_green: Rgb(0x28, 0x78, 0x28),
     accent_blue: Rgb(0x2E, 0x5C, 0xA0),
     accent_yellow: Rgb(0x80, 0x68, 0x00),
-    diff_added: Rgb(0x28, 0x6E, 0x20),
-    diff_removed: Rgb(0xB0, 0x30, 0x30),
+    diff_added: Rgb(0x1A, 0x7F, 0x37),
+    diff_removed: Rgb(0xCF, 0x22, 0x2E),
 };
