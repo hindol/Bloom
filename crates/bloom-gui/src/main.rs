@@ -28,8 +28,8 @@ pub(crate) const FONT_SIZE: f32 = 13.0;
 pub(crate) const LINE_HEIGHT: f32 = FONT_SIZE * 1.4;
 /// Vertical offset to center text within a LINE_HEIGHT row.
 pub(crate) const TEXT_Y_OFFSET: f32 = (LINE_HEIGHT - FONT_SIZE) / 2.0;
-/// Status bar is taller than content lines for visual prominence.
-pub(crate) const STATUS_BAR_HEIGHT: f32 = LINE_HEIGHT * 1.5;
+/// Status bar height — compact modeline, close to a text line.
+pub(crate) const STATUS_BAR_HEIGHT: f32 = LINE_HEIGHT * 1.2;
 pub(crate) const CHAR_WIDTH: f32 = FONT_SIZE * 0.6;
 pub(crate) const GUTTER_CHARS: usize = 5;
 pub(crate) const GUTTER_WIDTH: f32 = GUTTER_CHARS as f32 * CHAR_WIDTH;
@@ -41,6 +41,7 @@ pub(crate) const EDITOR_FONT: Font = Font::with_name("JetBrains Mono");
 pub(crate) const SPACING_XS: f32 = 2.0;
 pub(crate) const SPACING_SM: f32 = 4.0;
 pub(crate) const SPACING_MD: f32 = 8.0;
+#[allow(unused)]
 pub(crate) const SPACING_LG: f32 = 16.0;
 
 #[allow(dead_code)]

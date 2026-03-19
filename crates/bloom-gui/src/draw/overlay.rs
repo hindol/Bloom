@@ -11,116 +11,61 @@ use crate::draw::{
     text_width, truncate_text,
 };
 use crate::theme::rgb_to_color;
-use crate::{CHAR_WIDTH, LINE_HEIGHT, SPACING_LG, SPACING_MD};
+use crate::{CHAR_WIDTH, LINE_HEIGHT, SPACING_MD, STATUS_BAR_HEIGHT};
 
 pub(crate) fn draw_picker(
     frame: &mut iced::widget::canvas::Frame,
     size: Size,
     picker: &PickerFrame,
     theme: &ThemePalette,
-    scrim_alpha: f32,
+    _scrim_alpha: f32,
 ) {
-    draw_overlay_scrim(frame, size, rgb_to_color(&theme.background), scrim_alpha);
+    // No scrim — bottom-anchored minibuffer style.
 
-    let width = (size.width * if picker.wide { 0.72 } else { 0.60 }).max(40.0 * CHAR_WIDTH);
-    let height = (size.height * 0.70).max(12.0 * LINE_HEIGHT);
-    let area = rect(
-        (size.width - width).max(0.0) / 2.0,
-        (size.height - height).max(0.0) / 2.0,
-        width.min(size.width - 8.0),
-        height.min(size.height - 8.0),
-    );
-    fill_panel(
-        frame,
-        area,
-        rgb_to_color(&theme.background),
-        rgb_to_color(&theme.faded),
-    );
+    let content_chars = chars_that_fit(size.width).saturating_sub(4);
+    let max_visible: usize = 10;
+    let num_results = picker.results.len().min(max_visible);
+    // Clamp to available space: status_line(1) + results + query_line(1) + separator lines(2).
+    let available_lines = ((size.height - STATUS_BAR_HEIGHT) / LINE_HEIGHT) as usize;
+    let num_visible = num_results.min(available_lines.saturating_sub(4));
 
-    let inner = iced::Rectangle {
-        x: area.x + SPACING_LG,
-        y: area.y + SPACING_MD,
-        width: (area.width - SPACING_LG * 2.0).max(0.0),
-        height: (area.height - SPACING_MD * 2.0).max(0.0),
-    };
-    let total_lines = ((inner.height / LINE_HEIGHT).floor() as usize).max(8);
-    let preview_lines = if picker.preview.is_some() {
-        (total_lines / 4).clamp(4, 8)
-    } else {
-        0
-    };
-    let separator_lines = usize::from(preview_lines > 0);
-    let result_lines = total_lines.saturating_sub(3 + preview_lines + separator_lines);
-    let content_chars = chars_that_fit(inner.width).saturating_sub(2);
+    // Layout from bottom up.
+    let query_y = size.height - STATUS_BAR_HEIGHT - LINE_HEIGHT;
+    let status_line_y = query_y - LINE_HEIGHT;
+    let results_bottom_y = status_line_y; // results end here
+    let results_top_y = results_bottom_y - num_visible as f32 * LINE_HEIGHT;
+    let panel_top = results_top_y - LINE_HEIGHT * 0.5; // small padding above
 
-    draw_text(
-        frame,
-        inner.x,
-        inner.y,
-        truncate_text(&picker.title, content_chars),
-        rgb_to_color(&theme.strong),
-    );
-    draw_hline(
-        frame,
-        area.x + 1.0,
-        area.x + area.width - 1.0,
-        inner.y + LINE_HEIGHT - 3.0,
-        rgb_to_color(&theme.faded),
-    );
-
-    let query_y = inner.y + LINE_HEIGHT;
-    // Subtle background wash behind the query area.
+    // Opaque background covering the picker area.
     fill_rect(
         frame,
-        rect(area.x + 1.0, query_y, area.width - 2.0, LINE_HEIGHT),
-        rgb_to_color(&theme.subtle),
-    );
-    draw_text(frame, inner.x, query_y, ">", rgb_to_color(&theme.faded));
-    let query_x = inner.x + 2.0 * CHAR_WIDTH;
-    if picker.query_selected && !picker.query.is_empty() {
-        fill_rect(
-            frame,
-            rect(
-                query_x - 2.0,
-                query_y,
-                text_width(&picker.query) + CHAR_WIDTH,
-                LINE_HEIGHT,
-            ),
-            rgb_to_color(&theme.mild),
-        );
-    }
-    draw_text(
-        frame,
-        query_x,
-        query_y,
-        truncate_text(&picker.query, content_chars.saturating_sub(2)),
-        rgb_to_color(&theme.foreground),
-    );
-    draw_bar_cursor(
-        frame,
-        (query_x + picker.query.chars().count() as f32 * CHAR_WIDTH)
-            .min(inner.x + inner.width - 2.0),
-        query_y,
-        rgb_to_color(&theme.foreground),
+        rect(0.0, panel_top, size.width, size.height - STATUS_BAR_HEIGHT - panel_top),
+        rgb_to_color(&theme.background),
     );
 
-    // 1px faded line separating query from results.
-    draw_hline(
+    // Top separator.
+    draw_hline(frame, 0.0, size.width, panel_top, rgb_to_color(&theme.faded));
+
+    // ── Status line ("5 of 120 pages") ──
+    let footer = if picker.filtered_count > 0 {
+        format!(
+            "{} of {} {}",
+            picker.selected_index + 1,
+            picker.filtered_count,
+            picker.status_noun
+        )
+    } else {
+        format!("0 of {} {}", picker.total_count, picker.status_noun)
+    };
+    draw_text(
         frame,
-        area.x + 1.0,
-        area.x + area.width - 1.0,
-        query_y + LINE_HEIGHT,
+        SPACING_MD,
+        status_line_y,
+        truncate_text(&footer, content_chars),
         rgb_to_color(&theme.faded),
     );
 
-    let result_y = inner.y + 2.0 * LINE_HEIGHT;
-    let viewport = result_lines.max(1);
-    let scroll = if picker.selected_index >= viewport {
-        picker.selected_index - viewport + 1
-    } else {
-        0
-    };
-    let visible = picker.results.iter().skip(scroll).take(viewport);
+    // ── Results (newest/best at bottom, closest to query) ──
     let right_chars = picker
         .results
         .iter()
@@ -139,24 +84,27 @@ pub(crate) fn draw_picker(
         .min((content_chars / 4).max(8));
     let label_chars = content_chars.saturating_sub(right_chars + middle_chars + 6);
 
-    for (visible_index, row) in visible.enumerate() {
-        let y = result_y + visible_index as f32 * LINE_HEIGHT;
-        let selected = scroll + visible_index == picker.selected_index;
+    let viewport = num_visible.max(1);
+    let scroll = if picker.selected_index >= viewport {
+        picker.selected_index - viewport + 1
+    } else {
+        0
+    };
+    let visible_rows: Vec<_> = picker.results.iter().skip(scroll).take(viewport).collect();
+
+    for (vi, row) in visible_rows.iter().enumerate() {
+        let y = results_top_y + vi as f32 * LINE_HEIGHT;
+        let selected = scroll + vi == picker.selected_index;
         if selected {
             fill_rect(
                 frame,
-                rect(inner.x, y, inner.width, LINE_HEIGHT),
+                rect(0.0, y, size.width, LINE_HEIGHT),
                 rgb_to_color(&theme.mild),
-            );
-            fill_rect(
-                frame,
-                rect(inner.x, y, 2.0, LINE_HEIGHT),
-                rgb_to_color(&theme.salient),
             );
         }
         draw_text(
             frame,
-            inner.x,
+            SPACING_MD,
             y,
             format!(" {}", truncate_text(&row.label, label_chars)),
             rgb_to_color(&theme.foreground),
@@ -164,7 +112,7 @@ pub(crate) fn draw_picker(
         if let Some(middle) = &row.middle {
             draw_text(
                 frame,
-                inner.x + (label_chars + 3) as f32 * CHAR_WIDTH,
+                SPACING_MD + (label_chars + 3) as f32 * CHAR_WIDTH,
                 y,
                 truncate_text(middle, middle_chars),
                 rgb_to_color(&theme.faded),
@@ -173,7 +121,7 @@ pub(crate) fn draw_picker(
         if let Some(right) = &row.right {
             draw_text_right(
                 frame,
-                inner.x + inner.width,
+                size.width - SPACING_MD,
                 y,
                 &truncate_text(right, right_chars),
                 rgb_to_color(&theme.faded),
@@ -182,55 +130,55 @@ pub(crate) fn draw_picker(
     }
 
     if picker.results.is_empty() && picker.min_query_len > 0 && picker.query.len() < picker.min_query_len {
+        let area = rect(0.0, results_top_y, size.width, num_visible.max(1) as f32 * LINE_HEIGHT);
         draw_text_center(
             frame,
-            inner,
-            result_y + LINE_HEIGHT,
+            area,
+            results_top_y,
             "Type to search…",
             rgb_to_color(&theme.faded),
         );
     }
 
-    let footer_y = result_y + result_lines as f32 * LINE_HEIGHT;
-    let footer = if picker.filtered_count > 0 {
-        format!(
-            "{} of {} {}",
-            picker.selected_index + 1,
-            picker.filtered_count,
-            picker.status_noun
-        )
-    } else {
-        format!("0 of {} {}", picker.total_count, picker.status_noun)
-    };
+    // Separator between results and query.
+    draw_hline(frame, 0.0, size.width, query_y, rgb_to_color(&theme.faded));
+
+    // ── Query line: "{title} > {query}█" ──
+    let prompt = format!("{} > ", picker.title);
     draw_text(
         frame,
-        inner.x,
-        footer_y,
-        truncate_text(&footer, content_chars),
+        SPACING_MD,
+        query_y,
+        truncate_text(&prompt, content_chars),
         rgb_to_color(&theme.faded),
     );
-
-    if let Some(preview) = &picker.preview {
-        let sep_y = footer_y + LINE_HEIGHT - 3.0;
-        draw_hline(
+    let query_x = SPACING_MD + text_width(&prompt);
+    if picker.query_selected && !picker.query.is_empty() {
+        fill_rect(
             frame,
-            area.x + 1.0,
-            area.x + area.width - 1.0,
-            sep_y,
-            rgb_to_color(&theme.faded),
+            rect(
+                query_x - 2.0,
+                query_y,
+                text_width(&picker.query) + CHAR_WIDTH,
+                LINE_HEIGHT,
+            ),
+            rgb_to_color(&theme.mild),
         );
-        let start_y = footer_y + LINE_HEIGHT;
-        let preview_chars = chars_that_fit(inner.width).saturating_sub(1);
-        for (index, line) in preview.lines().take(preview_lines).enumerate() {
-            draw_text(
-                frame,
-                inner.x,
-                start_y + index as f32 * LINE_HEIGHT,
-                truncate_text(line, preview_chars),
-                rgb_to_color(&theme.faded),
-            );
-        }
     }
+    draw_text(
+        frame,
+        query_x,
+        query_y,
+        truncate_text(&picker.query, content_chars.saturating_sub(prompt.chars().count())),
+        rgb_to_color(&theme.foreground),
+    );
+    draw_bar_cursor(
+        frame,
+        (query_x + picker.query.chars().count() as f32 * CHAR_WIDTH)
+            .min(size.width - SPACING_MD - 2.0),
+        query_y,
+        rgb_to_color(&theme.foreground),
+    );
 }
 
 pub(crate) fn draw_dialog(

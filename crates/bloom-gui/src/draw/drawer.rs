@@ -9,7 +9,7 @@ use crate::draw::{
     chars_that_fit, draw_hline, draw_text, fill_rect, rect, text_width, truncate_text,
 };
 use crate::theme::rgb_to_color;
-use crate::{CHAR_WIDTH, LINE_HEIGHT, SPACING_MD, SPACING_SM};
+use crate::{CHAR_WIDTH, LINE_HEIGHT, SPACING_SM};
 
 pub(crate) fn draw_which_key(
     frame: &mut iced::widget::canvas::Frame,
@@ -18,7 +18,7 @@ pub(crate) fn draw_which_key(
     theme: &ThemePalette,
 ) {
     let total_chars = chars_that_fit(size.width);
-    let col_chars = 24usize;
+    let col_chars = 20usize;
     let cols = ((total_chars.saturating_sub(4)) / col_chars).max(1);
     let rows = which_key.entries.len().div_ceil(cols).max(1);
     let panel_lines = rows + 2;
@@ -32,16 +32,19 @@ pub(crate) fn draw_which_key(
     );
     draw_hline(frame, 0.0, size.width, panel_y, rgb_to_color(&theme.faded));
 
-    draw_text(
-        frame,
-        CHAR_WIDTH,
-        panel_y + 2.0,
-        truncate_text(
-            &which_key.prefix,
-            chars_that_fit(size.width).saturating_sub(2),
-        ),
-        rgb_to_color(&theme.faded),
-    );
+    // Minimal prefix header in faded.
+    if !which_key.prefix.is_empty() {
+        draw_text(
+            frame,
+            CHAR_WIDTH,
+            panel_y + 2.0,
+            truncate_text(
+                &which_key.prefix,
+                chars_that_fit(size.width).saturating_sub(2),
+            ),
+            rgb_to_color(&theme.faded),
+        );
+    }
 
     for (index, entry) in which_key.entries.iter().enumerate() {
         let col = index / rows;
@@ -51,14 +54,16 @@ pub(crate) fn draw_which_key(
         }
         let x = CHAR_WIDTH + (col * col_chars) as f32 * CHAR_WIDTH;
         let y = panel_y + (row + 1) as f32 * LINE_HEIGHT + 2.0;
+
+        // Key character in strong (no pill/box).
         let key = truncate_text(&entry.key, 4);
-        let key_text_width = text_width(&key);
-        // Subtle background pill behind the key.
-        let key_pill = rect(x, y, key_text_width + SPACING_SM * 2.0, LINE_HEIGHT);
-        fill_rect(frame, key_pill, rgb_to_color(&theme.subtle));
-        draw_text(frame, x + SPACING_SM, y, &key, rgb_to_color(&theme.strong));
-        let label_x = x + key_text_width + SPACING_SM * 2.0 + SPACING_MD;
-        let label = truncate_text(&entry.label, col_chars.saturating_sub(5));
+        draw_text(frame, x, y, &key, rgb_to_color(&theme.strong));
+
+        // Label: "+label" for groups, "label" for leaves.
+        let label_x = x + text_width(&key) + SPACING_SM;
+        let label_prefix = if entry.is_group { "+" } else { "" };
+        let max_label = col_chars.saturating_sub(key.chars().count() + 1 + label_prefix.len());
+        let label = format!("{}{}", label_prefix, truncate_text(&entry.label, max_label));
         draw_text(
             frame,
             label_x,

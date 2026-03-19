@@ -7,12 +7,13 @@ use bloom_md::theme::ThemePalette;
 use iced::{Color, Rectangle};
 
 use crate::draw::{
-    chars_that_fit, draw_bar_cursor, draw_text, draw_text_right, draw_text_sized, draw_vline,
+    chars_that_fit, draw_bar_cursor, draw_text, draw_text_right, draw_text_sized,
     fill_rect, rect, text_width, truncate_text,
 };
 use crate::theme::{rgb_to_color, style_to_bg, style_to_color};
 use crate::{
-    CHAR_WIDTH, FONT_SIZE, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, SPACING_SM, STATUS_BAR_HEIGHT,
+    CHAR_WIDTH, FONT_SIZE, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, SPACING_MD,
+    STATUS_BAR_HEIGHT,
 };
 
 /// Extra pixels the GUI status bar adds beyond what core allocates (1 cell row).
@@ -337,14 +338,13 @@ fn draw_active_status_bar(
     let status_y = pane_y + pane.rect.content_height as f32 * LINE_HEIGHT;
     let text_y = status_y + (STATUS_BAR_HEIGHT - LINE_HEIGHT) / 2.0;
 
-    // Status bar background — always `highlight`, not mode-coloured.
-    // Only the mode badge gets the mode colour.
+    // Modeline background.
     fill_rect(
         frame,
         rect(pane_x, status_y, pane_w, STATUS_BAR_HEIGHT),
         rgb_to_color(&theme.highlight),
     );
-    // Top border for visual anchor.
+    // 1px top border.
     crate::draw::draw_hline(
         frame,
         pane_x,
@@ -375,6 +375,7 @@ fn draw_inactive_status_bar(
     pane_w: f32,
 ) {
     let status_y = pane_y + pane.rect.content_height as f32 * LINE_HEIGHT;
+    // Subtle bg so it's distinguishable from content, but thinner feel.
     fill_rect(
         frame,
         rect(pane_x, status_y, pane_w, STATUS_BAR_HEIGHT),
@@ -388,13 +389,15 @@ fn draw_inactive_status_bar(
         rgb_to_color(&theme.faded),
     );
 
+    // No dot — just filename in faded.
     let text_y = status_y + (STATUS_BAR_HEIGHT - LINE_HEIGHT) / 2.0;
-    let title = truncate_text(&pane.title, chars_that_fit((pane_w - CHAR_WIDTH).max(0.0)));
+    let max_chars = chars_that_fit((pane_w - SPACING_MD * 2.0).max(0.0));
+    let title = truncate_text(&pane.title, max_chars);
     draw_text(
         frame,
-        pane_x + CHAR_WIDTH / 2.0,
+        pane_x + SPACING_MD,
         text_y,
-        format!(" {title}"),
+        &title,
         rgb_to_color(&theme.faded),
     );
 }
@@ -409,64 +412,66 @@ fn draw_normal_status(
     pane_w: f32,
     bar_y: f32,
 ) {
-    // Mode badge with coloured background per THEMING.md.
+    // ── Mode dot (6px filled circle) ──
     let mode = &pane.status_bar.mode;
-    let (badge_fg, badge_bg) = match mode.as_str() {
-        "INSERT" => (rgb_to_color(&theme.background), rgb_to_color(&theme.accent_green)),
-        "VISUAL" => (rgb_to_color(&theme.background), rgb_to_color(&theme.popout)),
-        "COMMAND" => (rgb_to_color(&theme.background), rgb_to_color(&theme.accent_blue)),
-        "HIST" | "DAY" | "JRNL" => (rgb_to_color(&theme.background), rgb_to_color(&theme.accent_yellow)),
-        _ => (rgb_to_color(&theme.foreground), rgb_to_color(&theme.mild)),
+    let dot_color = match mode.as_str() {
+        "INSERT" => rgb_to_color(&theme.accent_green),
+        "VISUAL" => rgb_to_color(&theme.popout),
+        "COMMAND" => rgb_to_color(&theme.accent_blue),
+        "HIST" | "DAY" | "JRNL" => rgb_to_color(&theme.accent_yellow),
+        _ => rgb_to_color(&theme.foreground),
     };
-    let badge_text = format!(" {} ", mode);
-    let badge_text_w = badge_text.chars().count() as f32 * CHAR_WIDTH;
-    let badge_x = pane_x + SPACING_SM;
-    let badge_w = badge_text_w + SPACING_SM * 2.0;
-    fill_rect(frame, rect(badge_x, bar_y, badge_w, STATUS_BAR_HEIGHT), badge_bg);
-    draw_text(frame, badge_x + SPACING_SM, status_y, &badge_text, badge_fg);
+    let dot_radius = 3.0_f32;
+    let dot_cx = pane_x + SPACING_MD + dot_radius;
+    let dot_cy = bar_y + STATUS_BAR_HEIGHT / 2.0;
+    frame.fill(
+        &iced::widget::canvas::Path::circle(
+            iced::Point::new(dot_cx, dot_cy),
+            dot_radius,
+        ),
+        dot_color,
+    );
 
-    // 1px vertical separator after the badge (half status bar height, centered).
-    let sep_x = badge_x + badge_w + SPACING_SM;
-    let sep_h = STATUS_BAR_HEIGHT * 0.5;
-    let sep_y1 = bar_y + (STATUS_BAR_HEIGHT - sep_h) / 2.0;
-    draw_vline(frame, sep_x, sep_y1, sep_y1 + sep_h, rgb_to_color(&theme.faded));
-
-    // Title + dirty flag after the separator.
-    let dirty = if normal.dirty { " [+]" } else { "" };
-    let after_badge_x = sep_x + SPACING_SM;
-    let title_text = format!("{}{}", normal.title, dirty);
-    let title_max = chars_that_fit((pane_x + pane_w - after_badge_x - CHAR_WIDTH).max(0.0));
+    // ── Filename ──
+    let after_dot_x = dot_cx + dot_radius + SPACING_MD;
+    let title = &normal.title;
+    let title_max = chars_that_fit((pane_x + pane_w - after_dot_x - CHAR_WIDTH * 10.0).max(0.0));
+    let title_text = truncate_text(title, title_max);
     draw_text(
         frame,
-        after_badge_x,
+        after_dot_x,
         status_y,
-        truncate_text(&title_text, title_max),
+        &title_text,
         rgb_to_color(&theme.foreground),
     );
 
-    // Dirty indicator in salient.
+    // ── Dirty [+] in salient ──
     if normal.dirty {
-        let dirty_x = after_badge_x + (normal.title.chars().count()) as f32 * CHAR_WIDTH;
+        let dirty_x = after_dot_x + text_width(&title_text);
         draw_text(frame, dirty_x, status_y, " [+]", rgb_to_color(&theme.salient));
     }
 
-    // Right-aligned elements — each drawn individually with its spec color.
+    // ── Right-aligned elements ──
     if let Some(hints) = &pane.status_bar.right_hints {
         draw_text_right(
             frame,
-            pane_x + pane_w - CHAR_WIDTH,
+            pane_x + pane_w - SPACING_MD,
             status_y,
             &truncate_text(hints, chars_that_fit((pane_w * 0.35).max(0.0))),
             rgb_to_color(&theme.faded),
         );
     } else {
-        // Build segments with individual colors, draw right-to-left.
+        // Build segments right-to-left.
         let mut segments: Vec<(&str, String, Color)> = Vec::new();
 
         // Line:col — faded (rightmost).
-        segments.push(("linecol", format!("{}:{}", normal.line + 1, normal.column + 1), rgb_to_color(&theme.faded)));
+        segments.push((
+            "linecol",
+            format!("{}:{}", normal.line + 1, normal.column + 1),
+            rgb_to_color(&theme.faded),
+        ));
 
-        // MCP indicator — faded when idle, salient when editing.
+        // MCP indicator.
         match &normal.mcp {
             McpIndicator::Off => {}
             McpIndicator::Idle => {
@@ -474,42 +479,43 @@ fn draw_normal_status(
             }
             McpIndicator::Editing { tick } => {
                 const FRAMES: &[&str] = &["⚡", "◐", "◑", "◒", "◓"];
-                segments.push(("mcp", FRAMES[(*tick as usize) % FRAMES.len()].to_string(), rgb_to_color(&theme.salient)));
+                segments.push((
+                    "mcp",
+                    FRAMES[(*tick as usize) % FRAMES.len()].to_string(),
+                    rgb_to_color(&theme.salient),
+                ));
             }
         }
 
-        // Indexer — salient when active.
+        // Indexer.
         if normal.indexing {
             segments.push(("indexer", "⟳".to_string(), rgb_to_color(&theme.salient)));
         }
 
-        // Pending keys — salient.
+        // Pending keys — salient, shown before position.
         if !normal.pending_keys.is_empty() {
-            segments.push(("pending", normal.pending_keys.clone(), rgb_to_color(&theme.salient)));
+            segments.push((
+                "pending",
+                normal.pending_keys.clone(),
+                rgb_to_color(&theme.salient),
+            ));
         }
 
-        // Macro recording — accent_red.
+        // Macro recording.
         if let Some(recording) = normal.recording_macro {
-            segments.push(("macro", format!("@{recording}"), rgb_to_color(&theme.accent_red)));
+            segments.push((
+                "macro",
+                format!("@{recording}"),
+                rgb_to_color(&theme.accent_red),
+            ));
         }
 
-        // Draw right-to-left: last segment rightmost.
         let gap = 2.0 * CHAR_WIDTH;
-        let right_edge = pane_x + pane_w - CHAR_WIDTH;
+        let right_edge = pane_x + pane_w - SPACING_MD;
         let mut cursor_x = right_edge;
-        for (id, text, color) in &segments {
+        for (_id, text, color) in &segments {
             let w = text_width(text);
             cursor_x -= w;
-            // Pending keys get a subtle background pill.
-            if *id == "pending" {
-                let pill = rect(
-                    cursor_x - SPACING_SM,
-                    bar_y,
-                    w + SPACING_SM * 2.0,
-                    STATUS_BAR_HEIGHT,
-                );
-                fill_rect(frame, pill, rgb_to_color(&theme.subtle));
-            }
             draw_text(frame, cursor_x, status_y, text, *color);
             cursor_x -= gap;
         }
