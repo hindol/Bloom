@@ -76,17 +76,17 @@ The ID is appended to the **last line of the block** — end of the thought, nev
 |-----------|----------|-------------------|-----------|
 | Heading (`##`+) | ✅ | ✅ | Section identity, linkable, foldable, section mirror anchor |
 | Task (`- [ ]` / `- [x]`) | ✅ | ✅ | Actionable, toggleable from views, has lifecycle |
-| List item (`- text`) | ❌ | — | Prose with a bullet — link to the heading instead |
-| Paragraph | ❌ | — | Prose — no semantic identity worth tracking |
-| Blockquote | ❌ | — | Prose |
+| List item (`- text`) | ✅ | ✅ | Referenceable, movable, history-trackable |
+| Paragraph | ✅ | ✅ | History tracking, emergence detection, stable chunk identity |
+| Blockquote | ✅ | ✅ | Referenceable content |
 | Code block | ❌ | — | Not a semantic "thought" |
 | Frontmatter / blank lines | ❌ | — | Not content |
 
-**No manual IDs.** Users cannot manually assign `^id` to arbitrary lines. If you need to reference a specific piece of content, promote it to a heading — headings are Bloom's unit of addressable content. This keeps the ID space clean, prevents orphaned IDs on prose that gets rewritten, and avoids complicating mirror/self-healing logic with user-authored IDs on block types that don't support mirroring.
+Every content block gets an ID. IDs serve history tracking (per-block git pickaxe), BQL result targeting, move-block operations, and emergence detection — even for paragraphs.
 
-### Mirror Type Gating
+### Mirror Promotion
 
-Since only headings and tasks receive IDs, any duplicate `^` detected by the indexer is always a valid mirror candidate. Promotion to `^=` proceeds as before — no type check needed.
+Any duplicate `^` detected by the indexer is a valid mirror candidate. Content-match check at promotion time; after `^=`, trust the marker.
 
 ### Sever on Type Change
 
@@ -101,7 +101,7 @@ Mirroring is tied to the block's semantic type. Changing the type severs the mir
 
 ### Visual Treatment
 
-Block IDs render as `SyntaxNoise` — faded + dim, Tier 3 (same as `**` bold markers and `[[` link brackets). With IDs limited to headings and tasks, most body text has no `^` markers — cleaner pages.
+Block IDs render as `SyntaxNoise` — faded + dim, Tier 3 (same as `**` bold markers and `[[` link brackets). Nearly invisible in practice.
 
 ### Assignment Strategy
 
@@ -469,10 +469,10 @@ CREATE TABLE block_ids (
 
 1. **Vault-scoped, not page-scoped.** Eliminates cross-page move breakage. Cost: 3 extra chars per ID.
 2. **5-char base36, fixed length.** 60.5M space for 5M lifetime target. Lowercase-only.
-3. **Headings and tasks only.** Auto-IDs limited to blocks with semantic identity. Paragraphs, list items, blockquotes don't get IDs. User-authored `^id` on non-heading/task lines is stripped. Need to reference prose? Promote it to a heading.
+3. **All content blocks get IDs.** Auto-IDs for headings, tasks, list items, paragraphs, blockquotes. IDs serve history tracking, BQL targeting, move-block, and emergence detection. Visual noise handled by Tier 3 dimming.
 4. **`^=` marker in file content.** Files are source of truth. Index is derivable. Survives rebuild.
 5. **`^=` is symmetric.** All copies are equal co-owners. No primary/secondary.
-6. **Mirror needs no type gate.** Since only headings and tasks get IDs, any duplicate `^` is always a valid mirror. Promotion logic is unchanged.
+6. **No mirror type gate.** All blocks get IDs, all blocks can be mirrored. Any duplicate `^` is a valid mirror candidate.
 7. **Sever on type change.** Removing `- [ ]` from a task or `##` from a heading severs the mirror. Mirroring is tied to semantic type, not arbitrary content.
 8. **Content comparison only at promotion.** `^` + `^` → compare once. After `^=`, trust the marker.
 9. **`MirrorEdit` as separate message.** One-flag circular prevention.
@@ -626,124 +626,54 @@ Brief confirmation that the edit propagated. Same transient notification style a
 
 When a user copies a full section (heading + body + tasks) to another file, each block gets `^=` and mirrors independently. Content edits propagate per-block — that works. But **structural changes** (adding a paragraph, deleting a task, reordering items) within the section don't propagate. The peer's section drifts structurally while individual blocks stay in sync.
 
-### The Design: Structural Sync via Heading Anchors
+### The Design: Individual Child Mirroring + Structural Sync
 
-A `^=` heading acts as a **section mirror anchor**. Two propagation modes coexist:
+A `^=` heading acts as a **section mirror anchor.** All children under the heading also get `^=` and mirror individually. Structural sync handles adds and removals — the source section is the truth, peers match it.
 
-1. **Structural sync** (new) — fires when the ordered list of child block IDs under a `^=` heading changes (add, delete, reorder). Compares child ID sequences between source and peers. Applies insert/delete/move of individual lines to bring peers into structural alignment.
+**Two propagation modes coexist:**
 
-2. **Content sync** (existing) — fires per-block via `^=` leaf mirroring. Each block within the section is a standard `^=` mirror. No changes to existing machinery.
+1. **Content sync** (existing) — fires per-block via `^=` leaf mirroring. Each child is a standard `^=` mirror. No changes to existing machinery.
 
-### How It Works
+2. **Structural sync** (new) — fires when the ordered list of child block IDs under a `^=` heading changes. Compares source children to peer children. Inserts missing blocks, removes blocks that are no longer in the source's section.
 
-#### Initial section copy
+### Rules
 
-User copies `## Design` section from page A to page B (via paste, `SPC r b`, or manual copy):
+**Rule 1:** `^=` heading = "mirror all my children." Every block under the heading gets `^=`.
 
-```markdown
-Page A:                          Page B:
-## Design ^=abc01                ## Design ^=abc01
-Body paragraph. ^=abc02          Body paragraph. ^=abc02
-- [ ] Review API ^=abc03         - [ ] Review API ^=abc03
-```
+**Rule 2:** New block added under a `^=` heading → generate ID, promote to `^=`, insert at the correct position in all peers.
 
-All block IDs preserved → indexer detects duplicates → auto-promotes all to `^=`. Standard behavior, no changes needed.
+**Rule 3:** Block leaves the source section (deleted or moved out) → remove from peer's section. The moved block keeps `^=` in its new location — it just no longer belongs to this heading's section.
 
-#### Adding a block
+**Rule 4:** Heading level change (demotion/promotion changes scope) → **do nothing** to peer blocks. Children that fall out of scope keep `^=` and continue leaf-mirroring independently. Children that enter scope are added to peers **only if missing** — prevents duplicates from quick demote-then-promote.
 
-User adds "New paragraph" in page A under `## Design`:
+**Rule 5:** Only the outermost `^=` heading in a section does structural sync. Nested `^=` headings are just leaf-mirrored children.
 
-```markdown
-## Design ^=abc01
-Body paragraph. ^=abc02
-New paragraph.                   ← no ID yet
-- [ ] Review API ^=abc03
-```
+### The Core Simplification
 
-On save:
-1. **EnsureBlockIds** assigns `^=xyz04` to "New paragraph" (under a `^=` heading → gets `^=` immediately).
-2. **Structural sync** for `^=abc01`: source children are `[abc02, xyz04, abc03]`. Page B has `[abc02, abc03]`. Diff: insert `xyz04` between `abc02` and `abc03` in page B.
+The source section's child list is the truth. Structural sync is a one-way diff:
+- Block in source but not in peer → insert
+- Block in peer but not in source → remove
+- Order differs → reorder
 
-Page B after sync:
-```markdown
-## Design ^=abc01
-Body paragraph. ^=abc02
-New paragraph. ^=xyz04           ← inserted by structural sync
-- [ ] Review API ^=abc03
-```
+This single rule handles deletion, move-out, and new blocks uniformly. The sync doesn't need to know WHY a block left — it just sees "it's not here" and acts.
 
-After this, `^=xyz04` is a leaf mirror — future content edits propagate per-block.
+Heading level changes are special-cased (Rule 4): scope changes don't trigger removal. Only actual content changes (add/delete/move) trigger structural sync.
 
-#### Deleting a block
+### Edge Cases
 
-User deletes `^=abc02` in page A. Structural sync sees children `[abc03]` vs peer's `[abc02, abc03]`. Removes the `abc02` line from page B. `abc02` goes to `retired_block_ids`.
-
-#### Reordering blocks
-
-User moves `^=abc03` above `^=abc02` in page A. Structural sync sees `[abc03, abc02]` vs peer's `[abc02, abc03]`. Reorders lines in page B.
-
-### Algorithm
-
-```
-On Insert→Normal (same trigger as content mirror):
-
-1. EnsureBlockIds — assign IDs to new blocks under ^= headings.
-   New blocks under a ^= heading get ^= (not ^).
-
-2. StructuralSync — for each ^= heading in the edited page:
-   source_children = [ordered block IDs within section scope]
-   for each peer page with same ^= heading:
-     peer_children = [ordered block IDs within section scope in peer]
-     if source_children != peer_children:
-       diff(peer_children → source_children)
-       apply inserts/deletes/moves as individual line operations
-
-3. LeafMirrorSync — existing per-block ^= content propagation.
-```
-
-Order matters: EnsureBlockIds → StructuralSync → LeafMirrorSync.
-
-### Section Scope
-
-"Children of `^=abc01`" = all blocks from the heading line to (but not including) the next heading of equal or higher level, or EOF. This is the same range as the `ah` text object.
-
-Children are a **flat list** of block IDs in document order — no tree recursion. Nested sub-headings and their content are included:
-
-```markdown
-## Design ^=abc01
-Body. ^=abc02           ← child
-### Sub ^=def01         ← child
-Sub body. ^=def02       ← child
-```
-
-Children of `abc01` = `[abc02, def01, def02]`.
-
-### Why This Avoids the Range Replacement Problem
-
-Section range replacement (`MirrorEdit` with a line range) was rejected because:
-- Line counts differ between peers → shifts all content below
-- Stale index ranges between mirror write and re-index
-- Nested mirrors create ambiguous propagation scope
-
-Structural sync avoids all of these:
-- **No range replacement** — each mutation is a single-line insert or delete
-- **No line shift cascade** — bounded to the inserted/deleted line
-- **No scope ambiguity** — diff operates on block ID lists, not line ranges
-- **Idempotent** — if children already match, no writes
-
-### Stress Test Results
-
-| Scenario | Result |
-|----------|--------|
-| Add block within section | ✅ Structural sync inserts line in peers |
-| Delete block | ✅ Structural sync removes line from peers |
-| Reorder blocks | ✅ Structural sync reorders lines in peers |
-| Content edit to existing block | ✅ Leaf mirror (existing, unchanged) |
-| Nested sub-heading within section | ✅ Flat child list, no recursion |
-| `^=` block also mirrored to a third page without the heading | ✅ Independent — leaf mirror continues working |
-| New block gets ID via EnsureBlockIds | ✅ Gets `^=` (not `^`) because parent heading is `^=` |
-| Heading level change | ✅ No scope concept in structural sync — just compares child lists at sync time |
-| Edit + structural change in same session | ✅ Order: EnsureBlockIds → StructuralSync → LeafMirrorSync |
+| Scenario | Behavior |
+|----------|----------|
+| Copy section to another file | All children get `^=`, structural + leaf sync active |
+| Add paragraph in mirrored section | New ID, `^=`, inserted in peers at correct position |
+| Delete block from section | Removed from peers |
+| Move block out of section (`SPC r b`) | Removed from peers, keeps `^=` in new location |
+| Child also mirrored to third page | Leaf mirror to third page continues independently |
+| Heading upgraded H3→H2 (scope shrinks) | Do nothing — orphaned blocks keep `^=`, leaf sync continues |
+| Heading downgraded H2→H3 (scope grows) | New children added to peers only if missing |
+| Quick demote then promote | No duplicates — Rule 4 checks for existing blocks |
+| Nested `^=` heading | Just a child — only outermost heading does structural sync |
+| Content edit within section | Leaf mirror propagates per-block (existing, unchanged) |
+| Reorder children | Structural sync reorders in peers |
 
 ### What This Does NOT Handle
 
