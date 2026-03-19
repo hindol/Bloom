@@ -352,15 +352,6 @@ fn draw_active_status_bar(
     }
     let text_y = status_y + (actual_h - LINE_HEIGHT) / 2.0;
 
-    // 1px top border.
-    crate::draw::draw_hline(
-        frame,
-        pane_x,
-        pane_x + pane_w,
-        status_y,
-        rgb_to_color(&theme.faded),
-    );
-
     match &pane.status_bar.content {
         StatusBarContent::Normal(normal) => {
             draw_normal_status(frame, pane, normal, theme, pane_x, text_y, pane_w, status_y, actual_h)
@@ -408,13 +399,6 @@ fn draw_inactive_status_bar(
         frame,
         rect(pane_x, status_y, pane_w, actual_h),
         rgb_to_color(&theme.subtle),
-    );
-    crate::draw::draw_hline(
-        frame,
-        pane_x,
-        pane_x + pane_w,
-        status_y,
-        rgb_to_color(&theme.faded),
     );
 
     let text_y = status_y + (actual_h - LINE_HEIGHT) / 2.0;
