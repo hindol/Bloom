@@ -8,7 +8,7 @@ license = "AGPL-3.0-or-later"
 bloom-core = { path = "../bloom-core" }
 bloom-md = { path = "../bloom-md" }
 crossbeam = "0.8.4"
-iced = { version = "0.14", features = ["canvas", "advanced"] }
+iced = { version = "0.14", features = ["canvas", "advanced", "tokio"] }
 tracing = "0.1"
 
 # Packaging prep for cargo-bundle / CI-based .dmg/.msi builds.

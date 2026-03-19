@@ -351,11 +351,15 @@ fn subscription(state: &BloomApp) -> Subscription<Message> {
         window::resize_events().map(|(_, size)| Message::WindowResized(size)),
     ];
 
-    // VSync-aligned frame tick — fires at the display's native refresh rate
-    // (60Hz, 120Hz, etc.). Automatically adapts when the window moves between
-    // monitors. Only active while animating — zero CPU when idle.
+    // VSync-aligned frame tick — fires at the display's native refresh rate.
+    // Only active while animating. When idle, a 1Hz heartbeat prevents macOS
+    // App Nap from classifying the app as inactive and force-terminating it.
     if state.animating {
         subs.push(window::frames().map(|_| Message::AnimTick));
+    } else {
+        subs.push(
+            iced::time::every(std::time::Duration::from_secs(1)).map(|_| Message::AnimTick),
+        );
     }
 
     Subscription::batch(subs)
