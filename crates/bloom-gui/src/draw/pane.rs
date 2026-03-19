@@ -7,11 +7,13 @@ use bloom_md::theme::ThemePalette;
 use iced::{Color, Rectangle};
 
 use crate::draw::{
-    chars_that_fit, draw_bar_cursor, draw_text, draw_text_right, draw_text_sized, fill_rect, rect,
-    text_width, truncate_text,
+    chars_that_fit, draw_bar_cursor, draw_text, draw_text_right, draw_text_sized, draw_vline,
+    fill_rect, rect, text_width, truncate_text,
 };
 use crate::theme::{rgb_to_color, style_to_bg, style_to_color};
-use crate::{CHAR_WIDTH, FONT_SIZE, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, STATUS_BAR_HEIGHT};
+use crate::{
+    CHAR_WIDTH, FONT_SIZE, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, SPACING_SM, STATUS_BAR_HEIGHT,
+};
 
 /// Extra pixels the GUI status bar adds beyond what core allocates (1 cell row).
 const STATUS_BAR_EXTRA: f32 = STATUS_BAR_HEIGHT - LINE_HEIGHT;
@@ -417,15 +419,23 @@ fn draw_normal_status(
         _ => (rgb_to_color(&theme.foreground), rgb_to_color(&theme.mild)),
     };
     let badge_text = format!(" {} ", mode);
-    let badge_w = badge_text.chars().count() as f32 * CHAR_WIDTH;
-    fill_rect(frame, rect(pane_x, bar_y, badge_w, STATUS_BAR_HEIGHT), badge_bg);
-    draw_text(frame, pane_x, status_y, &badge_text, badge_fg);
+    let badge_text_w = badge_text.chars().count() as f32 * CHAR_WIDTH;
+    let badge_x = pane_x + SPACING_SM;
+    let badge_w = badge_text_w + SPACING_SM * 2.0;
+    fill_rect(frame, rect(badge_x, bar_y, badge_w, STATUS_BAR_HEIGHT), badge_bg);
+    draw_text(frame, badge_x + SPACING_SM, status_y, &badge_text, badge_fg);
 
-    // Title + dirty flag after the badge.
+    // 1px vertical separator after the badge (half status bar height, centered).
+    let sep_x = badge_x + badge_w + SPACING_SM;
+    let sep_h = STATUS_BAR_HEIGHT * 0.5;
+    let sep_y1 = bar_y + (STATUS_BAR_HEIGHT - sep_h) / 2.0;
+    draw_vline(frame, sep_x, sep_y1, sep_y1 + sep_h, rgb_to_color(&theme.faded));
+
+    // Title + dirty flag after the separator.
     let dirty = if normal.dirty { " [+]" } else { "" };
-    let after_badge_x = pane_x + badge_w + CHAR_WIDTH;
+    let after_badge_x = sep_x + SPACING_SM;
     let title_text = format!("{}{}", normal.title, dirty);
-    let title_max = chars_that_fit((pane_w - badge_w - 2.0 * CHAR_WIDTH).max(0.0));
+    let title_max = chars_that_fit((pane_x + pane_w - after_badge_x - CHAR_WIDTH).max(0.0));
     draw_text(
         frame,
         after_badge_x,
@@ -487,9 +497,19 @@ fn draw_normal_status(
         let gap = 2.0 * CHAR_WIDTH;
         let right_edge = pane_x + pane_w - CHAR_WIDTH;
         let mut cursor_x = right_edge;
-        for (_id, text, color) in &segments {
+        for (id, text, color) in &segments {
             let w = text_width(text);
             cursor_x -= w;
+            // Pending keys get a subtle background pill.
+            if *id == "pending" {
+                let pill = rect(
+                    cursor_x - SPACING_SM,
+                    bar_y,
+                    w + SPACING_SM * 2.0,
+                    STATUS_BAR_HEIGHT,
+                );
+                fill_rect(frame, pill, rgb_to_color(&theme.subtle));
+            }
             draw_text(frame, cursor_x, status_y, text, *color);
             cursor_x -= gap;
         }

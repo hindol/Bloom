@@ -463,7 +463,7 @@ fn draw_split_borders(frame: &mut canvas::Frame, panes: &[PaneFrame], theme: &Th
             x as f32 * CHAR_WIDTH,
             y1 as f32 * crate::LINE_HEIGHT,
             y2 as f32 * crate::LINE_HEIGHT,
-            rgb_to_color(&theme.faded),
+            rgb_to_color(&theme.subtle),
         );
     }
     for (y, x1, x2) in horiz {
@@ -472,7 +472,7 @@ fn draw_split_borders(frame: &mut canvas::Frame, panes: &[PaneFrame], theme: &Th
             x1 as f32 * CHAR_WIDTH,
             x2 as f32 * CHAR_WIDTH,
             y as f32 * crate::LINE_HEIGHT,
-            rgb_to_color(&theme.faded),
+            rgb_to_color(&theme.subtle),
         );
     }
 }

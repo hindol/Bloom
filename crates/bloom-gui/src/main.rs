@@ -37,6 +37,12 @@ pub(crate) const GUTTER_WIDTH: f32 = GUTTER_CHARS as f32 * CHAR_WIDTH;
 pub(crate) const BOTTOM_SAFE_AREA: f32 = 6.0;
 pub(crate) const EDITOR_FONT: Font = Font::with_name("JetBrains Mono");
 
+#[allow(unused)]
+pub(crate) const SPACING_XS: f32 = 2.0;
+pub(crate) const SPACING_SM: f32 = 4.0;
+pub(crate) const SPACING_MD: f32 = 8.0;
+pub(crate) const SPACING_LG: f32 = 16.0;
+
 #[allow(dead_code)]
 pub(crate) struct FontMetrics {
     pub char_width: f32,

@@ -6,10 +6,10 @@ use bloom_md::theme::ThemePalette;
 use iced::Size;
 
 use crate::draw::{
-    chars_that_fit, draw_hline, draw_text, fill_rect, rect, truncate_text,
+    chars_that_fit, draw_hline, draw_text, fill_rect, rect, text_width, truncate_text,
 };
 use crate::theme::rgb_to_color;
-use crate::{CHAR_WIDTH, LINE_HEIGHT};
+use crate::{CHAR_WIDTH, LINE_HEIGHT, SPACING_MD, SPACING_SM};
 
 pub(crate) fn draw_which_key(
     frame: &mut iced::widget::canvas::Frame,
@@ -51,12 +51,17 @@ pub(crate) fn draw_which_key(
         }
         let x = CHAR_WIDTH + (col * col_chars) as f32 * CHAR_WIDTH;
         let y = panel_y + (row + 1) as f32 * LINE_HEIGHT + 2.0;
-        let key = format!("{:<4}", truncate_text(&entry.key, 4));
+        let key = truncate_text(&entry.key, 4);
+        let key_text_width = text_width(&key);
+        // Subtle background pill behind the key.
+        let key_pill = rect(x, y, key_text_width + SPACING_SM * 2.0, LINE_HEIGHT);
+        fill_rect(frame, key_pill, rgb_to_color(&theme.subtle));
+        draw_text(frame, x + SPACING_SM, y, &key, rgb_to_color(&theme.strong));
+        let label_x = x + key_text_width + SPACING_SM * 2.0 + SPACING_MD;
         let label = truncate_text(&entry.label, col_chars.saturating_sub(5));
-        draw_text(frame, x, y, key, rgb_to_color(&theme.strong));
         draw_text(
             frame,
-            x + 5.0 * CHAR_WIDTH,
+            label_x,
             y,
             label,
             rgb_to_color(&theme.foreground),

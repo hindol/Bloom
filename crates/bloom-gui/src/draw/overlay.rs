@@ -11,7 +11,7 @@ use crate::draw::{
     text_width, truncate_text,
 };
 use crate::theme::rgb_to_color;
-use crate::{CHAR_WIDTH, LINE_HEIGHT};
+use crate::{CHAR_WIDTH, LINE_HEIGHT, SPACING_LG, SPACING_MD};
 
 pub(crate) fn draw_picker(
     frame: &mut iced::widget::canvas::Frame,
@@ -37,7 +37,12 @@ pub(crate) fn draw_picker(
         rgb_to_color(&theme.faded),
     );
 
-    let inner = inset(area, CHAR_WIDTH);
+    let inner = iced::Rectangle {
+        x: area.x + SPACING_LG,
+        y: area.y + SPACING_MD,
+        width: (area.width - SPACING_LG * 2.0).max(0.0),
+        height: (area.height - SPACING_MD * 2.0).max(0.0),
+    };
     let total_lines = ((inner.height / LINE_HEIGHT).floor() as usize).max(8);
     let preview_lines = if picker.preview.is_some() {
         (total_lines / 4).clamp(4, 8)
@@ -64,6 +69,12 @@ pub(crate) fn draw_picker(
     );
 
     let query_y = inner.y + LINE_HEIGHT;
+    // Subtle background wash behind the query area.
+    fill_rect(
+        frame,
+        rect(area.x + 1.0, query_y, area.width - 2.0, LINE_HEIGHT),
+        rgb_to_color(&theme.subtle),
+    );
     draw_text(frame, inner.x, query_y, ">", rgb_to_color(&theme.faded));
     let query_x = inner.x + 2.0 * CHAR_WIDTH;
     if picker.query_selected && !picker.query.is_empty() {
@@ -91,6 +102,15 @@ pub(crate) fn draw_picker(
             .min(inner.x + inner.width - 2.0),
         query_y,
         rgb_to_color(&theme.foreground),
+    );
+
+    // 1px faded line separating query from results.
+    draw_hline(
+        frame,
+        area.x + 1.0,
+        area.x + area.width - 1.0,
+        query_y + LINE_HEIGHT,
+        rgb_to_color(&theme.faded),
     );
 
     let result_y = inner.y + 2.0 * LINE_HEIGHT;
@@ -125,8 +145,13 @@ pub(crate) fn draw_picker(
         if selected {
             fill_rect(
                 frame,
-                rect(inner.x - 2.0, y, inner.width + 4.0, LINE_HEIGHT),
+                rect(inner.x, y, inner.width, LINE_HEIGHT),
                 rgb_to_color(&theme.mild),
+            );
+            fill_rect(
+                frame,
+                rect(inner.x, y, 2.0, LINE_HEIGHT),
+                rgb_to_color(&theme.salient),
             );
         }
         draw_text(
