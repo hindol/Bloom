@@ -25,6 +25,7 @@ impl BloomEditor {
             level,
             expires_at,
             created_at: Instant::now(),
+            wall_time: chrono::Local::now(),
         };
         self.notification_history.push(notif.clone());
         if self.notification_history.len() > 100 {
@@ -92,12 +93,8 @@ impl BloomEditor {
                 render::NotificationLevel::Warning => "\u{26a0}",
                 render::NotificationLevel::Error => "\u{2717}",
             };
-            let elapsed = n.created_at.elapsed();
-            let secs = elapsed.as_secs();
-            let h = secs / 3600;
-            let m = (secs % 3600) / 60;
-            let s = secs % 60;
-            lines.push(format!("[{h:02}:{m:02}:{s:02}] {icon} {}", n.message));
+            let time = n.wall_time.format("%H:%M:%S").to_string();
+            lines.push(format!("[{time}] {icon} {}", n.message));
         }
         if lines.is_empty() {
             lines.push("No notifications yet.".to_string());

@@ -503,6 +503,9 @@ pub struct Notification {
     pub expires_at: Option<Instant>,
     #[serde(skip)]
     pub created_at: Instant,
+    /// Wall clock time for display in `:messages` buffer.
+    #[serde(skip)]
+    pub wall_time: chrono::DateTime<chrono::Local>,
 }
 
 /// Severity level for notifications — determines color coding and expiry.

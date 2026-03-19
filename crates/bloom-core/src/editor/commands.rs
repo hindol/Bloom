@@ -462,6 +462,7 @@ impl BloomEditor {
             level: render::NotificationLevel::Info,
             expires_at: Some(std::time::Instant::now() + std::time::Duration::from_secs(3)),
             created_at: std::time::Instant::now(),
+            wall_time: chrono::Local::now(),
         });
     }
 
@@ -472,6 +473,7 @@ impl BloomEditor {
             level: render::NotificationLevel::Info,
             expires_at: Some(std::time::Instant::now() + std::time::Duration::from_secs(3)),
             created_at: std::time::Instant::now(),
+            wall_time: chrono::Local::now(),
         });
     }
 
