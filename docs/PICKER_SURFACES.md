@@ -1,43 +1,9 @@
 # Bloom 🌱 — Picker Surfaces
 
-> Detailed wireframes for every fuzzy picker surface in Bloom.
-> See GOALS.md G16 for architecture and keybinding reference.
+> Per-picker data definitions, columns, ranking, and preview content.
+> See [WINDOW_LAYOUTS.md](WINDOW_LAYOUTS.md) for spatial layout, dimensions, and chrome styling.
 
-Every picker shares a single layout component and input handler. Individual pickers only supply **data** (items, columns, preview content) — they never define their own layout or keybindings.
-
-### Two layout variants
-
-**Modal** (default) — centered overlay, 60% × 70% of screen, with optional preview pane:
-
-```
-┌─ [Title] ─────────────────────────────────────────────────────┐
-│ > query text_                                     [filters]   │
-│                                                               │
-│ ▸ [label]             [middle col]          [right col]       │
-│   [label]             [middle col]          [right col]       │
-│   [label]             [middle col]          [right col]       │
-│                                                               │
-│   N of M [noun]                                               │  ← status line
-├───────────────────────────────────────────────────────────────┤
-│                                                               │
-│   [preview of highlighted item]                               │  ← preview pane
-│                                                               │
-└───────────────────────────────────────────────────────────────┘
-```
-
-**Inline menu** — compact, anchored to cursor or command line. Used for contextual completions:
-
-```
-   text before cursor|
-                      ┌───────────────────────────────┐
-                      │ ▸ [label]              [right] │
-                      │   [label]              [right] │
-                      │                                │
-                      │ ↵ select  ⎋ cancel             │  ← optional hint line
-                      └───────────────────────────────┘
-```
-
-The inline menu is a shared component. Individual use cases supply **data** (items, marginalia) and an **anchor point** — they never define their own layout or keybindings. See the inline menu sections below (§9–§13) for all use cases.
+Every picker shares a single layout component and input handler. Individual pickers only supply **data** (items, columns, preview content) — they never define their own layout or keybindings. There are two layout variants — **modal** (centered overlay with optional preview pane) and **inline menu** (compact, anchored to cursor) — both defined in [WINDOW_LAYOUTS.md](WINDOW_LAYOUTS.md).
 
 ### Row columns
 
@@ -562,33 +528,22 @@ For `SPC j t` (task variant):
 
 ## Shared Anatomy Summary
 
-```
-┌─ Title ───────────────────────────────────────────────────────┐
-│ > [query input]                          [filter] [filter]    │  ← input + filters
-│                                                               │
-│ ▸ [label]             [middle col]          [right col]       │  ← result list
-│   [label]             [middle col]          [right col]       │
-│   [label]             [middle col]          [right col]       │
-│                                                               │
-│   [filtered] of [total] [noun]                                │  ← status line
-├───────────────────────────────────────────────────────────────┤
-│                                                               │
-│   [preview of highlighted item]                               │  ← preview pane
-│                                                               │
-└───────────────────────────────────────────────────────────────┘
+Every modal picker has: a query input with filter pills, a result list with up to three columns, a status line (`{filtered} of {total} {noun}`), and an optional preview pane. For spatial layout and dimensions, see [WINDOW_LAYOUTS.md](WINDOW_LAYOUTS.md).
 
-Navigation:          Ctrl+N/P or Ctrl+J/K or ↑/↓    move highlight
-Confirm:             Enter               select / execute
-Cancel:              Escape / Ctrl+G     close picker
-Action menu:         Tab                 on highlighted result
-Batch select:        Tab (marks item)    then Enter to act on all
-Filters:             Ctrl+T/D/L/S        add filter
-Filter navigation:   Ctrl+←/→            move between filter pills
-Clear filter:        Backspace on pill
-Clear all filters:   Ctrl+Backspace
-Clear input:         Ctrl+U
-Top/bottom:          gg / G
-```
+**Navigation:**
+
+| Binding | Action |
+|---------|--------|
+| `Ctrl+N/P` or `Ctrl+J/K` or `↑/↓` | Move highlight |
+| `Enter` | Select / execute |
+| `Escape` / `Ctrl+G` | Close picker |
+| `Tab` | Action menu on highlighted result (or batch-mark) |
+| `Ctrl+T/D/L/S` | Add filter |
+| `Ctrl+←/→` | Move between filter pills |
+| `Backspace` on pill | Clear filter |
+| `Ctrl+Backspace` | Clear all filters |
+| `Ctrl+U` | Clear input |
+| `gg` / `G` | Top / bottom |
 
 ### Column usage by picker
 
@@ -693,227 +648,11 @@ Preview content is loaded on highlight change (not upfront for all results). For
 
 ---
 
-## Inline Menu — Shared Properties
+## Inline Menu — Shared Data Model
 
-All inline menus (§9–§13) share one rendering component and one input handler:
+All inline menus (§9–§13) share one rendering component and one input handler. For layout dimensions and styling, see the Inline Menu section in [WINDOW_LAYOUTS.md](WINDOW_LAYOUTS.md).
 
-| Property | Value |
-|----------|-------|
-| Width | max(label + right) + padding, capped at 40 cols |
-| Height | min(item count, 8 rows) |
-| Background | `subtle` |
-| Border | `faded`, single-line box |
-| Selected row | `mild` background, `▸` marker |
-| Label | `foreground` |
-| Right column | `faded` |
-| Navigation | `↓`/`Ctrl+n` next, `↑`/`Ctrl+p` previous |
-| Accept | `Tab` fills input (no execute), `Enter` confirms |
-| Cancel | `Escape` closes |
-| Scrolling | Same `scrolloff` config as editor |
-
----
-
-## 15. Which-Key Popup — `SPC` + timeout / pending Vim key
-
-Not a picker — a bottom-anchored panel that appears after a brief timeout (~500ms) when a key prefix is pending. Provides progressive disclosure of available next keys.
-
-### Leader Which-Key (after `SPC`)
-
-**Step 1: User presses `SPC` and pauses**
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                                                              │
-│  # Text Editor Theory                                        │
-│                                                              │
-│  ## Rope Data Structure                                      │
-│  Ropes are O(log n) for inserts. They use balanced           │
-│  binary trees to represent text.                             │
-│                                                              │
-├── SPC ───────────────────────────────────────────────────────┤
-│                                                              │
-│  f  files         s  search        l  links        j journal │
-│  t  tags          a  agenda        n  new page     w windows │
-│  u  undo          r  refactor      i  insert       T toggles │
-│  b  buffers       h  help          ?  all commands            │
-│  SPC  commands (M-x)                                         │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
-```
-
-**Step 2: User presses `f` — drills into the `files` group**
-
-```
-├── SPC f ─────────────────────────────────────────────────────┤
-│                                                              │
-│  f  find page     r  rename        D  delete                 │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
-```
-
-**Step 3: User presses `f` again — `SPC f f` executes (Find Page picker opens)**
-
-| Element | Style |
-|---------|-------|
-| Panel position | Bottom of screen, above status bar |
-| `SPC` / `SPC f` header | `faded` prefix showing the keys typed so far |
-| Key character (`f`, `s`, etc.) | `strong` (bold) — the actionable key |
-| Description (`files`, `search`) | `foreground` — what it does |
-| Group vs action | Groups (contain sub-keys) show as label only; actions execute immediately |
-| Grid layout | Keys arranged in columns, max 4 columns wide, rows wrap as needed |
-| Timeout | Popup appears ~500ms after the pending key. Typing before timeout skips the popup — the key is processed normally. |
-
-### Vim Grammar Which-Key (after pending operator)
-
-**User presses `d` in Normal mode and pauses:**
-
-```
-├── d ─────────────────────────────────────────────────────────┤
-│                                                              │
-│  motions                          text objects               │
-│  w  word          b  back word    iw  inner word             │
-│  e  end of word   $  end of line  aw  around word            │
-│  0  start of line gg top of file  ip  inner paragraph        │
-│  j  line down     k  line up      ap  around paragraph       │
-│  G  end of file   %  matching     il  inner link             │
-│  f… find char     t… till char    al  around link             │
-│                                   i#  inner tag              │
-│  operators                        a#  around tag             │
-│  d  delete line (dd)              i@  inner timestamp        │
-│                                   ih  inner heading section  │
-│                                   ah  around heading section │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
-```
-
-**User presses `c` (change) and pauses — similar layout:**
-
-```
-├── c ─────────────────────────────────────────────────────────┤
-│                                                              │
-│  motions                          text objects               │
-│  w  word          b  back word    iw  inner word             │
-│  e  end of word   $  end of line  aw  around word            │
-│  ...                              ...                        │
-│                                                              │
-│  operators                                                   │
-│  c  change line (cc)                                         │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
-```
-
-| Element | Style |
-|---------|-------|
-| Operator header (`d`, `c`) | `salient` — the pending operator |
-| Section labels (`motions`, `text objects`, `operators`) | `faded`, italic — category headers |
-| Key character | `strong` (bold) |
-| Description | `foreground` |
-| `…` suffix on `f` and `t` | Indicates another key follows (e.g., `fa` = find 'a') |
-| Bloom-specific objects | Highlighted subtly — `il`, `al`, `i#`, `a#`, `i@`, `ih`, `ah` appear alongside standard Vim objects |
-
-### Behavior
-
-- **No interaction required.** The popup is read-only. The user just presses the next key.
-- **Instant dismiss.** Any keypress closes the popup and processes the key. No Escape needed.
-- **Timeout only.** Popup ONLY appears after ~500ms of inactivity. Fast typists never see it — `SPC f f` typed quickly opens Find Page directly.
-- **Configurable timeout.** `which_key_timeout_ms = 500` in `config.toml`.
-- **Nested groups.** Leader which-key supports arbitrary depth: `SPC` → `w` → `=` (balance windows). Each level replaces the popup content.
-
----
-
-## 12. Command Line — `:` mode
-
-Triggered by pressing `:` in Normal mode. A single-line input at the bottom of the screen (same position as Vim's command line). Supports tab completion.
-
-### Basic Command
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                                                              │
-│  (editor content undisturbed)                                │
-│                                                              │
-├──────────────────────────────────────────────────────────────┤
-│ :rebuild-index_                                              │
-└──────────────────────────────────────────────────────────────┘
-```
-
-### Tab Completion
-
-**User types `:reb` and presses Tab:**
-
-```
-├──────────────────────────────────────────────────────────────┤
-│ :rebuild-index_                                              │
-│  rebuild-index    Rebuild the search index from scratch       │
-└──────────────────────────────────────────────────────────────┘
-```
-
-If multiple matches, Tab cycles through them:
-
-```
-├──────────────────────────────────────────────────────────────┤
-│ :theme_                                                      │
-│  theme            Switch or cycle themes                      │
-│  theme-reload     Reload theme from config                    │
-└──────────────────────────────────────────────────────────────┘
-```
-
-### Command with Arguments
-
-**`:theme` accepts a theme name. User types `:theme ` and presses Tab:**
-
-```
-├──────────────────────────────────────────────────────────────┤
-│ :theme bloom-dark_                                           │
-│  bloom-dark       bloom-dark-faded       bloom-light          │
-│  bloom-light-faded                                            │
-└──────────────────────────────────────────────────────────────┘
-```
-
-### Error Display
-
-**User types `:nonexistent` and presses Enter:**
-
-```
-├──────────────────────────────────────────────────────────────┤
-│ E: Unknown command: nonexistent                    :_        │
-└──────────────────────────────────────────────────────────────┘
-```
-
-Error message shown briefly (`critical` colour), then the command line closes.
-
-### Available Commands
-
-| Command | Arguments | Description |
-|---------|-----------|-------------|
-| `:rebuild-index` | — | Rebuild SQLite index from scratch |
-| `:theme` | `<name>?` | Switch theme (no arg = cycle) |
-| `:theme-reload` | — | Reload current theme from config |
-| `:import-logseq` | `<path>` | Import from Logseq directory |
-| `:set` | `<key> <value>` | Change a config setting for this session |
-| `:write` / `:w` | — | Save current buffer |
-| `:quit` / `:q` | — | Close current window |
-| `:wq` | — | Save and close |
-| `:qa` | — | Quit all windows |
-
-| Element | Style |
-|---------|-------|
-| `:` prompt | `faded` |
-| Command text | `foreground` |
-| Completion popup | `subtle` background, `foreground` text, highlighted match in `strong` |
-| Error message | `critical` foreground |
-| Position | Bottom of screen, replaces status bar while active |
-
-### Interaction
-
-| Binding | Action |
-|---------|--------|
-| `Enter` | Execute command |
-| `Escape` | Cancel, close command line |
-| `Tab` | Cycle through completions |
-| `Shift+Tab` | Cycle completions in reverse |
-| `↑` / `↓` | Command history (previous/next) |
-| `Ctrl+U` | Clear command line |
+Each inline menu supplies: a list of items with a **label** and an optional **right column**, plus an **anchor point** (cursor position or command line). Navigation: `↓`/`Ctrl+n` next, `↑`/`Ctrl+p` previous. `Tab` fills input (no execute), `Enter` confirms, `Escape` closes.
 
 ---
 

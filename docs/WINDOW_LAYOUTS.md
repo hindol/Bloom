@@ -674,6 +674,10 @@ Find Page > query█
 
 ### Which-Key Drawer
 
+Bottom-anchored panel that appears after a brief timeout when a key prefix is pending (leader `SPC`, or a Vim operator like `d`/`c`). Provides progressive disclosure of available next keys.
+
+**Leader Which-Key** (after `SPC`):
+
 ```
 ────────────────────── faded separator
  f +files     s +search     l +links     j +journal
@@ -681,13 +685,33 @@ Find Page > query█
 ────────────────────── (bottom of window)
 ```
 
+Pressing a group key (e.g., `f`) drills into the group, replacing the drawer content.
+
+**Vim Grammar Which-Key** (after pending operator like `d`, `c`):
+
+```
+────────────────────── faded separator
+ motions                          text objects
+ w  word          b  back word    iw  inner word
+ e  end of word   $  end of line  aw  around word
+ ...                              ...
+────────────────────── (bottom of window)
+```
+
 | Property | Value |
 |----------|-------|
+| Position | Bottom of screen, above status bar |
 | Background | `subtle` |
 | Top border | 1px `faded` |
 | Columns | 20 chars each, up to 4 |
-| Key | `strong` |
+| Key | `strong` (bold) |
 | Label | `foreground`, `+` prefix for groups |
+| Operator header (`d`, `c`) | `salient` |
+| Section labels (`motions`, `text objects`) | `faded`, italic |
+| Timeout | ~500ms of inactivity; fast typists never see it |
+| Configurable | `which_key_timeout_ms` in `config.toml` |
+| Dismiss | Any keypress closes the popup and processes the key |
+| Nesting | Supports arbitrary depth (e.g., `SPC` → `w` → `=`) |
 
 ### Temporal Strip Drawer
 
@@ -731,6 +755,26 @@ Anchored to cursor or command line. No scrim.
 | Max items | 8 |
 | Selected row | `mild` background |
 
+### Command Line (`:` mode)
+
+Single-line input at the bottom of the screen, replacing the status bar while active. Triggered by pressing `:` in Normal mode.
+
+```
+editor content
+────────────────────── faded separator
+:rebuild-index█
+```
+
+| Property | Value |
+|----------|-------|
+| Position | Bottom of screen, replaces status bar while active |
+| `:` prompt | `faded` |
+| Command text | `foreground` |
+| Completion popup | `subtle` background, `foreground` text, highlighted match in `strong` |
+| Error message | `critical` foreground, shown briefly then auto-dismissed |
+
+Tab completion shows an inline menu anchored to the command line (see **Inline Menu** above). For the list of available commands, see [PICKER_SURFACES.md](PICKER_SURFACES.md) §11 Command Completion.
+
 ### Notifications
 
 Bottom-right stack, above modeline.
@@ -751,5 +795,6 @@ Bottom-right stack, above modeline.
 |----------|----------|
 | [GOALS.md G11](GOALS.md) | Window management goal and keybindings |
 | [KEYBINDINGS.md](KEYBINDINGS.md) | Full window keybinding reference |
+| [PICKER_SURFACES.md](PICKER_SURFACES.md) | Per-picker data definitions, columns, ranking, and preview content |
 | [THEMING.md](THEMING.md) | Colour palette, semantic roles, spacing scale, GUI rendering constants |
 | [USE_CASES.md](test/USE_CASES.md) | UC-52 through UC-57 |
