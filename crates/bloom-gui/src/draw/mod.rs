@@ -44,6 +44,24 @@ pub(crate) fn draw_text(
     });
 }
 
+pub(crate) fn draw_text_sized(
+    frame: &mut Frame,
+    x: f32,
+    y: f32,
+    content: impl Into<String>,
+    color: Color,
+    size: f32,
+) {
+    frame.fill_text(canvas::Text {
+        content: content.into(),
+        position: Point::new(x, y + (size * 0.2).min(TEXT_Y_OFFSET)),
+        color,
+        size: size.into(),
+        font: EDITOR_FONT,
+        ..Default::default()
+    });
+}
+
 pub(crate) fn draw_text_right(
     frame: &mut Frame,
     right_x: f32,

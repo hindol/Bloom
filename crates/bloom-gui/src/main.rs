@@ -36,6 +36,24 @@ pub(crate) const GUTTER_WIDTH: f32 = GUTTER_CHARS as f32 * CHAR_WIDTH;
 /// Bottom safe area to avoid macOS window corner radius clipping.
 pub(crate) const BOTTOM_SAFE_AREA: f32 = 6.0;
 pub(crate) const EDITOR_FONT: Font = Font::with_name("JetBrains Mono");
+
+#[allow(dead_code)]
+pub(crate) struct FontMetrics {
+    pub char_width: f32,
+    pub line_height: f32,
+    pub font_size: f32,
+}
+
+impl Default for FontMetrics {
+    fn default() -> Self {
+        Self {
+            char_width: FONT_SIZE * 0.6,
+            line_height: FONT_SIZE * 1.4,
+            font_size: FONT_SIZE,
+        }
+    }
+}
+
 const JETBRAINS_MONO: &[u8] = include_bytes!("../fonts/JetBrainsMono-Regular.ttf");
 const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(530);
 
@@ -79,6 +97,9 @@ struct BloomApp {
     last_size: (u16, u16),
     /// Remote session rendering hints (detected once at startup).
     remote: RemoteHints,
+    /// Font metrics for layout calculations (prep for proportional fonts).
+    #[allow(dead_code)]
+    font_metrics: FontMetrics,
 }
 
 #[derive(Debug, Clone)]
@@ -160,6 +181,7 @@ fn boot() -> (BloomApp, Task<Message>) {
             blink_timer: None,
             last_size: (initial_cols, initial_rows),
             remote,
+            font_metrics: FontMetrics::default(),
         },
         Task::none(),
     )

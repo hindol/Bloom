@@ -1,20 +1,29 @@
 use bloom_core::render::{
     CommandLineSlot, CursorShape, LineSource, McpIndicator, NormalStatus, PageHistoryFrame,
-    PaneFrame, PaneKind, PaneRectFrame, QuickCaptureSlot, StatusBarContent, TimelineFrame,
+    PaneFrame, PaneKind, PaneRectFrame, QuickCaptureSlot, StatusBarContent, Style, TimelineFrame,
     UndoTreeFrame,
 };
 use bloom_md::theme::ThemePalette;
 use iced::{Color, Rectangle};
 
 use crate::draw::{
-    chars_that_fit, draw_bar_cursor, draw_text, draw_text_right, fill_rect, rect, text_width,
-    truncate_text,
+    chars_that_fit, draw_bar_cursor, draw_text, draw_text_right, draw_text_sized, fill_rect, rect,
+    text_width, truncate_text,
 };
 use crate::theme::{rgb_to_color, style_to_bg, style_to_color};
-use crate::{CHAR_WIDTH, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, STATUS_BAR_HEIGHT};
+use crate::{CHAR_WIDTH, FONT_SIZE, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, STATUS_BAR_HEIGHT};
 
 /// Extra pixels the GUI status bar adds beyond what core allocates (1 cell row).
 const STATUS_BAR_EXTRA: f32 = STATUS_BAR_HEIGHT - LINE_HEIGHT;
+
+fn heading_font_size(level: u8) -> f32 {
+    match level {
+        1 => FONT_SIZE * 1.5,
+        2 => FONT_SIZE * 1.3,
+        3 => FONT_SIZE * 1.1,
+        _ => FONT_SIZE,
+    }
+}
 
 /// Convert a cell-based PaneRectFrame to pixel coordinates.
 /// `status_bars_above` is the number of panes whose status bars are stacked
@@ -138,6 +147,12 @@ fn draw_editor_content(
                 rgb_to_color(&theme.foreground),
             );
         } else {
+            let heading_level = line.spans.iter().find_map(|s| match s.style {
+                Style::Heading { level } => Some(level),
+                _ => None,
+            });
+            let line_font_size = heading_level.map(heading_font_size).unwrap_or(FONT_SIZE);
+
             for span in &line.spans {
                 let start = span.range.start.min(visible_text.len());
                 let end = span.range.end.min(visible_text.len());
@@ -154,13 +169,24 @@ fn draw_editor_content(
                     fill_rect(frame, rect(text_x + span_x, y, span_w, LINE_HEIGHT), bg);
                 }
 
-                draw_text(
-                    frame,
-                    text_x + span_x,
-                    y,
-                    slice.to_string(),
-                    style_to_color(&span.style, theme),
-                );
+                if heading_level.is_some() {
+                    draw_text_sized(
+                        frame,
+                        text_x + span_x,
+                        y,
+                        slice.to_string(),
+                        style_to_color(&span.style, theme),
+                        line_font_size,
+                    );
+                } else {
+                    draw_text(
+                        frame,
+                        text_x + span_x,
+                        y,
+                        slice.to_string(),
+                        style_to_color(&span.style, theme),
+                    );
+                }
             }
         }
     }
