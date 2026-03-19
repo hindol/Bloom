@@ -244,8 +244,15 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
                 state.reset_cursor_blink();
 
                 if !state.handle_platform_shortcut(&key, &modified_key, modifiers) {
-                    if let Some(key_event) = convert_key(modified_key, modifiers) {
+                    // Try modified_key first (has Shift applied for characters),
+                    // fall back to key for named keys like Escape where
+                    // modified_key may differ.
+                    let bloom_key = convert_key(modified_key.clone(), modifiers)
+                        .or_else(|| convert_key(key.clone(), modifiers));
+                    if let Some(key_event) = bloom_key {
                         state.send_key_event(key_event);
+                    } else {
+                        eprintln!("[bloom-gui] unhandled key: key={key:?} modified_key={modified_key:?} modifiers={modifiers:?}");
                     }
                 }
 
