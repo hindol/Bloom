@@ -143,7 +143,9 @@ fn draw_editor_content(
                 {
                     rgb_to_color(&theme.salient)
                 } else {
-                    rgb_to_color(&theme.faded)
+                    // Blend faded toward background — softer than full faded,
+                    // stays within the semantic theme system.
+                    rgb_to_color(&theme.faded.blend(theme.background, 0.4))
                 };
                 draw_text(frame, pane_x, y, num_str, gutter_color);
             }
@@ -153,7 +155,7 @@ fn draw_editor_content(
                     pane_x + CHAR_WIDTH,
                     y,
                     "~",
-                    rgb_to_color(&theme.faded),
+                    rgb_to_color(&theme.faded.blend(theme.background, 0.4)),
                 );
             }
         }
