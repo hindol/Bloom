@@ -124,7 +124,7 @@ pub(crate) fn draw_temporal_diff_preview(
         let old_num = dl.old_line.map(|n| format!("{:>4}", n + 1)).unwrap_or_else(|| "    ".to_string());
         let new_num = dl.new_line.map(|n| format!("{:<4}", n + 1)).unwrap_or_else(|| "    ".to_string());
         let gutter_text = format!("{}│{}", old_num, new_num);
-        draw_text(frame, pane_x, y, gutter_text, rgb_to_color(&theme.faded));
+        draw_text(frame, pane_x, y, gutter_text, rgb_to_color(&theme.faded.blend(theme.background, 0.4)));
 
         // +/- prefix
         let prefix = match dl.kind {
