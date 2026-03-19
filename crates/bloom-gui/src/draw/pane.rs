@@ -76,6 +76,8 @@ pub(crate) fn pane_pixel_rect(
 
 /// Draw a pane. `anim` is `Some((cursor_y, highlight_y))` in absolute pixels
 /// for the active pane (smooth animated positions), or `None` for inactive panes.
+/// `modeline_bottom` is the Y coordinate of the bottom of the modeline rect,
+/// used to extend the bottommost status bar for macOS corner clearance.
 pub(crate) fn draw_pane(
     frame: &mut iced::widget::canvas::Frame,
     pane: &PaneFrame,
@@ -86,7 +88,7 @@ pub(crate) fn draw_pane(
     pane_y: f32,
     pane_w: f32,
     content_h: f32,
-    window_height: f32,
+    modeline_bottom: f32,
 ) {
     let content_rect = rect(pane_x, pane_y, pane_w, content_h);
 
@@ -105,9 +107,9 @@ pub(crate) fn draw_pane(
     }
 
     if pane.is_active {
-        draw_active_status_bar(frame, pane, theme, pane_x, pane_y, pane_w, window_height);
+        draw_active_status_bar(frame, pane, theme, pane_x, pane_y, pane_w, modeline_bottom);
     } else {
-        draw_inactive_status_bar(frame, pane, theme, pane_x, pane_y, pane_w, window_height);
+        draw_inactive_status_bar(frame, pane, theme, pane_x, pane_y, pane_w, modeline_bottom);
     }
 }
 
@@ -335,13 +337,13 @@ fn draw_active_status_bar(
     pane_x: f32,
     pane_y: f32,
     pane_w: f32,
-    window_height: f32,
+    modeline_bottom: f32,
 ) {
     let content_bottom = pane_y + pane.rect.content_height as f32 * LINE_HEIGHT;
-    // Fixed bar height — anchored to window bottom.
+    // Fixed bar height — anchored to modeline bottom.
     let bar_h = STATUS_BAR_HEIGHT + 4.0; // +4px for macOS corner clearance
-    let status_y = (window_height - bar_h).max(content_bottom);
-    let actual_h = window_height - status_y;
+    let status_y = (modeline_bottom - bar_h).max(content_bottom);
+    let actual_h = modeline_bottom - status_y;
     // Fill any gap between content and status bar with background.
     if status_y > content_bottom + 0.5 {
         fill_rect(
@@ -382,12 +384,12 @@ fn draw_inactive_status_bar(
     pane_x: f32,
     pane_y: f32,
     pane_w: f32,
-    window_height: f32,
+    modeline_bottom: f32,
 ) {
     let content_bottom = pane_y + pane.rect.content_height as f32 * LINE_HEIGHT;
     let target_h = STATUS_BAR_HEIGHT + 4.0;
-    let status_y = (window_height - target_h).max(content_bottom);
-    let actual_h = window_height - status_y;
+    let status_y = (modeline_bottom - target_h).max(content_bottom);
+    let actual_h = modeline_bottom - status_y;
     if status_y > content_bottom + 0.5 {
         fill_rect(
             frame,

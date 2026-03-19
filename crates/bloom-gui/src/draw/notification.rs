@@ -11,12 +11,13 @@ pub(crate) fn draw_notifications(
     size: Size,
     notifications: &[Notification],
     theme: &ThemePalette,
+    modeline_y: Option<f32>,
 ) {
     let gap = 4.0;
     let notif_h = LINE_HEIGHT + 4.0; // notification height with padding
-    // Start stacking from bottom, above the modeline area (~24px from bottom).
-    let bottom_margin = STATUS_BAR_HEIGHT + 8.0;
-    let mut y = size.height - bottom_margin - notif_h;
+    // Start stacking from bottom, above the modeline area.
+    let bottom_edge = modeline_y.unwrap_or(size.height - STATUS_BAR_HEIGHT - 8.0);
+    let mut y = bottom_edge - notif_h;
 
     for notification in notifications.iter().rev().take(3) {
         if y < 0.0 {

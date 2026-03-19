@@ -16,6 +16,7 @@ pub(crate) fn draw_which_key(
     size: Size,
     which_key: &WhichKeyFrame,
     theme: &ThemePalette,
+    drawer_rect: Option<iced::Rectangle>,
 ) {
     let total_chars = chars_that_fit(size.width);
     let col_chars = 20usize;
@@ -23,7 +24,9 @@ pub(crate) fn draw_which_key(
     let rows = which_key.entries.len().div_ceil(cols).max(1);
     let panel_lines = rows + 2;
     let panel_h = panel_lines as f32 * LINE_HEIGHT;
-    let panel_y = (size.height - panel_h).max(0.0);
+    let panel_y = drawer_rect
+        .map(|r| r.y)
+        .unwrap_or_else(|| (size.height - panel_h).max(0.0));
 
     fill_rect(
         frame,
@@ -82,10 +85,15 @@ pub(crate) fn draw_temporal_diff_preview(
     strip: &TemporalStripFrame,
     theme: &ThemePalette,
     active_pane: Option<&PaneFrame>,
+    drawer_rect: Option<iced::Rectangle>,
 ) {
-    let lines = if strip.compact { 4 } else { 6 };
-    let panel_h = lines as f32 * LINE_HEIGHT;
-    let panel_y = (size.height - panel_h).max(0.0);
+    let panel_y = drawer_rect
+        .map(|r| r.y)
+        .unwrap_or_else(|| {
+            let lines = if strip.compact { 4 } else { 6 };
+            let panel_h = lines as f32 * LINE_HEIGHT;
+            (size.height - panel_h).max(0.0)
+        });
 
     let (pane_x, pane_y, pane_w) = if let Some(pane) = active_pane {
         (
@@ -156,6 +164,7 @@ pub(crate) fn draw_temporal_strip_drawer(
     size: Size,
     strip: &TemporalStripFrame,
     theme: &ThemePalette,
+    drawer_rect: Option<iced::Rectangle>,
 ) {
     if strip.items.is_empty() {
         return;
@@ -163,7 +172,9 @@ pub(crate) fn draw_temporal_strip_drawer(
 
     let lines = if strip.compact { 4 } else { 6 };
     let panel_h = lines as f32 * LINE_HEIGHT;
-    let panel_y = (size.height - panel_h).max(0.0);
+    let panel_y = drawer_rect
+        .map(|r| r.y)
+        .unwrap_or_else(|| (size.height - panel_h).max(0.0));
 
     let panel = rect(0.0, panel_y, size.width, panel_h);
     fill_rect(frame, panel, rgb_to_color(&theme.highlight));
@@ -305,9 +316,12 @@ pub(crate) fn draw_context_strip(
     size: Size,
     strip: &ContextStripFrame,
     theme: &ThemePalette,
+    drawer_rect: Option<iced::Rectangle>,
 ) {
     let panel_h = 3.0 * LINE_HEIGHT;
-    let panel_y = (size.height - panel_h).max(0.0);
+    let panel_y = drawer_rect
+        .map(|r| r.y)
+        .unwrap_or_else(|| (size.height - panel_h).max(0.0));
     fill_rect(
         frame,
         rect(0.0, panel_y, size.width, panel_h),

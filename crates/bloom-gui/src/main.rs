@@ -3,6 +3,7 @@
 mod canvas;
 mod draw;
 mod keys;
+mod layout;
 mod remote;
 mod theme;
 

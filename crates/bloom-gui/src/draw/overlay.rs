@@ -18,18 +18,23 @@ pub(crate) fn draw_picker(
     picker: &PickerFrame,
     theme: &ThemePalette,
     _scrim_alpha: f32,
+    drawer_rect: Option<iced::Rectangle>,
 ) {
     // No scrim — bottom-anchored minibuffer style.
 
     let content_chars = chars_that_fit(size.width).saturating_sub(4);
     let max_visible: usize = 10;
     let num_results = picker.results.len().min(max_visible);
-    // Clamp to available space: status_line(1) + results + query_line(1) + separator lines(2).
-    let available_lines = ((size.height - STATUS_BAR_HEIGHT) / LINE_HEIGHT) as usize;
+
+    // Use drawer_rect to determine panel position when available.
+    let panel_bottom = drawer_rect
+        .map(|r| r.y + r.height)
+        .unwrap_or(size.height - STATUS_BAR_HEIGHT);
+    let available_lines = (panel_bottom / LINE_HEIGHT) as usize;
     let num_visible = num_results.min(available_lines.saturating_sub(4));
 
     // Layout from bottom up.
-    let query_y = size.height - STATUS_BAR_HEIGHT - LINE_HEIGHT;
+    let query_y = panel_bottom - LINE_HEIGHT;
     let status_line_y = query_y - LINE_HEIGHT;
     let results_bottom_y = status_line_y; // results end here
     let results_top_y = results_bottom_y - num_visible as f32 * LINE_HEIGHT;
@@ -38,7 +43,7 @@ pub(crate) fn draw_picker(
     // Opaque background covering the picker area.
     fill_rect(
         frame,
-        rect(0.0, panel_top, size.width, size.height - STATUS_BAR_HEIGHT - panel_top),
+        rect(0.0, panel_top, size.width, panel_bottom - panel_top),
         rgb_to_color(&theme.background),
     );
 
@@ -235,6 +240,7 @@ pub(crate) fn draw_date_picker(
     size: Size,
     picker: &DatePickerFrame,
     theme: &ThemePalette,
+    drawer_rect: Option<iced::Rectangle>,
 ) {
     // Bottom-anchored drawer (same pattern as picker minibuffer).
     let content_chars = chars_that_fit(size.width).saturating_sub(4);
@@ -243,13 +249,16 @@ pub(crate) fn draw_date_picker(
     let total_lines = 3 + num_weeks + 1;
 
     // Layout from bottom up, above modeline.
-    let hint_y = size.height - STATUS_BAR_HEIGHT - LINE_HEIGHT;
+    let panel_bottom = drawer_rect
+        .map(|r| r.y + r.height)
+        .unwrap_or(size.height - STATUS_BAR_HEIGHT);
+    let hint_y = panel_bottom - LINE_HEIGHT;
     let panel_top = hint_y - (total_lines as f32 - 1.0) * LINE_HEIGHT - LINE_HEIGHT * 0.5;
 
     // Opaque background.
     fill_rect(
         frame,
-        rect(0.0, panel_top, size.width, size.height - STATUS_BAR_HEIGHT - panel_top),
+        rect(0.0, panel_top, size.width, panel_bottom - panel_top),
         rgb_to_color(&theme.background),
     );
 
@@ -719,19 +728,23 @@ pub(crate) fn draw_view(
     size: Size,
     view_frame: &ViewFrame,
     theme: &ThemePalette,
+    drawer_rect: Option<iced::Rectangle>,
 ) {
     // Bottom-anchored minibuffer (same pattern as picker).
     let content_chars = chars_that_fit(size.width).saturating_sub(4);
     let max_visible: usize = 12;
     let num_results = view_frame.rows.len().min(max_visible);
-    let available_lines = ((size.height - STATUS_BAR_HEIGHT) / LINE_HEIGHT) as usize;
+    let panel_bottom = drawer_rect
+        .map(|r| r.y + r.height)
+        .unwrap_or(size.height - STATUS_BAR_HEIGHT);
+    let available_lines = (panel_bottom / LINE_HEIGHT) as usize;
 
     // Lines needed: title(1) + rows + status(1) + optional query(1) + optional error(1).
     let extra = 2 + if view_frame.is_prompt { 1 } else { 0 } + if view_frame.error.is_some() { 1 } else { 0 };
     let num_visible = num_results.min(available_lines.saturating_sub(extra + 2));
 
     // Layout from bottom up, above modeline.
-    let mut bottom_y = size.height - STATUS_BAR_HEIGHT;
+    let mut bottom_y = panel_bottom;
 
     // Query line (if prompt mode) — bottom-most element.
     let query_y = if view_frame.is_prompt {
@@ -765,7 +778,7 @@ pub(crate) fn draw_view(
     // Opaque background.
     fill_rect(
         frame,
-        rect(0.0, panel_top, size.width, size.height - STATUS_BAR_HEIGHT - panel_top),
+        rect(0.0, panel_top, size.width, panel_bottom - panel_top),
         rgb_to_color(&theme.background),
     );
 

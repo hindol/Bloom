@@ -7,6 +7,7 @@ use iced::widget::canvas::{self, Action, Cache, Event, Geometry};
 use iced::{Rectangle, Renderer, Size, Theme};
 
 use crate::draw::{draw_text_right, drawer, inline, notification, overlay, pane};
+use crate::layout::FrameLayout;
 use crate::remote::RemoteHints;
 use crate::theme::rgb_to_color;
 use crate::{CHAR_WIDTH, Message};
@@ -173,6 +174,10 @@ impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
                 return;
             }
 
+            // Compute layout once for the entire frame.
+            let layout = FrameLayout::compute(bounds.size().width, bounds.size().height, rf);
+            let modeline_bottom = layout.modeline.y + layout.modeline.height;
+
             // Compute how many status bars are above each pane's Y origin.
             // Panes are sorted by Y in the frame. For each pane, count panes
             // whose total_height boundary is at or above this pane's Y.
@@ -198,24 +203,25 @@ impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
                     py,
                     pw,
                     ch,
-                    bounds.size().height,
+                    modeline_bottom,
                 );
             }
 
             draw_split_borders(frame, &rf.panes, self.theme);
             draw_hidden_count(frame, bounds.size(), rf.hidden_pane_count, self.theme);
 
+            let drawer_rect = layout.drawer;
             if let Some(s) = &rf.context_strip {
-                drawer::draw_context_strip(frame, bounds.size(), s, self.theme);
+                drawer::draw_context_strip(frame, bounds.size(), s, self.theme, drawer_rect);
             }
             if let Some(s) = &rf.temporal_strip {
                 // Draw only the strip drawer (nodes, hints) — NOT the diff preview.
                 // Diff preview is on a separate layer (DiffCanvas) to avoid
                 // text blending issues within a single Canvas.
-                drawer::draw_temporal_strip_drawer(frame, bounds.size(), s, self.theme);
+                drawer::draw_temporal_strip_drawer(frame, bounds.size(), s, self.theme, drawer_rect);
             }
             if let Some(wk) = &rf.which_key {
-                drawer::draw_which_key(frame, bounds.size(), wk, self.theme);
+                drawer::draw_which_key(frame, bounds.size(), wk, self.theme, drawer_rect);
             }
         });
         vec![geometry]
@@ -260,9 +266,10 @@ impl<'a> canvas::Program<Message> for DiffCanvas<'a> {
         }
 
         let active = rf.panes.iter().find(|p| p.is_active);
+        let layout = FrameLayout::compute(bounds.size().width, bounds.size().height, rf);
 
         let geometry = self.cache.draw(renderer, bounds.size(), |frame| {
-            drawer::draw_temporal_diff_preview(frame, bounds.size(), strip, self.theme, active);
+            drawer::draw_temporal_diff_preview(frame, bounds.size(), strip, self.theme, active, layout.drawer);
         });
         vec![geometry]
     }
@@ -309,24 +316,27 @@ impl<'a> canvas::Program<Message> for OverlayCanvas<'a> {
         let geometry = self.cache.draw(renderer, bounds.size(), |frame| {
             let active = rf.panes.iter().find(|p| p.is_active);
             let scrim_alpha = if self.remote.opaque_scrim() { 1.0 } else { 0.50 };
+            let layout = FrameLayout::compute(bounds.size().width, bounds.size().height, rf);
+            let drawer_rect = layout.drawer;
 
             if let Some(m) = &rf.inline_menu {
                 inline::draw_inline_menu(frame, bounds.size(), active, m, self.theme);
             }
             if let Some(dp) = &rf.date_picker {
-                overlay::draw_date_picker(frame, bounds.size(), dp, self.theme);
+                overlay::draw_date_picker(frame, bounds.size(), dp, self.theme, drawer_rect);
             }
             if let Some(p) = &rf.picker {
-                overlay::draw_picker(frame, bounds.size(), p, self.theme, scrim_alpha);
+                overlay::draw_picker(frame, bounds.size(), p, self.theme, scrim_alpha, drawer_rect);
             }
             if let Some(d) = &rf.dialog {
                 overlay::draw_dialog(frame, bounds.size(), d, self.theme);
             }
             if let Some(v) = &rf.view {
-                overlay::draw_view(frame, bounds.size(), v, self.theme);
+                overlay::draw_view(frame, bounds.size(), v, self.theme, drawer_rect);
             }
             if !rf.notifications.is_empty() {
-                notification::draw_notifications(frame, bounds.size(), &rf.notifications, self.theme);
+                let modeline_y = Some(layout.modeline.y);
+                notification::draw_notifications(frame, bounds.size(), &rf.notifications, self.theme, modeline_y);
             }
         });
         vec![geometry]
