@@ -100,6 +100,9 @@ struct BloomApp {
     animating: bool,
     cursor_visible: bool,
     blink_timer: Option<Instant>,
+    /// Keep ticking until this instant — catches timer-driven core events
+    /// (which-key popup, notification expiry) after a key press.
+    keep_alive_until: Option<Instant>,
     /// Last window size sent to core (for resize detection).
     last_size: (u16, u16),
     /// Remote session rendering hints (detected once at startup).
@@ -186,6 +189,7 @@ fn boot() -> (BloomApp, Task<Message>) {
             animating: true,
             cursor_visible: true,
             blink_timer: None,
+            keep_alive_until: None,
             last_size: (initial_cols, initial_rows),
             remote,
             font_metrics: FontMetrics::default(),
@@ -235,7 +239,13 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
             };
             let insert_mode = state.is_insert_mode();
             let blink_changed = state.tick_cursor_blink(insert_mode);
-            state.animating = still_moving || insert_mode || state.frame.is_none();
+            let keep_alive = state.keep_alive_until
+                .map(|deadline| Instant::now() < deadline)
+                .unwrap_or(false);
+            state.animating = still_moving || insert_mode || state.frame.is_none() || keep_alive;
+            if !state.animating {
+                state.keep_alive_until = None;
+            }
             if still_moving || blink_changed {
                 state.clear_caches();
             }
@@ -263,9 +273,10 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
                     }
                 }
 
-                // Key sent — bump to animation speed so response frame is picked up
-                // on the next tick (8ms), and start the animation subscription.
+                // Key sent — keep ticking for 600ms to catch timer-driven
+                // core events (which-key popup at ~500ms, notification expiry).
                 state.animating = true;
+                state.keep_alive_until = Some(Instant::now() + Duration::from_millis(600));
                 state.clear_caches();
             }
         }
