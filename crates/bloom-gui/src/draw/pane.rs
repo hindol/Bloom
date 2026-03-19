@@ -257,12 +257,15 @@ fn draw_editor_content(
                 );
 
                 // Strikethrough for checked task text (not the checkbox or block ID).
-                // Skip leading whitespace so the line starts at the first non-space char.
+                // Skip leading and trailing whitespace so the line covers only the words.
                 if span.style == Style::CheckedTaskText {
-                    let leading_spaces = slice.chars().take_while(|c| c.is_whitespace()).count();
-                    let strike_start = text_x + x_cursor + leading_spaces as f32 * span_cw;
-                    let strike_end = text_x + x_cursor + span_w;
-                    if strike_end > strike_start {
+                    let leading = slice.chars().take_while(|c| c.is_whitespace()).count();
+                    let trailing = slice.chars().rev().take_while(|c| c.is_whitespace()).count();
+                    let text_chars = slice.chars().count();
+                    let content_chars = text_chars.saturating_sub(leading).saturating_sub(trailing);
+                    if content_chars > 0 {
+                        let strike_start = text_x + x_cursor + leading as f32 * span_cw;
+                        let strike_end = strike_start + content_chars as f32 * span_cw;
                         let strike_y = y + row_h / 2.0;
                         crate::draw::draw_hline(frame, strike_start, strike_end, strike_y, style_to_color(&span.style, theme));
                     }
