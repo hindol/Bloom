@@ -314,16 +314,16 @@ impl<'a> canvas::Program<Message> for OverlayCanvas<'a> {
                 inline::draw_inline_menu(frame, bounds.size(), active, m, self.theme);
             }
             if let Some(dp) = &rf.date_picker {
-                overlay::draw_date_picker(frame, bounds.size(), dp, self.theme, scrim_alpha);
+                overlay::draw_date_picker(frame, bounds.size(), dp, self.theme);
             }
             if let Some(p) = &rf.picker {
                 overlay::draw_picker(frame, bounds.size(), p, self.theme, scrim_alpha);
             }
             if let Some(d) = &rf.dialog {
-                overlay::draw_dialog(frame, bounds.size(), d, self.theme, scrim_alpha);
+                overlay::draw_dialog(frame, bounds.size(), d, self.theme);
             }
             if let Some(v) = &rf.view {
-                overlay::draw_view(frame, bounds.size(), v, self.theme, scrim_alpha);
+                overlay::draw_view(frame, bounds.size(), v, self.theme);
             }
             if !rf.notifications.is_empty() {
                 notification::draw_notifications(frame, bounds.size(), &rf.notifications, self.theme);

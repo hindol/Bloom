@@ -12,10 +12,17 @@ pub(crate) fn draw_notifications(
     notifications: &[Notification],
     theme: &ThemePalette,
 ) {
-    // Position above the status bar, with a small gap.
-    let mut y = size.height - STATUS_BAR_HEIGHT - LINE_HEIGHT - 4.0;
+    let gap = 4.0;
+    let notif_h = LINE_HEIGHT + 4.0; // notification height with padding
+    // Start stacking from bottom, above the modeline area (~24px from bottom).
+    let bottom_margin = STATUS_BAR_HEIGHT + 8.0;
+    let mut y = size.height - bottom_margin - notif_h;
 
     for notification in notifications.iter().rev().take(3) {
+        if y < 0.0 {
+            break;
+        }
+
         let (prefix, bg, fg) = match notification.level {
             NotificationLevel::Info => (
                 "✓",
@@ -37,14 +44,10 @@ pub(crate) fn draw_notifications(
         let text = truncate_text(&format!(" {prefix} {} ", notification.message), 48);
         let width = text_width(&text) + CHAR_WIDTH;
         let x = (size.width - width - CHAR_WIDTH).max(0.0);
-        let padding = crate::SPACING_SM;
-        let area = rect(x, y, width, LINE_HEIGHT);
+        let area = rect(x, y, width, notif_h);
         fill_rect(frame, area, bg);
-        draw_text(frame, x + padding, y, text, fg);
+        draw_text(frame, x + crate::SPACING_SM, y + 2.0, text, fg);
 
-        y -= LINE_HEIGHT + 4.0;
-        if y < 0.0 {
-            break;
-        }
+        y -= notif_h + gap;
     }
 }

@@ -159,11 +159,3 @@ pub(crate) fn truncate_text(text: &str, max_chars: usize) -> String {
 pub(crate) fn draw_bar_cursor(frame: &mut Frame, x: f32, y: f32, color: Color) {
     fill_rect(frame, rect(x, y, 2.0, LINE_HEIGHT), color);
 }
-
-pub(crate) fn draw_overlay_scrim(frame: &mut Frame, size: Size, color: Color, alpha: f32) {
-    fill_rect(
-        frame,
-        rect(0.0, 0.0, size.width, size.height),
-        Color { a: alpha, ..color },
-    );
-}

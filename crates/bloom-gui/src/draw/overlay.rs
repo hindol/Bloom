@@ -6,9 +6,8 @@ use bloom_md::theme::ThemePalette;
 use iced::Size;
 
 use crate::draw::{
-    chars_that_fit, draw_bar_cursor, draw_hline, draw_overlay_scrim, draw_text,
-    draw_text_center, draw_text_right, fill_panel, fill_rect, inset, rect, stroke_rect,
-    text_width, truncate_text,
+    chars_that_fit, draw_bar_cursor, draw_hline, draw_text, draw_text_center, draw_text_right,
+    fill_panel, fill_rect, inset, rect, stroke_rect, text_width, truncate_text,
 };
 use crate::theme::rgb_to_color;
 use crate::{CHAR_WIDTH, LINE_HEIGHT, SPACING_MD, STATUS_BAR_HEIGHT};
@@ -186,10 +185,7 @@ pub(crate) fn draw_dialog(
     size: Size,
     dialog: &DialogFrame,
     theme: &ThemePalette,
-    scrim_alpha: f32,
 ) {
-    draw_overlay_scrim(frame, size, rgb_to_color(&theme.background), scrim_alpha);
-
     let width = (size.width * 0.5).max(30.0 * CHAR_WIDTH).min(size.width - 8.0);
     let height = (4.5 * LINE_HEIGHT).min(size.height - 8.0);
     let area = rect(
@@ -239,58 +235,70 @@ pub(crate) fn draw_date_picker(
     size: Size,
     picker: &DatePickerFrame,
     theme: &ThemePalette,
-    scrim_alpha: f32,
 ) {
-    draw_overlay_scrim(frame, size, rgb_to_color(&theme.background), scrim_alpha);
+    // Bottom-anchored drawer (same pattern as picker minibuffer).
+    let content_chars = chars_that_fit(size.width).saturating_sub(4);
+    let num_weeks = picker.month_view.len();
+    // Rows: prompt + month header + day-of-week header + week rows + hint line
+    let total_lines = 3 + num_weeks + 1;
 
-    let width = 34.0 * CHAR_WIDTH;
-    let height = 11.0 * LINE_HEIGHT;
-    let area = rect(
-        (size.width - width).max(0.0) / 2.0,
-        (size.height - height).max(0.0) / 2.0,
-        width.min(size.width - 8.0),
-        height.min(size.height - 8.0),
-    );
-    fill_panel(
+    // Layout from bottom up, above modeline.
+    let hint_y = size.height - STATUS_BAR_HEIGHT - LINE_HEIGHT;
+    let panel_top = hint_y - (total_lines as f32 - 1.0) * LINE_HEIGHT - LINE_HEIGHT * 0.5;
+
+    // Opaque background.
+    fill_rect(
         frame,
-        area,
+        rect(0.0, panel_top, size.width, size.height - STATUS_BAR_HEIGHT - panel_top),
         rgb_to_color(&theme.background),
-        rgb_to_color(&theme.faded),
     );
 
-    let inner = inset(area, CHAR_WIDTH);
-    let month_name = month_name(picker.month);
-    draw_text_center(
-        frame,
-        inner,
-        inner.y,
-        &truncate_text(&picker.prompt, chars_that_fit(inner.width).saturating_sub(1)),
-        rgb_to_color(&theme.faded),
-    );
-    draw_text_center(
-        frame,
-        inner,
-        inner.y + LINE_HEIGHT,
-        &format!("{} {}", month_name, picker.year),
-        rgb_to_color(&theme.strong),
-    );
+    // Top separator.
+    draw_hline(frame, 0.0, size.width, panel_top, rgb_to_color(&theme.faded));
+
+    let mut y = panel_top + LINE_HEIGHT * 0.5;
+    let x_left = SPACING_MD;
+
+    // Prompt line.
     draw_text(
         frame,
-        inner.x,
-        inner.y + 2.0 * LINE_HEIGHT,
-        "Mo  Tu  We  Th  Fr  Sa  Su",
+        x_left,
+        y,
+        truncate_text(&picker.prompt, content_chars),
         rgb_to_color(&theme.faded),
     );
+    y += LINE_HEIGHT;
 
+    // Month header.
+    let month_name = month_name(picker.month);
+    draw_text(
+        frame,
+        x_left + 4.0 * CHAR_WIDTH,
+        y,
+        format!("{} {}", month_name, picker.year),
+        rgb_to_color(&theme.strong),
+    );
+    y += LINE_HEIGHT;
+
+    // Day-of-week header.
+    draw_text(
+        frame,
+        x_left,
+        y,
+        " Mo  Tu  We  Th  Fr  Sa  Su",
+        rgb_to_color(&theme.faded),
+    );
+    y += LINE_HEIGHT;
+
+    // Calendar grid.
     let (selected_year, selected_month_num, selected_day) = date_parts(&picker.selected_date);
     let selected_month = selected_year == picker.year && selected_month_num == picker.month;
     let (today_year, today_month_num, today_day) = date_parts(&picker.today);
     let today_month = today_year == picker.year && today_month_num == picker.month;
 
-    for (week_index, week) in picker.month_view.iter().enumerate() {
-        let y = inner.y + (3 + week_index) as f32 * LINE_HEIGHT;
+    for week in &picker.month_view {
         for (day_index, day) in week.iter().enumerate() {
-            let x = inner.x + day_index as f32 * 4.0 * CHAR_WIDTH;
+            let x = x_left + day_index as f32 * 4.0 * CHAR_WIDTH;
             let cell = rect(x, y, 3.0 * CHAR_WIDTH, LINE_HEIGHT);
             match day {
                 Some(day) => {
@@ -300,31 +308,34 @@ pub(crate) fn draw_date_picker(
                     if selected {
                         fill_rect(frame, cell, rgb_to_color(&theme.salient));
                     }
-                    if today {
-                        stroke_rect(frame, cell, rgb_to_color(&theme.accent_yellow));
+                    if has_journal && !selected {
+                        draw_text(frame, x, y, "◆", rgb_to_color(&theme.accent_yellow));
                     }
-                    if has_journal {
-                        draw_text(frame, x, y, "◆", rgb_to_color(&theme.salient));
-                    }
-                    draw_text(
-                        frame,
-                        x + CHAR_WIDTH,
-                        y,
-                        format!("{:>2}", day),
-                        rgb_to_color(if selected { &theme.background } else { &theme.foreground }),
-                    );
+                    let day_color = if selected {
+                        &theme.background
+                    } else if today {
+                        &theme.strong
+                    } else {
+                        &theme.foreground
+                    };
+                    draw_text(frame, x + CHAR_WIDTH, y, format!("{:>2}", day), rgb_to_color(day_color));
                 }
-                None => draw_text(frame, x, y, "   ", rgb_to_color(&theme.faded)),
+                None => {}
             }
         }
+        y += LINE_HEIGHT;
     }
 
-    let footer = format!("{} journal days", picker.journal_days.len());
-    draw_text_center(
+    // Hint / footer line.
+    let footer = format!(
+        "{} entries  ↵:open  ⎋:close",
+        picker.journal_days.len()
+    );
+    draw_text(
         frame,
-        inner,
-        inner.y + 10.0 * LINE_HEIGHT,
-        &footer,
+        x_left,
+        y,
+        truncate_text(&footer, content_chars),
         rgb_to_color(&theme.faded),
     );
 }
@@ -708,48 +719,102 @@ pub(crate) fn draw_view(
     size: Size,
     view_frame: &ViewFrame,
     theme: &ThemePalette,
-    scrim_alpha: f32,
 ) {
-    draw_overlay_scrim(frame, size, rgb_to_color(&theme.background), scrim_alpha);
-    let margin = 2.0 * CHAR_WIDTH;
-    let panel = rect(margin, margin, size.width - 2.0 * margin, size.height - 2.0 * margin);
-    fill_panel(frame, panel, rgb_to_color(&theme.background), rgb_to_color(&theme.faded));
+    // Bottom-anchored minibuffer (same pattern as picker).
+    let content_chars = chars_that_fit(size.width).saturating_sub(4);
+    let max_visible: usize = 12;
+    let num_results = view_frame.rows.len().min(max_visible);
+    let available_lines = ((size.height - STATUS_BAR_HEIGHT) / LINE_HEIGHT) as usize;
 
-    let inner = inset(panel, CHAR_WIDTH);
-    let max_chars = chars_that_fit(inner.width);
-    let mut y = inner.y;
+    // Lines needed: title(1) + rows + status(1) + optional query(1) + optional error(1).
+    let extra = 2 + if view_frame.is_prompt { 1 } else { 0 } + if view_frame.error.is_some() { 1 } else { 0 };
+    let num_visible = num_results.min(available_lines.saturating_sub(extra + 2));
 
-    // Title.
-    draw_text(frame, inner.x, y, view_frame.title.clone(), rgb_to_color(&theme.strong));
-    y += LINE_HEIGHT;
+    // Layout from bottom up, above modeline.
+    let mut bottom_y = size.height - STATUS_BAR_HEIGHT;
 
-    // Query (if prompt mode).
-    if view_frame.is_prompt {
-        let query_display = format!("  > {}", view_frame.query);
-        draw_text(frame, inner.x, y, truncate_text(&query_display, max_chars), rgb_to_color(&theme.foreground));
-        let cursor_x = inner.x + (4 + view_frame.query_cursor) as f32 * CHAR_WIDTH;
-        draw_bar_cursor(frame, cursor_x, y, rgb_to_color(&theme.foreground));
-        y += LINE_HEIGHT;
+    // Query line (if prompt mode) — bottom-most element.
+    let query_y = if view_frame.is_prompt {
+        bottom_y -= LINE_HEIGHT;
+        Some(bottom_y)
+    } else {
+        None
+    };
+
+    // Status / footer line.
+    bottom_y -= LINE_HEIGHT;
+    let status_y = bottom_y;
+
+    // Rows area.
+    let rows_bottom_y = bottom_y;
+    let rows_top_y = rows_bottom_y - num_visible as f32 * LINE_HEIGHT;
+
+    // Error line (if present).
+    let error_y = if view_frame.error.is_some() {
+        let ey = rows_top_y - LINE_HEIGHT;
+        Some(ey)
+    } else {
+        None
+    };
+
+    // Title line.
+    let title_y = error_y.unwrap_or(rows_top_y) - LINE_HEIGHT;
+
+    let panel_top = title_y - LINE_HEIGHT * 0.5;
+
+    // Opaque background.
+    fill_rect(
+        frame,
+        rect(0.0, panel_top, size.width, size.height - STATUS_BAR_HEIGHT - panel_top),
+        rgb_to_color(&theme.background),
+    );
+
+    // Top separator.
+    draw_hline(frame, 0.0, size.width, panel_top, rgb_to_color(&theme.faded));
+
+    // ── Title ──
+    draw_text(
+        frame,
+        SPACING_MD,
+        title_y,
+        truncate_text(&view_frame.title, content_chars),
+        rgb_to_color(&theme.strong),
+    );
+
+    // ── Error ──
+    if let Some(ey) = error_y {
+        if let Some(err) = &view_frame.error {
+            draw_text(
+                frame,
+                SPACING_MD,
+                ey,
+                truncate_text(err, content_chars),
+                rgb_to_color(&theme.critical),
+            );
+        }
     }
 
-    // Error.
-    if let Some(err) = &view_frame.error {
-        draw_text(frame, inner.x, y, truncate_text(err, max_chars), rgb_to_color(&theme.critical));
-        y += LINE_HEIGHT;
-    }
-
-    y += LINE_HEIGHT * 0.5;
-
-    // Rows.
-    let max_rows = ((inner.y + inner.height - y) / LINE_HEIGHT) as usize;
-    for (i, row) in view_frame.rows.iter().enumerate().take(max_rows) {
-        let is_selected = i == view_frame.selected;
+    // ── Result rows ──
+    let right_margin = size.width - SPACING_MD;
+    for (vi, row) in view_frame.rows.iter().take(num_visible).enumerate() {
+        let y = rows_top_y + vi as f32 * LINE_HEIGHT;
+        let is_selected = vi == view_frame.selected;
         if is_selected {
-            fill_rect(frame, rect(inner.x, y, inner.width, LINE_HEIGHT), rgb_to_color(&theme.mild));
+            fill_rect(
+                frame,
+                rect(0.0, y, size.width, LINE_HEIGHT),
+                rgb_to_color(&theme.mild),
+            );
         }
         match row {
             ViewRow::SectionHeader(title) => {
-                draw_text(frame, inner.x + CHAR_WIDTH, y, truncate_text(title, max_chars - 2), rgb_to_color(&theme.salient));
+                draw_text(
+                    frame,
+                    SPACING_MD + CHAR_WIDTH,
+                    y,
+                    truncate_text(title, content_chars.saturating_sub(2)),
+                    rgb_to_color(&theme.salient),
+                );
             }
             ViewRow::Data { cells, is_task, task_done } => {
                 let prefix = if *is_task {
@@ -764,20 +829,78 @@ pub(crate) fn draw_view(
                 } else {
                     rgb_to_color(&theme.foreground)
                 };
-                draw_text(frame, inner.x, y, prefix.to_string(), checkbox_color);
+                draw_text(frame, SPACING_MD, y, prefix.to_string(), checkbox_color);
 
-                let text_x = inner.x + prefix.len() as f32 * CHAR_WIDTH;
-                let remaining = max_chars.saturating_sub(prefix.len());
-                let cell_text = cells.join("  ");
+                let text_x = SPACING_MD + prefix.len() as f32 * CHAR_WIDTH;
                 let text_color = if *task_done { &theme.faded } else { &theme.foreground };
-                draw_text(frame, text_x, y, truncate_text(&cell_text, remaining), rgb_to_color(text_color));
+
+                // First cell is the main text; remaining cells go to the right margin.
+                if let Some((first, rest)) = cells.split_first() {
+                    let marginalia = rest.join("  ");
+                    let margin_chars = marginalia.chars().count();
+                    let main_chars = content_chars
+                        .saturating_sub(prefix.len())
+                        .saturating_sub(margin_chars + 2);
+                    draw_text(
+                        frame,
+                        text_x,
+                        y,
+                        truncate_text(first, main_chars),
+                        rgb_to_color(text_color),
+                    );
+                    if !marginalia.is_empty() {
+                        draw_text_right(
+                            frame,
+                            right_margin,
+                            y,
+                            &truncate_text(&marginalia, margin_chars),
+                            rgb_to_color(&theme.faded),
+                        );
+                    }
+                }
             }
         }
-        y += LINE_HEIGHT;
     }
 
-    // Footer.
-    let footer_y = inner.y + inner.height - LINE_HEIGHT;
-    let footer = format!("  {} of {} results", view_frame.selected + 1, view_frame.total);
-    draw_text(frame, inner.x, footer_y, footer, rgb_to_color(&theme.faded));
+    // ── Status line ──
+    let footer = format!(
+        "{} of {} results",
+        if view_frame.total > 0 { view_frame.selected + 1 } else { 0 },
+        view_frame.total,
+    );
+    draw_text(
+        frame,
+        SPACING_MD,
+        status_y,
+        truncate_text(&footer, content_chars),
+        rgb_to_color(&theme.faded),
+    );
+
+    // ── Query line (prompt mode) ──
+    if let Some(qy) = query_y {
+        draw_hline(frame, 0.0, size.width, qy, rgb_to_color(&theme.faded));
+        let prompt = format!("{} > ", view_frame.title);
+        draw_text(
+            frame,
+            SPACING_MD,
+            qy,
+            truncate_text(&prompt, content_chars),
+            rgb_to_color(&theme.faded),
+        );
+        let query_x = SPACING_MD + text_width(&prompt);
+        draw_text(
+            frame,
+            query_x,
+            qy,
+            truncate_text(&view_frame.query, content_chars.saturating_sub(prompt.chars().count())),
+            rgb_to_color(&theme.foreground),
+        );
+        draw_bar_cursor(
+            frame,
+            (query_x + view_frame.query_cursor as f32 * CHAR_WIDTH)
+                .min(size.width - SPACING_MD - 2.0),
+            qy,
+            rgb_to_color(&theme.foreground),
+        );
+    }
 }
