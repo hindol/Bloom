@@ -152,6 +152,8 @@ fn draw_editor_content(
                 _ => None,
             });
             let line_font_size = heading_level.map(heading_font_size).unwrap_or(FONT_SIZE);
+            // Scale char width proportionally for heading lines.
+            let line_char_width = CHAR_WIDTH * (line_font_size / FONT_SIZE);
 
             for span in &line.spans {
                 let start = span.range.start.min(visible_text.len());
@@ -161,8 +163,8 @@ fn draw_editor_content(
                 }
 
                 let slice = &visible_text[start..end];
-                let span_x = start as f32 * CHAR_WIDTH;
-                let span_w = slice.chars().count() as f32 * CHAR_WIDTH;
+                let span_x = start as f32 * line_char_width;
+                let span_w = slice.chars().count() as f32 * line_char_width;
 
                 // Background wash for styles that need it (Code, LinkText, SearchMatch, etc.)
                 if let Some(bg) = style_to_bg(&span.style, theme) {
