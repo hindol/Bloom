@@ -43,6 +43,7 @@
 | `SPC i d` | Insert `@due()` with date picker | G4 |
 | `SPC i s` | Insert `@start()` with date picker | G4 |
 | `SPC i a` | Insert `@at()` with date picker | G4 |
+| `SPC i y` | Paste from kill ring (fuzzy picker) | — |
 | **Notes** | | |
 | `SPC n` | New page (template picker) | G19 |
 | **Refactor** | | |
@@ -179,3 +180,34 @@ See [PICKER_SURFACES.md](PICKER_SURFACES.md) for detailed wireframes of each pic
 ## Standard Vim Support
 
 Standard Vim text objects (`iw`, `aw`, `ip`, `ap`, `i"`, `a"`, `i(`, `a(`, etc.), motions (`w`, `b`, `e`, `f`, `t`, `%`, `gg`, `G`, etc.), registers (`"a`-`"z`, `"+` for system clipboard), marks (`ma`, `'a`), `.` repeat, and macros (`qa`...`q`, `@a`) are all supported as per standard Vim.
+
+---
+
+## Clipboard & Kill Ring
+
+Bloom combines Vim registers, system clipboard, and an Emacs-inspired kill ring (Doom Emacs `counsel-yank-pop` model).
+
+### Three layers
+
+| Layer | Access | Scope |
+|-------|--------|-------|
+| **Vim registers** | `"ay` (yank to `a`), `"ap` (put from `a`) | In-memory, 26 named registers `a`-`z` + unnamed `"` |
+| **System clipboard** | `"+y` (yank to clipboard), `"+p` (put from clipboard) | OS-wide, shared with other applications |
+| **Kill ring** | `SPC i y` (browse & paste from ring) | In-memory, 32 most recent yanks/deletes |
+
+### How the kill ring works
+
+Every yank (`y`), delete (`d`, `x`, `c`), or change operation pushes the affected text onto the kill ring — a stack of the 32 most recent clipboard entries. This happens automatically, no special keybinding needed.
+
+| Binding | Action |
+|---------|--------|
+| `p` / `P` | Put from the most recent kill ring entry (same as unnamed register `"`) |
+| `SPC i y` | Open kill ring picker — fuzzy search through all 32 entries, `Enter` pastes the selected one |
+| `"+y` | Yank to system clipboard (also pushed to kill ring) |
+| `"+p` | Paste from system clipboard (bypasses kill ring) |
+| `Cmd+C` | `"+y` (macOS shortcut) |
+| `Cmd+V` | `"+p` (macOS shortcut) |
+
+### Kill ring picker (`SPC i y`)
+
+A standard Bloom picker showing kill ring entries, most recent first. Each entry shows a truncated preview of the text. Fuzzy search filters entries. `Enter` pastes at the cursor. This is the Doom Emacs `counsel-yank-pop` equivalent — more discoverable than blind `M-y` cycling.

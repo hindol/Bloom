@@ -52,3 +52,4 @@
 | Font strategy | Monospace-only (both TUI and GUI), GUI uses size variation for headings | Mixed-pitch (proportional body + monospace code), proportional everywhere |
 | Window navigation | Nearest spatial neighbor (ray cast from cursor position) | Tree-based parent/sibling traversal |
 | Splittable panes | Only editor panes can be split; special views (timeline, agenda, undo tree) are leaf-only | Any pane can be split |
+| Clipboard model | Vim registers + system clipboard (`arboard`) + kill ring (32 entries, `SPC i y` picker) | Vim registers only, system clipboard only, Emacs `M-y` cycling |
