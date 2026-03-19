@@ -29,7 +29,7 @@ pub(crate) const LINE_HEIGHT: f32 = FONT_SIZE * 1.4;
 /// Vertical offset to center text within a LINE_HEIGHT row.
 pub(crate) const TEXT_Y_OFFSET: f32 = (LINE_HEIGHT - FONT_SIZE) / 2.0;
 /// Status bar height — compact modeline, close to a text line.
-pub(crate) const STATUS_BAR_HEIGHT: f32 = LINE_HEIGHT * 1.2;
+pub(crate) const STATUS_BAR_HEIGHT: f32 = LINE_HEIGHT;
 pub(crate) const CHAR_WIDTH: f32 = FONT_SIZE * 0.6;
 pub(crate) const GUTTER_CHARS: usize = 5;
 pub(crate) const GUTTER_WIDTH: f32 = GUTTER_CHARS as f32 * CHAR_WIDTH;
