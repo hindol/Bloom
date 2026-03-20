@@ -27,10 +27,13 @@ pub(crate) fn draw_which_key(
     let panel_y = drawer_rect
         .map(|r| r.y)
         .unwrap_or_else(|| (size.height - panel_h).max(0.0));
+    let actual_h = drawer_rect
+        .map(|r| r.height)
+        .unwrap_or(panel_h);
 
     fill_rect(
         frame,
-        rect(0.0, panel_y, size.width, panel_h),
+        rect(0.0, panel_y, size.width, actual_h),
         rgb_to_color(&theme.subtle),
     );
     draw_hline(frame, 0.0, size.width, panel_y, rgb_to_color(&theme.faded));

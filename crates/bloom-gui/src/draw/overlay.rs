@@ -21,24 +21,30 @@ pub(crate) fn draw_picker(
     drawer_rect: Option<iced::Rectangle>,
 ) {
     // No scrim — bottom-anchored minibuffer style.
+    // Render within drawer_rect if provided.
 
     let content_chars = chars_that_fit(size.width).saturating_sub(4);
     let max_visible: usize = 10;
     let num_results = picker.results.len().min(max_visible);
 
-    // Use drawer_rect to determine panel position when available.
-    let panel_bottom = drawer_rect
-        .map(|r| r.y + r.height)
-        .unwrap_or(size.height - STATUS_BAR_HEIGHT);
-    let available_lines = (panel_bottom / LINE_HEIGHT) as usize;
-    let num_visible = num_results.min(available_lines.saturating_sub(4));
+    let (panel_top, panel_bottom) = if let Some(dr) = drawer_rect {
+        (dr.y, dr.y + dr.height)
+    } else {
+        let bottom = size.height - STATUS_BAR_HEIGHT;
+        let rows = num_results + 3;
+        let top = (bottom - rows as f32 * LINE_HEIGHT).max(0.0);
+        (top, bottom)
+    };
 
-    // Layout from bottom up.
+    let available_h = panel_bottom - panel_top;
+    let available_lines = (available_h / LINE_HEIGHT) as usize;
+    let num_visible = num_results.min(available_lines.saturating_sub(3));
+
+    // Layout from bottom up within the allocated rect.
     let query_y = panel_bottom - LINE_HEIGHT;
     let status_line_y = query_y - LINE_HEIGHT;
-    let results_bottom_y = status_line_y; // results end here
+    let results_bottom_y = status_line_y;
     let results_top_y = results_bottom_y - num_visible as f32 * LINE_HEIGHT;
-    let panel_top = results_top_y - LINE_HEIGHT * 0.5; // small padding above
 
     // Opaque background covering the picker area.
     fill_rect(
@@ -242,18 +248,19 @@ pub(crate) fn draw_date_picker(
     theme: &ThemePalette,
     drawer_rect: Option<iced::Rectangle>,
 ) {
-    // Bottom-anchored drawer (same pattern as picker minibuffer).
+    // Bottom-anchored drawer — render within drawer_rect.
     let content_chars = chars_that_fit(size.width).saturating_sub(4);
     let num_weeks = picker.month_view.len();
-    // Rows: prompt + month header + day-of-week header + week rows + hint line
     let total_lines = 3 + num_weeks + 1;
 
-    // Layout from bottom up, above modeline.
-    let panel_bottom = drawer_rect
-        .map(|r| r.y + r.height)
-        .unwrap_or(size.height - STATUS_BAR_HEIGHT);
-    let hint_y = panel_bottom - LINE_HEIGHT;
-    let panel_top = hint_y - (total_lines as f32 - 1.0) * LINE_HEIGHT - LINE_HEIGHT * 0.5;
+    let (panel_top, panel_bottom) = if let Some(dr) = drawer_rect {
+        (dr.y, dr.y + dr.height)
+    } else {
+        let bottom = size.height - STATUS_BAR_HEIGHT;
+        let top = (bottom - total_lines as f32 * LINE_HEIGHT).max(0.0);
+        (top, bottom)
+    };
+    let _hint_y = panel_bottom - LINE_HEIGHT;
 
     // Opaque background.
     fill_rect(
@@ -730,20 +737,26 @@ pub(crate) fn draw_view(
     theme: &ThemePalette,
     drawer_rect: Option<iced::Rectangle>,
 ) {
-    // Bottom-anchored minibuffer (same pattern as picker).
+    // Bottom-anchored minibuffer — render within drawer_rect.
     let content_chars = chars_that_fit(size.width).saturating_sub(4);
     let max_visible: usize = 12;
     let num_results = view_frame.rows.len().min(max_visible);
-    let panel_bottom = drawer_rect
-        .map(|r| r.y + r.height)
-        .unwrap_or(size.height - STATUS_BAR_HEIGHT);
-    let available_lines = (panel_bottom / LINE_HEIGHT) as usize;
+    let (panel_top, panel_bottom) = if let Some(dr) = drawer_rect {
+        (dr.y, dr.y + dr.height)
+    } else {
+        let bottom = size.height - STATUS_BAR_HEIGHT;
+        let rows = num_results + 4;
+        let top = (bottom - rows as f32 * LINE_HEIGHT).max(0.0);
+        (top, bottom)
+    };
+    let available_h = panel_bottom - panel_top;
+    let available_lines = (available_h / LINE_HEIGHT) as usize;
 
     // Lines needed: title(1) + rows + status(1) + optional query(1) + optional error(1).
     let extra = 2 + if view_frame.is_prompt { 1 } else { 0 } + if view_frame.error.is_some() { 1 } else { 0 };
-    let num_visible = num_results.min(available_lines.saturating_sub(extra + 2));
+    let num_visible = num_results.min(available_lines.saturating_sub(extra + 1));
 
-    // Layout from bottom up, above modeline.
+    // Layout from bottom up within the allocated rect.
     let mut bottom_y = panel_bottom;
 
     // Query line (if prompt mode) — bottom-most element.
