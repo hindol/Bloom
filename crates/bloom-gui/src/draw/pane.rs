@@ -462,7 +462,7 @@ fn draw_normal_status(
         "VISUAL" => rgb_to_color(&theme.popout),
         "COMMAND" => rgb_to_color(&theme.accent_blue),
         "HIST" | "DAY" | "JRNL" => rgb_to_color(&theme.accent_yellow),
-        _ => rgb_to_color(&theme.mild),
+        _ => rgb_to_color(&theme.salient),
     };
     fill_rect(frame, rect(pane_x, bar_y, mode_w, bar_h), mode_bg);
     draw_text(
