@@ -326,7 +326,6 @@ fn view(state: &BloomApp) -> Element<'_, Message> {
         frame: state.frame.as_deref(),
         theme: state.theme,
         cache: &state.overlay_cache,
-        remote: state.remote,
     })
     .width(Length::Fill)
     .height(Length::Fill);

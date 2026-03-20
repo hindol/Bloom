@@ -76,40 +76,44 @@ pub(crate) fn pane_pixel_rect(
 
 /// Draw a pane. `anim` is `Some((cursor_y, highlight_y))` in absolute pixels
 /// for the active pane (smooth animated positions), or `None` for inactive panes.
-/// `modeline_bottom` is the Y coordinate of the bottom of the modeline rect,
-/// used to extend the bottommost status bar for macOS corner clearance.
 pub(crate) fn draw_pane(
     frame: &mut iced::widget::canvas::Frame,
     pane: &PaneFrame,
     theme: &ThemePalette,
     anim: Option<(f32, f32)>,
     cursor_visible: bool,
-    pane_x: f32,
-    pane_y: f32,
-    pane_w: f32,
-    content_h: f32,
-    modeline_bottom: f32,
+    content_area: Rectangle,
+    modeline_area: Rectangle,
 ) {
-    let content_rect = rect(pane_x, pane_y, pane_w, content_h);
+    fill_rect(frame, content_area, rgb_to_color(&theme.background));
 
-    fill_rect(frame, content_rect, rgb_to_color(&theme.background));
+    // Fill gap between content bottom and modeline top with background.
+    let gap_y = content_area.y + content_area.height;
+    let gap_h = modeline_area.y - gap_y;
+    if gap_h > 0.5 {
+        fill_rect(
+            frame,
+            rect(content_area.x, gap_y, content_area.width, gap_h),
+            rgb_to_color(&theme.background),
+        );
+    }
 
     match &pane.kind {
         PaneKind::Editor => {
-            draw_editor_content(frame, pane, theme, anim, cursor_visible, pane_x, pane_y, pane_w)
+            draw_editor_content(frame, pane, theme, anim, cursor_visible, content_area)
         }
-        PaneKind::UndoTree(undo_tree) => draw_undo_tree(frame, content_rect, undo_tree, theme),
-        PaneKind::Timeline(timeline) => draw_timeline(frame, content_rect, timeline, theme),
+        PaneKind::UndoTree(undo_tree) => draw_undo_tree(frame, content_area, undo_tree, theme),
+        PaneKind::Timeline(timeline) => draw_timeline(frame, content_area, timeline, theme),
         PaneKind::PageHistory(page_history) => {
-            draw_page_history(frame, content_rect, page_history, theme)
+            draw_page_history(frame, content_area, page_history, theme)
         }
         PaneKind::SetupWizard(_) => {}
     }
 
     if pane.is_active {
-        draw_active_status_bar(frame, pane, theme, pane_x, pane_y, pane_w, modeline_bottom);
+        draw_active_status_bar(frame, pane, theme, modeline_area);
     } else {
-        draw_inactive_status_bar(frame, pane, theme, pane_x, pane_y, pane_w, modeline_bottom);
+        draw_inactive_status_bar(frame, pane, theme, modeline_area);
     }
 }
 
@@ -119,10 +123,11 @@ fn draw_editor_content(
     theme: &ThemePalette,
     anim: Option<(f32, f32)>,
     cursor_visible: bool,
-    pane_x: f32,
-    pane_y: f32,
-    pane_w: f32,
+    content_area: Rectangle,
 ) {
+    let pane_x = content_area.x;
+    let pane_y = content_area.y;
+    let pane_w = content_area.width;
     let content_chars = pane.rect.width as usize;
     let text_chars = content_chars.saturating_sub(GUTTER_CHARS);
 
@@ -358,45 +363,27 @@ fn draw_active_status_bar(
     frame: &mut iced::widget::canvas::Frame,
     pane: &PaneFrame,
     theme: &ThemePalette,
-    pane_x: f32,
-    pane_y: f32,
-    pane_w: f32,
-    modeline_bottom: f32,
+    modeline_area: Rectangle,
 ) {
-    let content_bottom = pane_y + pane.rect.content_height as f32 * LINE_HEIGHT;
-    // Fixed bar height — anchored to modeline bottom.
-    let bar_h = STATUS_BAR_HEIGHT + 4.0; // +4px for macOS corner clearance
-    let status_y = (modeline_bottom - bar_h).max(content_bottom);
-    let actual_h = modeline_bottom - status_y;
-    // Fill any gap between content and status bar with background.
-    if status_y > content_bottom + 0.5 {
-        fill_rect(
-            frame,
-            rect(pane_x, content_bottom, pane_w, status_y - content_bottom),
-            rgb_to_color(&theme.background),
-        );
-    }
-    let text_y = status_y + (actual_h - LINE_HEIGHT) / 2.0;
-
     match &pane.status_bar.content {
         StatusBarContent::Normal(normal) => {
-            draw_normal_status(frame, pane, normal, theme, pane_x, text_y, pane_w, status_y, actual_h)
+            draw_normal_status(frame, pane, normal, theme, modeline_area)
         }
         StatusBarContent::CommandLine(command) => {
             fill_rect(
                 frame,
-                rect(pane_x, status_y, pane_w, actual_h),
+                modeline_area,
                 rgb_to_color(&theme.highlight),
             );
-            draw_command_line(frame, command, theme, pane_x, pane_y, pane_w, text_y)
+            draw_command_line(frame, command, theme, modeline_area)
         }
         StatusBarContent::QuickCapture(capture) => {
             fill_rect(
                 frame,
-                rect(pane_x, status_y, pane_w, actual_h),
+                modeline_area,
                 rgb_to_color(&theme.highlight),
             );
-            draw_quick_capture(frame, capture, theme, pane_x, pane_w, text_y)
+            draw_quick_capture(frame, capture, theme, modeline_area)
         }
     }
 }
@@ -405,34 +392,20 @@ fn draw_inactive_status_bar(
     frame: &mut iced::widget::canvas::Frame,
     pane: &PaneFrame,
     theme: &ThemePalette,
-    pane_x: f32,
-    pane_y: f32,
-    pane_w: f32,
-    modeline_bottom: f32,
+    modeline_area: Rectangle,
 ) {
-    let content_bottom = pane_y + pane.rect.content_height as f32 * LINE_HEIGHT;
-    let target_h = STATUS_BAR_HEIGHT + 4.0;
-    let status_y = (modeline_bottom - target_h).max(content_bottom);
-    let actual_h = modeline_bottom - status_y;
-    if status_y > content_bottom + 0.5 {
-        fill_rect(
-            frame,
-            rect(pane_x, content_bottom, pane_w, status_y - content_bottom),
-            rgb_to_color(&theme.background),
-        );
-    }
     fill_rect(
         frame,
-        rect(pane_x, status_y, pane_w, actual_h),
+        modeline_area,
         rgb_to_color(&theme.subtle),
     );
 
-    let text_y = status_y + (actual_h - LINE_HEIGHT) / 2.0;
-    let max_chars = chars_that_fit((pane_w - SPACING_MD * 2.0).max(0.0));
+    let text_y = modeline_area.y + (modeline_area.height - LINE_HEIGHT) / 2.0;
+    let max_chars = chars_that_fit((modeline_area.width - SPACING_MD * 2.0).max(0.0));
     let title = truncate_text(&pane.title, max_chars);
     draw_text(
         frame,
-        pane_x + SPACING_MD,
+        modeline_area.x + SPACING_MD,
         text_y,
         &title,
         rgb_to_color(&theme.faded),
@@ -444,14 +417,14 @@ fn draw_normal_status(
     pane: &PaneFrame,
     normal: &NormalStatus,
     theme: &ThemePalette,
-    pane_x: f32,
-    status_y: f32,
-    pane_w: f32,
-    bar_y: f32,
-    bar_h: f32,
+    modeline_area: Rectangle,
 ) {
-    let text_y = status_y;
-    let h_pad = MODELINE_H_PAD; // horizontal padding for rounded corners
+    let pane_x = modeline_area.x;
+    let pane_w = modeline_area.width;
+    let bar_y = modeline_area.y;
+    let bar_h = modeline_area.height;
+    let text_y = bar_y + (bar_h - LINE_HEIGHT) / 2.0;
+    let h_pad = MODELINE_H_PAD;
 
     // ── 1. Mode segment (left-aligned, fixed width) ──
     let mode = &pane.status_bar.mode;
@@ -574,11 +547,11 @@ fn draw_command_line(
     frame: &mut iced::widget::canvas::Frame,
     command: &CommandLineSlot,
     theme: &ThemePalette,
-    pane_x: f32,
-    pane_y: f32,
-    pane_w: f32,
-    status_y: f32,
+    modeline_area: Rectangle,
 ) {
+    let pane_x = modeline_area.x;
+    let pane_w = modeline_area.width;
+    let status_y = modeline_area.y + (modeline_area.height - LINE_HEIGHT) / 2.0;
     let input_max = chars_that_fit((pane_w - CHAR_WIDTH).max(0.0));
     let prefix = format!(
         ":{}",
@@ -605,7 +578,7 @@ fn draw_command_line(
     }
 
     if let Some(error) = &command.error {
-        let error_y = (status_y - LINE_HEIGHT).max(pane_y);
+        let error_y = (status_y - LINE_HEIGHT).max(modeline_area.y);
         draw_text(
             frame,
             pane_x,
@@ -625,10 +598,11 @@ fn draw_quick_capture(
     frame: &mut iced::widget::canvas::Frame,
     capture: &QuickCaptureSlot,
     theme: &ThemePalette,
-    pane_x: f32,
-    pane_w: f32,
-    status_y: f32,
+    modeline_area: Rectangle,
 ) {
+    let pane_x = modeline_area.x;
+    let pane_w = modeline_area.width;
+    let status_y = modeline_area.y + (modeline_area.height - LINE_HEIGHT) / 2.0;
     let content = format!("{}{}", capture.prompt, capture.input);
     draw_text(
         frame,

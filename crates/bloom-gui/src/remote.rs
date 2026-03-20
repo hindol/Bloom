@@ -27,6 +27,7 @@ impl RemoteHints {
     }
 
     /// Whether the overlay scrim should be fully opaque (no alpha blending).
+    #[allow(dead_code)]
     pub fn opaque_scrim(&self) -> bool {
         self.is_remote
     }

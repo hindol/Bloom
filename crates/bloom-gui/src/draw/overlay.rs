@@ -3,38 +3,27 @@ use bloom_core::render::{
     ViewFrame, ViewRow,
 };
 use bloom_md::theme::ThemePalette;
-use iced::Size;
+use iced::Rectangle;
 
 use crate::draw::{
     chars_that_fit, draw_bar_cursor, draw_hline, draw_text, draw_text_center, draw_text_right,
     fill_panel, fill_rect, inset, rect, stroke_rect, text_width, truncate_text,
 };
 use crate::theme::rgb_to_color;
-use crate::{CHAR_WIDTH, LINE_HEIGHT, SPACING_MD, STATUS_BAR_HEIGHT};
+use crate::{CHAR_WIDTH, LINE_HEIGHT, SPACING_MD};
 
 pub(crate) fn draw_picker(
     frame: &mut iced::widget::canvas::Frame,
-    size: Size,
+    area: Rectangle,
     picker: &PickerFrame,
     theme: &ThemePalette,
-    _scrim_alpha: f32,
-    drawer_rect: Option<iced::Rectangle>,
 ) {
-    // No scrim — bottom-anchored minibuffer style.
-    // Render within drawer_rect if provided.
-
-    let content_chars = chars_that_fit(size.width).saturating_sub(4);
+    let content_chars = chars_that_fit(area.width).saturating_sub(4);
     let max_visible: usize = 10;
     let num_results = picker.results.len().min(max_visible);
 
-    let (panel_top, panel_bottom) = if let Some(dr) = drawer_rect {
-        (dr.y, dr.y + dr.height)
-    } else {
-        let bottom = size.height - STATUS_BAR_HEIGHT;
-        let rows = num_results + 3;
-        let top = (bottom - rows as f32 * LINE_HEIGHT).max(0.0);
-        (top, bottom)
-    };
+    let panel_top = area.y;
+    let panel_bottom = area.y + area.height;
 
     let available_h = panel_bottom - panel_top;
     let available_lines = (available_h / LINE_HEIGHT) as usize;
@@ -49,12 +38,12 @@ pub(crate) fn draw_picker(
     // Opaque background covering the picker area.
     fill_rect(
         frame,
-        rect(0.0, panel_top, size.width, panel_bottom - panel_top),
+        area,
         rgb_to_color(&theme.background),
     );
 
     // Top separator.
-    draw_hline(frame, 0.0, size.width, panel_top, rgb_to_color(&theme.faded));
+    draw_hline(frame, area.x, area.x + area.width, panel_top, rgb_to_color(&theme.faded));
 
     // ── Status line ("5 of 120 pages") ──
     let footer = if picker.filtered_count > 0 {
@@ -69,7 +58,7 @@ pub(crate) fn draw_picker(
     };
     draw_text(
         frame,
-        SPACING_MD,
+        area.x + SPACING_MD,
         status_line_y,
         truncate_text(&footer, content_chars),
         rgb_to_color(&theme.faded),
@@ -108,13 +97,13 @@ pub(crate) fn draw_picker(
         if selected {
             fill_rect(
                 frame,
-                rect(0.0, y, size.width, LINE_HEIGHT),
+                rect(area.x, y, area.width, LINE_HEIGHT),
                 rgb_to_color(&theme.mild),
             );
         }
         draw_text(
             frame,
-            SPACING_MD,
+            area.x + SPACING_MD,
             y,
             format!(" {}", truncate_text(&row.label, label_chars)),
             rgb_to_color(&theme.foreground),
@@ -122,7 +111,7 @@ pub(crate) fn draw_picker(
         if let Some(middle) = &row.middle {
             draw_text(
                 frame,
-                SPACING_MD + (label_chars + 3) as f32 * CHAR_WIDTH,
+                area.x + SPACING_MD + (label_chars + 3) as f32 * CHAR_WIDTH,
                 y,
                 truncate_text(middle, middle_chars),
                 rgb_to_color(&theme.faded),
@@ -131,7 +120,7 @@ pub(crate) fn draw_picker(
         if let Some(right) = &row.right {
             draw_text_right(
                 frame,
-                size.width - SPACING_MD,
+                area.x + area.width - SPACING_MD,
                 y,
                 &truncate_text(right, right_chars),
                 rgb_to_color(&theme.faded),
@@ -140,10 +129,10 @@ pub(crate) fn draw_picker(
     }
 
     if picker.results.is_empty() && picker.min_query_len > 0 && picker.query.len() < picker.min_query_len {
-        let area = rect(0.0, results_top_y, size.width, num_visible.max(1) as f32 * LINE_HEIGHT);
+        let empty_area = rect(area.x, results_top_y, area.width, num_visible.max(1) as f32 * LINE_HEIGHT);
         draw_text_center(
             frame,
-            area,
+            empty_area,
             results_top_y,
             "Type to search…",
             rgb_to_color(&theme.faded),
@@ -151,18 +140,18 @@ pub(crate) fn draw_picker(
     }
 
     // Separator between results and query.
-    draw_hline(frame, 0.0, size.width, query_y, rgb_to_color(&theme.faded));
+    draw_hline(frame, area.x, area.x + area.width, query_y, rgb_to_color(&theme.faded));
 
     // ── Query line: "{title} > {query}█" ──
     let prompt = format!("{} > ", picker.title);
     draw_text(
         frame,
-        SPACING_MD,
+        area.x + SPACING_MD,
         query_y,
         truncate_text(&prompt, content_chars),
         rgb_to_color(&theme.faded),
     );
-    let query_x = SPACING_MD + text_width(&prompt);
+    let query_x = area.x + SPACING_MD + text_width(&prompt);
     if picker.query_selected && !picker.query.is_empty() {
         fill_rect(
             frame,
@@ -185,7 +174,7 @@ pub(crate) fn draw_picker(
     draw_bar_cursor(
         frame,
         (query_x + picker.query.chars().count() as f32 * CHAR_WIDTH)
-            .min(size.width - SPACING_MD - 2.0),
+            .min(area.x + area.width - SPACING_MD - 2.0),
         query_y,
         rgb_to_color(&theme.foreground),
     );
@@ -193,18 +182,10 @@ pub(crate) fn draw_picker(
 
 pub(crate) fn draw_dialog(
     frame: &mut iced::widget::canvas::Frame,
-    size: Size,
+    area: Rectangle,
     dialog: &DialogFrame,
     theme: &ThemePalette,
 ) {
-    let width = (size.width * 0.5).max(30.0 * CHAR_WIDTH).min(size.width - 8.0);
-    let height = (4.5 * LINE_HEIGHT).min(size.height - 8.0);
-    let area = rect(
-        (size.width - width).max(0.0) / 2.0,
-        (size.height - height).max(0.0) / 2.0,
-        width,
-        height,
-    );
     fill_panel(
         frame,
         area,
@@ -243,37 +224,26 @@ pub(crate) fn draw_dialog(
 
 pub(crate) fn draw_date_picker(
     frame: &mut iced::widget::canvas::Frame,
-    size: Size,
+    area: Rectangle,
     picker: &DatePickerFrame,
     theme: &ThemePalette,
-    drawer_rect: Option<iced::Rectangle>,
 ) {
-    // Bottom-anchored drawer — render within drawer_rect.
-    let content_chars = chars_that_fit(size.width).saturating_sub(4);
-    let num_weeks = picker.month_view.len();
-    let total_lines = 3 + num_weeks + 1;
+    let content_chars = chars_that_fit(area.width).saturating_sub(4);
 
-    let (panel_top, panel_bottom) = if let Some(dr) = drawer_rect {
-        (dr.y, dr.y + dr.height)
-    } else {
-        let bottom = size.height - STATUS_BAR_HEIGHT;
-        let top = (bottom - total_lines as f32 * LINE_HEIGHT).max(0.0);
-        (top, bottom)
-    };
-    let _hint_y = panel_bottom - LINE_HEIGHT;
+    let panel_top = area.y;
 
     // Opaque background.
     fill_rect(
         frame,
-        rect(0.0, panel_top, size.width, panel_bottom - panel_top),
+        area,
         rgb_to_color(&theme.background),
     );
 
     // Top separator.
-    draw_hline(frame, 0.0, size.width, panel_top, rgb_to_color(&theme.faded));
+    draw_hline(frame, area.x, area.x + area.width, panel_top, rgb_to_color(&theme.faded));
 
     let mut y = panel_top + LINE_HEIGHT * 0.5;
-    let x_left = SPACING_MD;
+    let x_left = area.x + SPACING_MD;
 
     // Prompt line.
     draw_text(
@@ -358,25 +328,26 @@ pub(crate) fn draw_date_picker(
 
 pub(crate) fn draw_setup_wizard(
     frame: &mut iced::widget::canvas::Frame,
-    size: Size,
+    area: Rectangle,
     wizard: &SetupWizardFrame,
     theme: &ThemePalette,
 ) {
     fill_rect(
         frame,
-        rect(0.0, 0.0, size.width, size.height),
+        area,
         rgb_to_color(&theme.background),
     );
     stroke_rect(
         frame,
-        rect(1.0, 1.0, (size.width - 2.0).max(0.0), (size.height - 2.0).max(0.0)),
+        rect(area.x + 1.0, area.y + 1.0, (area.width - 2.0).max(0.0), (area.height - 2.0).max(0.0)),
         rgb_to_color(&theme.faded),
     );
 
-    let left = 9.0 * CHAR_WIDTH;
-    let top = (size.height * 0.2).max(2.0 * LINE_HEIGHT);
-    let right = size.width - 3.0 * CHAR_WIDTH;
+    let left = area.x + 9.0 * CHAR_WIDTH;
+    let top = area.y + (area.height * 0.2).max(2.0 * LINE_HEIGHT);
+    let right = area.x + area.width - 3.0 * CHAR_WIDTH;
     let content_chars = chars_that_fit((right - left).max(0.0));
+    let bottom = area.y + area.height;
 
     let fg = rgb_to_color(&theme.foreground);
     let faded = rgb_to_color(&theme.faded);
@@ -406,7 +377,7 @@ pub(crate) fn draw_setup_wizard(
             wizard_line(
                 frame,
                 right - text_width("Press Enter to get started"),
-                size.height - 2.0 * LINE_HEIGHT,
+                bottom - 2.0 * LINE_HEIGHT,
                 "Press Enter to get started",
                 faded,
             );
@@ -444,11 +415,11 @@ pub(crate) fn draw_setup_wizard(
                     error,
                 );
             }
-            wizard_line(frame, left, size.height - 2.0 * LINE_HEIGHT, "Esc back", faded);
+            wizard_line(frame, left, bottom - 2.0 * LINE_HEIGHT, "Esc back", faded);
             wizard_line(
                 frame,
                 right - text_width("Enter to confirm"),
-                size.height - 2.0 * LINE_HEIGHT,
+                bottom - 2.0 * LINE_HEIGHT,
                 "Enter to confirm",
                 faded,
             );
@@ -473,11 +444,11 @@ pub(crate) fn draw_setup_wizard(
                 yes_selected,
                 theme,
             );
-            wizard_line(frame, left, size.height - 2.0 * LINE_HEIGHT, "Esc back", faded);
+            wizard_line(frame, left, bottom - 2.0 * LINE_HEIGHT, "Esc back", faded);
             wizard_line(
                 frame,
                 right - text_width("↑↓ select   Enter to confirm"),
-                size.height - 2.0 * LINE_HEIGHT,
+                bottom - 2.0 * LINE_HEIGHT,
                 "↑↓ select   Enter to confirm",
                 faded,
             );
@@ -504,11 +475,11 @@ pub(crate) fn draw_setup_wizard(
                     error,
                 );
             }
-            wizard_line(frame, left, size.height - 2.0 * LINE_HEIGHT, "Esc back", faded);
+            wizard_line(frame, left, bottom - 2.0 * LINE_HEIGHT, "Esc back", faded);
             wizard_line(
                 frame,
                 right - text_width("Enter to start import"),
-                size.height - 2.0 * LINE_HEIGHT,
+                bottom - 2.0 * LINE_HEIGHT,
                 "Enter to start import",
                 faded,
             );
@@ -516,7 +487,7 @@ pub(crate) fn draw_setup_wizard(
         SetupStep::ImportRunning => {
             wizard_line(frame, left, top, "Importing from Logseq...", heading);
             if let Some(progress) = &wizard.import_progress {
-                let bar_width = (size.width * 0.35).max(20.0 * CHAR_WIDTH);
+                let bar_width = (area.width * 0.35).max(20.0 * CHAR_WIDTH);
                 let bar_area = rect(left, top + 2.0 * LINE_HEIGHT, bar_width, LINE_HEIGHT);
                 fill_rect(frame, bar_area, rgb_to_color(&theme.subtle));
                 let ratio = if progress.total > 0 {
@@ -580,7 +551,7 @@ pub(crate) fn draw_setup_wizard(
                     wizard_line(
                         frame,
                         right - text_width("Press Enter to continue"),
-                        size.height - 2.0 * LINE_HEIGHT,
+                        bottom - 2.0 * LINE_HEIGHT,
                         "Press Enter to continue",
                         faded,
                     );
@@ -613,7 +584,7 @@ pub(crate) fn draw_setup_wizard(
             wizard_line(
                 frame,
                 right - text_width("Press Enter to open your journal"),
-                size.height - 2.0 * LINE_HEIGHT,
+                bottom - 2.0 * LINE_HEIGHT,
                 "Press Enter to open your journal",
                 faded,
             );
@@ -732,23 +703,15 @@ fn draw_choice(
 
 pub(crate) fn draw_view(
     frame: &mut iced::widget::canvas::Frame,
-    size: Size,
+    area: Rectangle,
     view_frame: &ViewFrame,
     theme: &ThemePalette,
-    drawer_rect: Option<iced::Rectangle>,
 ) {
-    // Bottom-anchored minibuffer — render within drawer_rect.
-    let content_chars = chars_that_fit(size.width).saturating_sub(4);
+    let content_chars = chars_that_fit(area.width).saturating_sub(4);
     let max_visible: usize = 12;
     let num_results = view_frame.rows.len().min(max_visible);
-    let (panel_top, panel_bottom) = if let Some(dr) = drawer_rect {
-        (dr.y, dr.y + dr.height)
-    } else {
-        let bottom = size.height - STATUS_BAR_HEIGHT;
-        let rows = num_results + 4;
-        let top = (bottom - rows as f32 * LINE_HEIGHT).max(0.0);
-        (top, bottom)
-    };
+    let panel_top = area.y;
+    let panel_bottom = area.y + area.height;
     let available_h = panel_bottom - panel_top;
     let available_lines = (available_h / LINE_HEIGHT) as usize;
 
@@ -786,22 +749,22 @@ pub(crate) fn draw_view(
     // Title line.
     let title_y = error_y.unwrap_or(rows_top_y) - LINE_HEIGHT;
 
-    let panel_top = title_y - LINE_HEIGHT * 0.5;
+    let actual_top = title_y - LINE_HEIGHT * 0.5;
 
     // Opaque background.
     fill_rect(
         frame,
-        rect(0.0, panel_top, size.width, panel_bottom - panel_top),
+        rect(area.x, actual_top, area.width, panel_bottom - actual_top),
         rgb_to_color(&theme.background),
     );
 
     // Top separator.
-    draw_hline(frame, 0.0, size.width, panel_top, rgb_to_color(&theme.faded));
+    draw_hline(frame, area.x, area.x + area.width, actual_top, rgb_to_color(&theme.faded));
 
     // ── Title ──
     draw_text(
         frame,
-        SPACING_MD,
+        area.x + SPACING_MD,
         title_y,
         truncate_text(&view_frame.title, content_chars),
         rgb_to_color(&theme.strong),
@@ -812,7 +775,7 @@ pub(crate) fn draw_view(
         if let Some(err) = &view_frame.error {
             draw_text(
                 frame,
-                SPACING_MD,
+                area.x + SPACING_MD,
                 ey,
                 truncate_text(err, content_chars),
                 rgb_to_color(&theme.critical),
@@ -821,14 +784,14 @@ pub(crate) fn draw_view(
     }
 
     // ── Result rows ──
-    let right_margin = size.width - SPACING_MD;
+    let right_margin = area.x + area.width - SPACING_MD;
     for (vi, row) in view_frame.rows.iter().take(num_visible).enumerate() {
         let y = rows_top_y + vi as f32 * LINE_HEIGHT;
         let is_selected = vi == view_frame.selected;
         if is_selected {
             fill_rect(
                 frame,
-                rect(0.0, y, size.width, LINE_HEIGHT),
+                rect(area.x, y, area.width, LINE_HEIGHT),
                 rgb_to_color(&theme.mild),
             );
         }
@@ -836,7 +799,7 @@ pub(crate) fn draw_view(
             ViewRow::SectionHeader(title) => {
                 draw_text(
                     frame,
-                    SPACING_MD + CHAR_WIDTH,
+                    area.x + SPACING_MD + CHAR_WIDTH,
                     y,
                     truncate_text(title, content_chars.saturating_sub(2)),
                     rgb_to_color(&theme.salient),
@@ -855,9 +818,9 @@ pub(crate) fn draw_view(
                 } else {
                     rgb_to_color(&theme.foreground)
                 };
-                draw_text(frame, SPACING_MD, y, prefix.to_string(), checkbox_color);
+                draw_text(frame, area.x + SPACING_MD, y, prefix.to_string(), checkbox_color);
 
-                let text_x = SPACING_MD + prefix.len() as f32 * CHAR_WIDTH;
+                let text_x = area.x + SPACING_MD + prefix.len() as f32 * CHAR_WIDTH;
                 let text_color = if *task_done { &theme.faded } else { &theme.foreground };
 
                 // First cell is the main text; remaining cells go to the right margin.
@@ -896,7 +859,7 @@ pub(crate) fn draw_view(
     );
     draw_text(
         frame,
-        SPACING_MD,
+        area.x + SPACING_MD,
         status_y,
         truncate_text(&footer, content_chars),
         rgb_to_color(&theme.faded),
@@ -904,16 +867,16 @@ pub(crate) fn draw_view(
 
     // ── Query line (prompt mode) ──
     if let Some(qy) = query_y {
-        draw_hline(frame, 0.0, size.width, qy, rgb_to_color(&theme.faded));
+        draw_hline(frame, area.x, area.x + area.width, qy, rgb_to_color(&theme.faded));
         let prompt = format!("{} > ", view_frame.title);
         draw_text(
             frame,
-            SPACING_MD,
+            area.x + SPACING_MD,
             qy,
             truncate_text(&prompt, content_chars),
             rgb_to_color(&theme.faded),
         );
-        let query_x = SPACING_MD + text_width(&prompt);
+        let query_x = area.x + SPACING_MD + text_width(&prompt);
         draw_text(
             frame,
             query_x,
@@ -924,7 +887,7 @@ pub(crate) fn draw_view(
         draw_bar_cursor(
             frame,
             (query_x + view_frame.query_cursor as f32 * CHAR_WIDTH)
-                .min(size.width - SPACING_MD - 2.0),
+                .min(area.x + area.width - SPACING_MD - 2.0),
             qy,
             rgb_to_color(&theme.foreground),
         );

@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use bloom_core::render::{PaneFrame, PaneKind, RenderFrame};
+use bloom_core::render::{InlineMenuAnchor, InlineMenuFrame, PaneFrame, PaneKind, RenderFrame};
 use bloom_md::theme::ThemePalette;
 use iced::mouse;
 use iced::widget::canvas::{self, Action, Cache, Event, Geometry};
@@ -170,13 +170,13 @@ impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
                 PaneKind::SetupWizard(w) => Some(w),
                 _ => None,
             }) {
-                overlay::draw_setup_wizard(frame, bounds.size(), wizard, self.theme);
+                let window_rect = Rectangle::new(iced::Point::ORIGIN, bounds.size());
+                overlay::draw_setup_wizard(frame, window_rect, wizard, self.theme);
                 return;
             }
 
             // Compute layout once for the entire frame.
             let layout = FrameLayout::compute(bounds.size().width, bounds.size().height, rf);
-            let modeline_bottom = layout.modeline.y + layout.modeline.height;
 
             // Compute how many status bars are above each pane's Y origin.
             // Panes are sorted by Y in the frame. For each pane, count panes
@@ -188,6 +188,13 @@ impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
                     .filter(|other| other.rect.y + other.rect.total_height <= pf.rect.y)
                     .count();
                 let (px, py, pw, ch) = pane::pane_pixel_rect(&pf.rect, status_bars_above, bounds.size());
+                let content_area = Rectangle { x: px, y: py, width: pw, height: ch };
+                let pane_modeline = Rectangle {
+                    x: px,
+                    y: layout.modeline.y,
+                    width: pw,
+                    height: layout.modeline.height,
+                };
                 let anim = if pf.is_active && !self.remote.skip_animation() {
                     Some((self.anim.cursor_y(), self.anim.highlight_y()))
                 } else {
@@ -199,29 +206,28 @@ impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
                     self.theme,
                     anim,
                     self.cursor_visible,
-                    px,
-                    py,
-                    pw,
-                    ch,
-                    modeline_bottom,
+                    content_area,
+                    pane_modeline,
                 );
             }
 
             draw_split_borders(frame, &rf.panes, self.theme);
             draw_hidden_count(frame, bounds.size(), rf.hidden_pane_count, self.theme);
 
-            let drawer_rect = layout.drawer;
             if let Some(s) = &rf.context_strip {
-                drawer::draw_context_strip(frame, bounds.size(), s, self.theme, drawer_rect);
+                if let Some(dr) = layout.drawer {
+                    drawer::draw_context_strip(frame, dr, s, self.theme);
+                }
             }
             if let Some(s) = &rf.temporal_strip {
-                // Draw only the strip drawer (nodes, hints) — NOT the diff preview.
-                // Diff preview is on a separate layer (DiffCanvas) to avoid
-                // text blending issues within a single Canvas.
-                drawer::draw_temporal_strip_drawer(frame, bounds.size(), s, self.theme, drawer_rect);
+                if let Some(dr) = layout.drawer {
+                    drawer::draw_temporal_strip_drawer(frame, dr, s, self.theme);
+                }
             }
             if let Some(wk) = &rf.which_key {
-                drawer::draw_which_key(frame, bounds.size(), wk, self.theme, drawer_rect);
+                if let Some(dr) = layout.drawer {
+                    drawer::draw_which_key(frame, dr, wk, self.theme);
+                }
             }
         });
         vec![geometry]
@@ -268,8 +274,31 @@ impl<'a> canvas::Program<Message> for DiffCanvas<'a> {
         let active = rf.panes.iter().find(|p| p.is_active);
         let layout = FrameLayout::compute(bounds.size().width, bounds.size().height, rf);
 
+        // Compute the diff preview area from the active pane, above the drawer.
+        let diff_area = if let Some(pane) = active {
+            let status_bars_above = rf.panes.iter()
+                .filter(|other| other.rect.y + other.rect.total_height <= pane.rect.y)
+                .count();
+            let (px, py, pw, _ch) = pane::pane_pixel_rect(&pane.rect, status_bars_above, bounds.size());
+            let drawer_y = layout.drawer.map(|r| r.y).unwrap_or(layout.modeline.y);
+            Rectangle {
+                x: px,
+                y: py,
+                width: pw,
+                height: (drawer_y - py).max(0.0),
+            }
+        } else {
+            let drawer_y = layout.drawer.map(|r| r.y).unwrap_or(layout.modeline.y);
+            Rectangle {
+                x: 0.0,
+                y: 0.0,
+                width: bounds.size().width,
+                height: drawer_y,
+            }
+        };
+
         let geometry = self.cache.draw(renderer, bounds.size(), |frame| {
-            drawer::draw_temporal_diff_preview(frame, bounds.size(), strip, self.theme, active, layout.drawer);
+            drawer::draw_temporal_diff_preview(frame, diff_area, strip, self.theme);
         });
         vec![geometry]
     }
@@ -284,7 +313,6 @@ pub(crate) struct OverlayCanvas<'a> {
     pub(crate) frame: Option<&'a RenderFrame>,
     pub(crate) theme: &'a ThemePalette,
     pub(crate) cache: &'a Cache,
-    pub(crate) remote: RemoteHints,
 }
 
 impl<'a> canvas::Program<Message> for OverlayCanvas<'a> {
@@ -314,29 +342,49 @@ impl<'a> canvas::Program<Message> for OverlayCanvas<'a> {
         }
 
         let geometry = self.cache.draw(renderer, bounds.size(), |frame| {
+            let size = bounds.size();
             let active = rf.panes.iter().find(|p| p.is_active);
-            let scrim_alpha = if self.remote.opaque_scrim() { 1.0 } else { 0.50 };
-            let layout = FrameLayout::compute(bounds.size().width, bounds.size().height, rf);
-            let drawer_rect = layout.drawer;
+            let layout = FrameLayout::compute(size.width, size.height, rf);
 
+            // Inline menu: compute rect from anchor position + menu dimensions.
             if let Some(m) = &rf.inline_menu {
-                inline::draw_inline_menu(frame, bounds.size(), active, m, self.theme);
+                let menu_rect = compute_inline_menu_rect(active, m, size);
+                inline::draw_inline_menu(frame, menu_rect, m, self.theme);
             }
             if let Some(dp) = &rf.date_picker {
-                overlay::draw_date_picker(frame, bounds.size(), dp, self.theme, drawer_rect);
+                if let Some(dr) = layout.drawer {
+                    overlay::draw_date_picker(frame, dr, dp, self.theme);
+                }
             }
             if let Some(p) = &rf.picker {
-                overlay::draw_picker(frame, bounds.size(), p, self.theme, scrim_alpha, drawer_rect);
+                if let Some(dr) = layout.drawer {
+                    overlay::draw_picker(frame, dr, p, self.theme);
+                }
             }
             if let Some(d) = &rf.dialog {
-                overlay::draw_dialog(frame, bounds.size(), d, self.theme);
+                let w = (size.width * 0.5).max(30.0 * crate::CHAR_WIDTH).min(size.width - 8.0);
+                let h = (4.5 * crate::LINE_HEIGHT).min(size.height - 8.0);
+                let dialog_rect = Rectangle {
+                    x: (size.width - w).max(0.0) / 2.0,
+                    y: (size.height - h).max(0.0) / 2.0,
+                    width: w,
+                    height: h,
+                };
+                overlay::draw_dialog(frame, dialog_rect, d, self.theme);
             }
             if let Some(v) = &rf.view {
-                overlay::draw_view(frame, bounds.size(), v, self.theme, drawer_rect);
+                if let Some(dr) = layout.drawer {
+                    overlay::draw_view(frame, dr, v, self.theme);
+                }
             }
             if !rf.notifications.is_empty() {
-                let modeline_y = Some(layout.modeline.y);
-                notification::draw_notifications(frame, bounds.size(), &rf.notifications, self.theme, modeline_y);
+                let notif_area = Rectangle {
+                    x: 0.0,
+                    y: 0.0,
+                    width: size.width,
+                    height: layout.modeline.y,
+                };
+                notification::draw_notifications(frame, notif_area, &rf.notifications, self.theme);
             }
         });
         vec![geometry]
@@ -346,6 +394,51 @@ impl<'a> canvas::Program<Message> for OverlayCanvas<'a> {
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
+
+/// Compute the pixel rect for the inline menu, positioned relative to the
+/// cursor or command line and clamped to window bounds.
+fn compute_inline_menu_rect(
+    active_pane: Option<&PaneFrame>,
+    menu: &InlineMenuFrame,
+    window_size: Size,
+) -> Rectangle {
+    let max_label = menu.items.iter().map(|i| i.label.chars().count()).max().unwrap_or(0);
+    let max_right = menu.items.iter().filter_map(|i| i.right.as_ref()).map(|t| t.chars().count()).max().unwrap_or(0);
+    let visible_items = menu.items.len().min(8);
+    let hint_rows = usize::from(menu.hint.is_some());
+    let menu_chars = (max_label + max_right + 6).clamp(16, 40);
+    let menu_w = menu_chars as f32 * CHAR_WIDTH;
+    let menu_h = (visible_items + hint_rows) as f32 * crate::LINE_HEIGHT + crate::LINE_HEIGHT * 0.5;
+
+    let (anchor_x, anchor_y) = match menu.anchor {
+        InlineMenuAnchor::CommandLine => {
+            if let Some(pane) = active_pane {
+                let x = pane.rect.x as f32 * CHAR_WIDTH;
+                let y = (pane.rect.y + pane.rect.content_height) as f32 * crate::LINE_HEIGHT - menu_h - 4.0;
+                (x, y)
+            } else {
+                (0.0, window_size.height - menu_h - crate::LINE_HEIGHT - 4.0)
+            }
+        }
+        InlineMenuAnchor::Cursor { line, col } => {
+            if let Some(pane) = active_pane {
+                let x = pane.rect.x as f32 * CHAR_WIDTH + col as f32 * CHAR_WIDTH;
+                let mut y = pane.rect.y as f32 * crate::LINE_HEIGHT + (line + 1) as f32 * crate::LINE_HEIGHT;
+                if y + menu_h > window_size.height {
+                    y = (pane.rect.y as f32 * crate::LINE_HEIGHT + line as f32 * crate::LINE_HEIGHT - menu_h)
+                        .max(0.0);
+                }
+                (x, y)
+            } else {
+                (col as f32 * CHAR_WIDTH, line as f32 * crate::LINE_HEIGHT)
+            }
+        }
+    };
+
+    let x = anchor_x.min((window_size.width - menu_w - 4.0).max(0.0)).max(0.0);
+    let y = anchor_y.min((window_size.height - menu_h - 4.0).max(0.0)).max(0.0);
+    Rectangle { x, y, width: menu_w, height: menu_h }
+}
 
 fn editor_pane_at_position(
     frame: &RenderFrame,
