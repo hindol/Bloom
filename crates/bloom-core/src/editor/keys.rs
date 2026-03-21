@@ -1227,9 +1227,9 @@ impl BloomEditor {
                         self.writer.apply(crate::BufferMessage::EndEditGroup { page_id: page_id.clone() });
                         if !is_ro {
                             self.ensure_block_ids(&page_id);
-                            if was_insert {
-                                self.propagate_mirror_edit(&page_id);
-                            }
+                            // Propagate mirrors after any edit (not just Insert→Normal).
+                            // Normal mode ops like x, r, dd also mutate mirrored lines.
+                            self.propagate_mirror_edit(&page_id);
                         }
                     }
                     // Auto-align only on Insert→Normal transition, skip for read-only
