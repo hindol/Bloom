@@ -116,17 +116,26 @@ impl BloomEditor {
                 ("All Commands".to_string(), "commands".to_string(), items)
             }
             PickerKind::Templates => {
-                let mut items = vec![
-                    // Built-in "Blank page" always available.
-                    GenericPickerItem {
-                        id: "__blank__".to_string(),
-                        label: "Blank page".to_string(),
-                        middle: Some("Empty page with frontmatter".to_string()),
-                        right: None,
-                        preview_text: Some("---\nid: ...\ntitle: \"...\"\ncreated: ...\ntags: []\n---\n".to_string()),
-                        score_boost: 1, // sort above user templates
-                    },
-                ];
+                let mut items: Vec<GenericPickerItem> =
+                    template::builtins::builtin_templates()
+                        .into_iter()
+                        .map(|t| {
+                            let placeholder_count =
+                                t.placeholders.iter().filter(|p| p.index != 0).count();
+                            GenericPickerItem {
+                                id: t.name.clone(),
+                                label: t.name.clone(),
+                                middle: Some(t.description.clone()),
+                                right: if placeholder_count > 0 {
+                                    Some(format!("{placeholder_count} fields"))
+                                } else {
+                                    None
+                                },
+                                preview_text: Some(t.content.clone()),
+                                score_boost: 1, // sort above user templates
+                            }
+                        })
+                        .collect();
                 if let Some(engine) = &self.template_engine {
                     items.extend(engine.list().into_iter().map(|t| {
                         let placeholder_count = t.placeholders.len();
@@ -814,29 +823,33 @@ impl BloomEditor {
                 let _ = self.execute_actions(actions);
             }
             PickerAction::ExpandTemplate => {
-                if item.id == "__blank__" {
-                    // Built-in blank page — just frontmatter.
-                    let id = crate::uuid::generate_hex_id();
+                // Look up built-in templates first, then fall back to user templates.
+                let builtin = template::builtins::builtin_templates()
+                    .into_iter()
+                    .find(|t| t.name == item.id);
+
+                if let Some(bt) = builtin {
+                    let values = std::collections::HashMap::new();
                     let title = "Untitled";
-                    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-                    let content = format!(
-                        "---\nid: {}\ntitle: \"{}\"\ncreated: {}\ntags: []\n---\n\n",
-                        id.to_hex(),
-                        title,
-                        today,
-                    );
+                    let expanded =
+                        template::TemplateEngine::expand_content(&bt.content, title, &values);
+                    let id = crate::uuid::generate_hex_id();
                     let path = self
                         .vault_root
                         .as_ref()
                         .map(|r| r.join("pages").join(format!("{}.md", title)))
                         .unwrap_or_else(|| std::path::PathBuf::from(format!("{}.md", title)));
-                    self.open_page_with_content(&id, title, &path, &content);
+                    self.open_page_with_content(&id, title, &path, &expanded.content);
+                    if !expanded.tab_stops.is_empty() {
+                        self.template_mode =
+                            Some(template::TemplateModeState::new(expanded.tab_stops));
+                    }
                 } else if let Some(engine) = &self.template_engine {
                     let templates = engine.list();
-                    if let Some(template) = templates.iter().find(|t| t.name == item.id) {
+                    if let Some(tmpl) = templates.iter().find(|t| t.name == item.id) {
                         let values = std::collections::HashMap::new();
-                        let title = template.name.clone();
-                        let expanded = engine.expand(template, &title, &values);
+                        let title = tmpl.name.clone();
+                        let expanded = engine.expand(tmpl, &title, &values);
                         let id = crate::uuid::generate_hex_id();
                         let path = self
                             .vault_root

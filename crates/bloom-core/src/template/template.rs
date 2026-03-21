@@ -193,8 +193,96 @@ impl TemplateEngine {
         expanded.tab_stops.clone()
     }
 
+    /// Expand raw template content without needing a [`TemplateEngine`] instance.
+    ///
+    /// This is the same expansion logic as [`expand`](Self::expand) but operates
+    /// on a content string directly, making it suitable for built-in templates
+    /// that don't live on disk.
+    pub fn expand_content(
+        content: &str,
+        title: &str,
+        values: &HashMap<usize, String>,
+    ) -> ExpandedTemplate {
+        let uuid_hex = crate::uuid::generate_hex_id().to_hex();
+        let today = Local::now().format("%Y-%m-%d").to_string();
+
+        // Phase 1: replace magic variables
+        let mut content = content.to_string();
+        content = content.replace("${AUTO}", &uuid_hex);
+        content = content.replace("${DATE}", &today);
+        content = content.replace("${TITLE}", title);
+
+        // Phase 2: replace numbered placeholders ${N:description} and $0
+        let mut result = String::new();
+        let mut stop_map: HashMap<usize, (String, Vec<Range<usize>>)> = HashMap::new();
+
+        let bytes = content.as_bytes();
+        let len = bytes.len();
+        let mut i = 0;
+
+        while i < len {
+            if bytes[i] == b'$' {
+                if i + 1 < len && bytes[i + 1] == b'{' {
+                    if let Some(close) = content[i..].find('}') {
+                        let inner = &content[i + 2..i + close];
+                        if let Some(colon_pos) = inner.find(':') {
+                            if let Ok(idx) = inner[..colon_pos].parse::<usize>() {
+                                let desc = &inner[colon_pos + 1..];
+                                let replacement = values
+                                    .get(&idx)
+                                    .cloned()
+                                    .unwrap_or_else(|| desc.to_string());
+                                let start = result.len();
+                                result.push_str(&replacement);
+                                let end = result.len();
+
+                                let entry = stop_map
+                                    .entry(idx)
+                                    .or_insert_with(|| (desc.to_string(), Vec::new()));
+                                entry.1.push(start..end);
+
+                                i += close + 1;
+                                continue;
+                            }
+                        }
+                    }
+                }
+                if i + 1 < len && bytes[i + 1] == b'0' {
+                    let pos = result.len();
+                    let entry = stop_map
+                        .entry(0)
+                        .or_insert_with(|| (String::new(), Vec::new()));
+                    entry.1.push(pos..pos);
+                    i += 2;
+                    continue;
+                }
+            }
+            result.push(content.as_bytes()[i] as char);
+            i += 1;
+        }
+
+        let mut indices: Vec<usize> = stop_map.keys().copied().collect();
+        indices.sort_by_key(|&idx| if idx == 0 { usize::MAX } else { idx });
+
+        let mut tab_stops_vec: Vec<TabStop> = Vec::new();
+        for idx in indices {
+            if let Some((desc, ranges)) = stop_map.remove(&idx) {
+                tab_stops_vec.push(TabStop {
+                    index: idx,
+                    ranges,
+                    default_text: desc,
+                });
+            }
+        }
+
+        ExpandedTemplate {
+            content: result,
+            tab_stops: tab_stops_vec,
+        }
+    }
+
     /// Parse template content to find all placeholders.
-    fn parse_placeholders(content: &str) -> Vec<Placeholder> {
+    pub(crate) fn parse_placeholders(content: &str) -> Vec<Placeholder> {
         let mut placeholders: HashMap<usize, Placeholder> = HashMap::new();
         let bytes = content.as_bytes();
         let len = bytes.len();

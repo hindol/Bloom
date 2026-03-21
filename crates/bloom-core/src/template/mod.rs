@@ -4,6 +4,7 @@
 //! `${TITLE}`) and numbered placeholders (`${1:description}`). After expansion,
 //! the user tabs through stops; mirror edits synchronize duplicate placeholders.
 
+pub mod builtins;
 #[allow(clippy::module_inception)]
 pub mod template;
 
