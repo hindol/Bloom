@@ -116,31 +116,34 @@ impl BloomEditor {
                 ("All Commands".to_string(), "commands".to_string(), items)
             }
             PickerKind::Templates => {
-                let items = self
-                    .template_engine
-                    .as_ref()
-                    .map(|engine| {
-                        engine
-                            .list()
-                            .into_iter()
-                            .map(|t| {
-                                let placeholder_count = t.placeholders.len();
-                                GenericPickerItem {
-                                    id: t.name.clone(),
-                                    label: t.name.clone(),
-                                    middle: Some(t.description.clone()),
-                                    right: if placeholder_count > 0 {
-                                        Some(format!("{placeholder_count} fields"))
-                                    } else {
-                                        None
-                                    },
-                                    preview_text: Some(t.content.clone()),
-                                    score_boost: 0,
-                                }
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let mut items = vec![
+                    // Built-in "Blank page" always available.
+                    GenericPickerItem {
+                        id: "__blank__".to_string(),
+                        label: "Blank page".to_string(),
+                        middle: Some("Empty page with frontmatter".to_string()),
+                        right: None,
+                        preview_text: Some("---\nid: ...\ntitle: \"...\"\ncreated: ...\ntags: []\n---\n".to_string()),
+                        score_boost: 1, // sort above user templates
+                    },
+                ];
+                if let Some(engine) = &self.template_engine {
+                    items.extend(engine.list().into_iter().map(|t| {
+                        let placeholder_count = t.placeholders.len();
+                        GenericPickerItem {
+                            id: t.name.clone(),
+                            label: t.name.clone(),
+                            middle: Some(t.description.clone()),
+                            right: if placeholder_count > 0 {
+                                Some(format!("{placeholder_count} fields"))
+                            } else {
+                                None
+                            },
+                            preview_text: Some(t.content.clone()),
+                            score_boost: 0,
+                        }
+                    }));
+                }
                 ("Templates".to_string(), "templates".to_string(), items)
             }
             PickerKind::Backlinks(page_id) => {
@@ -811,7 +814,24 @@ impl BloomEditor {
                 let _ = self.execute_actions(actions);
             }
             PickerAction::ExpandTemplate => {
-                if let Some(engine) = &self.template_engine {
+                if item.id == "__blank__" {
+                    // Built-in blank page — just frontmatter.
+                    let id = crate::uuid::generate_hex_id();
+                    let title = "Untitled";
+                    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+                    let content = format!(
+                        "---\nid: {}\ntitle: \"{}\"\ncreated: {}\ntags: []\n---\n\n",
+                        id.to_hex(),
+                        title,
+                        today,
+                    );
+                    let path = self
+                        .vault_root
+                        .as_ref()
+                        .map(|r| r.join("pages").join(format!("{}.md", title)))
+                        .unwrap_or_else(|| std::path::PathBuf::from(format!("{}.md", title)));
+                    self.open_page_with_content(&id, title, &path, &content);
+                } else if let Some(engine) = &self.template_engine {
                     let templates = engine.list();
                     if let Some(template) = templates.iter().find(|t| t.name == item.id) {
                         let values = std::collections::HashMap::new();
