@@ -239,7 +239,8 @@ impl BloomEditor {
                 let show_jrnl = is_active
                     && self.in_journal_mode
                     && self.temporal_strip.is_none()
-                    && matches!(content, render::StatusBarContent::Normal(_));
+                    && matches!(content, render::StatusBarContent::Normal(_))
+                    && matches!(self.vim_state.mode(), bloom_vim::Mode::Normal);
 
                 let show_hist = is_active && self.temporal_strip.is_some();
 
