@@ -135,11 +135,16 @@ fn boot() -> (BloomApp, Task<Message>) {
 
     let mut editor = BloomEditor::new(config).expect("failed to create editor");
 
-    let vault_path = default_vault_path();
-    let vault_root = std::path::Path::new(&vault_path);
-    if vault_root.join("config.toml").exists() {
-        let _ = editor.init_vault(vault_root);
-        editor.startup();
+    // First-run detection: show setup wizard if no vault exists.
+    if editor.needs_setup() {
+        editor.start_wizard();
+    } else {
+        let vault_path = default_vault_path();
+        let vault_root = std::path::Path::new(&vault_path);
+        if vault_root.join("config.toml").exists() {
+            let _ = editor.init_vault(vault_root);
+            editor.startup();
+        }
     }
 
     let (frontend_tx, frontend_rx) = crossbeam::channel::unbounded();
