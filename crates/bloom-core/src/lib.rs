@@ -184,6 +184,10 @@ impl BufferManager {
         self.buffers.get(&page_id.to_hex()).map(|(_, info)| info)
     }
 
+    pub fn info_mut(&mut self, page_id: &types::PageId) -> Option<&mut BufferInfo> {
+        self.buffers.get_mut(&page_id.to_hex()).map(|(_, info)| info)
+    }
+
     pub fn close(&mut self, page_id: &types::PageId) {
         self.buffers.remove(&page_id.to_hex());
     }
@@ -663,6 +667,10 @@ pub(crate) enum ActiveDialog {
     FileChanged {
         page_id: types::PageId,
         path: std::path::PathBuf,
+        selected: usize,
+    },
+    DeletePage {
+        page_id: types::PageId,
         selected: usize,
     },
 }

@@ -306,6 +306,14 @@ impl BloomEditor {
         kind: &keymap::dispatch::QuickCaptureKind,
         text: &str,
     ) {
+        match kind {
+            keymap::dispatch::QuickCaptureKind::Rename => {
+                self.rename_current_page(text.to_string());
+                return;
+            }
+            _ => {}
+        }
+
         let Some(journal) = &self.journal else { return };
         let Some(store) = &self.note_store else { return };
         let today = journal::Journal::today();
@@ -318,6 +326,7 @@ impl BloomEditor {
             keymap::dispatch::QuickCaptureKind::Task => {
                 journal.append_task(today, text, store, &self.parser)
             }
+            keymap::dispatch::QuickCaptureKind::Rename => unreachable!(),
         };
 
         match result {
@@ -336,4 +345,114 @@ impl BloomEditor {
             }
         }
     }
+
+    /// Rename the current page: update frontmatter title, rename file on disk,
+    /// and update buffer metadata.
+    fn rename_current_page(&mut self, new_title: String) {
+        let Some(page_id) = self.active_page().cloned() else { return };
+
+        // 1. Update the title in the buffer's frontmatter text.
+        if let Some(buf) = self.writer.buffers().get(&page_id) {
+            let text = buf.text().to_string();
+            if let Some(updated) = Self::replace_frontmatter_title(&text, &new_title) {
+                self.writer.apply(crate::BufferMessage::Reload {
+                    page_id: page_id.clone(),
+                    content: updated,
+                });
+            }
+        }
+
+        // 2. Rename file on disk.
+        let old_path = self
+            .writer
+            .buffers()
+            .info(&page_id)
+            .map(|i| i.path.clone());
+        if let Some(old) = &old_path {
+            if old.to_string_lossy().starts_with('[') {
+                // Pseudo-path like [scratch] — skip disk rename
+            } else if let Some(parent) = old.parent() {
+                let new_filename = sanitize_filename(&new_title);
+                let new_path = parent.join(format!("{new_filename}.md"));
+                if old != &new_path {
+                    let _ = std::fs::rename(old, &new_path);
+                    // Update stored path in buffer info
+                    if let Some(info) = self.writer.buffers_mut().info_mut(&page_id) {
+                        info.path = new_path.clone();
+                    }
+                }
+            }
+        }
+
+        // 3. Update buffer title in metadata.
+        if let Some(info) = self.writer.buffers_mut().info_mut(&page_id) {
+            info.title = new_title.clone();
+        }
+
+        self.push_notification(
+            format!("Renamed to: {new_title}"),
+            render::NotificationLevel::Info,
+        );
+    }
+
+    /// Replace the `title:` value in YAML frontmatter.
+    /// Returns `Some(new_content)` if frontmatter was found and updated.
+    fn replace_frontmatter_title(content: &str, new_title: &str) -> Option<String> {
+        // Frontmatter: starts with "---\n", ends with "\n---\n"
+        if !content.starts_with("---\n") {
+            return None;
+        }
+        let end = content[4..].find("\n---\n").map(|i| i + 4)?;
+        let fm_block = &content[4..end];
+        let after = &content[end + 5..];
+
+        let mut new_fm_lines = Vec::new();
+        for line in fm_block.lines() {
+            if line.starts_with("title:") {
+                new_fm_lines.push(format!("title: \"{}\"", new_title));
+            } else {
+                new_fm_lines.push(line.to_string());
+            }
+        }
+        let mut result = String::from("---\n");
+        result.push_str(&new_fm_lines.join("\n"));
+        result.push_str("\n---\n");
+        result.push_str(after);
+        Some(result)
+    }
+}
+
+/// Convert a page title to a safe filename (lowercase, spaces → hyphens,
+/// strip non-alphanumeric except hyphens/underscores).
+fn sanitize_filename(title: &str) -> String {
+    let s: String = title
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c.to_ascii_lowercase()
+            } else if c == ' ' {
+                '-'
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    // Collapse consecutive hyphens/underscores
+    let mut result = String::with_capacity(s.len());
+    let mut prev_sep = false;
+    for c in s.chars() {
+        if c == '-' || c == '_' {
+            if !prev_sep {
+                result.push(c);
+            }
+            prev_sep = true;
+        } else {
+            result.push(c);
+            prev_sep = false;
+        }
+    }
+    if result.is_empty() {
+        result.push_str("untitled");
+    }
+    result
 }

@@ -105,6 +105,7 @@ pub enum PickerInputAction {
 pub enum QuickCaptureKind {
     Note,
     Task,
+    Rename,
 }
 
 #[derive(Debug, Clone)]

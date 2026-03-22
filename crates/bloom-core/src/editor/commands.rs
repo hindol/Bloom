@@ -262,12 +262,39 @@ impl BloomEditor {
                 }
             }
             "rename_page" => {
-                // TODO: open rename input pre-filled with current title
-                vec![keymap::dispatch::Action::Noop]
+                if let Some(page_id) = self.active_page().cloned() {
+                    if self.writer.buffers().get(&page_id).is_some() {
+                        let current_title = self
+                            .writer
+                            .buffers()
+                            .info(&page_id)
+                            .map(|i| i.title.clone())
+                            .unwrap_or_default();
+                        let len = current_title.len();
+                        self.quick_capture = Some(QuickCaptureState {
+                            kind: keymap::dispatch::QuickCaptureKind::Rename,
+                            input: current_title,
+                            cursor_pos: len,
+                        });
+                    }
+                }
+                vec![]
             }
             "delete_page" => {
-                // TODO: show confirmation dialog, then delete
-                vec![keymap::dispatch::Action::Noop]
+                if let Some(page_id) = self.active_page().cloned() {
+                    let title = self
+                        .writer
+                        .buffers()
+                        .info(&page_id)
+                        .map(|i| i.title.clone())
+                        .unwrap_or_default();
+                    self.active_dialog = Some(ActiveDialog::DeletePage {
+                        page_id,
+                        selected: 0,
+                    });
+                    let _ = title; // title used for dialog rendering
+                }
+                vec![]
             }
             "close_other_windows" => vec![keymap::dispatch::Action::CloseOtherWindows],
             "widen_window" => vec![keymap::dispatch::Action::ResizeWindow(

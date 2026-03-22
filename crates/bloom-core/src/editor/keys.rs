@@ -45,7 +45,10 @@ impl BloomEditor {
 
         // If quick capture is open
         if self.quick_capture.is_some() {
-            return self.handle_quick_capture_key(&key);
+            let actions = self.handle_quick_capture_key(&key);
+            let result = self.execute_actions(actions);
+            self.autosave_if_dirty();
+            return result;
         }
 
         // If a view is active, handle q/Enter; other keys pass through to Vim
@@ -557,23 +560,62 @@ impl BloomEditor {
                             }
                             // selected == 1: keep buffer (do nothing)
                         }
+                        ActiveDialog::DeletePage { page_id, selected } => {
+                            if selected == 1 {
+                                // "Delete" selected — delete from disk and close buffer
+                                if let Some(info) = self.writer.buffers().info(&page_id) {
+                                    let path = info.path.clone();
+                                    let _ = std::fs::remove_file(&path);
+                                }
+                                // Close the buffer
+                                self.writer.apply(crate::BufferMessage::Close {
+                                    page_id: page_id.clone(),
+                                });
+                                // Switch to next available buffer or journal
+                                if let Some(next) = self.writer.buffers().open_buffers().first() {
+                                    self.set_active_page(Some(next.page_id.clone()));
+                                    self.set_cursor(0);
+                                } else {
+                                    self.open_journal_today();
+                                }
+                                self.push_notification(
+                                    "Page deleted".to_string(),
+                                    render::NotificationLevel::Info,
+                                );
+                            }
+                            // selected == 0: "Cancel" (do nothing)
+                        }
                     }
                 }
             }
             KeyCode::Left | KeyCode::Char('h') => {
-                if let Some(ActiveDialog::FileChanged {
-                    ref mut selected, ..
-                }) = self.active_dialog
-                {
-                    *selected = 0;
+                match &mut self.active_dialog {
+                    Some(ActiveDialog::FileChanged {
+                        ref mut selected, ..
+                    }) => {
+                        *selected = 0;
+                    }
+                    Some(ActiveDialog::DeletePage {
+                        ref mut selected, ..
+                    }) => {
+                        *selected = 0;
+                    }
+                    _ => {}
                 }
             }
             KeyCode::Right | KeyCode::Char('l') => {
-                if let Some(ActiveDialog::FileChanged {
-                    ref mut selected, ..
-                }) = self.active_dialog
-                {
-                    *selected = 1;
+                match &mut self.active_dialog {
+                    Some(ActiveDialog::FileChanged {
+                        ref mut selected, ..
+                    }) => {
+                        *selected = 1;
+                    }
+                    Some(ActiveDialog::DeletePage {
+                        ref mut selected, ..
+                    }) => {
+                        *selected = 1;
+                    }
+                    _ => {}
                 }
             }
             _ => {}

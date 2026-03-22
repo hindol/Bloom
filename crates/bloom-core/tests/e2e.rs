@@ -3784,21 +3784,122 @@ fn uc07_create_page_from_template_with_frontmatter() {
 }
 
 #[test]
-#[ignore = "rename_page currently maps to Action::Noop in bloom-core/src/editor/commands.rs"]
 fn uc09_rename_page_opens_input() {
     let vault = linked_vault();
     let mut sim = SimInput::with_vault(vault);
     sim.keys("SPC f r");
-    assert!(sim.screen(80, 24).has_picker() || sim.screen(80, 24).frame.inline_menu.is_some());
+    let screen = sim.screen(80, 24);
+    // Quick capture should be active with the rename prompt
+    let pane = screen.frame.panes.iter().find(|p| p.is_active).unwrap();
+    match &pane.status_bar.content {
+        bloom_core::render::StatusBarContent::QuickCapture(qc) => {
+            assert!(qc.prompt.contains("Rename"), "prompt should mention Rename, got: {}", qc.prompt);
+            // Should be pre-filled with current title
+            assert!(!qc.input.is_empty(), "input should be pre-filled with current title");
+        }
+        other => panic!("expected QuickCapture, got {:?}", std::mem::discriminant(other)),
+    }
 }
 
 #[test]
-#[ignore = "delete_page currently maps to Action::Noop in bloom-core/src/editor/commands.rs"]
+fn uc09_rename_page_updates_title() {
+    let vault = TestVault::new()
+        .page("Old Title")
+        .with_content("Some content\n")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // Open the page via picker
+    sim.keys("SPC f f");
+    sim.type_text("Old");
+    sim.keys("<CR>");
+
+    let screen = sim.screen(80, 24);
+    assert!(screen.title().contains("Old Title"), "should show Old Title, got: {}", screen.title());
+
+    // Rename: SPC f r
+    sim.keys("SPC f r");
+
+    // Verify quick capture is active with pre-filled title
+    let screen = sim.screen(80, 24);
+    let pane = screen.frame.panes.iter().find(|p| p.is_active).unwrap();
+    match &pane.status_bar.content {
+        bloom_core::render::StatusBarContent::QuickCapture(qc) => {
+            assert_eq!(qc.input, "Old Title");
+        }
+        _ => panic!("expected QuickCapture"),
+    }
+
+    // Clear and type new name — send Backspace for each char to clear
+    for _ in 0.."Old Title".len() {
+        sim.keys("<BS>");
+    }
+    sim.type_text("New Title");
+    sim.keys("<CR>");
+
+    let screen = sim.screen(80, 24);
+    assert!(screen.title().contains("New Title"), "title should be New Title, got: {}", screen.title());
+}
+
+#[test]
 fn uc10_delete_page_shows_confirmation_dialog() {
     let vault = linked_vault();
     let mut sim = SimInput::with_vault(vault);
     sim.keys("SPC f D");
     assert!(sim.screen(80, 24).has_dialog());
+}
+
+#[test]
+fn uc10_delete_page_cancel_keeps_page() {
+    let vault = TestVault::new()
+        .page("Keep Me")
+        .with_content("Stay\n")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    sim.type_text("Keep");
+    sim.keys("<CR>");
+
+    sim.keys("SPC f D");
+    assert!(sim.screen(80, 24).has_dialog());
+
+    // Cancel (selected=0 is Cancel, just press Enter)
+    sim.keys("<CR>");
+
+    let screen = sim.screen(80, 24);
+    assert!(!screen.has_dialog());
+    assert!(screen.title().contains("Keep Me"), "page should still exist, got: {}", screen.title());
+}
+
+#[test]
+fn uc10_delete_page_confirm_removes_page() {
+    let vault = TestVault::new()
+        .page("To Delete")
+        .with_content("Delete me\n")
+        .page("Keep Me")
+        .with_content("Stay\n")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    // Open the page to delete
+    sim.keys("SPC f f");
+    sim.type_text("To Delete");
+    sim.keys("<CR>");
+
+    // Delete: SPC f D
+    sim.keys("SPC f D");
+    let screen = sim.screen(80, 24);
+    assert!(screen.has_dialog());
+
+    // Move to "Delete" option (right) and confirm
+    sim.keys("l");
+    sim.keys("<CR>");
+
+    let screen = sim.screen(80, 24);
+    assert!(!screen.has_dialog());
+    // Should have switched away from the deleted page
+    assert!(!screen.title().contains("To Delete"), "should not show deleted page, got: {}", screen.title());
 }
 
 #[test]

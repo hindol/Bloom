@@ -206,6 +206,9 @@ impl BloomEditor {
                         keymap::dispatch::QuickCaptureKind::Task => {
                             "- [ ] Append task > ".to_string()
                         }
+                        keymap::dispatch::QuickCaptureKind::Rename => {
+                            "✏️  Rename page > ".to_string()
+                        }
                     };
                     render::StatusBarContent::QuickCapture(render::QuickCaptureSlot {
                         prompt,
@@ -711,6 +714,19 @@ impl BloomEditor {
                     Some(render::DialogFrame {
                         message: format!("{} changed on disk. Reload?", filename),
                         choices: vec!["Reload".to_string(), "Keep buffer".to_string()],
+                        selected: *selected,
+                    })
+                }
+                Some(ActiveDialog::DeletePage { page_id, selected }) => {
+                    let title = self
+                        .writer
+                        .buffers()
+                        .info(page_id)
+                        .map(|i| i.title.clone())
+                        .unwrap_or_else(|| "this page".to_string());
+                    Some(render::DialogFrame {
+                        message: format!("Delete \"{}\"? This cannot be undone.", title),
+                        choices: vec!["Cancel".to_string(), "Delete".to_string()],
                         selected: *selected,
                     })
                 }
