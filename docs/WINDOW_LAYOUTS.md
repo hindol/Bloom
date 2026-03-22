@@ -699,6 +699,60 @@ Each drawer surface reports its needed height — the layout manager allocates i
 
 ---
 
+## Dashboard (Empty State)
+
+> Status: **Design** — not yet implemented.
+
+Shown when no buffers are open (last buffer closed, or fresh launch with no session to restore). A read-only special pane (`PaneKind::Dashboard`) that refreshes each time it's shown.
+
+### Layout
+
+```
+                          ╔╗ 
+                          ╚╝ Bloom 🌱
+
+          Write freely. Let patterns emerge.
+
+
+   Recent Pages                       Quick Actions
+   ─────────────                      ─────────────
+   Text Editor Theory      2m ago     SPC n    new page
+   Rust Programming        1h ago     SPC j t  today's journal
+   2026-03-22 (journal)    today      SPC f f  find page
+   Meeting Notes            3d ago    SPC s s  search everything
+   CRDT Research           1w ago     SPC a a  agenda
+
+
+   Today                              Did You Know?
+   ─────────────                      ─────────────
+   3 open tasks                       SPC l t opens a timeline
+   2 pages edited                     of every note that links
+   Journal: 5 entries                 to the current page.
+
+
+                    SPC j t to start writing
+```
+
+### Sections
+
+| Section | Content | Source |
+|---------|---------|--------|
+| Header | ASCII logo + tagline | Static |
+| Recent Pages | Last 5 accessed, time-ago | `page_access` (frecency) |
+| Quick Actions | Key bindings for common actions | Static |
+| Today | Open tasks, pages edited, journal entries | Index queries |
+| Did You Know? | Random tip from pool of ~15 | Rotates per show |
+| Footer | "SPC j t to start writing" | Static |
+
+### Behaviour
+
+- **Auto-shown** when last buffer closes
+- **Dismissed** by any page-opening action (`SPC n`, `SPC f f`, `SPC j t`, etc.)
+- **Not a real page** — no UUID, no file on disk, no frontmatter
+- **PaneKind::Dashboard** — rendered like other special panes
+
+---
+
 ## GUI Chrome — Modeline, Picker, Drawers
 
 > Pixel-level specs for the GUI (Iced Canvas). The TUI maps the same logical

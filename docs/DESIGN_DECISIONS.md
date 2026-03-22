@@ -53,3 +53,7 @@
 | Window navigation | Nearest spatial neighbor (ray cast from cursor position) | Tree-based parent/sibling traversal |
 | Splittable panes | Only editor panes can be split; special views (timeline, agenda, undo tree) are leaf-only | Any pane can be split |
 | Clipboard model | Vim registers + system clipboard (`arboard`) + kill ring (32 entries, `SPC i y` picker) | Vim registers only, system clipboard only, Emacs `M-y` cycling |
+| New page creation | `SPC n` = template picker with title prompt. Title auto-derived from content on save if blank. Lazy file creation. | Prompt-free scratch buffer, name-on-save only |
+| Scratch buffer | No separate scratch — today's journal IS the scratch. Extract to a page with `SPC r s`. | Dedicated scratch buffer, multiple unnamed buffers |
+| Empty state | Dashboard with recent pages, quick actions, today's stats, random tip | Blank screen, auto-open journal, splash screen |
+| Journal ID stability | Cache today's journal PageId in memory. `SPC j t` reopens same ID. No churn on close/reopen. | New ID per open, persist across restart |
