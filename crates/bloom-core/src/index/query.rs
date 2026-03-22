@@ -621,6 +621,34 @@ impl Index {
         rows.filter_map(|r| r.ok()).collect()
     }
 
+    /// Like [`frecency_top`] but also returns `last_accessed_ms` for each page.
+    pub fn frecency_top_with_time(&self, limit: usize) -> Vec<(PageMeta, i64)> {
+        let mut stmt = match self.conn.prepare(
+            "SELECT p.id, p.title, p.created, p.path, a.last_accessed_ms
+             FROM page_access a
+             JOIN pages p ON p.id = a.page_id
+             ORDER BY a.frecency_score DESC
+             LIMIT ?1",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+        let rows = match stmt.query_map(rusqlite::params![limit as i64], |row| {
+            let meta = self.row_to_page_meta(
+                &row.get::<_, String>(0)?,
+                &row.get::<_, String>(1)?,
+                &row.get::<_, String>(2)?,
+                &row.get::<_, String>(3)?,
+            );
+            let ts: i64 = row.get(4)?;
+            Ok((meta, ts))
+        }) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        rows.filter_map(|r| r.ok()).collect()
+    }
+
     /// Get frecency score for a page (0.0 if never accessed).
     pub fn frecency_score(&self, page_id: &PageId) -> f64 {
         let hex = page_id.to_hex();

@@ -8,6 +8,46 @@
 use crate::editor::commands::EX_COMMANDS;
 use crate::*;
 
+/// Format a millisecond-epoch timestamp as a human-readable "time ago" string.
+fn format_time_ago(accessed_ms: i64) -> String {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    let delta_s = ((now_ms - accessed_ms) / 1000).max(0);
+    if delta_s < 60 {
+        "just now".to_string()
+    } else if delta_s < 3600 {
+        format!("{}m ago", delta_s / 60)
+    } else if delta_s < 86400 {
+        format!("{}h ago", delta_s / 3600)
+    } else if delta_s < 86400 * 7 {
+        let days = delta_s / 86400;
+        if days == 1 { "yesterday".to_string() } else { format!("{}d ago", days) }
+    } else {
+        format!("{}w ago", delta_s / (86400 * 7))
+    }
+}
+
+const DASHBOARD_TIPS: &[&str] = &[
+    "SPC l t opens a timeline of every note that links to the current page.",
+    "[[ in Insert mode triggers the link picker \u{2014} type to search pages.",
+    "SPC s t lets you browse all tags and filter by one.",
+    "SPC w v splits the window \u{2014} edit two pages side by side.",
+    "SPC u u opens the undo tree \u{2014} navigate branching history visually.",
+    "#tag anywhere in text creates an inline tag \u{2014} searchable immediately.",
+    "@due(2026-03-25) on a task makes it appear in the agenda (SPC a a).",
+    "SPC H h shows the full history of the current page \u{2014} every version.",
+    "SPC r s extracts a section into its own page \u{2014} with links preserved.",
+    "[d and ]d hop between journal days \u{2014} the scrubber shows context.",
+    "SPC T t opens the theme picker with live preview.",
+    "SPC ? shows all commands \u{2014} fuzzy-searchable.",
+    "SPC l y copies a link to the current page \u{2014} paste it anywhere.",
+    "ah selects the entire heading section \u{2014} great for moving or deleting.",
+    "Group related journal notes under a ## Heading, then SPC r s to extract them into their own page.",
+    "SPC i y opens the kill ring \u{2014} browse and paste from your clipboard history.",
+];
+
 /// Convert the window manager's binary split tree into the render module's
 /// serializable multi-child tree for GUI consumption.
 fn wm_tree_to_render(tree: &window::LayoutTree) -> render::LayoutTree {
@@ -60,6 +100,40 @@ fn command_ghost_text(input: &str) -> Option<String> {
 }
 
 impl BloomEditor {
+    /// Build the dashboard frame shown when no buffers are open.
+    fn build_dashboard_frame(&self) -> render::DashboardFrame {
+        let recent_pages: Vec<render::DashboardRecentPage> = self
+            .index
+            .as_ref()
+            .map(|idx| idx.frecency_top_with_time(5))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(meta, accessed_ms)| render::DashboardRecentPage {
+                title: meta.title,
+                time_ago: format_time_ago(accessed_ms),
+            })
+            .collect();
+
+        let open_tasks = self
+            .index
+            .as_ref()
+            .map(|idx| idx.all_open_tasks().len())
+            .unwrap_or(0);
+
+        let tip_idx = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as usize % DASHBOARD_TIPS.len())
+            .unwrap_or(0);
+
+        render::DashboardFrame {
+            recent_pages,
+            open_tasks,
+            pages_edited_today: 0,
+            journal_entries_today: 0,
+            tip: DASHBOARD_TIPS[tip_idx].to_string(),
+        }
+    }
+
     /// Produce the render frame. `width` and `height` are the actual terminal
     /// dimensions — used directly for layout computation so pane rects always
     /// tile the exact screen area.
@@ -130,6 +204,79 @@ impl BloomEditor {
         let drawer_h = wk_h.max(ts_h);
         let pane_area_h = height.saturating_sub(drawer_h);
         let pane_rects = self.window_mgr.compute_pane_rects(width, pane_area_h);
+
+        // Dashboard: when no buffers are open, show the dashboard pane.
+        if self.writer.buffers().open_buffers().is_empty() {
+            let dashboard = self.build_dashboard_frame();
+            let first_rect = pane_rects.first();
+            return render::RenderFrame {
+                panes: vec![render::PaneFrame {
+                    id: first_rect.map(|r| r.pane_id).unwrap_or(types::PaneId(0)),
+                    kind: render::PaneKind::Dashboard(dashboard),
+                    visible_lines: Vec::new(),
+                    cursor: render::CursorState::default(),
+                    scroll_offset: 0,
+                    total_lines: 0,
+                    is_active: true,
+                    title: String::from("Dashboard"),
+                    dirty: false,
+                    status_bar: render::StatusBarFrame {
+                        content: render::StatusBarContent::Normal(render::NormalStatus {
+                            title: String::from("Dashboard"),
+                            dirty: false,
+                            line: 0,
+                            column: 0,
+                            pending_keys: if !self.leader_keys.is_empty() {
+                                self.leader_keys
+                                    .iter()
+                                    .map(|k| k.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(" ")
+                            } else {
+                                String::new()
+                            },
+                            recording_macro: None,
+                            mcp: render::McpIndicator::Off,
+                            indexing: self.indexing,
+                        }),
+                        mode: mode_str.to_string(),
+                        right_hints: None,
+                    },
+                    rect: first_rect
+                        .map(|r| render::PaneRectFrame {
+                            x: r.x,
+                            y: r.y,
+                            width: r.width,
+                            content_height: r.content_height,
+                            total_height: r.height,
+                        })
+                        .unwrap_or_default(),
+                }],
+                maximized: false,
+                hidden_pane_count: 0,
+                picker: None,
+                inline_menu: None,
+                which_key: None,
+                date_picker: None,
+                context_strip: None,
+                temporal_strip: None,
+                dialog: None,
+                view: None,
+                notifications: self
+                    .notifications
+                    .iter()
+                    .rev()
+                    .take(3)
+                    .rev()
+                    .cloned()
+                    .collect(),
+                scrolloff: self.config.scrolloff,
+                theme_name: self.active_theme.name.to_string(),
+                layout_tree: render::LayoutTree::Leaf(
+                    first_rect.map(|r| r.pane_id).unwrap_or(types::PaneId(0)),
+                ),
+            };
+        }
 
         // Layout is computed above; now rendering is read-only below.
 

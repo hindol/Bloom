@@ -1,14 +1,14 @@
 use bloom_core::render::{
-    CommandLineSlot, CursorShape, LineSource, McpIndicator, NormalStatus, PageHistoryFrame,
-    PaneFrame, PaneKind, PaneRectFrame, QuickCaptureSlot, StatusBarContent, Style, TimelineFrame,
-    UndoTreeFrame,
+    CommandLineSlot, CursorShape, DashboardFrame, LineSource, McpIndicator, NormalStatus,
+    PageHistoryFrame, PaneFrame, PaneKind, PaneRectFrame, QuickCaptureSlot, StatusBarContent,
+    Style, TimelineFrame, UndoTreeFrame,
 };
 use bloom_md::theme::ThemePalette;
 use iced::{Color, Rectangle};
 
 use crate::draw::{
-    chars_that_fit, draw_bar_cursor, draw_text, draw_text_right, draw_text_sized,
-    fill_rect, rect, text_width, truncate_text,
+    chars_that_fit, draw_bar_cursor, draw_text, draw_text_center, draw_text_right,
+    draw_text_sized, fill_rect, rect, text_width, truncate_text,
 };
 use crate::theme::{rgb_to_color, style_to_bg, style_to_color};
 use crate::{
@@ -108,6 +108,7 @@ pub(crate) fn draw_pane(
             draw_page_history(frame, content_area, page_history, theme)
         }
         PaneKind::SetupWizard(_) => {}
+        PaneKind::Dashboard(dashboard) => draw_dashboard(frame, content_area, dashboard, theme),
     }
 
     if pane.is_active {
@@ -819,4 +820,152 @@ fn draw_undo_tree(
             row += 1;
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard (empty state)
+// ---------------------------------------------------------------------------
+
+fn draw_dashboard(
+    frame: &mut iced::widget::canvas::Frame,
+    area: Rectangle,
+    dashboard: &DashboardFrame,
+    theme: &ThemePalette,
+) {
+    let strong = rgb_to_color(&theme.strong);
+    let faded = rgb_to_color(&theme.faded);
+    let salient = rgb_to_color(&theme.salient);
+    let fg = rgb_to_color(&theme.foreground);
+
+    // --- Logo area (top center) ---
+    let logo_y = area.y + 3.0 * LINE_HEIGHT;
+    let logo_size = FONT_SIZE * 1.6;
+    let logo_row_h = logo_size * 1.4;
+    let logo_text = "Bloom \u{1F331}";
+    let logo_w = text_width(logo_text) * (logo_size / FONT_SIZE);
+    let logo_x = area.x + (area.width - logo_w).max(0.0) / 2.0;
+    draw_text_sized(frame, logo_x, logo_y, logo_text, strong, logo_size, logo_row_h);
+
+    let tagline = "Write freely. Let patterns emerge.";
+    draw_text_center(frame, area, logo_y + logo_row_h + LINE_HEIGHT * 0.5, tagline, faded);
+
+    // --- Two-column layout: Recent Pages + Quick Actions ---
+    let col_top = logo_y + logo_row_h + LINE_HEIGHT * 3.0;
+    let left_x = area.x + area.width * 0.1;
+    let right_x = area.x + area.width * 0.55;
+
+    // Recent Pages header
+    draw_text(frame, left_x, col_top, "Recent Pages", salient);
+    let sep_y = col_top + LINE_HEIGHT;
+    draw_text(frame, left_x, sep_y, "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}", faded);
+
+    let mut row_y = sep_y + LINE_HEIGHT;
+    if dashboard.recent_pages.is_empty() {
+        draw_text(frame, left_x, row_y, "No recent pages", faded);
+    } else {
+        for page in &dashboard.recent_pages {
+            draw_text(frame, left_x, row_y, &page.title, fg);
+            let time_x = left_x + area.width * 0.28;
+            draw_text(frame, time_x, row_y, &page.time_ago, faded);
+            row_y += LINE_HEIGHT;
+        }
+    }
+
+    // Quick Actions header
+    draw_text(frame, right_x, col_top, "Quick Actions", salient);
+    draw_text(frame, right_x, sep_y, "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}", faded);
+    let actions = [
+        ("SPC n", "new page"),
+        ("SPC j t", "today\u{2019}s journal"),
+        ("SPC f f", "find page"),
+        ("SPC s s", "search everything"),
+        ("SPC a a", "agenda"),
+    ];
+    let mut action_y = sep_y + LINE_HEIGHT;
+    for (key, label) in &actions {
+        draw_text(frame, right_x, action_y, *key, strong);
+        draw_text(frame, right_x + CHAR_WIDTH * 10.0, action_y, *label, fg);
+        action_y += LINE_HEIGHT;
+    }
+
+    // --- Second two-column layout: Today + Did You Know? ---
+    let sec2_top = col_top + LINE_HEIGHT * 8.0;
+
+    // Today header
+    draw_text(frame, left_x, sec2_top, "Today", salient);
+    draw_text(
+        frame,
+        left_x,
+        sec2_top + LINE_HEIGHT,
+        "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+        faded,
+    );
+    let stats_y = sec2_top + LINE_HEIGHT * 2.0;
+    draw_text(
+        frame,
+        left_x,
+        stats_y,
+        format!("{} open tasks", dashboard.open_tasks),
+        fg,
+    );
+    draw_text(
+        frame,
+        left_x,
+        stats_y + LINE_HEIGHT,
+        format!("{} pages edited", dashboard.pages_edited_today),
+        fg,
+    );
+    draw_text(
+        frame,
+        left_x,
+        stats_y + LINE_HEIGHT * 2.0,
+        format!("Journal: {} entries", dashboard.journal_entries_today),
+        fg,
+    );
+
+    // Did You Know? header
+    draw_text(frame, right_x, sec2_top, "Did You Know?", salient);
+    draw_text(
+        frame,
+        right_x,
+        sec2_top + LINE_HEIGHT,
+        "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+        faded,
+    );
+    // Word-wrap the tip into the available column width.
+    let tip_max_chars = ((area.width * 0.35) / CHAR_WIDTH) as usize;
+    let tip_lines = wrap_text(&dashboard.tip, tip_max_chars);
+    let mut tip_y = sec2_top + LINE_HEIGHT * 2.0;
+    for line in &tip_lines {
+        draw_text(frame, right_x, tip_y, line.as_str(), fg);
+        tip_y += LINE_HEIGHT;
+    }
+
+    // --- Footer ---
+    let footer_y = area.y + area.height - 2.0 * LINE_HEIGHT;
+    draw_text_center(frame, area, footer_y, "SPC j t to start writing", faded);
+}
+
+/// Simple word-wrap helper: break `text` into lines of at most `max_chars`.
+fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
+    if max_chars == 0 {
+        return vec![text.to_string()];
+    }
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for word in text.split_whitespace() {
+        if current.is_empty() {
+            current.push_str(word);
+        } else if current.len() + 1 + word.len() > max_chars {
+            lines.push(std::mem::take(&mut current));
+            current.push_str(word);
+        } else {
+            current.push(' ');
+            current.push_str(word);
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
 }

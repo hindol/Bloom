@@ -1012,52 +1012,13 @@ impl BloomEditor {
     // -----------------------------------------------------------------------
 
     pub(crate) fn open_agenda(&mut self) {
-        // Look for an existing page titled "Agenda"
-        if let Some(idx) = &self.index {
-            if let Some(meta) = idx.find_page_by_title("Agenda") {
-                // Already open in a buffer?
-                if self.writer.buffers().get(&meta.id).is_some() {
-                    self.set_active_page(Some(meta.id.clone()));
-                    return;
-                }
-                // Load from disk
-                if let Some(vault_root) = &self.vault_root {
-                    let path = vault_root.join(&meta.path);
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        self.open_page_with_content(&meta.id, "Agenda", &path, &content);
-                        return;
-                    }
-                }
-            }
-        }
-
-        // No Agenda page exists — create one from the built-in template
-        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-        let id = crate::uuid::generate_hex_id();
-        let content = format!(
-            "---\nid: {}\ntitle: \"Agenda\"\ncreated: {}\ntags: []\n---\n\n\
-             ## Overdue\n\n\
-             ## This Week\n\n\
-             ## No Due Date\n",
-            id.to_hex(),
-            today,
-        );
-
-        // Write to disk if vault is initialized
-        if let Some(vault_root) = &self.vault_root {
-            let path = vault_root.join("pages").join("Agenda.md");
-            if let Some(tx) = &self.autosave_tx {
-                let _ = tx.send(bloom_store::disk_writer::WriteRequest {
-                    path: path.clone(),
-                    content: content.clone(),
-                    write_id: 0,
-                    buffer_version: 0,
-                });
-            }
-            self.open_page_with_content(&id, "Agenda", &path, &content);
-        } else {
-            self.open_page_with_content(&id, "Agenda", std::path::Path::new("[agenda]"), &content);
-        }
+        // Open the agenda as a live BQL view
+        let view_config = crate::config::ViewConfig {
+            name: "Agenda".to_string(),
+            query: "tasks | where not done | sort due | group due.category".to_string(),
+            key: Some("a a".to_string()),
+        };
+        self.open_named_view(view_config);
     }
 
     // Will be used by named views task toggle
@@ -1135,9 +1096,8 @@ impl BloomEditor {
                     if let Some(next) = self.writer.buffers().open_buffers().first() {
                         self.set_active_page(Some(next.page_id.clone()));
                         self.set_cursor(0);
-                    } else {
-                        self.open_journal_today();
                     }
+                    // No else — render() will show the dashboard when no buffers remain.
                     return;
                 }
             }
@@ -1155,9 +1115,8 @@ impl BloomEditor {
             if let Some(next) = self.writer.buffers().open_buffers().first() {
                 self.set_active_page(Some(next.page_id.clone()));
                 self.set_cursor(0);
-            } else {
-                self.open_journal_today();
             }
+            // No else — render() will show the dashboard when no buffers remain.
         }
     }
 

@@ -79,6 +79,28 @@ pub enum PaneKind {
     Timeline(TimelineFrame),
     PageHistory(PageHistoryFrame),
     SetupWizard(SetupWizardFrame),
+    Dashboard(DashboardFrame),
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard (empty state)
+// ---------------------------------------------------------------------------
+
+/// Render data for the dashboard shown when no buffers are open.
+#[derive(Serialize)]
+pub struct DashboardFrame {
+    pub recent_pages: Vec<DashboardRecentPage>,
+    pub open_tasks: usize,
+    pub pages_edited_today: usize,
+    pub journal_entries_today: usize,
+    pub tip: String,
+}
+
+/// One entry in the dashboard's "Recent Pages" section.
+#[derive(Serialize)]
+pub struct DashboardRecentPage {
+    pub title: String,
+    pub time_ago: String,
 }
 
 // ---------------------------------------------------------------------------
