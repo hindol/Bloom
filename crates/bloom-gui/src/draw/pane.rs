@@ -305,16 +305,68 @@ fn draw_editor_content(
 
     if pane.is_active && cursor_visible {
         let cursor_row_idx = pane.cursor.line.saturating_sub(pane.scroll_offset);
-        let cursor_char_width = pane.visible_lines.get(cursor_row_idx)
-            .and_then(|line| line.spans.iter().find_map(|s| match s.style {
-                Style::Heading { level } => Some(level),
-                _ => None,
-            }))
-            .map(|level| CHAR_WIDTH * (heading_font_size(level) / FONT_SIZE))
-            .unwrap_or(CHAR_WIDTH);
         let cursor_row_h = line_heights.get(cursor_row_idx).copied().unwrap_or(LINE_HEIGHT);
 
-        let cx = pane_x + GUTTER_WIDTH + pane.cursor.column as f32 * cursor_char_width;
+        // Compute cursor X using the same running-width logic as span rendering.
+        // Each span may have a different char width (heading vs base).
+        let (cx, cursor_cw) = if let Some(line) = pane.visible_lines.get(cursor_row_idx) {
+            let h_level = line.spans.iter().find_map(|s| match s.style {
+                Style::Heading { level } => Some(level),
+                _ => None,
+            });
+            let h_cw = h_level.map(|l| CHAR_WIDTH * (heading_font_size(l) / FONT_SIZE)).unwrap_or(CHAR_WIDTH);
+            let line_text = line.text.trim_end_matches(['\n', '\r']);
+
+            // Walk spans to find the X of cursor.column
+            let mut x = 0.0_f32;
+            let mut last_end = 0usize;
+            let mut char_w_at_cursor = CHAR_WIDTH;
+            let col = pane.cursor.column;
+            let mut col_found = false;
+
+            for span in &line.spans {
+                let start = span.range.start.min(line_text.len());
+                let end = span.range.end.min(line_text.len());
+                if start >= end { continue; }
+
+                // Gap before this span
+                if start > last_end {
+                    let gap_chars = line_text[last_end..start].chars().count();
+                    let gap_cw = if h_level.is_some() { h_cw } else { CHAR_WIDTH };
+                    if col >= last_end && col < start {
+                        x += (col - last_end) as f32 * gap_cw;
+                        char_w_at_cursor = gap_cw;
+                        col_found = true;
+                        break;
+                    }
+                    x += gap_chars as f32 * gap_cw;
+                }
+
+                let is_heading_span = matches!(span.style, Style::Heading { .. } | Style::SyntaxNoise) && h_level.is_some();
+                let span_cw = if is_heading_span { h_cw } else { CHAR_WIDTH };
+                let span_chars = line_text[start..end].chars().count();
+
+                if col >= start && col < end {
+                    x += (col - start) as f32 * span_cw;
+                    char_w_at_cursor = span_cw;
+                    col_found = true;
+                    break;
+                }
+                x += span_chars as f32 * span_cw;
+                last_end = end;
+            }
+
+            if !col_found {
+                // Cursor past all spans — use base width for remaining
+                if col > last_end {
+                    x += (col - last_end) as f32 * CHAR_WIDTH;
+                }
+            }
+
+            (pane_x + GUTTER_WIDTH + x, char_w_at_cursor)
+        } else {
+            (pane_x + GUTTER_WIDTH + pane.cursor.column as f32 * CHAR_WIDTH, CHAR_WIDTH)
+        };
         let cy = anim.map(|(c, _)| c).unwrap_or(
             line_ys.get(cursor_row_idx).copied().unwrap_or(pane_y),
         );
@@ -325,7 +377,7 @@ fn draw_editor_content(
                 // colour so it's always readable (terminal-style inverse).
                 fill_rect(
                     frame,
-                    rect(cx, cy, cursor_char_width, cursor_row_h),
+                    rect(cx, cy, cursor_cw, cursor_row_h),
                     rgb_to_color(&theme.foreground),
                 );
                 // Extract the character under the cursor and redraw it inverted.
@@ -353,7 +405,7 @@ fn draw_editor_content(
             CursorShape::Bar => draw_bar_cursor(frame, cx, cy, rgb_to_color(&theme.foreground)),
             CursorShape::Underline => fill_rect(
                 frame,
-                rect(cx, cy + cursor_row_h - 2.0, cursor_char_width, 2.0),
+                rect(cx, cy + cursor_row_h - 2.0, cursor_cw, 2.0),
                 rgb_to_color(&theme.foreground),
             ),
         }
