@@ -66,7 +66,7 @@ Fields:
 
 ## Subscriber Configuration
 
-Single `tracing_subscriber` setup in `bloom-tui/src/main.rs` (and `bloom-gui` equivalent):
+Single `tracing_subscriber` setup in `bloom-gui/src/main.rs`:
 
 ```rust
 use tracing_subscriber::{fmt, EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
@@ -264,7 +264,7 @@ max_files = 4            # keep this many rotated files
 | Crate | Purpose |
 |-------|---------|
 | `tracing` | Structured logging facade (already in all crates) |
-| `tracing-subscriber` | Subscriber setup, filtering, formatting (already in bloom-tui) |
+| `tracing-subscriber` | Subscriber setup, filtering, formatting (already in bloom-gui) |
 | `tracing-appender` | File appender with rotation (new dependency) |
 
 ---

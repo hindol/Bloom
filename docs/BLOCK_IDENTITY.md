@@ -528,7 +528,7 @@ The mirror indicator is the line number color — but only on the **cursor line*
 
 This builds association: the user lands on a line, sees the colored number AND the status bar hint (`🪞 3 pages · SPC m: mirror`) simultaneously. After a few encounters, the colored number alone triggers recognition. No "mystery colors" on non-cursor lines that the user has to puzzle over.
 
-**Implementation:** `RenderedLine` gains an `is_mirror: bool` flag, set from the line text during `render()` (parse `^=` — no index query). The TUI gutter renderer branches: `if is_cursor_line && is_mirror { salient } else if is_cursor_line { base_style } else { faded }`.
+**Implementation:** `RenderedLine` gains an `is_mirror: bool` flag, set from the line text during `render()` (parse `^=` — no index query). The gutter renderer branches: `if is_cursor_line && is_mirror { salient } else if is_cursor_line { base_style } else { faded }`.
 
 **Theming:** Uses existing `salient` palette slot. No new slots needed.
 

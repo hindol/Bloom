@@ -89,7 +89,7 @@ The BufferWriter is **a struct on the UI thread**, not a separate thread. Synchr
 UI Thread:
     poll input → produce Message
     buffer_writer.apply(message) → mutate Buffer, emit events
-    render(buffers) → RenderFrame → TUI draws
+    render(buffers) → RenderFrame → GUI draws
 
     BufferWriter (struct, not thread):
         apply(EditRequest)  → mutate rope, mark dirty, queue WriteRequest

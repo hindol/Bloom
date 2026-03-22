@@ -774,8 +774,8 @@ Shown when no buffers are open (last buffer closed, or fresh launch with no sess
 
 ## GUI Chrome — Modeline, Picker, Drawers
 
-> Pixel-level specs for the GUI (Iced Canvas). The TUI maps the same logical
-> layout to terminal cells; the GUI maps it to pixel coordinates and spacing tokens.
+> Pixel-level specs for the GUI (Iced Canvas). The GUI maps logical
+> layout to pixel coordinates and spacing tokens.
 
 ### Modeline (Status Bar)
 

@@ -350,7 +350,7 @@ All text operations — editing, display, alignment, search, motions — must ha
 - **Display width**: Column calculations use `unicode-width` display columns, not byte counts. CJK characters (2 columns), emoji, combining marks (0 columns), and multi-byte characters are handled everywhere: editor content, status bar, picker rows, alignment engine, which-key drawer.
 - **Char vs byte boundaries**: String slicing always respects UTF-8 boundaries. Cursor positions, text object ranges, and search results use char indices from ropey, never raw byte offsets on user content.
 - **International content**: Page titles, tags (`#café`), link display text, and frontmatter values can contain any Unicode characters. The parser uses `char::is_alphabetic()` and `char::is_whitespace()` — never ASCII-only checks — for word boundaries and tag detection.
-- **Ligatures**: Font ligatures (fi, fl, →, ≥) are a rendering concern handled by the font, not the editor. Monospace fonts keep each character at a fixed column width regardless of ligature. The GUI may use ligature-capable fonts; the TUI inherits the terminal's font settings.
+- **Ligatures**: Font ligatures (fi, fl, →, ≥) are a rendering concern handled by the font, not the editor. Monospace fonts keep each character at a fixed column width regardless of ligature. The GUI may use ligature-capable fonts.
 - **File paths**: Vault paths, filenames, and journal dates support Unicode characters on all platforms.
 
 ---

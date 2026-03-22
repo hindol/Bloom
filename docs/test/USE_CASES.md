@@ -1118,7 +1118,7 @@ Verifies: BLOCK_IDENTITY
 
 Verifies: ARCHITECTURE
 
-1. User launches Bloom (TUI or GUI).
+1. User launches Bloom.
 2. `.bloom.lock` is created in the vault root with the PID.
 3. User attempts to launch a second instance pointing at the same vault.
 4. The second instance fails with a clear error: "another Bloom instance is running (PID N)."

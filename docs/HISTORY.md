@@ -119,7 +119,7 @@ Message: "2026-03-08 14:32 — edited Text Editor Theory, journal"
 
 ### Single-Instance Lock
 
-Only one Bloom process may access a vault at a time (TUI or GUI, not both). On startup, Bloom creates `.index/bloom.lock` exclusively. The lock file contains the PID. On shutdown, deleted. If Bloom crashes, the stale lock's PID is checked — if the process isn't running, the lock is taken.
+Only one Bloom process may access a vault at a time. On startup, Bloom creates `.index/bloom.lock` exclusively. The lock file contains the PID. On shutdown, deleted. If Bloom crashes, the stale lock's PID is checked — if the process isn't running, the lock is taken.
 
 This prevents concurrent writes to both the SQLite index and the git repo.
 
@@ -432,7 +432,7 @@ Git history is always on — it powers self-healing block IDs, time travel, and 
 
 1. **UUID-based git tree.** Files stored under their page UUID, not filesystem path. Eliminates rename tracking. The index provides bidirectional UUID↔path mapping, rebuildable from frontmatter.
 2. **Linear git, branching undo tree.** Git history is linear (no git branches). Branching is the undo tree's job — persisted to SQLite, VS Code model. Two layers, clean separation.
-3. **Single-instance lock.** `.index/bloom.lock` with PID. Only one Bloom process per vault. TUI + GUI simultaneously is not supported.
+3. **Single-instance lock.** `.index/bloom.lock` with PID. Only one Bloom process per vault.
 4. **Block history via pickaxe.** `git log -S "^block_id" -- {uuid}.md` — scoped to one UUID file, fast. No blame needed.
 5. **`.index/` contains non-rebuildable data.** Git history and undo tree are lost if `.index/` is deleted. Documented, acceptable — vault files are always the source of truth.
 
@@ -465,7 +465,7 @@ pub fn commit_at(
 )
 ```
 
-This is a **dev-dependency only** — `bloom-test-harness` is never shipped in the release binary. Production code in `bloom-core` and `bloom-tui` has no access to backdating.
+This is a **dev-dependency only** — `bloom-test-harness` is never shipped in the release binary. Production code in `bloom-core` and `bloom-gui` has no access to backdating.
 
 ### Demo Vault
 

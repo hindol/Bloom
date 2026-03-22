@@ -82,7 +82,7 @@ The alignment column is set by the longest text-before-`@` in the block. All oth
 - [x] Set up vault                                              @due(2026-03-04)
 ```
 
-Line 2 is the longest and sets the column. Lines 1 and 3 pad to match. If the terminal is narrow, lines 1 and 2 may word-wrap — that's the TUI's problem, not the alignment logic's.
+Line 2 is the longest and sets the column. Lines 1 and 3 pad to match. If the window is narrow, lines 1 and 2 may word-wrap — that's the GUI's problem, not the alignment logic's.
 
 ---
 

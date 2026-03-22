@@ -23,8 +23,8 @@
    | Accent colours | **≥ 4.5 : 1** | Must pass WCAG AA for the small amount of text they colour (checkboxes, errors). |
 
    The "faded" variants of each theme may go ~1–2 points lower across the board for an even calmer feel.
-6. **Terminal-friendly.** All colours must work on 256-colour terminals. The TUI is the primary frontend.
-7. **Monospace throughout.** Both TUI and GUI use monospace fonts. Typography is achieved through bold/italic/dim/size — not font family variation. This keeps Vim column operations correct and simplifies the rendering pipeline. The GUI may use font size variation for headings (larger monospace), but each line remains a uniform monospace grid.
+6. **GPU-rendered.** All colours are specified as sRGB hex values for the Iced Canvas GUI.
+7. **Monospace throughout.** The GUI uses monospace fonts. Typography is achieved through bold/italic/dim/size — not font family variation. This keeps Vim column operations correct and simplifies the rendering pipeline. The GUI may use font size variation for headings (larger monospace), but each line remains a uniform monospace grid.
 
 ---
 
@@ -34,7 +34,6 @@
 
 | Frontend | Font | Size Variation |
 |----------|------|---------------|
-| TUI | Terminal's monospace font | None — fixed grid, all characters same size |
 | GUI | Configurable monospace (default: system monospace) | Headings rendered at larger sizes (see below) |
 
 ### GUI Font Sizes
@@ -61,7 +60,7 @@ line_height = 1.6            # line-height multiplier (GUI only)
 
 ### Line Spacing
 
-Generous line spacing is the single biggest factor in making monospace prose readable. Default `line_height = 1.6` (inspired by iA Writer). The TUI uses the terminal's native line spacing.
+Generous line spacing is the single biggest factor in making monospace prose readable. Default `line_height = 1.6` (inspired by iA Writer).
 
 ### Recommended Fonts
 
@@ -412,8 +411,8 @@ accent_green = "#A3BE8C"
 
 ## GUI Rendering
 
-> Pixel-level specifications for the Iced Canvas GUI. The TUI maps the same semantic
-> colours to terminal attributes; the GUI maps them to pixel coordinates, spacing tokens, and animation parameters.
+> Pixel-level specifications for the Iced Canvas GUI. The GUI maps semantic
+> colours to pixel coordinates, spacing tokens, and animation parameters.
 
 ### Spacing Scale
 

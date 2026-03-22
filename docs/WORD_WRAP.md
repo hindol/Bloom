@@ -7,7 +7,7 @@
 ## Principles
 
 1. **Display-only.** Wrapping never modifies the buffer. No newlines inserted, no undo entries. The buffer is the source of truth; wrapping is a frontend lens.
-2. **Frontend-owned.** bloom-core emits unwrapped `RenderedLine`s (one per buffer line). Each frontend (TUI, GUI) computes its own wrap map using its own width measurement. The TUI measures in display columns (`UnicodeWidthStr`); a future GUI measures in pixels with font metrics.
+2. **Frontend-owned.** bloom-core emits unwrapped `RenderedLine`s (one per buffer line). The GUI computes its own wrap map using its own width measurement — pixels with font metrics.
 3. **Pluggable measurement.** The wrap algorithm is generic over a `MeasureWidth` trait so the same logic works for monospace columns, proportional fonts, and mixed-width (CJK + Latin) text.
 
 ---
@@ -15,7 +15,7 @@
 ## Architecture
 
 ```
-bloom-core                          Frontend (TUI or GUI)
+bloom-core                          Frontend (GUI)
 ─────────                           ─────────────────────
 Buffer (rope)                       
     │                               
@@ -52,13 +52,13 @@ Viewport { first_visible_line }     ── core-owned buffer-line viewport
 
 ```rust
 /// Measure the display width of a text slice.
-/// Returns a unit appropriate for the frontend — columns for TUI, pixels for GUI.
+/// Returns a unit appropriate for the frontend — pixels for GUI, columns for monospace fallback.
 pub trait MeasureWidth {
     fn width(&self, text: &str) -> usize;
 }
 ```
 
-**TUI implementation:**
+**Monospace implementation (bloom-core::render::measure):**
 ```rust
 struct MonospaceWidth;
 
@@ -130,7 +130,7 @@ For each `RenderedLine`:
 
 ## ScreenScroll
 
-Replaces `Viewport::ensure_visible_with_scrolloff` for the TUI, operating on screen rows:
+Replaces `Viewport::ensure_visible_with_scrolloff` for the GUI, operating on screen rows:
 
 ```rust
 pub struct ScreenScroll {
@@ -196,7 +196,7 @@ This reuses the existing span-rendering loop with a byte offset adjustment. No c
 
 ## Cursor Placement
 
-The cursor is at buffer position `(line, column)`. The TUI translates:
+The cursor is at buffer position `(line, column)`. The GUI translates:
 
 ```rust
 let screen_row = wrap_map.cursor_screen_row(cursor_line_idx, cursor_column);
@@ -219,7 +219,7 @@ f.set_cursor_position((cx, cy));
 | `g0` / `g$` | Start/end of screen row | Future addition |
 | `h` / `l` | Move by character | Unchanged — may cross wrap boundaries |
 
-`gj`/`gk` require the core to know about screen rows. The clean approach: the TUI passes a `screen_row_count_for_line(line_idx) -> usize` callback (or the wrap map itself) to the core when processing `gj`/`gk`, rather than the core owning wrapping.
+`gj`/`gk` require the core to know about screen rows. The clean approach: the GUI passes a `screen_row_count_for_line(line_idx) -> usize` callback (or the wrap map itself) to the core when processing `gj`/`gk`, rather than the core owning wrapping.
 
 ---
 
@@ -240,7 +240,7 @@ No `wrap_column` setting — wrapping always uses the pane width. A fixed-column
 - **Buffer** — no newlines inserted, no mutations
 - **`RenderedLine`** — still one per buffer line, unchanged struct
 - **Syntax highlighting** — computed per buffer line in bloom-core, unchanged
-- **bloom-core `Viewport`** — still emits buffer-line ranges; TUI refines to screen rows
+- **bloom-core `Viewport`** — still emits buffer-line ranges; GUI refines to screen rows
 - **`CursorState`** — still `(line, column)` in buffer coordinates
 - **Undo/redo** — unaffected, wrapping is stateless display
 - **Autosave/file watcher** — unaffected

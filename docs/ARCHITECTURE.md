@@ -9,7 +9,7 @@
 | Component | Choice | Rationale |
 |-----------|--------|-----------|
 | Language | Rust | Memory safety, performance, cross-platform, zero-cost abstractions |
-| UI framework | Tauri (GUI) + ratatui (TUI) | Both built in parallel over a shared `RenderFrame` abstraction. Frontends are thin render targets. |
+| UI framework | Iced (GUI) | Built over a shared `RenderFrame` abstraction. The GUI is a thin render target. |
 | Text buffer | Rope (`ropey` crate) | O(log n) operations, natural undo tree support via persistent snapshots, composable for transclusion |
 | Storage | Markdown files on disk + SQLite index | Files for portability, SQLite for fast search/backlinks/metadata queries |
 | Channels | `crossbeam` | Inter-thread communication, no async runtime dependency in core |
@@ -21,7 +21,7 @@
 ```text
 ┌─────────────────────────────────────────────────────┐
 │                  Frontend Layer                       │
-│  (Tauri GUI / TUI / MCP Server — all swappable)      │
+│  (Iced GUI / MCP Server — all swappable)              │
 │  Responsibility: consume RenderFrame, capture input   │
 └──────────────────────┬──────────────────────────────┘
                        │ RenderFrame (UI-agnostic snapshot)
@@ -92,7 +92,7 @@ terminal.draw(|f| {
     let (w, h) = f.area();
     editor.update_layout(w, h);          // state: viewport dims, cursor scroll
     let frame = editor.render(w, h);     // read-only: produces the snapshot
-    tui::draw(f, &frame, &theme);        // TUI reads rects, renders widgets
+    gui::draw(f, &frame, &theme);        // GUI reads rects, renders widgets
 });
 ```
 
@@ -111,13 +111,12 @@ A `RenderFrame` contains:
 | `notifications` | `Vec<Notification>` | Active transient notifications |
 | `scrolloff` | `usize` | Scroll margin forwarded to the frontend renderer |
 
-Each `PaneFrame` includes a `PaneRectFrame` with `x, y, width, content_height, total_height` — concrete cell positions computed by the core's `WindowManager::compute_pane_rects()`. The TUI reads these directly instead of computing its own layout.
+Each `PaneFrame` includes a `PaneRectFrame` with `x, y, width, content_height, total_height` — concrete cell positions computed by the core's `WindowManager::compute_pane_rects()`. The GUI reads these directly instead of computing its own layout.
 
 This means:
-- **Tests assert on `RenderFrame`** — no terminal or browser needed.
-- **TUI and GUI are thin** — they map `RenderFrame` fields to their native primitives.
-- **Layout lives in one place** — the core computes pane dimensions; the TUI never splits areas.
-- **Design issues surface early** — both frontends consume the same contract.
+- **Tests assert on `RenderFrame`** — no browser needed.
+- **GUI is thin** — it maps `RenderFrame` fields to Iced Canvas primitives.
+- **Layout lives in one place** — the core computes pane dimensions; the GUI never splits areas.
 
 ---
 
@@ -125,39 +124,37 @@ This means:
 
 ### Render Loop
 
-The TUI render loop runs synchronously on the UI thread at ~60fps (or on input):
+The GUI render loop runs on the UI thread at ~60fps (or on input):
 
 ```rust,ignore
 loop {
-    terminal.draw(|f| {
-        let area = f.area();                            // actual terminal dimensions
-        editor.update_layout(area.w, area.h);           // state: viewport + scroll
-        let frame = editor.render(area.w, area.h);      // read-only: snapshot
-        tui::draw(f, &frame, &theme);                   // TUI: widgets into ratatui buffer
-    });                                                  // ratatui diffs and flushes to terminal
+    let (w, h) = window_size();                         // actual window dimensions
+    editor.update_layout(w, h);                         // state: viewport + scroll
+    let frame = editor.render(w, h);                    // read-only: snapshot
+    gui::draw(canvas, &frame, &theme);                  // GUI: primitives onto Iced Canvas
     wait_for_input_or_tick();
 }
 ```
 
-**Key property:** The terminal dimensions (`f.area()`) flow into `update_layout()` which sets viewport dimensions, then into `render()` which uses them to compute pane rects. The same dimensions are used by the TUI to draw. No stored state to drift.
+**Key property:** The window dimensions flow into `update_layout()` which sets viewport dimensions, then into `render()` which uses them to compute pane rects. The same dimensions are used by the GUI to draw. No stored state to drift.
 
 ### Cell Painting Strategy
 
-ratatui uses **differential rendering** — it maintains an in-memory buffer and only flushes cells that changed since the last frame to the terminal. This makes full-screen repaints cheap in the common case (most cells don't change).
+The Iced Canvas GUI uses **GPU-accelerated rendering** — it redraws the visible frame each tick using the `RenderFrame` snapshot. The Canvas API batches draw calls efficiently so full-frame repaints are cheap.
 
 Each frame follows a three-layer painting strategy:
 
 ```text
-Layer 1: Clear + Background    ← writes ' ' with bg to every cell (clean slate)
-Layer 2: Pane content          ← editor lines, status bars, written into pane rects
+Layer 1: Clear + Background    ← fills the canvas with the background colour (clean slate)
+Layer 2: Pane content          ← editor lines, status bars, drawn into pane rects
 Layer 3: Overlays              ← picker, inline menu, date picker, dialog, notifications
 ```
 
-**Layer 1** ensures no stale content from previous frames bleeds through. `Clear` writes space characters (content reset), then `Block::default().style(bg)` sets the background colour. Both operate on the in-memory buffer — the terminal only receives the final diff.
+**Layer 1** ensures no stale content from previous frames bleeds through. The canvas is cleared and filled with the background colour.
 
 **Layer 2** renders each pane into its core-computed rect. The pane content (editor lines, syntax-highlighted spans) overwrites the background layer. Each pane includes its own status bar at the bottom of its rect.
 
-**Layer 3** renders overlays on top of panes. Overlays draw last, so their `set_cursor_position()` calls override the pane cursor — each overlay owns its cursor (picker query input, inline selection, date picker choice, dialog choice).
+**Layer 3** renders overlays on top of panes. Overlays draw last, so their cursor-positioning calls override the pane cursor — each overlay owns its cursor (picker query input, inline selection, date picker choice, dialog choice).
 
 ### Viewport and Scrolling
 
@@ -167,9 +164,9 @@ The viewport tracks which lines of the buffer are visible. On each render cycle:
 2. Each pane viewport is refreshed from its `content_height` and `width`.
 3. The active pane's `viewport.ensure_visible(cursor_line)` updates buffer-line scroll state.
 4. `render()` consumes that state and `render_buffer_lines()` produces `RenderedLine`s for the visible range.
-5. Frontends may add display-specific refinement (for example TUI `ScreenScroll` for wrapped screen rows) without mutating the core viewport.
+5. Frontends may add display-specific refinement (for example `ScreenScroll` for wrapped screen rows) without mutating the core viewport.
 
-The viewport height is never guessed or stored separately — it's refreshed from layout computation using the actual terminal dimensions before `render()` consumes it.
+The viewport height is never guessed or stored separately — it's refreshed from layout computation using the actual window dimensions before `render()` consumes it.
 
 ### Semantic Highlighting Pipeline
 
@@ -217,7 +214,7 @@ Search match highlighting overlays on top via `render::search_highlight::highlig
 │                    UI Thread                          │
 │                                                      │
 │  ┌─ Event Loop ─────────────────────────────────┐    │
-│  │  1. Poll for input (crossterm)               │    │
+│  │  1. Poll for input (Iced/winit)               │    │
 │  │  2. Poll indexer completion channel           │    │
 │  │  3. Poll file watcher, debounce, forward      │    │
 │  │  4. Poll MCP edit channel (if enabled)        │    │
@@ -225,8 +222,8 @@ Search match highlighting overlays on top via `render::search_highlight::highlig
 │  │  6. Process Vim grammar, apply edits to rope  │    │
 │  │  7. Call editor.update_layout(w, h)           │    │
 │  │  8. Call editor.render(w, h) → RenderFrame    │    │
-│  │  9. TUI draws RenderFrame into ratatui buffer │    │
-│  │ 10. ratatui diffs and flushes to terminal     │    │
+│  │  9. GUI draws RenderFrame onto Iced Canvas    │    │
+│  │ 10. Iced presents the frame to the window     │    │
 │  └──────────────────────────────────────────────┘    │
 │                                                      │
 │  Rule: NEVER blocks. All I/O dispatched via channels.│
@@ -365,7 +362,7 @@ While the indexer runs, the editor is fully usable. Features that depend on the 
 
 All inter-thread communication uses `crossbeam` channels (bounded, lock-free):
 
-- **Input → UI**: `Sender<crossterm::Event>` — dedicated input thread calls `crossterm::event::read()` in a loop
+- **Input → UI**: Iced/winit delivers keyboard and mouse events on the UI thread via its subscription model
 - **UI → Disk Writer**: `Sender<WriteRequest>` — debounced auto-save and explicit `:w` both route here
 - **Disk Writer → UI**: `Sender<WriteComplete>` — ack with mtime/size fingerprint after each successful write
 - **UI → Indexer**: `Sender<IndexRequest>` — `FullRebuild`, `IncrementalBatch(paths)`, `Shutdown`
@@ -377,7 +374,7 @@ All inter-thread communication uses `crossbeam` channels (bounded, lock-free):
 
 ### Event-Driven Rendering
 
-The TUI event loop uses `crossbeam::select!` to block until **any** channel fires or a timer expires — no polling, no frame-budget spinning. The loop renders only when state changes, sleeps with zero CPU cost between events, and wakes with sub-millisecond latency on any channel input. Timeouts are computed dynamically from active timers (notification expiry, which-key popup delay, file-event debounce).
+The GUI event loop uses `crossbeam::select!` to block until **any** channel fires or a timer expires — no polling, no frame-budget spinning. The loop renders only when state changes, sleeps with zero CPU cost between events, and wakes with sub-millisecond latency on any channel input. Timeouts are computed dynamically from active timers (notification expiry, which-key popup delay, file-event debounce).
 
 The core library has **zero dependency on any async runtime**. All concurrency is OS threads + channels. This keeps the dependency tree small, debugging straightforward, and latency predictable.
 
