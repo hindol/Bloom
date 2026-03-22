@@ -52,6 +52,7 @@
 | Font strategy | Monospace-only, GUI uses size variation for headings | Mixed-pitch (proportional body + monospace code), proportional everywhere |
 | Window navigation | Nearest spatial neighbor (ray cast from cursor position) | Tree-based parent/sibling traversal |
 | Splittable panes | Only editor panes can be split; special views (timeline, agenda, undo tree) are leaf-only | Any pane can be split |
+| Config as documentation | `config.toml` lists ALL keys with comments and defaults (commented out). `config_version` integer enables migration — new app versions add new keys + docs automatically. | Hidden defaults, separate docs, no migration |
 | Clipboard model | Vim registers + system clipboard (`arboard`) + kill ring (32 entries, `SPC i y` picker) | Vim registers only, system clipboard only, Emacs `M-y` cycling |
 | New page creation | `SPC p n` = template picker with title prompt. Title auto-derived from content on save if blank. Lazy file creation. | Prompt-free scratch buffer, name-on-save only |
 | Scratch buffer | No separate scratch — today's journal IS the scratch. Extract to a page with `SPC r s`. | Dedicated scratch buffer, multiple unnamed buffers |

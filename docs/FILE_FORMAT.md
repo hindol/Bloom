@@ -121,3 +121,101 @@ $0
 ```
 
 On template creation, the cursor jumps to `$1`, then `Tab` advances to `$2`, `$3`, and finally `$0` (the Notes section). `${AUTO}`, `${DATE}`, and `${TITLE}` are filled automatically. Unfilled placeholders remain as plain text.
+
+---
+
+## Configuration (`config.toml`)
+
+> Status: **Design** — self-documenting config with migration not yet implemented.
+> Current config is a plain TOML file with no comments or migration.
+
+### Philosophy
+
+The config file IS the documentation. Every setting is listed with its default value (commented out), a description, and valid options. Users discover features by reading their config — no separate reference needed.
+
+### Self-Documenting Format
+
+```toml
+# ──────────────────────────────────────────────────────────────
+# Bloom Configuration
+# ──────────────────────────────────────────────────────────────
+# Every setting is listed with its default. Uncomment to customize.
+# Config version — used for automatic migration. Do not edit.
+config_version = 3
+
+# ──── Startup ─────────────────────────────────────────────────
+
+# What to show on launch.
+# Options: "restore" (last session), "journal" (today), "blank"
+# startup.mode = "restore"
+
+# ──── Editor ──────────────────────────────────────────────────
+
+# scrolloff = 5                    # Lines above/below cursor
+# autosave_delay_ms = 300          # Auto-save after last keystroke (0 = off)
+# word_wrap = true                 # Visual wrap (never modifies buffer)
+# auto_align = "page"              # "page", "block", or "none"
+
+# ──── Theme ───────────────────────────────────────────────────
+
+# Built-in: bloom-dark, bloom-light, aurora, frost, ember,
+#           solarium, twilight, sakura, verdant, lichen, paper
+# theme.name = "bloom-dark"
+
+# ──── Font (GUI) ──────────────────────────────────────────────
+
+# font.family = "JetBrains Mono"   # Bundled default
+# font.size = 13                   # Base size in points
+# font.line_height = 1.4           # Line height multiplier
+
+# ──── Which-Key ───────────────────────────────────────────────
+
+# which_key_timeout_ms = 500       # Popup delay in milliseconds
+
+# ──── MCP Server ──────────────────────────────────────────────
+
+# [mcp]
+# enabled = false                  # Enable local LLM integration
+# mode = "read-write"              # "read-only" or "read-write"
+# exclude_paths = []               # Glob patterns invisible to MCP
+
+# ──── Views (BQL) ─────────────────────────────────────────────
+
+# [[views]]
+# name = "Work Tasks"
+# query = "tasks | where not done and tags has #work | sort due"
+# key = "SPC v w"                  # Optional keybinding
+
+# ──── Calendar ────────────────────────────────────────────────
+
+# [calendar]
+# week_starts = "monday"           # "monday" (ISO) or "sunday"
+```
+
+### Config Migration
+
+Each config file has a `config_version` integer. On startup:
+
+1. Read `config_version` from the file.
+2. If less than the app's current config version:
+   - Preserve the user's uncommented (custom) values.
+   - Regenerate the file with ALL keys: user values uncommented, new/unchanged keys commented with defaults.
+   - Bump `config_version`.
+3. If the file doesn't exist: generate the full documented template with all defaults commented out.
+
+This ensures every app update brings new settings to the user's config as documented, commented entries — discoverable without reading release notes.
+
+### Sections
+
+| Section | Keys |
+|---------|------|
+| Startup | `startup.mode` |
+| Editor | `scrolloff`, `autosave_delay_ms`, `word_wrap`, `wrap_indicator`, `auto_align` |
+| Theme | `theme.name`, `[theme.overrides]` |
+| Font | `font.family`, `font.size`, `font.line_height` |
+| Which-Key | `which_key_timeout_ms` |
+| MCP | `[mcp]` — `enabled`, `mode`, `exclude_paths` |
+| Views | `[[views]]` — `name`, `query`, `key` |
+| Calendar | `[calendar]` — `week_starts` |
+| Logging | `[logging]` — `level`, `max_file_size_mb`, `max_files` |
+| History | `[history]` — `max_commit_interval_minutes` |
