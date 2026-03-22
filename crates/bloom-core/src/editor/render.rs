@@ -134,6 +134,41 @@ impl BloomEditor {
         }
     }
 
+    /// Build the which-key popup frame if applicable.
+    fn build_which_key_frame(&self, show_wk: bool) -> Option<render::WhichKeyFrame> {
+        if !show_wk {
+            return None;
+        }
+        if matches!(self.vim_state.mode(), bloom_vim::Mode::Command) {
+            return None;
+        }
+        if self.leader_keys.len() > 1 {
+            let lookup_keys: Vec<types::KeyEvent> = self.leader_keys[1..].to_vec();
+            match self.which_key_tree.lookup(&lookup_keys) {
+                which_key::WhichKeyLookup::Prefix(entries) => {
+                    let prefix = self.leader_keys.iter().map(|k| k.to_string()).collect::<Vec<_>>().join(" ");
+                    Some(render::WhichKeyFrame {
+                        entries: entries.into_iter().map(|e| render::WhichKeyEntry { key: e.key, label: e.label, is_group: e.is_group }).collect(),
+                        prefix,
+                        context: render::WhichKeyContext::Leader,
+                    })
+                }
+                _ => None,
+            }
+        } else if self.leader_keys.len() == 1 {
+            match self.which_key_tree.lookup(&[]) {
+                which_key::WhichKeyLookup::Prefix(entries) => Some(render::WhichKeyFrame {
+                    entries: entries.into_iter().map(|e| render::WhichKeyEntry { key: e.key, label: e.label, is_group: e.is_group }).collect(),
+                    prefix: "SPC".to_string(),
+                    context: render::WhichKeyContext::Leader,
+                }),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
     /// Produce the render frame. `width` and `height` are the actual terminal
     /// dimensions — used directly for layout computation so pane rects always
     /// tile the exact screen area.
@@ -209,6 +244,7 @@ impl BloomEditor {
         // Dashboard: when no buffers are open, show the dashboard pane.
         if self.writer.buffers().open_buffers().is_empty() {
             let dashboard = self.build_dashboard_frame();
+            let which_key = self.build_which_key_frame(show_wk);
             let first_rect = pane_rects.first();
             return render::RenderFrame {
                 panes: vec![render::PaneFrame {
@@ -257,7 +293,7 @@ impl BloomEditor {
                 hidden_pane_count: 0,
                 picker: None,
                 inline_menu: None,
-                which_key: None,
+                which_key,
                 date_picker: None,
                 context_strip: None,
                 temporal_strip: None,

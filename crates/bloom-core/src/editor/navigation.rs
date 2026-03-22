@@ -54,8 +54,12 @@ impl BloomEditor {
             (String::new(), None)
         };
 
-        // Use existing ID or generate a stable one
+        // Use existing ID or generate a stable one, caching per date
         let id = id.unwrap_or_else(|| {
+            // Check the per-date cache first
+            if let Some(cached) = self.journal_id_cache.get(&title) {
+                return cached.clone();
+            }
             // Check if we already have this file open by path
             if let Some(existing) = self.writer.buffers().find_by_path(&path) {
                 return existing.clone();
@@ -63,6 +67,7 @@ impl BloomEditor {
             // Generate new ID and embed it in frontmatter
             crate::uuid::generate_hex_id()
         });
+        self.journal_id_cache.entry(title.clone()).or_insert_with(|| id.clone());
 
         if self.writer.buffers().is_open(&id) {
             self.set_active_page(Some(id));
