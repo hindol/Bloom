@@ -741,8 +741,27 @@ Shown when no buffers are open (last buffer closed, or fresh launch with no sess
 | Recent Pages | Last 5 accessed, time-ago | `page_access` (frecency) |
 | Quick Actions | Key bindings for common actions | Static |
 | Today | Open tasks, pages edited, journal entries | Index queries |
-| Did You Know? | Random tip from pool of ~15 | Rotates per show |
+| Did You Know? | Random tip from pool of ~16 | Rotates per show |
 | Footer | "SPC j t to start writing" | Static |
+
+### Tip Pool
+
+1. `SPC l t` opens a timeline of every note that links to the current page.
+2. `[[` in Insert mode triggers the link picker — type to search pages.
+3. `SPC s t` lets you browse all tags and filter by one.
+4. `SPC w v` splits the window — edit two pages side by side.
+5. `SPC u u` opens the undo tree — navigate branching history visually.
+6. `#tag` anywhere in text creates an inline tag — searchable immediately.
+7. `@due(2026-03-25)` on a task makes it appear in the agenda (`SPC a a`).
+8. `SPC H h` shows the full history of the current page — every version.
+9. `SPC r s` extracts a section into its own page — with links preserved.
+10. `[d` and `]d` hop between journal days — the scrubber shows context.
+11. `SPC T t` opens the theme picker with live preview.
+12. `SPC ?` shows all commands — fuzzy-searchable.
+13. `SPC l y` copies a link to the current page — paste it anywhere.
+14. `ah` selects the entire heading section — great for moving or deleting.
+15. Group related journal notes under a `## Heading`, then `SPC r s` to extract them into their own page.
+16. `SPC i y` opens the kill ring — browse and paste from your clipboard history.
 
 ### Behaviour
 
