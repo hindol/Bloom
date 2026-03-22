@@ -288,7 +288,7 @@ Bloom ships with default templates for common note types and supports user-creat
 
 - **Built-in templates**: Daily journal, meeting notes, book review, project page.
 - **User templates**: Stored in `templates/` as Markdown files with placeholder syntax.
-- **Template selection**: When creating a new page (`SPC n`), the picker offers available templates.
+- **Template selection**: When creating a new page (`SPC p n`), the picker offers available templates.
 - Templates can include pre-filled frontmatter, headings, tags, and placeholder text. Placeholder syntax uses `${N:description}` (snippet-style tab-stops): `${1:Title}`, `${2:Attendees}`, etc. Magic variables `${AUTO}` (UUID), `${DATE}` (today), and `${TITLE}` (user-entered title) are filled automatically. `$0` marks the final cursor position. On template creation, the cursor jumps to `$1`, then `Tab` advances through stops. After the last stop, `Tab` exits template mode. Escape returns to Normal mode without ending template mode. If `${1:desc}` appears multiple times, advancing past it replaces all occurrences. Placeholders inside code blocks are not expanded. See [FILE_FORMAT.md](FILE_FORMAT.md) for full syntax reference.
 
 ### G20: Orphaned Link Indicators

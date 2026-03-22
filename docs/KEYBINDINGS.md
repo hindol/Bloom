@@ -45,7 +45,7 @@
 | `SPC i a` | Insert `@at()` with date picker | G4 |
 | `SPC i y` | Paste from kill ring (fuzzy picker) | — |
 | **Notes** | | |
-| `SPC n` | New page (template picker) | G19 |
+| `SPC p n` | New page (template picker) | G19 |
 | **Refactor** | | |
 | `SPC r s` | Split page (extract section to new page) | G18 |
 | `SPC r m` | Merge pages | G18 |

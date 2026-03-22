@@ -310,7 +310,7 @@ fn build_static_tree(tree: &mut WhichKeyTree) {
     tree.register("H d", "Day activity", "day_activity".into());
 
     // New from template (single key, no sub-key)
-    tree.register("n", "New from template", "new_from_template".into());
+    tree.register("p n", "New page", "new_from_template".into());
 
     // Toggles
     tree.register("T t", "Theme selector", "theme_selector".into());
@@ -540,7 +540,7 @@ mod tests {
     #[test]
     fn lookup_single_key_action() {
         let tree = default_tree();
-        let result = tree.lookup(&[KeyEvent::char('n')]);
+        let result = tree.lookup(&[KeyEvent::char('p'), KeyEvent::char('n')]);
         match result {
             WhichKeyLookup::Action(id) => assert_eq!(id, "new_from_template"),
             _ => panic!("expected Action for 'n'"),

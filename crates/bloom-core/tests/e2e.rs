@@ -3802,7 +3802,7 @@ fn uc07_create_page_from_template_with_frontmatter() {
     .unwrap();
 
     let mut sim = SimInput::with_vault(vault);
-    sim.keys("SPC n");
+    sim.keys("SPC p n");
     let picker = sim.screen(80, 24);
     assert!(picker.has_picker());
     assert!(picker
@@ -3942,7 +3942,7 @@ fn uc10_delete_page_confirm_removes_page() {
 fn uc13_create_blank_page() {
     let vault = TestVault::new().page("Seed").build();
     let mut sim = SimInput::with_vault(vault);
-    sim.keys("SPC n");
+    sim.keys("SPC p n");
     sim.keys("Enter");
     assert!(sim.buffer_text().contains("title:"));
 }
@@ -4212,7 +4212,7 @@ fn uc58_template_with_tab_stops() {
     )
     .unwrap();
     let mut sim = SimInput::with_vault(vault);
-    sim.keys("SPC n");
+    sim.keys("SPC p n");
     sim.keys("Enter");
     sim.keys("<Tab>");
     assert_ne!(sim.screen(80, 24).cursor(), (0, 0));

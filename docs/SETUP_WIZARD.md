@@ -272,7 +272,7 @@ After completion:
 │         Tips:                                                 │
 │           SPC j j     open today's journal                    │
 │           SPC f f     find a page                             │
-│           SPC n       create a new page                       │
+│           SPC p n     create a new page                       │
 │           SPC ?       all commands                            │
 │                                                               │
 │                                                               │

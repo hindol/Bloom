@@ -716,7 +716,7 @@ Shown when no buffers are open (last buffer closed, or fresh launch with no sess
 
    Recent Pages                       Quick Actions
    ─────────────                      ─────────────
-   Text Editor Theory      2m ago     SPC n    new page
+   Text Editor Theory      2m ago     SPC p n  new page
    Rust Programming        1h ago     SPC j t  today's journal
    2026-03-22 (journal)    today      SPC f f  find page
    Meeting Notes            3d ago    SPC s s  search everything

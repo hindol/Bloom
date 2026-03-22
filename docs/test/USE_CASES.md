@@ -84,7 +84,7 @@ Verifies: G14, G4 (Linking)
 
 Verifies: G19 (Templates)
 
-1. User presses `SPC n` in Normal mode.
+1. User presses `SPC p n` in Normal mode.
 2. A picker shows available templates: "Blank page", "Daily journal", "Meeting notes", "Book review", "Project page", plus any user templates from `templates/`.
 3. User selects "Meeting notes".
 4. Picker prompts: "Page title: _". User types "Q1 Review".
@@ -157,7 +157,7 @@ Verifies: —
 
 Verifies: G19 (Templates)
 
-1. User presses `SPC n`.
+1. User presses `SPC p n`.
 2. In the template picker, user selects "Blank page".
 3. An input appears: "Page title: _"
 4. User types "CRDT Notes".
@@ -646,7 +646,7 @@ Verifies: G11
 
 Verifies: G19 (Templates)
 
-1. User presses `SPC n` → template picker shows available templates with names and descriptions.
+1. User presses `SPC p n` → template picker shows available templates with names and descriptions.
 2. User selects "Meeting notes".
 3. Picker prompts: "Page title: _". User types "Sprint Retrospective".
 4. New buffer is created. `${AUTO}` → UUID, `${DATE}` → today, `${TITLE}` → "Sprint Retrospective".
@@ -711,7 +711,7 @@ Verifies: G19
 
    $0
    ```
-2. Next time user presses `SPC n`, "Bug Report" appears in the picker with description "Track and document software bugs with reproduction steps".
+2. Next time user presses `SPC p n`, "Bug Report" appears in the picker with description "Track and document software bugs with reproduction steps".
 3. If the `<!-- template: ... -->` comment is omitted, the name is derived from the filename: `bug-report.md` → "Bug report".
 
 ### UC-60: Template with auto-filled values
