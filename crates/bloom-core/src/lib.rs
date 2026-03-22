@@ -1086,18 +1086,29 @@ impl BloomEditor {
         };
         let name = self.active_theme.name;
 
-        // Replace theme name in [theme] section only, or append section if missing.
+        // Replace theme name in [theme] section, dotted-key format, or append.
         let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
         let mut in_theme_section = false;
         let mut replaced = false;
 
         for line in &mut lines {
-            let trimmed = line.trim();
+            let trimmed = line.trim().to_owned();
             if trimmed.starts_with('[') {
                 in_theme_section = trimmed == "[theme]";
             }
+            // Handle [theme]\nname = "..." format
             if in_theme_section && trimmed.starts_with("name = ") {
                 *line = format!("name = \"{}\"", name);
+                replaced = true;
+            }
+            // Handle dotted-key format: theme.name = "..."
+            if trimmed.starts_with("theme.name = ") {
+                *line = format!("theme.name = \"{}\"", name);
+                replaced = true;
+            }
+            // Handle commented dotted-key: # theme.name = "..."
+            if trimmed.starts_with("# theme.name = ") {
+                *line = format!("theme.name = \"{}\"", name);
                 replaced = true;
             }
         }

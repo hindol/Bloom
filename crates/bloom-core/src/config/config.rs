@@ -3,6 +3,76 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 
+// ── Config template & version ────────────────────────────────────────────
+
+pub const CURRENT_CONFIG_VERSION: u32 = 1;
+
+pub const CONFIG_TEMPLATE: &str = r#"# ──────────────────────────────────────────────────────────────
+# Bloom Configuration
+# ──────────────────────────────────────────────────────────────
+# Every setting is listed with its default. Uncomment to customize.
+# Config version — used for automatic migration. Do not edit.
+config_version = 1
+
+# ──── Startup ─────────────────────────────────────────────────
+
+# What to show on launch.
+# Options: "restore" (last session), "journal" (today), "blank"
+# startup.mode = "journal"
+
+# ──── Editor ──────────────────────────────────────────────────
+
+# scrolloff = 3
+# autosave_debounce_ms = 300
+# word_wrap = true
+# wrap_indicator = "↪"
+# auto_align = "page"
+# max_results = 100
+
+# ──── Theme ───────────────────────────────────────────────────
+
+# Built-in: bloom-dark, bloom-light, aurora, frost, ember,
+#           solarium, twilight, sakura, verdant, lichen, paper
+# theme.name = "bloom-dark"
+
+# ──── Font (GUI) ──────────────────────────────────────────────
+
+# font.family = "JetBrains Mono"
+# font.size = 14
+# font.line_height = 1.6
+
+# ──── Which-Key ───────────────────────────────────────────────
+
+# which_key_timeout_ms = 500
+
+# ──── History (git-backed time travel) ────────────────────────
+
+# [history]
+# auto_commit_idle_minutes = 5
+# max_commit_interval_minutes = 60
+
+# ──── MCP Server ──────────────────────────────────────────────
+
+# [mcp]
+# enabled = false
+# mode = "read-only"
+# exclude_paths = []
+
+# ──── Views (BQL) ─────────────────────────────────────────────
+
+# [[views]]
+# name = "Work Tasks"
+# query = "tasks | where not done and tags has #work | sort due"
+# key = "SPC v w"
+
+# ──── Calendar ────────────────────────────────────────────────
+
+# [calendar]
+# week_starts = "monday"
+"#;
+
+// ── Default value helpers ────────────────────────────────────────────────
+
 fn default_autosave_debounce() -> u64 {
     300
 }
@@ -24,6 +94,8 @@ fn default_max_results() -> u64 {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
+    #[serde(default)]
+    pub config_version: u32,
     #[serde(default)]
     pub startup: StartupConfig,
     #[serde(default)]
@@ -80,13 +152,13 @@ fn default_views() -> Vec<ViewConfig> {
     }]
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, PartialEq)]
 pub struct StartupConfig {
     #[serde(default)]
     pub mode: StartupMode,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum StartupMode {
     #[default]
@@ -105,7 +177,7 @@ fn default_line_height() -> f32 {
     1.6
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct FontConfig {
     #[serde(default = "default_font_family")]
     pub family: String,
@@ -119,7 +191,7 @@ fn default_theme() -> String {
     "bloom-dark".into()
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct ThemeConfig {
     #[serde(default = "default_theme")]
     pub name: String,
@@ -134,7 +206,7 @@ fn default_max_commit_interval_minutes() -> u64 {
     60
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct HistoryConfig {
     #[serde(default = "default_auto_commit_idle_minutes")]
     pub auto_commit_idle_minutes: u64,
@@ -151,7 +223,7 @@ impl Default for HistoryConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, PartialEq)]
 pub struct McpConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -161,7 +233,7 @@ pub struct McpConfig {
     pub exclude_paths: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum McpMode {
     #[default]
@@ -171,16 +243,25 @@ pub enum McpMode {
 
 impl Config {
     /// Load configuration from a TOML file at the given path.
+    /// Runs version-based migration when `config_version` is outdated.
     pub fn load(path: &Path) -> Result<Self, BloomError> {
         let content = std::fs::read_to_string(path)?;
-        let config: Config =
+        let mut config: Config =
             toml::from_str(&content).map_err(|e| BloomError::ConfigError(e.to_string()))?;
+
+        if config.config_version < CURRENT_CONFIG_VERSION {
+            let migrated = migrate_config(&config);
+            let _ = std::fs::write(path, &migrated);
+            config.config_version = CURRENT_CONFIG_VERSION;
+        }
+
         Ok(config)
     }
 
     /// Return the default configuration.
     pub fn defaults() -> Self {
         Self {
+            config_version: CURRENT_CONFIG_VERSION,
             startup: StartupConfig::default(),
             font: FontConfig::default(),
             theme: ThemeConfig::default(),
@@ -202,6 +283,188 @@ impl Default for Config {
     fn default() -> Self {
         Self::defaults()
     }
+}
+
+// ── Migration ────────────────────────────────────────────────────────────
+
+/// Rebuild `config.toml` from `CONFIG_TEMPLATE`, uncommenting lines whose
+/// values differ from the compiled-in defaults.
+pub fn migrate_config(config: &Config) -> String {
+    let defaults = Config::defaults();
+    let mut result = CONFIG_TEMPLATE.to_string();
+
+    // ── Startup ──────────────────────────────────────────────────────
+    if config.startup.mode != defaults.startup.mode {
+        let mode_str = match config.startup.mode {
+            StartupMode::Journal => "journal",
+            StartupMode::Restore => "restore",
+            StartupMode::Blank => "blank",
+        };
+        result = result.replace(
+            "# startup.mode = \"journal\"",
+            &format!("startup.mode = \"{}\"", mode_str),
+        );
+    }
+
+    // ── Editor scalars ───────────────────────────────────────────────
+    if config.scrolloff != defaults.scrolloff {
+        result = result.replace(
+            "# scrolloff = 3",
+            &format!("scrolloff = {}", config.scrolloff),
+        );
+    }
+    if config.autosave_debounce_ms != defaults.autosave_debounce_ms {
+        result = result.replace(
+            "# autosave_debounce_ms = 300",
+            &format!("autosave_debounce_ms = {}", config.autosave_debounce_ms),
+        );
+    }
+    if config.word_wrap != defaults.word_wrap {
+        result = result.replace(
+            "# word_wrap = true",
+            &format!("word_wrap = {}", config.word_wrap),
+        );
+    }
+    if config.wrap_indicator != defaults.wrap_indicator {
+        result = result.replace(
+            "# wrap_indicator = \"↪\"",
+            &format!("wrap_indicator = \"{}\"", config.wrap_indicator),
+        );
+    }
+    if config.auto_align != defaults.auto_align {
+        let align_str = match config.auto_align {
+            AutoAlignMode::Page => "page",
+            AutoAlignMode::Block => "block",
+            AutoAlignMode::None => "none",
+        };
+        result = result.replace(
+            "# auto_align = \"page\"",
+            &format!("auto_align = \"{}\"", align_str),
+        );
+    }
+    if config.max_results != defaults.max_results {
+        result = result.replace(
+            "# max_results = 100",
+            &format!("max_results = {}", config.max_results),
+        );
+    }
+
+    // ── Theme ────────────────────────────────────────────────────────
+    if config.theme.name != defaults.theme.name {
+        result = result.replace(
+            "# theme.name = \"bloom-dark\"",
+            &format!("theme.name = \"{}\"", config.theme.name),
+        );
+    }
+    if !config.theme.overrides.is_empty() {
+        let mut overrides = String::from("\n[theme.overrides]\n");
+        let mut keys: Vec<&String> = config.theme.overrides.keys().collect();
+        keys.sort();
+        for k in keys {
+            overrides.push_str(&format!("{} = \"{}\"\n", k, config.theme.overrides[k]));
+        }
+        result.push_str(&overrides);
+    }
+
+    // ── Font ─────────────────────────────────────────────────────────
+    if config.font.family != defaults.font.family {
+        result = result.replace(
+            "# font.family = \"JetBrains Mono\"",
+            &format!("font.family = \"{}\"", config.font.family),
+        );
+    }
+    if config.font.size != defaults.font.size {
+        result = result.replace(
+            "# font.size = 14",
+            &format!("font.size = {}", config.font.size),
+        );
+    }
+    if (config.font.line_height - defaults.font.line_height).abs() > f32::EPSILON {
+        result = result.replace(
+            "# font.line_height = 1.6",
+            &format!("font.line_height = {}", config.font.line_height),
+        );
+    }
+
+    // ── Which-Key ────────────────────────────────────────────────────
+    if config.which_key_timeout_ms != defaults.which_key_timeout_ms {
+        result = result.replace(
+            "# which_key_timeout_ms = 500",
+            &format!("which_key_timeout_ms = {}", config.which_key_timeout_ms),
+        );
+    }
+
+    // ── History ──────────────────────────────────────────────────────
+    if config.history != defaults.history {
+        let replacement = format!(
+            "[history]\nauto_commit_idle_minutes = {}\nmax_commit_interval_minutes = {}",
+            config.history.auto_commit_idle_minutes, config.history.max_commit_interval_minutes,
+        );
+        result = result.replace(
+            "# [history]\n# auto_commit_idle_minutes = 5\n# max_commit_interval_minutes = 60",
+            &replacement,
+        );
+    }
+
+    // ── MCP ──────────────────────────────────────────────────────────
+    if config.mcp != defaults.mcp {
+        let mode_str = match config.mcp.mode {
+            McpMode::ReadOnly => "read-only",
+            McpMode::ReadWrite => "read-write",
+        };
+        let exclude = if config.mcp.exclude_paths.is_empty() {
+            "[]".to_string()
+        } else {
+            format!(
+                "[{}]",
+                config
+                    .mcp
+                    .exclude_paths
+                    .iter()
+                    .map(|p| format!("\"{}\"", p))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        let replacement = format!(
+            "[mcp]\nenabled = {}\nmode = \"{}\"\nexclude_paths = {}",
+            config.mcp.enabled, mode_str, exclude,
+        );
+        result = result.replace(
+            "# [mcp]\n# enabled = false\n# mode = \"read-only\"\n# exclude_paths = []",
+            &replacement,
+        );
+    }
+
+    // ── Views ────────────────────────────────────────────────────────
+    // The default "Agenda" view comes from Rust defaults; the template only
+    // shows a commented example. If the user has non-default views, append them.
+    if !views_eq(&config.views, &defaults.views) {
+        // Remove the commented example so it doesn't confuse users.
+        result = result.replace(
+            "# [[views]]\n# name = \"Work Tasks\"\n# query = \"tasks | where not done and tags has #work | sort due\"\n# key = \"SPC v w\"",
+            "# Custom views (migrated from previous config):",
+        );
+        for v in &config.views {
+            result.push_str("\n[[views]]\n");
+            result.push_str(&format!("name = \"{}\"\n", v.name));
+            result.push_str(&format!("query = \"{}\"\n", v.query));
+            if let Some(key) = &v.key {
+                result.push_str(&format!("key = \"{}\"\n", key));
+            }
+        }
+    }
+
+    result
+}
+
+fn views_eq(a: &[ViewConfig], b: &[ViewConfig]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b.iter()).all(|(va, vb)| {
+        va.name == vb.name && va.query == vb.query && va.key == vb.key
+    })
 }
 
 impl Default for FontConfig {
@@ -230,6 +493,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = Config::defaults();
+        assert_eq!(config.config_version, CURRENT_CONFIG_VERSION);
         assert_eq!(config.autosave_debounce_ms, 300);
         assert_eq!(config.which_key_timeout_ms, 500);
         assert_eq!(config.font.family, "JetBrains Mono");
@@ -271,5 +535,151 @@ mod tests {
             Ok(c) => assert_eq!(c.theme.name, "lichen"),
             Err(e) => panic!("Config parse failed on unknown sections: {e}"),
         }
+    }
+
+    #[test]
+    fn test_config_version_defaults_to_zero() {
+        let toml_str = "[startup]\nmode = \"journal\"\n";
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.config_version, 0);
+    }
+
+    #[test]
+    fn test_config_version_parsed() {
+        let toml_str = "config_version = 1\n";
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.config_version, 1);
+    }
+
+    #[test]
+    fn test_template_parses_as_valid_config() {
+        let config: Config = toml::from_str(CONFIG_TEMPLATE).unwrap();
+        assert_eq!(config.config_version, CURRENT_CONFIG_VERSION);
+        // All other fields should be defaults (since commented out).
+        assert_eq!(config.startup.mode, StartupMode::Journal);
+        assert_eq!(config.scrolloff, 3);
+        assert_eq!(config.theme.name, "bloom-dark");
+    }
+
+    #[test]
+    fn test_migrate_default_config_is_template() {
+        let defaults = Config::defaults();
+        let migrated = migrate_config(&defaults);
+        // With all defaults, migration should produce the template unchanged.
+        assert_eq!(migrated, CONFIG_TEMPLATE);
+    }
+
+    #[test]
+    fn test_migrate_preserves_custom_scalars() {
+        let mut config = Config::defaults();
+        config.config_version = 0;
+        config.scrolloff = 8;
+        config.which_key_timeout_ms = 1000;
+        config.theme.name = "aurora".to_string();
+
+        let migrated = migrate_config(&config);
+
+        assert!(migrated.contains("scrolloff = 8"));
+        assert!(!migrated.contains("# scrolloff = 3"));
+        assert!(migrated.contains("which_key_timeout_ms = 1000"));
+        assert!(migrated.contains("theme.name = \"aurora\""));
+        assert!(migrated.contains("config_version = 1"));
+    }
+
+    #[test]
+    fn test_migrate_preserves_startup_mode() {
+        let mut config = Config::defaults();
+        config.startup.mode = StartupMode::Restore;
+
+        let migrated = migrate_config(&config);
+        assert!(migrated.contains("startup.mode = \"restore\""));
+        assert!(!migrated.contains("# startup.mode"));
+    }
+
+    #[test]
+    fn test_migrate_preserves_mcp() {
+        let mut config = Config::defaults();
+        config.mcp.enabled = true;
+        config.mcp.mode = McpMode::ReadWrite;
+
+        let migrated = migrate_config(&config);
+        assert!(migrated.contains("[mcp]"));
+        assert!(migrated.contains("enabled = true"));
+        assert!(migrated.contains("mode = \"read-write\""));
+        assert!(!migrated.contains("# [mcp]"));
+    }
+
+    #[test]
+    fn test_migrate_preserves_history() {
+        let mut config = Config::defaults();
+        config.history.auto_commit_idle_minutes = 10;
+
+        let migrated = migrate_config(&config);
+        assert!(migrated.contains("[history]"));
+        assert!(migrated.contains("auto_commit_idle_minutes = 10"));
+    }
+
+    #[test]
+    fn test_migrate_preserves_font() {
+        let mut config = Config::defaults();
+        config.font.family = "Fira Code".to_string();
+        config.font.size = 16;
+
+        let migrated = migrate_config(&config);
+        assert!(migrated.contains("font.family = \"Fira Code\""));
+        assert!(migrated.contains("font.size = 16"));
+    }
+
+    #[test]
+    fn test_migrated_output_parses() {
+        let mut config = Config::defaults();
+        config.config_version = 0;
+        config.scrolloff = 10;
+        config.theme.name = "frost".to_string();
+        config.startup.mode = StartupMode::Restore;
+
+        let migrated = migrate_config(&config);
+        let reparsed: Config = toml::from_str(&migrated).unwrap();
+        assert_eq!(reparsed.config_version, CURRENT_CONFIG_VERSION);
+        assert_eq!(reparsed.scrolloff, 10);
+        assert_eq!(reparsed.theme.name, "frost");
+        assert_eq!(reparsed.startup.mode, StartupMode::Restore);
+    }
+
+    #[test]
+    fn test_load_triggers_migration() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        // Write a v0 config (no config_version field).
+        std::fs::write(
+            &config_path,
+            "[startup]\nmode = \"restore\"\n\n[theme]\nname = \"frost\"\n",
+        )
+        .unwrap();
+
+        let config = Config::load(&config_path).unwrap();
+        assert_eq!(config.config_version, CURRENT_CONFIG_VERSION);
+        assert_eq!(config.startup.mode, StartupMode::Restore);
+        assert_eq!(config.theme.name, "frost");
+
+        // File on disk should now be the migrated template.
+        let on_disk = std::fs::read_to_string(&config_path).unwrap();
+        assert!(on_disk.contains("config_version = 1"));
+        assert!(on_disk.contains("startup.mode = \"restore\""));
+        assert!(on_disk.contains("theme.name = \"frost\""));
+    }
+
+    #[test]
+    fn test_load_skips_migration_when_current() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        std::fs::write(&config_path, CONFIG_TEMPLATE).unwrap();
+
+        let config = Config::load(&config_path).unwrap();
+        assert_eq!(config.config_version, CURRENT_CONFIG_VERSION);
+
+        // File should be untouched.
+        let on_disk = std::fs::read_to_string(&config_path).unwrap();
+        assert_eq!(on_disk, CONFIG_TEMPLATE);
     }
 }
