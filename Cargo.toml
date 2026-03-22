@@ -8,7 +8,6 @@ members = [
     "crates/bloom-store",
     "crates/bloom-core",
     "crates/bloom-history",
-    "crates/bloom-tui",
     "crates/bloom-gui",
     "crates/bloom-mcp",
     "crates/bloom-import",
