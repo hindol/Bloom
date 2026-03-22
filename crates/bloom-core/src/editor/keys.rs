@@ -301,7 +301,8 @@ impl BloomEditor {
                     self.follow_link_at_cursor();
                 }
                 keymap::dispatch::Action::CopyToClipboard(ref text) => {
-                    // Pass through — TUI handles actual clipboard
+                    // Store for the render frame — frontend reads and writes to OS clipboard
+                    self.pending_clipboard = Some(text.clone());
                     result.push(keymap::dispatch::Action::CopyToClipboard(text.clone()));
                 }
                 keymap::dispatch::Action::RebuildIndex => {
@@ -1314,9 +1315,11 @@ impl BloomEditor {
             "repeat" => {
                 // Dot repeat: replay the last repeatable command's keys.
                 if let Some(recorded) = self.vim_state.last_command().cloned() {
+                    self.vim_state.set_replaying(true);
                     for key in recorded.keys {
                         self.handle_key(key);
                     }
+                    self.vim_state.set_replaying(false);
                 }
                 vec![keymap::dispatch::Action::Noop]
             }

@@ -77,6 +77,12 @@ pub struct VimState {
     last_find: Option<FindCommand>,
     /// Keys accumulated for the current editing command (for `.` repeat).
     current_cmd_keys: Vec<KeyEvent>,
+    /// Whether we're recording Insert-mode keys for a change that entered Insert.
+    recording_insert: bool,
+    /// Keys accumulated for a change that spans Normal→Insert→Esc.
+    insert_change_keys: Vec<KeyEvent>,
+    /// Set during dot-repeat replay to suppress re-recording.
+    replaying: bool,
 }
 
 impl Default for VimState {
@@ -95,6 +101,9 @@ impl VimState {
             last_command: None,
             last_find: None,
             current_cmd_keys: Vec::new(),
+            recording_insert: false,
+            insert_change_keys: Vec::new(),
+            replaying: false,
         }
     }
 
@@ -150,6 +159,11 @@ impl VimState {
         self.registers.get(name)
     }
 
+    /// Access the full register file (for kill ring iteration, etc.).
+    pub fn registers(&self) -> &RegisterFile {
+        &self.registers
+    }
+
     /// Start macro recording to a register.
     pub fn start_macro(&mut self, register: char) {
         self.macro_state.start_recording(register);
@@ -173,6 +187,11 @@ impl VimState {
     /// Get the last repeatable command (for `.`).
     pub fn last_command(&self) -> Option<&RecordedCommand> {
         self.last_command.as_ref()
+    }
+
+    /// Mark replay mode (suppresses re-recording during `.` replay).
+    pub fn set_replaying(&mut self, replaying: bool) {
+        self.replaying = replaying;
     }
 
     // ── Normal mode ──────────────────────────────────────────────────
@@ -209,9 +228,15 @@ impl VimState {
                 let keys = std::mem::take(&mut self.current_cmd_keys);
                 self.pending.clear();
                 let action = self.execute_command(cmd, buffer, cursor);
-                // Store as last command for repeatable editing commands
-                if is_repeatable(&action) {
-                    self.last_command = Some(RecordedCommand { keys });
+                if !self.replaying {
+                    let enters_insert = enters_insert_mode(&action);
+                    if enters_insert {
+                        // Defer last_command — record Insert keys until Esc.
+                        self.recording_insert = true;
+                        self.insert_change_keys = keys;
+                    } else if is_repeatable(&action) {
+                        self.last_command = Some(RecordedCommand { keys });
+                    }
                 }
                 action
             }
@@ -227,6 +252,11 @@ impl VimState {
     // ── Insert mode ──────────────────────────────────────────────────
 
     fn process_insert(&mut self, key: KeyEvent, buffer: &Buffer, cursor: usize) -> VimAction {
+        // Record insert-mode keys for dot-repeat.
+        if self.recording_insert && !self.replaying {
+            self.insert_change_keys.push(key.clone());
+        }
+
         // Handle Ctrl combinations first
         if key.modifiers.ctrl {
             match key.code {
@@ -261,6 +291,12 @@ impl VimState {
         match key.code {
             KeyCode::Esc => {
                 self.mode = Mode::Normal;
+                if self.recording_insert && !self.replaying {
+                    self.last_command = Some(RecordedCommand {
+                        keys: std::mem::take(&mut self.insert_change_keys),
+                    });
+                    self.recording_insert = false;
+                }
                 VimAction::ModeChange(Mode::Normal)
             }
             KeyCode::Char(c) => {
@@ -962,6 +998,17 @@ fn is_repeatable(action: &VimAction) -> bool {
     }
 }
 
+/// Check if an action transitions into Insert mode.
+fn enters_insert_mode(action: &VimAction) -> bool {
+    match action {
+        VimAction::ModeChange(Mode::Insert) => true,
+        VimAction::Composite(actions) => actions
+            .iter()
+            .any(|a| matches!(a, VimAction::ModeChange(Mode::Insert))),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1390,5 +1437,148 @@ mod tests {
                 action
             ),
         }
+    }
+
+    // ── Dot repeat tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_dot_repeat_records_dw() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello world");
+        vim.process_key(key('d'), &buf, 0);
+        vim.process_key(key('w'), &buf, 0);
+        let last = vim.last_command().expect("dw should be recorded");
+        assert_eq!(last.keys.len(), 2);
+        assert_eq!(last.keys[0], key('d'));
+        assert_eq!(last.keys[1], key('w'));
+    }
+
+    #[test]
+    fn test_dot_repeat_records_x() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello");
+        vim.process_key(key('x'), &buf, 0);
+        let last = vim.last_command().expect("x should be recorded");
+        assert_eq!(last.keys.len(), 1);
+        assert_eq!(last.keys[0], key('x'));
+    }
+
+    #[test]
+    fn test_dot_repeat_records_insert_session() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello");
+        // i + type "ab" + Esc should record the full sequence
+        vim.process_key(key('i'), &buf, 0);
+        assert!(vim.recording_insert, "should be recording insert keys");
+        vim.process_key(key('a'), &buf, 0);
+        vim.process_key(key('b'), &buf, 0);
+        vim.process_key(esc(), &buf, 2);
+        assert!(!vim.recording_insert);
+        let last = vim.last_command().expect("insert session should be recorded");
+        // Keys: i, a, b, Esc
+        assert_eq!(last.keys.len(), 4);
+        assert_eq!(last.keys[0], key('i'));
+        assert_eq!(last.keys[1], key('a'));
+        assert_eq!(last.keys[2], key('b'));
+        assert_eq!(last.keys[3], esc());
+    }
+
+    #[test]
+    fn test_dot_repeat_records_cw_with_insert_text() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello world");
+        // cw enters insert mode after deleting word
+        vim.process_key(key('c'), &buf, 0);
+        vim.process_key(key('w'), &buf, 0);
+        assert!(matches!(vim.mode(), Mode::Insert));
+        assert!(vim.recording_insert);
+        // Type "hi" then Esc
+        vim.process_key(key('h'), &buf, 0);
+        vim.process_key(key('i'), &buf, 1);
+        vim.process_key(esc(), &buf, 2);
+        let last = vim.last_command().expect("cw+text should be recorded");
+        // Keys: c, w, h, i, Esc
+        assert_eq!(last.keys.len(), 5);
+        assert_eq!(last.keys[0], key('c'));
+        assert_eq!(last.keys[1], key('w'));
+        assert_eq!(last.keys[2], key('h'));
+        assert_eq!(last.keys[3], key('i'));
+        assert_eq!(last.keys[4], esc());
+    }
+
+    #[test]
+    fn test_dot_repeat_records_o_with_insert_text() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello\nworld");
+        // o opens line below and enters insert mode
+        vim.process_key(key('o'), &buf, 3);
+        assert!(matches!(vim.mode(), Mode::Insert));
+        assert!(vim.recording_insert);
+        vim.process_key(key('x'), &buf, 6);
+        vim.process_key(esc(), &buf, 7);
+        let last = vim.last_command().expect("o+text should be recorded");
+        // Keys: o, x, Esc
+        assert_eq!(last.keys.len(), 3);
+        assert_eq!(last.keys[0], key('o'));
+    }
+
+    #[test]
+    fn test_dot_repeat_records_a_with_insert_text() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello");
+        // a enters insert after cursor
+        vim.process_key(key('a'), &buf, 2);
+        assert!(matches!(vim.mode(), Mode::Insert));
+        assert!(vim.recording_insert);
+        vim.process_key(key('z'), &buf, 3);
+        vim.process_key(esc(), &buf, 4);
+        let last = vim.last_command().expect("a+text should be recorded");
+        assert_eq!(last.keys.len(), 3); // a, z, Esc
+        assert_eq!(last.keys[0], key('a'));
+    }
+
+    #[test]
+    fn test_motion_does_not_record() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello world");
+        vim.process_key(key('w'), &buf, 0);
+        assert!(vim.last_command().is_none(), "motion should not be recorded");
+    }
+
+    #[test]
+    fn test_normal_edit_overwrites_insert_recording() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello world");
+        // First do an insert
+        vim.process_key(key('i'), &buf, 0);
+        vim.process_key(key('z'), &buf, 0);
+        vim.process_key(esc(), &buf, 1);
+        let last1 = vim.last_command().cloned().unwrap();
+        assert_eq!(last1.keys.len(), 3); // i, z, Esc
+
+        // Now do a normal edit — should overwrite
+        vim.process_key(key('x'), &buf, 0);
+        let last2 = vim.last_command().unwrap();
+        assert_eq!(last2.keys.len(), 1);
+        assert_eq!(last2.keys[0], key('x'));
+    }
+
+    #[test]
+    fn test_replaying_suppresses_recording() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("hello");
+        vim.process_key(key('x'), &buf, 0);
+        let original = vim.last_command().cloned().unwrap();
+
+        // Simulate replay
+        vim.set_replaying(true);
+        vim.process_key(key('i'), &buf, 0);
+        vim.process_key(key('a'), &buf, 0);
+        vim.process_key(esc(), &buf, 1);
+        vim.set_replaying(false);
+
+        // last_command should still be the original x, not overwritten
+        let after = vim.last_command().unwrap();
+        assert_eq!(after.keys, original.keys);
     }
 }

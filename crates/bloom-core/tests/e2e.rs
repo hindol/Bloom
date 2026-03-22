@@ -366,6 +366,41 @@ fn uc23_dot_repeat() {
     );
 }
 
+#[test]
+fn uc23_dot_repeat_insert_session() {
+    let mut sim = SimInput::with_content("aaa bbb\n");
+
+    // cw + type "xxx" + Esc replaces first word
+    sim.keys("cw");
+    sim.type_text("xxx");
+    sim.keys("<Esc>");
+    assert_eq!(sim.buffer_text(), "xxx bbb\n");
+
+    // Move to next word and dot repeat — should replace it with "xxx"
+    sim.keys("w");
+    sim.keys(".");
+    assert_eq!(
+        sim.buffer_text(),
+        "xxx xxx\n",
+        "dot repeat should replay cw + typed text"
+    );
+}
+
+#[test]
+fn uc23_dot_repeat_x_multiple() {
+    let mut sim = SimInput::with_content("abcdef\n");
+
+    // Delete first char
+    sim.keys("x");
+    assert_eq!(sim.buffer_text(), "bcdef\n");
+
+    // Dot repeat twice
+    sim.keys(".");
+    assert_eq!(sim.buffer_text(), "cdef\n");
+    sim.keys(".");
+    assert_eq!(sim.buffer_text(), "def\n");
+}
+
 // -----------------------------------------------------------------------
 // UC-42: Toggle task
 // -----------------------------------------------------------------------
