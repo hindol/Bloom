@@ -23,6 +23,7 @@ pub(crate) fn picker_kind_key(kind: &keymap::dispatch::PickerKind) -> String {
         PickerKind::InlineLink => "inline_link".into(),
         PickerKind::Templates => "templates".into(),
         PickerKind::Theme => "theme".into(),
+        PickerKind::KillRing => "kill_ring".into(),
     }
 }
 
@@ -213,6 +214,28 @@ impl BloomEditor {
                 self.open_theme_picker();
                 return;
             }
+            PickerKind::KillRing => {
+                let items: Vec<GenericPickerItem> = self
+                    .vim_state
+                    .registers()
+                    .kill_ring()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, text)| {
+                        let preview: String = text.chars().take(60).collect();
+                        let preview = preview.replace('\n', "↵");
+                        GenericPickerItem {
+                            id: i.to_string(),
+                            label: preview,
+                            middle: None,
+                            right: Some(format!("{} chars", text.len())),
+                            preview_text: Some(text.clone()),
+                            score_boost: 0,
+                        }
+                    })
+                    .collect();
+                ("Kill Ring".to_string(), "entries".to_string(), items)
+            }
         };
         let min_query_len = match &kind {
             PickerKind::Search => 2,
@@ -236,6 +259,7 @@ impl BloomEditor {
                 crate::PickerAction::OpenPage
             }
             PickerKind::Theme => crate::PickerAction::ApplyTheme,
+            PickerKind::KillRing => crate::PickerAction::InsertText,
         };
         self.picker_state = Some(ActivePicker {
             kind: kind.clone(),
@@ -870,6 +894,11 @@ impl BloomEditor {
                         let link_text = format!("[[{}|{}]]", item.id, item.label);
                         self.insert_text_at_cursor(&link_text);
                     }
+                }
+            }
+            PickerAction::InsertText => {
+                if let Some(text) = &item.preview_text {
+                    self.insert_text_at_cursor(text);
                 }
             }
             PickerAction::ApplyTheme | PickerAction::Noop => {}

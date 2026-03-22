@@ -90,6 +90,7 @@ pub enum PickerKind {
     InlineLink,
     Templates,
     Theme,
+    KillRing,
 }
 
 #[derive(Debug, Clone)]

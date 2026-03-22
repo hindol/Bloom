@@ -7,6 +7,7 @@ license = "AGPL-3.0-or-later"
 [dependencies]
 bloom-core = { path = "../bloom-core" }
 bloom-md = { path = "../bloom-md" }
+arboard = "3"
 crossbeam = "0.8.4"
 iced = { version = "0.14", features = ["canvas", "advanced", "tokio"] }
 tracing = "0.1"

@@ -35,6 +35,8 @@ pub struct RenderFrame {
     /// Split tree snapshot — the GUI computes pixel rects from ratios + font
     /// metrics; the TUI uses [`PaneRectFrame`] cell coords instead.
     pub layout_tree: super::LayoutTree,
+    /// Text that should be written to the system clipboard this frame.
+    pub clipboard_text: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

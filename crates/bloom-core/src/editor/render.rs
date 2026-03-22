@@ -168,6 +168,7 @@ impl BloomEditor {
                 scrolloff: self.config.scrolloff,
                 theme_name: self.active_theme.name.to_string(),
                 layout_tree: render::LayoutTree::Leaf(types::PaneId(0)),
+                clipboard_text: None,
             };
         }
 
@@ -275,6 +276,7 @@ impl BloomEditor {
                 layout_tree: render::LayoutTree::Leaf(
                     first_rect.map(|r| r.pane_id).unwrap_or(types::PaneId(0)),
                 ),
+                clipboard_text: None,
             };
         }
 
@@ -891,6 +893,7 @@ impl BloomEditor {
             scrolloff: self.config.scrolloff,
             theme_name: self.active_theme.name.to_string(),
             layout_tree: wm_tree_to_render(self.window_mgr.layout()),
+            clipboard_text: self.pending_clipboard.take(),
         }
     }
 

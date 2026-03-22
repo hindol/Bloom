@@ -224,6 +224,9 @@ impl BloomEditor {
                 self.set_cursor(self.cursor().saturating_sub(1));
                 vec![keymap::dispatch::Action::Noop]
             }
+            "kill_ring" => vec![keymap::dispatch::Action::OpenPicker(
+                keymap::dispatch::PickerKind::KillRing,
+            )],
             "search_backlinks" => {
                 if let Some(id) = self.active_page().cloned() {
                     vec![keymap::dispatch::Action::OpenPicker(
@@ -504,7 +507,7 @@ impl BloomEditor {
         });
     }
 
-    fn open_named_view(&mut self, view_config: config::ViewConfig) {
+    pub(crate) fn open_named_view(&mut self, view_config: config::ViewConfig) {
         let previous_page = self.active_page().cloned();
         let mut view_state = ViewState {
             name: view_config.name.clone(),

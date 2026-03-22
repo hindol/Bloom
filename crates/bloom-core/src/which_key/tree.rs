@@ -259,8 +259,8 @@ fn build_static_tree(tree: &mut WhichKeyTree) {
     tree.register("t a", "Add tag", "add_tag".into());
     tree.register("t r", "Remove tag", "remove_tag".into());
 
-    // Agenda - handled via dynamic view system
-    // tree.register("a a", "Agenda", "agenda".into());
+    // Agenda
+    tree.register("a a", "Agenda", "agenda".into());
 
     // Views
     tree.register("v v", "Query prompt", "view_prompt".into());
@@ -272,6 +272,7 @@ fn build_static_tree(tree: &mut WhichKeyTree) {
     tree.register("i d", "Insert @due()", "insert_due".into());
     tree.register("i s", "Insert @start()", "insert_start".into());
     tree.register("i a", "Insert @at()", "insert_at".into());
+    tree.register("i y", "Paste from kill ring", "kill_ring".into());
 
     // Windows
     tree.register("w v", "Split vertical", "split_vertical".into());

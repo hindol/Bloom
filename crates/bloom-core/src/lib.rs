@@ -555,6 +555,8 @@ pub struct BloomEditor {
     /// Cursor position before search started (for Esc to restore).
     pub(crate) search_origin: usize,
 
+    /// Cache journal page IDs per date to avoid UUID churn on close/reopen.
+    pub(crate) journal_id_cache: std::collections::HashMap<String, types::PageId>,
     pub(crate) last_viewed_journal_date: Option<chrono::NaiveDate>,
     pub(crate) in_journal_mode: bool,
     pub(crate) journal_nav_at: Option<Instant>,
@@ -606,6 +608,8 @@ pub struct BloomEditor {
     pub(crate) history_rx: Option<crossbeam::channel::Receiver<history::HistoryComplete>>,
     pub(crate) page_history_entries: Option<Vec<history::PageHistoryEntry>>,
     pub(crate) page_history_selected: usize,
+    /// Text pending delivery to the system clipboard (drained by render).
+    pub(crate) pending_clipboard: Option<String>,
 }
 
 pub(crate) struct ViewState {
@@ -845,6 +849,8 @@ pub(crate) enum PickerAction {
     ExpandTemplate,
     /// Apply a theme (handled specially by theme picker).
     ApplyTheme,
+    /// Insert raw text at cursor (kill ring paste).
+    InsertText,
     /// No-op (e.g., tags picker — not yet wired to action).
     Noop,
 }
@@ -936,6 +942,7 @@ impl BloomEditor {
             search_active: false,
             search_origin: 0,
 
+            journal_id_cache: std::collections::HashMap::new(),
             last_viewed_journal_date: None,
             in_journal_mode: false,
             journal_nav_at: None,
@@ -972,6 +979,7 @@ impl BloomEditor {
             history_rx: None,
             page_history_entries: None,
             page_history_selected: 0,
+            pending_clipboard: None,
             config,
         })
     }

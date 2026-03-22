@@ -470,6 +470,31 @@ impl BloomApp {
             return true;
         }
 
+        // Cmd+V: paste from system clipboard
+        if key_matches_any(key, &["v"]) || key_matches_any(modified_key, &["v"]) {
+            if let Ok(mut clip) = arboard::Clipboard::new() {
+                if let Ok(text) = clip.get_text() {
+                    for ch in text.chars() {
+                        if ch == '\n' {
+                            self.send_key_event(KeyEvent::enter());
+                        } else {
+                            self.send_key_event(KeyEvent::char(ch));
+                        }
+                    }
+                }
+            }
+            return true;
+        }
+
+        // Cmd+C: copy — handled via CopyToClipboard action on render frame
+        if key_matches_any(key, &["c"]) || key_matches_any(modified_key, &["c"]) {
+            // In visual mode, yank to clipboard register by sending "y"
+            // which triggers a yank → the kill ring picks it up.
+            // For a richer approach, we'd need to extract the visual selection.
+            self.send_key_event(KeyEvent::char('y'));
+            return true;
+        }
+
         if key_matches_any(key, &["+", "="]) || key_matches_any(modified_key, &["+", "="]) {
             eprintln!("TODO: increase font size shortcut");
             return true;
@@ -495,6 +520,12 @@ impl BloomApp {
         while let Ok(frame) = self.frame_rx.try_recv() {
             if let Some(palette) = bloom_md::theme::palette_by_name(&frame.theme_name) {
                 self.theme = palette;
+            }
+            // Write pending clipboard text to the OS clipboard via arboard.
+            if let Some(ref text) = frame.clipboard_text {
+                if let Ok(mut clip) = arboard::Clipboard::new() {
+                    let _ = clip.set_text(text.clone());
+                }
             }
             self.frame = Some(frame);
             got_frame = true;
