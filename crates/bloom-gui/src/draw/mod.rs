@@ -7,7 +7,7 @@ pub mod pane;
 use iced::widget::canvas::{self, Frame, Path, Stroke};
 use iced::{Color, Point, Rectangle, Size};
 
-use crate::{CHAR_WIDTH, EDITOR_FONT, FONT_SIZE, LINE_HEIGHT, TEXT_Y_OFFSET};
+use crate::{CHAR_WIDTH, EDITOR_FONT, FONT_SIZE, TEXT_Y_OFFSET};
 
 pub(crate) fn rect(x: f32, y: f32, width: f32, height: f32) -> Rectangle {
     Rectangle {
@@ -158,4 +158,98 @@ pub(crate) fn truncate_text(text: &str, max_chars: usize) -> String {
 
 pub(crate) fn draw_bar_cursor(frame: &mut Frame, x: f32, y: f32, h: f32, color: Color) {
     fill_rect(frame, rect(x, y, 2.0, h), color);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_width_empty() {
+        assert_eq!(text_width(""), 0.0);
+    }
+
+    #[test]
+    fn text_width_ascii() {
+        assert_eq!(text_width("hello"), 5.0 * CHAR_WIDTH);
+    }
+
+    #[test]
+    fn text_width_unicode() {
+        // Each char counts as 1 for monospace approximation.
+        assert_eq!(text_width("日本語"), 3.0 * CHAR_WIDTH);
+    }
+
+    #[test]
+    fn chars_that_fit_zero_width() {
+        assert_eq!(chars_that_fit(0.0), 0);
+    }
+
+    #[test]
+    fn chars_that_fit_exact_multiple() {
+        assert_eq!(chars_that_fit(CHAR_WIDTH * 10.0), 10);
+    }
+
+    #[test]
+    fn chars_that_fit_partial() {
+        // Slightly more than 5 chars of space → still 5
+        assert_eq!(chars_that_fit(CHAR_WIDTH * 5.0 + 0.1), 5);
+    }
+
+    #[test]
+    fn chars_that_fit_negative() {
+        assert_eq!(chars_that_fit(-10.0), 0);
+    }
+
+    #[test]
+    fn truncate_text_short_string() {
+        assert_eq!(truncate_text("hi", 10), "hi");
+    }
+
+    #[test]
+    fn truncate_text_exact_fit() {
+        assert_eq!(truncate_text("hello", 5), "hello");
+    }
+
+    #[test]
+    fn truncate_text_overflow() {
+        assert_eq!(truncate_text("hello world", 8), "hello w…");
+    }
+
+    #[test]
+    fn truncate_text_max_zero() {
+        assert_eq!(truncate_text("hello", 0), "");
+    }
+
+    #[test]
+    fn truncate_text_max_one() {
+        assert_eq!(truncate_text("hello", 1), "…");
+    }
+
+    #[test]
+    fn rect_helper() {
+        let r = rect(10.0, 20.0, 100.0, 50.0);
+        assert_eq!(r.x, 10.0);
+        assert_eq!(r.y, 20.0);
+        assert_eq!(r.width, 100.0);
+        assert_eq!(r.height, 50.0);
+    }
+
+    #[test]
+    fn inset_shrinks_rect() {
+        let r = rect(0.0, 0.0, 100.0, 80.0);
+        let i = inset(r, 10.0);
+        assert_eq!(i.x, 10.0);
+        assert_eq!(i.y, 10.0);
+        assert_eq!(i.width, 80.0);
+        assert_eq!(i.height, 60.0);
+    }
+
+    #[test]
+    fn inset_clamps_to_zero() {
+        let r = rect(0.0, 0.0, 10.0, 10.0);
+        let i = inset(r, 20.0);
+        assert_eq!(i.width, 0.0);
+        assert_eq!(i.height, 0.0);
+    }
 }

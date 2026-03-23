@@ -43,3 +43,90 @@ pub(crate) fn convert_key(
         modifiers: bloom_mods,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bloom_core::types::KeyCode;
+
+    fn no_mods() -> keyboard::Modifiers {
+        keyboard::Modifiers::default()
+    }
+
+    fn ctrl() -> keyboard::Modifiers {
+        let mut m = keyboard::Modifiers::default();
+        m.insert(keyboard::Modifiers::CTRL);
+        m
+    }
+
+    fn shift() -> keyboard::Modifiers {
+        let mut m = keyboard::Modifiers::default();
+        m.insert(keyboard::Modifiers::SHIFT);
+        m
+    }
+
+    #[test]
+    fn escape_maps_correctly() {
+        let key = keyboard::Key::Named(keyboard::key::Named::Escape);
+        let result = convert_key(key, no_mods()).unwrap();
+        assert_eq!(result.code, KeyCode::Esc);
+        assert!(!result.modifiers.ctrl);
+    }
+
+    #[test]
+    fn enter_maps_correctly() {
+        let key = keyboard::Key::Named(keyboard::key::Named::Enter);
+        let result = convert_key(key, no_mods()).unwrap();
+        assert_eq!(result.code, KeyCode::Enter);
+    }
+
+    #[test]
+    fn character_key() {
+        let key = keyboard::Key::Character("a".into());
+        let result = convert_key(key, no_mods()).unwrap();
+        assert_eq!(result.code, KeyCode::Char('a'));
+        assert!(!result.modifiers.shift);
+    }
+
+    #[test]
+    fn ctrl_modifier_propagates() {
+        let key = keyboard::Key::Character("s".into());
+        let result = convert_key(key, ctrl()).unwrap();
+        assert_eq!(result.code, KeyCode::Char('s'));
+        assert!(result.modifiers.ctrl);
+    }
+
+    #[test]
+    fn shift_modifier_propagates() {
+        let key = keyboard::Key::Character("A".into());
+        let result = convert_key(key, shift()).unwrap();
+        assert_eq!(result.code, KeyCode::Char('A'));
+        assert!(result.modifiers.shift);
+    }
+
+    #[test]
+    fn space_is_char_space() {
+        let key = keyboard::Key::Named(keyboard::key::Named::Space);
+        let result = convert_key(key, no_mods()).unwrap();
+        assert_eq!(result.code, KeyCode::Char(' '));
+    }
+
+    #[test]
+    fn arrow_keys() {
+        let cases = [
+            (keyboard::key::Named::ArrowUp, KeyCode::Up),
+            (keyboard::key::Named::ArrowDown, KeyCode::Down),
+            (keyboard::key::Named::ArrowLeft, KeyCode::Left),
+            (keyboard::key::Named::ArrowRight, KeyCode::Right),
+        ];
+        for (named, expected) in cases {
+            let result = convert_key(keyboard::Key::Named(named), no_mods()).unwrap();
+            assert_eq!(result.code, expected);
+        }
+    }
+
+    #[test]
+    fn unidentified_returns_none() {
+        assert!(convert_key(keyboard::Key::Unidentified, no_mods()).is_none());
+    }
+}

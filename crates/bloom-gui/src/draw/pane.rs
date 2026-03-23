@@ -599,7 +599,13 @@ fn draw_command_line(
     let cursor_x = (pane_x + (1 + command.cursor_pos) as f32 * CHAR_WIDTH)
         .min(pane_x + pane_w - 2.0)
         .max(pane_x);
-    draw_bar_cursor(frame, cursor_x, status_y, LINE_HEIGHT, rgb_to_color(&theme.foreground));
+    draw_bar_cursor(
+        frame,
+        cursor_x,
+        status_y,
+        LINE_HEIGHT,
+        rgb_to_color(&theme.foreground),
+    );
 }
 
 fn draw_quick_capture(
@@ -624,7 +630,13 @@ fn draw_quick_capture(
     let cursor_x = (pane_x + (prompt_chars + capture.cursor_pos) as f32 * CHAR_WIDTH)
         .min(pane_x + pane_w - 2.0)
         .max(pane_x);
-    draw_bar_cursor(frame, cursor_x, status_y, LINE_HEIGHT, rgb_to_color(&theme.foreground));
+    draw_bar_cursor(
+        frame,
+        cursor_x,
+        status_y,
+        LINE_HEIGHT,
+        rgb_to_color(&theme.foreground),
+    );
 }
 
 fn draw_timeline(
@@ -981,4 +993,68 @@ fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
         lines.push(current);
     }
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::FONT_SIZE;
+
+    #[test]
+    fn heading_font_size_h1() {
+        assert_eq!(heading_font_size(1), FONT_SIZE * 1.5);
+    }
+
+    #[test]
+    fn heading_font_size_h2() {
+        assert_eq!(heading_font_size(2), FONT_SIZE * 1.3);
+    }
+
+    #[test]
+    fn heading_font_size_h3() {
+        assert_eq!(heading_font_size(3), FONT_SIZE * 1.1);
+    }
+
+    #[test]
+    fn heading_font_size_h4_falls_back() {
+        assert_eq!(heading_font_size(4), FONT_SIZE);
+    }
+
+    #[test]
+    fn heading_row_height_scales_with_font() {
+        // H1 row height = heading_font_size(1) * 1.4
+        let h1_h = heading_font_size(1) * 1.4;
+        assert!(h1_h > LINE_HEIGHT, "H1 row should be taller than normal");
+        assert!((h1_h - FONT_SIZE * 1.5 * 1.4).abs() < 0.01);
+    }
+
+    #[test]
+    fn cursor_y_empty_lines() {
+        assert_eq!(cursor_y_in_pane(&[], 0, 10.0), 10.0);
+    }
+
+    #[test]
+    fn cursor_y_first_line() {
+        let lines = vec![make_normal_line("hello")];
+        assert_eq!(cursor_y_in_pane(&lines, 0, 5.0), 5.0);
+    }
+
+    #[test]
+    fn cursor_y_second_line() {
+        let lines = vec![make_normal_line("one"), make_normal_line("two")];
+        let y = cursor_y_in_pane(&lines, 1, 0.0);
+        assert!((y - LINE_HEIGHT).abs() < 0.01);
+    }
+
+    fn make_normal_line(text: &str) -> bloom_core::render::RenderedLine {
+        bloom_core::render::RenderedLine {
+            source: bloom_core::render::LineSource::Buffer(0),
+            is_mirror: false,
+            text: text.to_string(),
+            spans: vec![bloom_md::parser::traits::StyledSpan {
+                range: 0..text.len(),
+                style: bloom_md::parser::traits::Style::Normal,
+            }],
+        }
+    }
 }

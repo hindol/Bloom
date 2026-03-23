@@ -93,3 +93,100 @@ impl FrameLayout {
         0.0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bloom_core::render::{PickerFrame, PickerRow, RenderFrame};
+
+    fn empty_frame() -> RenderFrame {
+        RenderFrame {
+            panes: vec![],
+            maximized: false,
+            hidden_pane_count: 0,
+            picker: None,
+            inline_menu: None,
+            which_key: None,
+            date_picker: None,
+            context_strip: None,
+            temporal_strip: None,
+            dialog: None,
+            view: None,
+            notifications: vec![],
+            scrolloff: 3,
+            theme_name: "bloom-dark".into(),
+            layout_tree: bloom_core::render::LayoutTree::Leaf(bloom_core::types::PaneId(0)),
+            clipboard_text: None,
+        }
+    }
+
+    fn picker_frame(n_results: usize) -> PickerFrame {
+        PickerFrame {
+            title: "Test".into(),
+            query: String::new(),
+            results: (0..n_results)
+                .map(|i| PickerRow {
+                    label: format!("item {i}"),
+                    middle: None,
+                    right: None,
+                })
+                .collect(),
+            selected_index: 0,
+            filters: vec![],
+            preview: None,
+            total_count: n_results,
+            filtered_count: n_results,
+            status_noun: "items".into(),
+            min_query_len: 0,
+            query_selected: false,
+            wide: false,
+        }
+    }
+
+    #[test]
+    fn layout_no_drawer() {
+        let layout = FrameLayout::compute(800.0, 600.0, &empty_frame());
+        assert!(layout.drawer.is_none());
+        assert_eq!(layout.window.width, 800.0);
+        assert_eq!(layout.window.height, 600.0);
+        assert!(layout.content.height > 0.0);
+    }
+
+    #[test]
+    fn layout_vertical_stack_order() {
+        let layout = FrameLayout::compute(1000.0, 800.0, &empty_frame());
+        assert_eq!(layout.content.y, 0.0);
+        assert!(layout.modeline.y >= layout.content.height - 0.1);
+        assert!(layout.modeline.y + layout.modeline.height <= 800.0 + 0.1);
+    }
+
+    #[test]
+    fn layout_with_picker_has_drawer() {
+        let mut frame = empty_frame();
+        frame.picker = Some(picker_frame(0));
+        let layout = FrameLayout::compute(800.0, 600.0, &frame);
+        assert!(layout.drawer.is_some());
+        let drawer = layout.drawer.unwrap();
+        assert!(drawer.height > 0.0);
+        assert!(drawer.y >= layout.modeline.y + layout.modeline.height - 0.1);
+    }
+
+    #[test]
+    fn layout_content_shrinks_with_drawer() {
+        let no_drawer = FrameLayout::compute(800.0, 600.0, &empty_frame());
+        let mut frame = empty_frame();
+        frame.picker = Some(picker_frame(5));
+        let with_drawer = FrameLayout::compute(800.0, 600.0, &frame);
+        assert!(
+            with_drawer.content.height < no_drawer.content.height,
+            "content should shrink when drawer opens"
+        );
+    }
+
+    #[test]
+    fn layout_full_width() {
+        let layout = FrameLayout::compute(1920.0, 1080.0, &empty_frame());
+        assert_eq!(layout.content.width, 1920.0);
+        assert_eq!(layout.modeline.width, 1920.0);
+    }
+}
