@@ -1263,6 +1263,7 @@ fn uc37_search_finds_content() {
         .with_content("# Python\n\nDynamic typing.\n")
         .build();
     let mut sim = SimInput::with_vault(vault);
+    sim.flush_background();
 
     sim.keys("SPC s s");
     assert!(sim.screen(80, 24).has_picker());
@@ -1534,6 +1535,7 @@ fn linked_vault_open_specific_page() {
 fn linked_vault_search_content() {
     let vault = linked_vault();
     let mut sim = SimInput::with_vault(vault);
+    sim.flush_background();
 
     sim.keys("SPC s s");
     sim.type_text("rope");
@@ -1618,6 +1620,7 @@ fn task_vault_open_project_a() {
 fn task_vault_search_tasks() {
     let vault = task_vault();
     let mut sim = SimInput::with_vault(vault);
+    sim.flush_background();
 
     sim.keys("SPC s s");
     sim.type_text("API design");
@@ -2417,7 +2420,8 @@ fn mirror_promotion_on_duplicate_block_id() {
         .with_content("- [ ] Shared task ^abc01\n")
         .build();
     let vault_root = vault.root().to_path_buf();
-    let _sim = SimInput::with_vault(vault);
+    let mut sim = SimInput::with_vault(vault);
+    sim.flush_background();
 
     // After indexing, read files back — both should have ^=abc01
     let page_a = std::fs::read_to_string(vault_root.join("pages/pagea.md")).unwrap();
@@ -2937,7 +2941,7 @@ fn theme_persists_to_config_without_corrupting_views() {
     // Write config at vault root BEFORE init
     std::fs::write(
         vault_root.join("config.toml"),
-        "[theme]\nname = \"bloom-dark\"\n\n[[views]]\nname = \"Agenda\"\nquery = \"tasks | where not done | sort due\"\nkey = \"a a\"\n",
+        "config_version = 1\n\n[theme]\nname = \"bloom-dark\"\n\n[[views]]\nname = \"Agenda\"\nquery = \"tasks | where not done | sort due\"\nkey = \"a a\"\n",
     ).unwrap();
 
     let config = bloom_core::config::Config::load(&vault_root.join("config.toml"))
@@ -3810,6 +3814,8 @@ fn uc07_create_page_from_template_with_frontmatter() {
         .iter()
         .any(|label| label.contains("meeting-notes")));
 
+    // Type to filter to the user template, then select it.
+    sim.type_text("meeting-notes");
     sim.keys("Enter");
     let text = sim.buffer_text();
     assert!(text.contains("id: "));
@@ -4136,6 +4142,7 @@ fn uc41_create_a_task() {
 fn uc43_open_agenda() {
     let vault = task_vault();
     let mut sim = SimInput::with_vault(vault);
+    sim.flush_background();
     sim.keys("SPC a a");
 
     let screen = sim.screen(80, 24);
@@ -4148,6 +4155,9 @@ fn uc43_open_agenda() {
 fn uc44_act_on_task_from_agenda() {
     let vault = task_vault();
     let mut sim = SimInput::with_vault(vault);
+
+    // Give the indexer time to index tasks before opening the agenda.
+    sim.flush_background();
 
     sim.keys("SPC a a");
     let screen = sim.screen(80, 24);

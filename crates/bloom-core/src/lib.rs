@@ -2370,16 +2370,25 @@ mod tests {
         let mut editor = BloomEditor::new(config).unwrap();
         let _ = editor.init_vault(dir.path());
 
-        // Wait for indexer (in tests, it completes quickly)
-        let ch = editor.channels();
-        if let Some(rx) = &ch.indexer_rx {
-            for _ in 0..100 {
-                if let Ok(complete) = rx.try_recv() {
+        // Wait for indexer to complete — under parallel test load the indexer
+        // thread may be starved, so we poll with generous timeout (5s total).
+        for _ in 0..500 {
+            let ch = editor.channels();
+            if let Some(rx) = &ch.indexer_rx {
+                while let Ok(complete) = rx.try_recv() {
                     editor.handle_index_complete(complete);
-                    break;
                 }
-                std::thread::sleep(std::time::Duration::from_millis(10));
             }
+            if let Some(rx) = &ch.write_result_rx {
+                while let Ok(result) = rx.try_recv() {
+                    editor.handle_write_result(result);
+                }
+            }
+            if !editor.is_indexing() {
+                break;
+            }
+            std::thread::yield_now();
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert!(!editor.is_indexing(), "indexer should have completed");
 

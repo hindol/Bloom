@@ -1026,7 +1026,7 @@ impl BloomEditor {
         // Open the agenda as a live BQL view
         let view_config = crate::config::ViewConfig {
             name: "Agenda".to_string(),
-            query: "tasks | where not done | sort due | group due.category".to_string(),
+            query: "tasks | where not done | sort due".to_string(),
             key: Some("a a".to_string()),
         };
         self.open_named_view(view_config);

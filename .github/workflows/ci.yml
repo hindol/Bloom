@@ -64,7 +64,10 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: Run tests with coverage
-        run: cargo llvm-cov --workspace --fail-under-regions 65
+        run: |
+          # E2e tests spawn background indexer threads per test case.
+          # Limit parallelism so indexers finish within flush_background timeouts.
+          RUST_TEST_THREADS=4 cargo llvm-cov --workspace --fail-under-regions 65
 
   build:
     name: Build

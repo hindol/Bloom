@@ -270,6 +270,44 @@ impl SimInput {
         self
     }
 
+    /// Drain background channels (indexer, file writer) until quiescent.
+    /// Call this before any test that relies on search results, agenda, or
+    /// other index-dependent features.
+    pub fn flush_background(&mut self) -> &mut Self {
+        let timeout = std::time::Duration::from_millis(50);
+        for _ in 0..100 {
+            let mut progressed = false;
+            let channels = self.editor.channels();
+
+            if let Some(rx) = &channels.write_result_rx {
+                while let Ok(result) = rx.try_recv() {
+                    self.editor.handle_write_result(result);
+                    progressed = true;
+                }
+            }
+
+            if let Some(rx) = &channels.indexer_rx {
+                // Use blocking recv_timeout so we yield CPU to the indexer thread
+                match rx.recv_timeout(timeout) {
+                    Ok(complete) => {
+                        self.editor.handle_index_complete(complete);
+                        progressed = true;
+                        // Drain any additional messages
+                        while let Ok(c) = rx.try_recv() {
+                            self.editor.handle_index_complete(c);
+                        }
+                    }
+                    Err(_) => {}
+                }
+            }
+
+            if !progressed && !self.editor.is_indexing() {
+                break;
+            }
+        }
+        self
+    }
+
     /// Render and return a TestScreen for assertions.
     pub fn screen(&mut self, width: u16, height: u16) -> TestScreen {
         self.editor.update_layout(width, height);
