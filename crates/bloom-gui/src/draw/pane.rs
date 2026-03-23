@@ -363,7 +363,9 @@ fn draw_editor_content(
                     }
                 }
             }
-            CursorShape::Bar => draw_bar_cursor(frame, cx, cy, rgb_to_color(&theme.foreground)),
+            CursorShape::Bar => {
+                draw_bar_cursor(frame, cx, cy, cursor_row_h, rgb_to_color(&theme.foreground))
+            }
             CursorShape::Underline => fill_rect(
                 frame,
                 rect(cx, cy + cursor_row_h - 2.0, cursor_cw, 2.0),
@@ -597,7 +599,7 @@ fn draw_command_line(
     let cursor_x = (pane_x + (1 + command.cursor_pos) as f32 * CHAR_WIDTH)
         .min(pane_x + pane_w - 2.0)
         .max(pane_x);
-    draw_bar_cursor(frame, cursor_x, status_y, rgb_to_color(&theme.foreground));
+    draw_bar_cursor(frame, cursor_x, status_y, LINE_HEIGHT, rgb_to_color(&theme.foreground));
 }
 
 fn draw_quick_capture(
@@ -622,7 +624,7 @@ fn draw_quick_capture(
     let cursor_x = (pane_x + (prompt_chars + capture.cursor_pos) as f32 * CHAR_WIDTH)
         .min(pane_x + pane_w - 2.0)
         .max(pane_x);
-    draw_bar_cursor(frame, cursor_x, status_y, rgb_to_color(&theme.foreground));
+    draw_bar_cursor(frame, cursor_x, status_y, LINE_HEIGHT, rgb_to_color(&theme.foreground));
 }
 
 fn draw_timeline(

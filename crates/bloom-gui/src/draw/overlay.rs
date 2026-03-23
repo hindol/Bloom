@@ -195,6 +195,7 @@ pub(crate) fn draw_picker(
         (query_x + picker.query.chars().count() as f32 * CHAR_WIDTH)
             .min(area.x + area.width - SPACING_MD - 2.0),
         query_y,
+        LINE_HEIGHT,
         rgb_to_color(&theme.foreground),
     );
 }
@@ -765,6 +766,7 @@ fn draw_input_row(
         frame,
         (input_x + cursor as f32 * CHAR_WIDTH + 2.0).min(input_x + input_w - 2.0),
         y,
+        LINE_HEIGHT,
         rgb_to_color(&theme.foreground),
     );
 }
@@ -1034,6 +1036,7 @@ pub(crate) fn draw_view(
             (query_x + view_frame.query_cursor as f32 * CHAR_WIDTH)
                 .min(area.x + area.width - SPACING_MD - 2.0),
             qy,
+            LINE_HEIGHT,
             rgb_to_color(&theme.foreground),
         );
     }
