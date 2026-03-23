@@ -36,14 +36,16 @@ pub(crate) fn draw_picker(
     let results_top_y = results_bottom_y - num_visible as f32 * LINE_HEIGHT;
 
     // Opaque background covering the picker area.
-    fill_rect(
-        frame,
-        area,
-        rgb_to_color(&theme.background),
-    );
+    fill_rect(frame, area, rgb_to_color(&theme.background));
 
     // Top separator.
-    draw_hline(frame, area.x, area.x + area.width, panel_top, rgb_to_color(&theme.faded));
+    draw_hline(
+        frame,
+        area.x,
+        area.x + area.width,
+        panel_top,
+        rgb_to_color(&theme.faded),
+    );
 
     // ── Status line ("5 of 120 pages") ──
     let footer = if picker.filtered_count > 0 {
@@ -128,8 +130,16 @@ pub(crate) fn draw_picker(
         }
     }
 
-    if picker.results.is_empty() && picker.min_query_len > 0 && picker.query.len() < picker.min_query_len {
-        let empty_area = rect(area.x, results_top_y, area.width, num_visible.max(1) as f32 * LINE_HEIGHT);
+    if picker.results.is_empty()
+        && picker.min_query_len > 0
+        && picker.query.len() < picker.min_query_len
+    {
+        let empty_area = rect(
+            area.x,
+            results_top_y,
+            area.width,
+            num_visible.max(1) as f32 * LINE_HEIGHT,
+        );
         draw_text_center(
             frame,
             empty_area,
@@ -140,7 +150,13 @@ pub(crate) fn draw_picker(
     }
 
     // Separator between results and query.
-    draw_hline(frame, area.x, area.x + area.width, query_y, rgb_to_color(&theme.faded));
+    draw_hline(
+        frame,
+        area.x,
+        area.x + area.width,
+        query_y,
+        rgb_to_color(&theme.faded),
+    );
 
     // ── Query line: "{title} > {query}█" ──
     let prompt = format!("{} > ", picker.title);
@@ -168,7 +184,10 @@ pub(crate) fn draw_picker(
         frame,
         query_x,
         query_y,
-        truncate_text(&picker.query, content_chars.saturating_sub(prompt.chars().count())),
+        truncate_text(
+            &picker.query,
+            content_chars.saturating_sub(prompt.chars().count()),
+        ),
         rgb_to_color(&theme.foreground),
     );
     draw_bar_cursor(
@@ -209,14 +228,22 @@ pub(crate) fn draw_dialog(
         let label = format!("[{}]", choice);
         let w = text_width(&label) + CHAR_WIDTH;
         if index == dialog.selected {
-            fill_rect(frame, rect(x - 2.0, y, w, LINE_HEIGHT), rgb_to_color(&theme.mild));
+            fill_rect(
+                frame,
+                rect(x - 2.0, y, w, LINE_HEIGHT),
+                rgb_to_color(&theme.mild),
+            );
         }
         draw_text(
             frame,
             x,
             y,
             label,
-            rgb_to_color(if index == dialog.selected { &theme.strong } else { &theme.foreground }),
+            rgb_to_color(if index == dialog.selected {
+                &theme.strong
+            } else {
+                &theme.foreground
+            }),
         );
         x += w + CHAR_WIDTH;
     }
@@ -233,14 +260,16 @@ pub(crate) fn draw_date_picker(
     let panel_top = area.y;
 
     // Opaque background.
-    fill_rect(
-        frame,
-        area,
-        rgb_to_color(&theme.background),
-    );
+    fill_rect(frame, area, rgb_to_color(&theme.background));
 
     // Top separator.
-    draw_hline(frame, area.x, area.x + area.width, panel_top, rgb_to_color(&theme.faded));
+    draw_hline(
+        frame,
+        area.x,
+        area.x + area.width,
+        panel_top,
+        rgb_to_color(&theme.faded),
+    );
 
     let mut y = panel_top + LINE_HEIGHT * 0.5;
     let x_left = area.x + SPACING_MD;
@@ -286,37 +315,37 @@ pub(crate) fn draw_date_picker(
         for (day_index, day) in week.iter().enumerate() {
             let x = x_left + day_index as f32 * 4.0 * CHAR_WIDTH;
             let cell = rect(x, y, 3.0 * CHAR_WIDTH, LINE_HEIGHT);
-            match day {
-                Some(day) => {
-                    let selected = selected_month && *day == selected_day;
-                    let today = today_month && *day == today_day;
-                    let has_journal = picker.journal_days.contains(day);
-                    if selected {
-                        fill_rect(frame, cell, rgb_to_color(&theme.salient));
-                    }
-                    if has_journal && !selected {
-                        draw_text(frame, x, y, "◆", rgb_to_color(&theme.accent_yellow));
-                    }
-                    let day_color = if selected {
-                        &theme.background
-                    } else if today {
-                        &theme.strong
-                    } else {
-                        &theme.foreground
-                    };
-                    draw_text(frame, x + CHAR_WIDTH, y, format!("{:>2}", day), rgb_to_color(day_color));
+            if let Some(day) = day {
+                let selected = selected_month && *day == selected_day;
+                let today = today_month && *day == today_day;
+                let has_journal = picker.journal_days.contains(day);
+                if selected {
+                    fill_rect(frame, cell, rgb_to_color(&theme.salient));
                 }
-                None => {}
+                if has_journal && !selected {
+                    draw_text(frame, x, y, "◆", rgb_to_color(&theme.accent_yellow));
+                }
+                let day_color = if selected {
+                    &theme.background
+                } else if today {
+                    &theme.strong
+                } else {
+                    &theme.foreground
+                };
+                draw_text(
+                    frame,
+                    x + CHAR_WIDTH,
+                    y,
+                    format!("{:>2}", day),
+                    rgb_to_color(day_color),
+                );
             }
         }
         y += LINE_HEIGHT;
     }
 
     // Hint / footer line.
-    let footer = format!(
-        "{} entries  ↵:open  ⎋:close",
-        picker.journal_days.len()
-    );
+    let footer = format!("{} entries  ↵:open  ⎋:close", picker.journal_days.len());
     draw_text(
         frame,
         x_left,
@@ -332,14 +361,15 @@ pub(crate) fn draw_setup_wizard(
     wizard: &SetupWizardFrame,
     theme: &ThemePalette,
 ) {
-    fill_rect(
-        frame,
-        area,
-        rgb_to_color(&theme.background),
-    );
+    fill_rect(frame, area, rgb_to_color(&theme.background));
     stroke_rect(
         frame,
-        rect(area.x + 1.0, area.y + 1.0, (area.width - 2.0).max(0.0), (area.height - 2.0).max(0.0)),
+        rect(
+            area.x + 1.0,
+            area.y + 1.0,
+            (area.width - 2.0).max(0.0),
+            (area.height - 2.0).max(0.0),
+        ),
         rgb_to_color(&theme.faded),
     );
 
@@ -401,11 +431,41 @@ pub(crate) fn draw_setup_wizard(
                 wizard.vault_path_cursor,
                 theme,
             );
-            wizard_line(frame, left, top + 7.0 * LINE_HEIGHT, "Bloom will create:", faded);
-            wizard_line(frame, left + 2.0 * CHAR_WIDTH, top + 8.0 * LINE_HEIGHT, "pages/     — topic pages", faded);
-            wizard_line(frame, left + 2.0 * CHAR_WIDTH, top + 9.0 * LINE_HEIGHT, "journal/   — daily journal", faded);
-            wizard_line(frame, left + 2.0 * CHAR_WIDTH, top + 10.0 * LINE_HEIGHT, "templates/ — page templates", faded);
-            wizard_line(frame, left + 2.0 * CHAR_WIDTH, top + 11.0 * LINE_HEIGHT, "images/    — attachments", faded);
+            wizard_line(
+                frame,
+                left,
+                top + 7.0 * LINE_HEIGHT,
+                "Bloom will create:",
+                faded,
+            );
+            wizard_line(
+                frame,
+                left + 2.0 * CHAR_WIDTH,
+                top + 8.0 * LINE_HEIGHT,
+                "pages/     — topic pages",
+                faded,
+            );
+            wizard_line(
+                frame,
+                left + 2.0 * CHAR_WIDTH,
+                top + 9.0 * LINE_HEIGHT,
+                "journal/   — daily journal",
+                faded,
+            );
+            wizard_line(
+                frame,
+                left + 2.0 * CHAR_WIDTH,
+                top + 10.0 * LINE_HEIGHT,
+                "templates/ — page templates",
+                faded,
+            );
+            wizard_line(
+                frame,
+                left + 2.0 * CHAR_WIDTH,
+                top + 11.0 * LINE_HEIGHT,
+                "images/    — attachments",
+                faded,
+            );
             if let Some(message) = &wizard.error {
                 wizard_line(
                     frame,
@@ -435,7 +495,14 @@ pub(crate) fn draw_setup_wizard(
             );
             let no_selected = wizard.import_choice == ImportChoice::No;
             let yes_selected = wizard.import_choice == ImportChoice::Yes;
-            draw_choice(frame, left, top + 6.0 * LINE_HEIGHT, "No, start fresh", no_selected, theme);
+            draw_choice(
+                frame,
+                left,
+                top + 6.0 * LINE_HEIGHT,
+                "No, start fresh",
+                no_selected,
+                theme,
+            );
             draw_choice(
                 frame,
                 left,
@@ -455,7 +522,13 @@ pub(crate) fn draw_setup_wizard(
         }
         SetupStep::ImportPath => {
             wizard_line(frame, left, top, "Import from Logseq", heading);
-            wizard_line(frame, left, top + 2.0 * LINE_HEIGHT, "Enter the path to your Logseq vault:", fg);
+            wizard_line(
+                frame,
+                left,
+                top + 2.0 * LINE_HEIGHT,
+                "Enter the path to your Logseq vault:",
+                fg,
+            );
             draw_input_row(
                 frame,
                 left,
@@ -497,7 +570,12 @@ pub(crate) fn draw_setup_wizard(
                 };
                 fill_rect(
                     frame,
-                    rect(bar_area.x, bar_area.y, bar_area.width * ratio.clamp(0.0, 1.0), bar_area.height),
+                    rect(
+                        bar_area.x,
+                        bar_area.y,
+                        bar_area.width * ratio.clamp(0.0, 1.0),
+                        bar_area.height,
+                    ),
                     rgb_to_color(&theme.salient),
                 );
                 stroke_rect(frame, bar_area, rgb_to_color(&theme.faded));
@@ -559,9 +637,27 @@ pub(crate) fn draw_setup_wizard(
             }
         }
         SetupStep::Complete => {
-            wizard_line(frame, left, top + 2.0 * LINE_HEIGHT, "Your vault is ready 🌱", heading);
-            wizard_line(frame, left, top + 4.0 * LINE_HEIGHT, &format!("Location: {}", wizard.vault_path), fg);
-            wizard_line(frame, left, top + 5.0 * LINE_HEIGHT, &format!("Pages: {}", wizard.stats.pages), fg);
+            wizard_line(
+                frame,
+                left,
+                top + 2.0 * LINE_HEIGHT,
+                "Your vault is ready 🌱",
+                heading,
+            );
+            wizard_line(
+                frame,
+                left,
+                top + 4.0 * LINE_HEIGHT,
+                &format!("Location: {}", wizard.vault_path),
+                fg,
+            );
+            wizard_line(
+                frame,
+                left,
+                top + 5.0 * LINE_HEIGHT,
+                &format!("Pages: {}", wizard.stats.pages),
+                fg,
+            );
             wizard_line(
                 frame,
                 left,
@@ -638,6 +734,7 @@ fn date_parts(date: &impl ToString) -> (i32, u32, u32) {
     (year, month, day)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_input_row(
     frame: &mut iced::widget::canvas::Frame,
     left: f32,
@@ -683,7 +780,12 @@ fn draw_choice(
     if selected {
         fill_rect(
             frame,
-            rect(x - 2.0, y, text_width(label) + 4.0 * CHAR_WIDTH, LINE_HEIGHT),
+            rect(
+                x - 2.0,
+                y,
+                text_width(label) + 4.0 * CHAR_WIDTH,
+                LINE_HEIGHT,
+            ),
             rgb_to_color(&theme.mild),
         );
     }
@@ -693,7 +795,11 @@ fn draw_choice(
         x,
         y,
         format!("{prefix}{label}"),
-        rgb_to_color(if selected { &theme.strong } else { &theme.foreground }),
+        rgb_to_color(if selected {
+            &theme.strong
+        } else {
+            &theme.foreground
+        }),
     );
 }
 
@@ -716,7 +822,9 @@ pub(crate) fn draw_view(
     let available_lines = (available_h / LINE_HEIGHT) as usize;
 
     // Lines needed: title(1) + rows + status(1) + optional query(1) + optional error(1).
-    let extra = 2 + if view_frame.is_prompt { 1 } else { 0 } + if view_frame.error.is_some() { 1 } else { 0 };
+    let extra = 2
+        + if view_frame.is_prompt { 1 } else { 0 }
+        + if view_frame.error.is_some() { 1 } else { 0 };
     let num_visible = num_results.min(available_lines.saturating_sub(extra + 1));
 
     // Layout from bottom up within the allocated rect.
@@ -759,7 +867,13 @@ pub(crate) fn draw_view(
     );
 
     // Top separator.
-    draw_hline(frame, area.x, area.x + area.width, actual_top, rgb_to_color(&theme.faded));
+    draw_hline(
+        frame,
+        area.x,
+        area.x + area.width,
+        actual_top,
+        rgb_to_color(&theme.faded),
+    );
 
     // ── Title ──
     draw_text(
@@ -805,9 +919,17 @@ pub(crate) fn draw_view(
                     rgb_to_color(&theme.salient),
                 );
             }
-            ViewRow::Data { cells, is_task, task_done } => {
+            ViewRow::Data {
+                cells,
+                is_task,
+                task_done,
+            } => {
                 let prefix = if *is_task {
-                    if *task_done { "  [x] " } else { "  [ ] " }
+                    if *task_done {
+                        "  [x] "
+                    } else {
+                        "  [ ] "
+                    }
                 } else {
                     "  "
                 };
@@ -818,10 +940,20 @@ pub(crate) fn draw_view(
                 } else {
                     rgb_to_color(&theme.foreground)
                 };
-                draw_text(frame, area.x + SPACING_MD, y, prefix.to_string(), checkbox_color);
+                draw_text(
+                    frame,
+                    area.x + SPACING_MD,
+                    y,
+                    prefix.to_string(),
+                    checkbox_color,
+                );
 
                 let text_x = area.x + SPACING_MD + prefix.len() as f32 * CHAR_WIDTH;
-                let text_color = if *task_done { &theme.faded } else { &theme.foreground };
+                let text_color = if *task_done {
+                    &theme.faded
+                } else {
+                    &theme.foreground
+                };
 
                 // First cell is the main text; remaining cells go to the right margin.
                 if let Some((first, rest)) = cells.split_first() {
@@ -854,7 +986,11 @@ pub(crate) fn draw_view(
     // ── Status line ──
     let footer = format!(
         "{} of {} results",
-        if view_frame.total > 0 { view_frame.selected + 1 } else { 0 },
+        if view_frame.total > 0 {
+            view_frame.selected + 1
+        } else {
+            0
+        },
         view_frame.total,
     );
     draw_text(
@@ -867,7 +1003,13 @@ pub(crate) fn draw_view(
 
     // ── Query line (prompt mode) ──
     if let Some(qy) = query_y {
-        draw_hline(frame, area.x, area.x + area.width, qy, rgb_to_color(&theme.faded));
+        draw_hline(
+            frame,
+            area.x,
+            area.x + area.width,
+            qy,
+            rgb_to_color(&theme.faded),
+        );
         let prompt = format!("{} > ", view_frame.title);
         draw_text(
             frame,
@@ -881,7 +1023,10 @@ pub(crate) fn draw_view(
             frame,
             query_x,
             qy,
-            truncate_text(&view_frame.query, content_chars.saturating_sub(prompt.chars().count())),
+            truncate_text(
+                &view_frame.query,
+                content_chars.saturating_sub(prompt.chars().count()),
+            ),
             rgb_to_color(&theme.foreground),
         );
         draw_bar_cursor(

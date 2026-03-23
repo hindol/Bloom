@@ -21,10 +21,9 @@ pub struct TestVault {
 }
 
 impl TestVault {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> TestVaultBuilder {
-        TestVaultBuilder {
-            pages: Vec::new(),
-        }
+        TestVaultBuilder { pages: Vec::new() }
     }
 
     pub fn root(&self) -> &Path {
@@ -32,6 +31,7 @@ impl TestVault {
     }
 }
 
+#[derive(Default)]
 pub struct TestVaultBuilder {
     pages: Vec<(String, String)>, // (filename, content)
 }
@@ -94,12 +94,6 @@ impl TestVaultBuilder {
         }
 
         TestVault { dir }
-    }
-}
-
-impl Default for TestVaultBuilder {
-    fn default() -> Self {
-        Self { pages: Vec::new() }
     }
 }
 
@@ -198,12 +192,7 @@ impl SimInput {
         let config = Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = bloom_core::uuid::generate_hex_id();
-        editor.open_page_with_content(
-            &id,
-            "Scratch",
-            std::path::Path::new("[scratch]"),
-            "",
-        );
+        editor.open_page_with_content(&id, "Scratch", std::path::Path::new("[scratch]"), "");
         Self {
             editor,
             vault: None,
@@ -215,12 +204,7 @@ impl SimInput {
         let config = Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let id = bloom_core::uuid::generate_hex_id();
-        editor.open_page_with_content(
-            &id,
-            "Scratch",
-            std::path::Path::new("[scratch]"),
-            content,
-        );
+        editor.open_page_with_content(&id, "Scratch", std::path::Path::new("[scratch]"), content);
         Self {
             editor,
             vault: None,
@@ -319,7 +303,11 @@ pub struct TestScreen {
 
 impl TestScreen {
     pub fn from_frame(frame: RenderFrame, width: u16, height: u16) -> Self {
-        Self { frame, width, height }
+        Self {
+            frame,
+            width,
+            height,
+        }
     }
 
     /// Get the text content of a visible line (0-indexed) in the active pane.
@@ -352,9 +340,7 @@ impl TestScreen {
 
     /// Get the page title shown in the active pane.
     pub fn title(&self) -> &str {
-        self.active_pane()
-            .map(|p| p.title.as_str())
-            .unwrap_or("")
+        self.active_pane().map(|p| p.title.as_str()).unwrap_or("")
     }
 
     /// Get the mode string (NORMAL, INSERT, VISUAL, COMMAND).
@@ -383,7 +369,11 @@ impl TestScreen {
 
     /// Get picker query text.
     pub fn picker_query(&self) -> &str {
-        self.frame.picker.as_ref().map(|p| p.query.as_str()).unwrap_or("")
+        self.frame
+            .picker
+            .as_ref()
+            .map(|p| p.query.as_str())
+            .unwrap_or("")
     }
 
     /// Get picker result labels.
@@ -397,9 +387,10 @@ impl TestScreen {
 
     /// Get the selected picker result label.
     pub fn picker_selected(&self) -> Option<&str> {
-        self.frame.picker.as_ref().and_then(|p| {
-            p.results.get(p.selected_index).map(|r| r.label.as_str())
-        })
+        self.frame
+            .picker
+            .as_ref()
+            .and_then(|p| p.results.get(p.selected_index).map(|r| r.label.as_str()))
     }
 
     /// Whether a which-key popup is visible.
@@ -477,11 +468,7 @@ impl TestScreen {
 
     /// Get the number of result rows in the view.
     pub fn view_row_count(&self) -> usize {
-        self.frame
-            .view
-            .as_ref()
-            .map(|v| v.rows.len())
-            .unwrap_or(0)
+        self.frame.view.as_ref().map(|v| v.rows.len()).unwrap_or(0)
     }
 }
 
@@ -611,10 +598,7 @@ impl FrameRecorder {
     pub fn step_type(&mut self, text: &str) -> &mut Self {
         for ch in text.chars() {
             self.sim.type_text(&ch.to_string());
-            self.capture_frame(
-                Some(format!("type '{}'", ch)),
-                self.typing_speed,
-            );
+            self.capture_frame(Some(format!("type '{}'", ch)), self.typing_speed);
         }
         self
     }
@@ -671,20 +655,21 @@ impl FrameRecorder {
         // Find workspace root by looking for the workspace Cargo.toml
         let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let workspace_root = manifest_dir
-            .parent()  // crates/
-            .and_then(|p| p.parent())  // workspace root
+            .parent() // crates/
+            .and_then(|p| p.parent()) // workspace root
             .unwrap_or(manifest_dir);
         let dir = workspace_root.join("target/animations");
         std::fs::create_dir_all(&dir).expect("create animations dir");
         let path = dir.join(format!("{}.json", name));
-        let json = serde_json::to_string_pretty(&self.frames)
-            .expect("serialize frames");
+        let json = serde_json::to_string_pretty(&self.frames).expect("serialize frames");
         std::fs::write(&path, json).expect("write animation JSON");
         eprintln!(
             "Animation saved: {} ({} frames, {}KB)",
             path.display(),
             self.frames.len(),
-            std::fs::metadata(&path).map(|m| m.len() / 1024).unwrap_or(0),
+            std::fs::metadata(&path)
+                .map(|m| m.len() / 1024)
+                .unwrap_or(0),
         );
         path
     }

@@ -71,13 +71,17 @@ impl BloomEditor {
                     self.inline_completion = None;
                     // fall through to vim (Esc exits insert mode)
                 }
-                (types::KeyCode::Up, _) | (types::KeyCode::Char('p'), true) | (types::KeyCode::Char('k'), true) => {
+                (types::KeyCode::Up, _)
+                | (types::KeyCode::Char('p'), true)
+                | (types::KeyCode::Char('k'), true) => {
                     if let Some(ic) = &mut self.inline_completion {
                         ic.selected = ic.selected.saturating_sub(1);
                     }
                     return vec![keymap::dispatch::Action::Noop];
                 }
-                (types::KeyCode::Down, _) | (types::KeyCode::Char('n'), true) | (types::KeyCode::Char('j'), true) => {
+                (types::KeyCode::Down, _)
+                | (types::KeyCode::Char('n'), true)
+                | (types::KeyCode::Char('j'), true) => {
                     if let Some(ic) = &mut self.inline_completion {
                         ic.selected += 1; // clamped during render
                     }
@@ -275,7 +279,9 @@ impl BloomEditor {
                 }
                 keymap::dispatch::Action::Undo => {
                     if let Some(page_id) = self.active_page().cloned() {
-                        self.writer.apply(crate::BufferMessage::Undo { page_id: page_id.clone() });
+                        self.writer.apply(crate::BufferMessage::Undo {
+                            page_id: page_id.clone(),
+                        });
                         // Fix cursor bounds after undo
                         if let Some(buf) = self.writer.buffers().get(&page_id) {
                             let len = buf.len_chars();
@@ -287,7 +293,9 @@ impl BloomEditor {
                 }
                 keymap::dispatch::Action::Redo => {
                     if let Some(page_id) = self.active_page().cloned() {
-                        self.writer.apply(crate::BufferMessage::Redo { page_id: page_id.clone() });
+                        self.writer.apply(crate::BufferMessage::Redo {
+                            page_id: page_id.clone(),
+                        });
                         // Fix cursor bounds after redo
                         if let Some(buf) = self.writer.buffers().get(&page_id) {
                             let len = buf.len_chars();
@@ -589,36 +597,32 @@ impl BloomEditor {
                     }
                 }
             }
-            KeyCode::Left | KeyCode::Char('h') => {
-                match &mut self.active_dialog {
-                    Some(ActiveDialog::FileChanged {
-                        ref mut selected, ..
-                    }) => {
-                        *selected = 0;
-                    }
-                    Some(ActiveDialog::DeletePage {
-                        ref mut selected, ..
-                    }) => {
-                        *selected = 0;
-                    }
-                    _ => {}
+            KeyCode::Left | KeyCode::Char('h') => match &mut self.active_dialog {
+                Some(ActiveDialog::FileChanged {
+                    ref mut selected, ..
+                }) => {
+                    *selected = 0;
                 }
-            }
-            KeyCode::Right | KeyCode::Char('l') => {
-                match &mut self.active_dialog {
-                    Some(ActiveDialog::FileChanged {
-                        ref mut selected, ..
-                    }) => {
-                        *selected = 1;
-                    }
-                    Some(ActiveDialog::DeletePage {
-                        ref mut selected, ..
-                    }) => {
-                        *selected = 1;
-                    }
-                    _ => {}
+                Some(ActiveDialog::DeletePage {
+                    ref mut selected, ..
+                }) => {
+                    *selected = 0;
                 }
-            }
+                _ => {}
+            },
+            KeyCode::Right | KeyCode::Char('l') => match &mut self.active_dialog {
+                Some(ActiveDialog::FileChanged {
+                    ref mut selected, ..
+                }) => {
+                    *selected = 1;
+                }
+                Some(ActiveDialog::DeletePage {
+                    ref mut selected, ..
+                }) => {
+                    *selected = 1;
+                }
+                _ => {}
+            },
             _ => {}
         }
         vec![keymap::dispatch::Action::Noop]
@@ -636,7 +640,9 @@ impl BloomEditor {
             }
             KeyCode::Enter => {
                 if let Some(qc) = self.quick_capture.take() {
-                    vec![keymap::dispatch::Action::SubmitQuickCapture(qc.kind, qc.input)]
+                    vec![keymap::dispatch::Action::SubmitQuickCapture(
+                        qc.kind, qc.input,
+                    )]
                 } else {
                     vec![]
                 }
@@ -771,7 +777,11 @@ impl BloomEditor {
                 let target = next_month
                     .and_then(|first| {
                         let last_day = (first + Duration::days(31)).with_day(1)?.pred_opt()?;
-                        NaiveDate::from_ymd_opt(first.year(), first.month(), d.day().min(last_day.day()))
+                        NaiveDate::from_ymd_opt(
+                            first.year(),
+                            first.month(),
+                            d.day().min(last_day.day()),
+                        )
                     })
                     .unwrap_or(d);
                 nav!(target)
@@ -1137,9 +1147,7 @@ impl BloomEditor {
                 bloom_vim::VimAction::Edit(_) => {
                     return vec![keymap::dispatch::Action::Noop];
                 }
-                bloom_vim::VimAction::ModeChange(mode)
-                    if matches!(mode, bloom_vim::Mode::Insert) =>
-                {
+                bloom_vim::VimAction::ModeChange(bloom_vim::Mode::Insert) => {
                     // Revert Vim's mode back to Normal
                     self.vim_state.force_normal_mode();
                     return vec![keymap::dispatch::Action::Noop];
@@ -1216,7 +1224,8 @@ impl BloomEditor {
                 // Edit group lifecycle: begin on Insert entry, end on Insert exit
                 if matches!(mode, bloom_vim::Mode::Insert) {
                     if let Some(page_id) = self.active_page().cloned() {
-                        self.writer.apply(crate::BufferMessage::BeginEditGroup { page_id });
+                        self.writer
+                            .apply(crate::BufferMessage::BeginEditGroup { page_id });
                     }
                 } else if matches!(mode, bloom_vim::Mode::Normal) {
                     // Leaving Insert (or Visual, Command) → close the edit group first,
@@ -1226,7 +1235,9 @@ impl BloomEditor {
                     // TODO: merge system ops into the edit group for single-undo.
                     if let Some(page_id) = self.active_page().cloned() {
                         let is_ro = self.writer.buffers().is_read_only(&page_id);
-                        self.writer.apply(crate::BufferMessage::EndEditGroup { page_id: page_id.clone() });
+                        self.writer.apply(crate::BufferMessage::EndEditGroup {
+                            page_id: page_id.clone(),
+                        });
                         if !is_ro {
                             self.ensure_block_ids(&page_id);
                             // Propagate mirrors after any edit (not just Insert→Normal).
@@ -1244,9 +1255,8 @@ impl BloomEditor {
                             match self.config.auto_align {
                                 config::AutoAlignMode::Page => {
                                     if let Some(page_id) = self.active_page().cloned() {
-                                        self.writer.apply(crate::BufferMessage::AlignPage {
-                                            page_id,
-                                        });
+                                        self.writer
+                                            .apply(crate::BufferMessage::AlignPage { page_id });
                                     }
                                 }
                                 config::AutoAlignMode::Block => {
@@ -1382,7 +1392,8 @@ fn resolve_command(cmd: &str) -> String {
         || matches!(
             trimmed,
             "q" | "q!"
-                | "qa" | "qa!"
+                | "qa"
+                | "qa!"
                 | "quit"
                 | "quit!"
                 | "quitall"
@@ -1621,7 +1632,10 @@ impl BloomEditor {
                                         .unwrap_or_else(|| meta.path.clone());
                                     if let Ok(content) = std::fs::read_to_string(&full) {
                                         self.open_page_with_content(
-                                            &pid, &page_title, &full, &content,
+                                            &pid,
+                                            &page_title,
+                                            &full,
+                                            &content,
                                         );
                                         self.set_cursor(line);
                                     }
@@ -1718,7 +1732,11 @@ impl BloomEditor {
         }
         if mirror_count > 0 {
             self.push_notification(
-                format!("🪞 Updated {} mirror{}", mirror_count, if mirror_count == 1 { "" } else { "s" }),
+                format!(
+                    "🪞 Updated {} mirror{}",
+                    mirror_count,
+                    if mirror_count == 1 { "" } else { "s" }
+                ),
                 crate::render::NotificationLevel::Info,
             );
         }
@@ -1776,7 +1794,8 @@ impl BloomEditor {
                 buf.replace(line_start..line_start + old_trimmed.len(), new_trimmed);
                 toggled_new_text = Some(new_trimmed.to_string());
                 // Extract block ID via parser
-                if let Some(bid) = bloom_md::parser::extensions::parse_block_id(old_trimmed, *line) {
+                if let Some(bid) = bloom_md::parser::extensions::parse_block_id(old_trimmed, *line)
+                {
                     block_id_on_line = Some(bid.id.0);
                 }
             }
@@ -1838,10 +1857,7 @@ impl BloomEditor {
         self.active_view = Some(vs);
     }
 
-    fn handle_view_prompt_key(
-        &mut self,
-        key: &types::KeyEvent,
-    ) -> Vec<keymap::dispatch::Action> {
+    fn handle_view_prompt_key(&mut self, key: &types::KeyEvent) -> Vec<keymap::dispatch::Action> {
         match &key.code {
             types::KeyCode::Enter => {
                 // Execute query and render to buffer
@@ -1880,7 +1896,8 @@ impl BloomEditor {
             }
             types::KeyCode::Right => {
                 if let Some(view_state) = &mut self.active_view {
-                    view_state.query_cursor = (view_state.query_cursor + 1).min(view_state.query_input.len());
+                    view_state.query_cursor =
+                        (view_state.query_cursor + 1).min(view_state.query_input.len());
                 }
                 vec![keymap::dispatch::Action::Noop]
             }
@@ -1907,10 +1924,7 @@ impl BloomEditor {
     }
 
     /// Handle keystrokes while the search prompt is active.
-    fn handle_search_key(
-        &mut self,
-        key: types::KeyEvent,
-    ) -> Vec<keymap::dispatch::Action> {
+    fn handle_search_key(&mut self, key: types::KeyEvent) -> Vec<keymap::dispatch::Action> {
         match key.code {
             types::KeyCode::Esc => {
                 self.search_active = false;
@@ -1971,8 +1985,12 @@ impl BloomEditor {
             Some(p) if !p.is_empty() => p.clone(),
             _ => return,
         };
-        let Some(page_id) = self.active_page().cloned() else { return };
-        let Some(buf) = self.writer.buffers().get(&page_id) else { return };
+        let Some(page_id) = self.active_page().cloned() else {
+            return;
+        };
+        let Some(buf) = self.writer.buffers().get(&page_id) else {
+            return;
+        };
         let text = buf.text().to_string();
         let text_lower = text.to_lowercase();
         let pat_lower = pattern.to_lowercase();
@@ -2008,22 +2026,35 @@ impl BloomEditor {
 
     // ── Mirror inline menu ───────────────────────────────────────────
 
-    fn handle_mirror_menu_key(
-        &mut self,
-        key: types::KeyEvent,
-    ) -> Vec<keymap::dispatch::Action> {
-        let ctrl_p = key.modifiers.ctrl && matches!(key.code, types::KeyCode::Char('p') | types::KeyCode::Char('k'));
-        let ctrl_n = key.modifiers.ctrl && matches!(key.code, types::KeyCode::Char('n') | types::KeyCode::Char('j'));
+    fn handle_mirror_menu_key(&mut self, key: types::KeyEvent) -> Vec<keymap::dispatch::Action> {
+        let ctrl_p = key.modifiers.ctrl
+            && matches!(
+                key.code,
+                types::KeyCode::Char('p') | types::KeyCode::Char('k')
+            );
+        let ctrl_n = key.modifiers.ctrl
+            && matches!(
+                key.code,
+                types::KeyCode::Char('n') | types::KeyCode::Char('j')
+            );
 
-        if matches!(key.code, types::KeyCode::Esc | types::KeyCode::Char('q')) && !key.modifiers.ctrl {
+        if matches!(key.code, types::KeyCode::Esc | types::KeyCode::Char('q'))
+            && !key.modifiers.ctrl
+        {
             self.mirror_menu = None;
-        } else if matches!(key.code, types::KeyCode::Up | types::KeyCode::Char('k')) && !key.modifiers.ctrl || ctrl_p {
+        } else if matches!(key.code, types::KeyCode::Up | types::KeyCode::Char('k'))
+            && !key.modifiers.ctrl
+            || ctrl_p
+        {
             if let Some(menu) = &mut self.mirror_menu {
                 if menu.selected > 0 {
                     menu.selected -= 1;
                 }
             }
-        } else if matches!(key.code, types::KeyCode::Down | types::KeyCode::Char('j')) && !key.modifiers.ctrl || ctrl_n {
+        } else if matches!(key.code, types::KeyCode::Down | types::KeyCode::Char('j'))
+            && !key.modifiers.ctrl
+            || ctrl_n
+        {
             if let Some(menu) = &mut self.mirror_menu {
                 if menu.selected + 1 < menu.items.len() {
                     menu.selected += 1;

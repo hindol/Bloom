@@ -167,7 +167,8 @@ impl Buffer {
             } else {
                 format!("insert '{}...'", &text[..17])
             };
-            self.undo_tree.push(self.rope.clone(), self.cursor_pos_for_undo(), desc);
+            self.undo_tree
+                .push(self.rope.clone(), self.cursor_pos_for_undo(), desc);
         }
     }
 
@@ -177,7 +178,11 @@ impl Buffer {
         self.rope.remove(range);
         self.bump_version();
         if self.edit_group_checkpoint.is_none() {
-            self.undo_tree.push(self.rope.clone(), self.cursor_pos_for_undo(), "delete".to_string());
+            self.undo_tree.push(
+                self.rope.clone(),
+                self.cursor_pos_for_undo(),
+                "delete".to_string(),
+            );
         }
     }
 
@@ -196,7 +201,8 @@ impl Buffer {
             } else {
                 format!("replace with '{}...'", &text[..17])
             };
-            self.undo_tree.push(self.rope.clone(), self.cursor_pos_for_undo(), desc);
+            self.undo_tree
+                .push(self.rope.clone(), self.cursor_pos_for_undo(), desc);
         }
     }
 
@@ -274,14 +280,18 @@ impl Buffer {
         self.edit_group_checkpoint = Some(self.rope.clone());
         // Store current cursor on the current undo node so that undoing TO
         // this state restores the cursor to where it was before the edit.
-        self.undo_tree.update_current_cursor(self.cursor_pos_for_undo());
+        self.undo_tree
+            .update_current_cursor(self.cursor_pos_for_undo());
     }
 
     pub fn end_edit_group(&mut self) {
         if let Some(checkpoint) = self.edit_group_checkpoint.take() {
             if self.rope != checkpoint {
-                self.undo_tree
-                    .push(self.rope.clone(), self.cursor_pos_for_undo(), "insert session".to_string());
+                self.undo_tree.push(
+                    self.rope.clone(),
+                    self.cursor_pos_for_undo(),
+                    "insert session".to_string(),
+                );
             }
         }
     }

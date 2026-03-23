@@ -23,7 +23,11 @@ fn format_time_ago(accessed_ms: i64) -> String {
         format!("{}h ago", delta_s / 3600)
     } else if delta_s < 86400 * 7 {
         let days = delta_s / 86400;
-        if days == 1 { "yesterday".to_string() } else { format!("{}d ago", days) }
+        if days == 1 {
+            "yesterday".to_string()
+        } else {
+            format!("{}d ago", days)
+        }
     } else {
         format!("{}w ago", delta_s / (86400 * 7))
     }
@@ -146,9 +150,21 @@ impl BloomEditor {
             let lookup_keys: Vec<types::KeyEvent> = self.leader_keys[1..].to_vec();
             match self.which_key_tree.lookup(&lookup_keys) {
                 which_key::WhichKeyLookup::Prefix(entries) => {
-                    let prefix = self.leader_keys.iter().map(|k| k.to_string()).collect::<Vec<_>>().join(" ");
+                    let prefix = self
+                        .leader_keys
+                        .iter()
+                        .map(|k| k.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ");
                     Some(render::WhichKeyFrame {
-                        entries: entries.into_iter().map(|e| render::WhichKeyEntry { key: e.key, label: e.label, is_group: e.is_group }).collect(),
+                        entries: entries
+                            .into_iter()
+                            .map(|e| render::WhichKeyEntry {
+                                key: e.key,
+                                label: e.label,
+                                is_group: e.is_group,
+                            })
+                            .collect(),
                         prefix,
                         context: render::WhichKeyContext::Leader,
                     })
@@ -158,7 +174,14 @@ impl BloomEditor {
         } else if self.leader_keys.len() == 1 {
             match self.which_key_tree.lookup(&[]) {
                 which_key::WhichKeyLookup::Prefix(entries) => Some(render::WhichKeyFrame {
-                    entries: entries.into_iter().map(|e| render::WhichKeyEntry { key: e.key, label: e.label, is_group: e.is_group }).collect(),
+                    entries: entries
+                        .into_iter()
+                        .map(|e| render::WhichKeyEntry {
+                            key: e.key,
+                            label: e.label,
+                            is_group: e.is_group,
+                        })
+                        .collect(),
                     prefix: "SPC".to_string(),
                     context: render::WhichKeyContext::Leader,
                 }),
@@ -236,7 +259,11 @@ impl BloomEditor {
         } else {
             0
         };
-        let ts_h = self.temporal_strip.as_ref().map(|ts| ts.drawer_height()).unwrap_or(0);
+        let ts_h = self
+            .temporal_strip
+            .as_ref()
+            .map(|ts| ts.drawer_height())
+            .unwrap_or(0);
         let drawer_h = wk_h.max(ts_h);
         let pane_area_h = height.saturating_sub(drawer_h);
         let pane_rects = self.window_mgr.compute_pane_rects(width, pane_area_h);
@@ -329,41 +356,55 @@ impl BloomEditor {
                 continue;
             }
 
-            let (title, dirty, visible_lines, pane_cursor_line, pane_cursor_col, scroll_offset, buf_total_lines): (String, bool, Vec<_>, usize, usize, usize, usize) =
-                if let Some(ps) = pane_state {
-                    if let Some(page_id) = &ps.page_id {
-                        if let Some(buf) = self.writer.buffers().get(page_id) {
-                            let title = self
-                                .writer.buffers()
-                                .info(page_id)
-                                .map(|i| i.title.clone())
-                                .unwrap_or_default();
-                            let dirty = !self.writer.buffers().is_read_only(page_id) && buf.is_dirty();
-                            let is_md = self.writer.buffers()
-                                .info(page_id)
-                                .map(|i| i.path.extension().and_then(|e| e.to_str()) == Some("md"))
-                                .unwrap_or(true);
-                            let lines = self.render_buffer_lines_with_viewport(buf, &ps.viewport, is_md);
-                            let (cl, cc) =
-                                Self::cursor_position_for(buf.cursor(ps.cursor_idx), buf, &self.vim_state);
-                            (
-                                title,
-                                dirty,
-                                lines,
-                                cl,
-                                cc,
-                                ps.viewport.first_visible_line,
-                                buf.len_lines(),
-                            )
-                        } else {
-                            (String::new(), false, Vec::new(), 0, 0, 0, 0)
-                        }
+            let (
+                title,
+                dirty,
+                visible_lines,
+                pane_cursor_line,
+                pane_cursor_col,
+                scroll_offset,
+                buf_total_lines,
+            ): (String, bool, Vec<_>, usize, usize, usize, usize) = if let Some(ps) = pane_state {
+                if let Some(page_id) = &ps.page_id {
+                    if let Some(buf) = self.writer.buffers().get(page_id) {
+                        let title = self
+                            .writer
+                            .buffers()
+                            .info(page_id)
+                            .map(|i| i.title.clone())
+                            .unwrap_or_default();
+                        let dirty = !self.writer.buffers().is_read_only(page_id) && buf.is_dirty();
+                        let is_md = self
+                            .writer
+                            .buffers()
+                            .info(page_id)
+                            .map(|i| i.path.extension().and_then(|e| e.to_str()) == Some("md"))
+                            .unwrap_or(true);
+                        let lines =
+                            self.render_buffer_lines_with_viewport(buf, &ps.viewport, is_md);
+                        let (cl, cc) = Self::cursor_position_for(
+                            buf.cursor(ps.cursor_idx),
+                            buf,
+                            &self.vim_state,
+                        );
+                        (
+                            title,
+                            dirty,
+                            lines,
+                            cl,
+                            cc,
+                            ps.viewport.first_visible_line,
+                            buf.len_lines(),
+                        )
                     } else {
                         (String::new(), false, Vec::new(), 0, 0, 0, 0)
                     }
                 } else {
                     (String::new(), false, Vec::new(), 0, 0, 0, 0)
-                };
+                }
+            } else {
+                (String::new(), false, Vec::new(), 0, 0, 0, 0)
+            };
 
             // Build per-pane status bar
             let status_bar = if is_active {
@@ -379,7 +420,8 @@ impl BloomEditor {
                     };
                     render::StatusBarContent::CommandLine(render::CommandLineSlot {
                         input,
-                        cursor_pos: self.vim_state.pending_keys().len() + if self.search_active { 1 } else { 0 },
+                        cursor_pos: self.vim_state.pending_keys().len()
+                            + if self.search_active { 1 } else { 0 },
                         ghost_text,
                         error: None,
                     })
@@ -664,18 +706,22 @@ impl BloomEditor {
                     None
                 }
             } else if let Some(mm) = &self.mirror_menu {
-                let items: Vec<render::InlineMenuItem> = mm.items.iter().map(|item| {
-                    render::InlineMenuItem {
+                let items: Vec<render::InlineMenuItem> = mm
+                    .items
+                    .iter()
+                    .map(|item| render::InlineMenuItem {
                         id: Some(item.page_id.to_hex()),
                         label: item.title.clone(),
                         right: Some(format!("L{}", item.line + 1)),
-                    }
-                }).collect();
+                    })
+                    .collect();
                 Some(render::InlineMenuFrame {
                     items,
                     selected: mm.selected,
                     anchor: render::InlineMenuAnchor::Cursor {
-                        line: mm.cursor_line.saturating_sub(self.viewport().first_visible_line),
+                        line: mm
+                            .cursor_line
+                            .saturating_sub(self.viewport().first_visible_line),
                         col: mm.cursor_col + 5,
                     },
                     hint: Some("🪞 mirrors".to_string()),
@@ -1055,9 +1101,7 @@ impl BloomEditor {
         }
 
         // Find journal days in this month
-        let journal_days = if let (Some(journal), Some(store)) =
-            (&self.journal, &self.note_store)
-        {
+        let journal_days = if let (Some(journal), Some(store)) = (&self.journal, &self.note_store) {
             journal
                 .all_dates(store)
                 .unwrap_or_default()
@@ -1115,7 +1159,8 @@ impl BloomEditor {
         let page_title = self
             .active_page()
             .and_then(|id| {
-                self.writer.buffers()
+                self.writer
+                    .buffers()
                     .open_buffers()
                     .iter()
                     .find(|b| b.page_id == *id)
@@ -1276,46 +1321,46 @@ impl BloomEditor {
                 }
                 // Block history inline diff: replace spans on the block line
                 if let Some(ts) = &self.temporal_strip {
-                    if matches!(ts.mode, render::TemporalMode::BlockHistory) {
-                        if ts.block_line == Some(line_idx) {
-                            if let Some(item) = ts.items.get(ts.selected) {
-                                if let Some(hist_line) = &item.content {
-                                    let diff_segs = word_diff(hist_line, &ts.current_content);
-                                    let mut diff_spans = Vec::new();
-                                    let mut pos = 0usize;
-                                    for seg in &diff_segs {
-                                        let style = match seg.kind {
-                                            render::DiffLineKind::Context => {
-                                                bloom_md::parser::traits::Style::Normal
-                                            }
-                                            render::DiffLineKind::Added => {
-                                                bloom_md::parser::traits::Style::DiffAdded
-                                            }
-                                            render::DiffLineKind::Removed => {
-                                                bloom_md::parser::traits::Style::DiffRemoved
-                                            }
-                                            render::DiffLineKind::Modified => {
-                                                bloom_md::parser::traits::Style::Normal
-                                            }
-                                        };
-                                        let end = pos + seg.text.len();
-                                        diff_spans.push(bloom_md::parser::traits::StyledSpan {
-                                            range: pos..end,
-                                            style,
-                                        });
-                                        pos = end;
-                                    }
-                                    let diff_text: String =
-                                        diff_segs.iter().map(|s| s.text.as_str()).collect();
-                                    lines.push(render::RenderedLine {
-                                        source: render::LineSource::Buffer(line_idx),
-                                        is_mirror: diff_text.contains(" ^="),
-                                        text: diff_text,
-                                        spans: diff_spans,
+                    if matches!(ts.mode, render::TemporalMode::BlockHistory)
+                        && ts.block_line == Some(line_idx)
+                    {
+                        if let Some(item) = ts.items.get(ts.selected) {
+                            if let Some(hist_line) = &item.content {
+                                let diff_segs = word_diff(hist_line, &ts.current_content);
+                                let mut diff_spans = Vec::new();
+                                let mut pos = 0usize;
+                                for seg in &diff_segs {
+                                    let style = match seg.kind {
+                                        render::DiffLineKind::Context => {
+                                            bloom_md::parser::traits::Style::Normal
+                                        }
+                                        render::DiffLineKind::Added => {
+                                            bloom_md::parser::traits::Style::DiffAdded
+                                        }
+                                        render::DiffLineKind::Removed => {
+                                            bloom_md::parser::traits::Style::DiffRemoved
+                                        }
+                                        render::DiffLineKind::Modified => {
+                                            bloom_md::parser::traits::Style::Normal
+                                        }
+                                    };
+                                    let end = pos + seg.text.len();
+                                    diff_spans.push(bloom_md::parser::traits::StyledSpan {
+                                        range: pos..end,
+                                        style,
                                     });
-                                    line_idx += 1;
-                                    continue;
+                                    pos = end;
                                 }
+                                let diff_text: String =
+                                    diff_segs.iter().map(|s| s.text.as_str()).collect();
+                                lines.push(render::RenderedLine {
+                                    source: render::LineSource::Buffer(line_idx),
+                                    is_mirror: diff_text.contains(" ^="),
+                                    text: diff_text,
+                                    spans: diff_spans,
+                                });
+                                line_idx += 1;
+                                continue;
                             }
                         }
                     }
@@ -1366,7 +1411,11 @@ impl BloomEditor {
         let total_lines = rope.len_lines();
         if line >= total_lines {
             tracing::error!(
-                cursor, clamped, len, line, total_lines,
+                cursor,
+                clamped,
+                len,
+                line,
+                total_lines,
                 "cursor_position_for: line >= total_lines!"
             );
         }

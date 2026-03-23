@@ -10,7 +10,7 @@ use crate::draw::{draw_text_right, drawer, inline, notification, overlay, pane};
 use crate::layout::FrameLayout;
 use crate::remote::RemoteHints;
 use crate::theme::rgb_to_color;
-use crate::{CHAR_WIDTH, Message};
+use crate::{Message, CHAR_WIDTH};
 
 /// Animation speed: fraction of remaining distance covered per frame.
 const LERP_FACTOR: f32 = 0.6;
@@ -99,12 +99,8 @@ impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<Action<Message>> {
-        let Some(frame) = self.frame else {
-            return None;
-        };
-        let Some(position) = cursor.position_in(bounds) else {
-            return None;
-        };
+        let frame = self.frame?;
+        let position = cursor.position_in(bounds)?;
 
         match event {
             Event::Mouse(mouse::Event::WheelScrolled { delta })
@@ -187,8 +183,14 @@ impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
                     .iter()
                     .filter(|other| other.rect.y + other.rect.total_height <= pf.rect.y)
                     .count();
-                let (px, py, pw, ch) = pane::pane_pixel_rect(&pf.rect, status_bars_above, bounds.size());
-                let content_area = Rectangle { x: px, y: py, width: pw, height: ch };
+                let (px, py, pw, ch) =
+                    pane::pane_pixel_rect(&pf.rect, status_bars_above, bounds.size());
+                let content_area = Rectangle {
+                    x: px,
+                    y: py,
+                    width: pw,
+                    height: ch,
+                };
                 let pane_modeline = Rectangle {
                     x: px,
                     y: layout.modeline.y,
@@ -264,7 +266,10 @@ impl<'a> canvas::Program<Message> for DiffCanvas<'a> {
         };
 
         use bloom_core::render::TemporalMode;
-        if !matches!(strip.mode, TemporalMode::PageHistory | TemporalMode::BlockHistory) {
+        if !matches!(
+            strip.mode,
+            TemporalMode::PageHistory | TemporalMode::BlockHistory
+        ) {
             return vec![];
         }
         if strip.preview_lines.is_empty() {
@@ -276,10 +281,13 @@ impl<'a> canvas::Program<Message> for DiffCanvas<'a> {
 
         // Compute the diff preview area from the active pane, above the drawer.
         let diff_area = if let Some(pane) = active {
-            let status_bars_above = rf.panes.iter()
+            let status_bars_above = rf
+                .panes
+                .iter()
                 .filter(|other| other.rect.y + other.rect.total_height <= pane.rect.y)
                 .count();
-            let (px, py, pw, _ch) = pane::pane_pixel_rect(&pane.rect, status_bars_above, bounds.size());
+            let (px, py, pw, _ch) =
+                pane::pane_pixel_rect(&pane.rect, status_bars_above, bounds.size());
             let drawer_y = layout.drawer.map(|r| r.y).unwrap_or(layout.modeline.y);
             Rectangle {
                 x: px,
@@ -362,7 +370,9 @@ impl<'a> canvas::Program<Message> for OverlayCanvas<'a> {
                 }
             }
             if let Some(d) = &rf.dialog {
-                let w = (size.width * 0.5).max(30.0 * crate::CHAR_WIDTH).min(size.width - 8.0);
+                let w = (size.width * 0.5)
+                    .max(30.0 * crate::CHAR_WIDTH)
+                    .min(size.width - 8.0);
                 let h = (4.5 * crate::LINE_HEIGHT).min(size.height - 8.0);
                 let dialog_rect = Rectangle {
                     x: (size.width - w).max(0.0) / 2.0,
@@ -402,8 +412,19 @@ fn compute_inline_menu_rect(
     menu: &InlineMenuFrame,
     window_size: Size,
 ) -> Rectangle {
-    let max_label = menu.items.iter().map(|i| i.label.chars().count()).max().unwrap_or(0);
-    let max_right = menu.items.iter().filter_map(|i| i.right.as_ref()).map(|t| t.chars().count()).max().unwrap_or(0);
+    let max_label = menu
+        .items
+        .iter()
+        .map(|i| i.label.chars().count())
+        .max()
+        .unwrap_or(0);
+    let max_right = menu
+        .items
+        .iter()
+        .filter_map(|i| i.right.as_ref())
+        .map(|t| t.chars().count())
+        .max()
+        .unwrap_or(0);
     let visible_items = menu.items.len().min(8);
     let hint_rows = usize::from(menu.hint.is_some());
     let menu_chars = (max_label + max_right + 6).clamp(16, 40);
@@ -414,7 +435,9 @@ fn compute_inline_menu_rect(
         InlineMenuAnchor::CommandLine => {
             if let Some(pane) = active_pane {
                 let x = pane.rect.x as f32 * CHAR_WIDTH;
-                let y = (pane.rect.y + pane.rect.content_height) as f32 * crate::LINE_HEIGHT - menu_h - 4.0;
+                let y = (pane.rect.y + pane.rect.content_height) as f32 * crate::LINE_HEIGHT
+                    - menu_h
+                    - 4.0;
                 (x, y)
             } else {
                 (0.0, window_size.height - menu_h - crate::LINE_HEIGHT - 4.0)
@@ -423,9 +446,12 @@ fn compute_inline_menu_rect(
         InlineMenuAnchor::Cursor { line, col } => {
             if let Some(pane) = active_pane {
                 let x = pane.rect.x as f32 * CHAR_WIDTH + col as f32 * CHAR_WIDTH;
-                let mut y = pane.rect.y as f32 * crate::LINE_HEIGHT + (line + 1) as f32 * crate::LINE_HEIGHT;
+                let mut y = pane.rect.y as f32 * crate::LINE_HEIGHT
+                    + (line + 1) as f32 * crate::LINE_HEIGHT;
                 if y + menu_h > window_size.height {
-                    y = (pane.rect.y as f32 * crate::LINE_HEIGHT + line as f32 * crate::LINE_HEIGHT - menu_h)
+                    y = (pane.rect.y as f32 * crate::LINE_HEIGHT
+                        + line as f32 * crate::LINE_HEIGHT
+                        - menu_h)
                         .max(0.0);
                 }
                 (x, y)
@@ -435,9 +461,18 @@ fn compute_inline_menu_rect(
         }
     };
 
-    let x = anchor_x.min((window_size.width - menu_w - 4.0).max(0.0)).max(0.0);
-    let y = anchor_y.min((window_size.height - menu_h - 4.0).max(0.0)).max(0.0);
-    Rectangle { x, y, width: menu_w, height: menu_h }
+    let x = anchor_x
+        .min((window_size.width - menu_w - 4.0).max(0.0))
+        .max(0.0);
+    let y = anchor_y
+        .min((window_size.height - menu_h - 4.0).max(0.0))
+        .max(0.0);
+    Rectangle {
+        x,
+        y,
+        width: menu_w,
+        height: menu_h,
+    }
 }
 
 fn editor_pane_at_position(
@@ -586,5 +621,3 @@ fn draw_hidden_count(frame: &mut canvas::Frame, size: Size, count: usize, theme:
         rgb_to_color(&theme.faded),
     );
 }
-
-

@@ -1474,7 +1474,9 @@ mod tests {
         vim.process_key(key('b'), &buf, 0);
         vim.process_key(esc(), &buf, 2);
         assert!(!vim.recording_insert);
-        let last = vim.last_command().expect("insert session should be recorded");
+        let last = vim
+            .last_command()
+            .expect("insert session should be recorded");
         // Keys: i, a, b, Esc
         assert_eq!(last.keys.len(), 4);
         assert_eq!(last.keys[0], key('i'));
@@ -1542,7 +1544,10 @@ mod tests {
         let mut vim = VimState::new();
         let buf = Buffer::from_text("hello world");
         vim.process_key(key('w'), &buf, 0);
-        assert!(vim.last_command().is_none(), "motion should not be recorded");
+        assert!(
+            vim.last_command().is_none(),
+            "motion should not be recorded"
+        );
     }
 
     #[test]

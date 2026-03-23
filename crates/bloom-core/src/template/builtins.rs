@@ -199,11 +199,7 @@ pub const BUILTIN_TEMPLATE_DATA: &[(&str, &str, &str)] = &[
         "Track books and articles you're reading",
         READING,
     ),
-    (
-        "Movie / TV log",
-        "Log movies and shows with ratings",
-        MOVIE,
-    ),
+    ("Movie / TV log", "Log movies and shows with ratings", MOVIE),
 ];
 
 /// Return fully parsed [`Template`] objects for all built-in templates.
@@ -234,11 +230,7 @@ mod tests {
         let blank = templates.iter().find(|t| t.name == "Blank page").unwrap();
         // Only $0 (final cursor), no numbered placeholders.
         assert_eq!(
-            blank
-                .placeholders
-                .iter()
-                .filter(|p| p.index != 0)
-                .count(),
+            blank.placeholders.iter().filter(|p| p.index != 0).count(),
             0
         );
     }

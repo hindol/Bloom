@@ -118,7 +118,10 @@ impl BloomEditor {
                 vec![keymap::dispatch::Action::Noop]
             }
             "day_activity" => {
-                self.push_notification("Day activity not yet implemented".into(), render::NotificationLevel::Info);
+                self.push_notification(
+                    "Day activity not yet implemented".into(),
+                    render::NotificationLevel::Info,
+                );
                 vec![keymap::dispatch::Action::Noop]
             }
             "new_from_template" => vec![keymap::dispatch::Action::OpenPicker(
@@ -353,8 +356,7 @@ impl BloomEditor {
             }
             _ => {
                 // Check for dynamic view commands from config
-                if action_id.starts_with("view_") {
-                    let view_name = &action_id[5..]; // Remove "view_" prefix
+                if let Some(view_name) = action_id.strip_prefix("view_") {
                     if let Some(view) = self.config.views.iter().find(|v| v.name == view_name) {
                         self.open_named_view(view.clone());
                         return vec![keymap::dispatch::Action::Noop];
@@ -405,7 +407,7 @@ impl BloomEditor {
                     self.window_mgr.close(pane);
                     vec![keymap::dispatch::Action::Noop]
                 }
-            },
+            }
             "e" | "edit" => vec![keymap::dispatch::Action::OpenPicker(
                 keymap::dispatch::PickerKind::FindPage,
             )],
@@ -441,7 +443,7 @@ impl BloomEditor {
     }
 
     // View management methods
-    
+
     fn open_view_prompt(&mut self) {
         let previous_page = self.active_page().cloned();
         self.active_view = Some(ViewState {
@@ -554,8 +556,7 @@ impl BloomEditor {
         match result {
             Ok(result) => {
                 view_state.error = None;
-                let (content, row_map) =
-                    format_view_result(&result, today_date);
+                let (content, row_map) = format_view_result(&result, today_date);
 
                 let id = crate::uuid::generate_hex_id();
                 self.writer.apply(crate::BufferMessage::OpenReadOnly {
@@ -585,8 +586,12 @@ impl BloomEditor {
 
     /// SPC * — grab word under cursor, set as search pattern, open vault search.
     fn search_word_under_cursor(&mut self) {
-        let Some(page_id) = self.active_page().cloned() else { return };
-        let Some(buf) = self.writer.buffers().get(&page_id) else { return };
+        let Some(page_id) = self.active_page().cloned() else {
+            return;
+        };
+        let Some(buf) = self.writer.buffers().get(&page_id) else {
+            return;
+        };
         let cursor = self.cursor();
         let text = buf.text().to_string();
 
@@ -632,8 +637,12 @@ impl BloomEditor {
         };
         let cursor_line = self.cursor_position().0;
         let (old_marker, _bid) = {
-            let Some(buf) = self.writer.buffers().get(&page_id) else { return };
-            if cursor_line >= buf.len_lines() { return; }
+            let Some(buf) = self.writer.buffers().get(&page_id) else {
+                return;
+            };
+            if cursor_line >= buf.len_lines() {
+                return;
+            }
             let line_text = buf.line(cursor_line).to_string();
             let bid = bloom_md::parser::extensions::parse_block_id(&line_text, cursor_line);
             match bid {
@@ -642,7 +651,10 @@ impl BloomEditor {
                     (marker, b.id.0)
                 }
                 _ => {
-                    self.push_notification("Not on a mirrored block".into(), crate::render::NotificationLevel::Warning);
+                    self.push_notification(
+                        "Not on a mirrored block".into(),
+                        crate::render::NotificationLevel::Warning,
+                    );
                     return;
                 }
             }
@@ -661,10 +673,7 @@ impl BloomEditor {
             let trimmed = line_text.trim_end_matches('\n');
             if let Some(pos) = trimmed.rfind(&old_marker) {
                 let ls = buf.text().line_to_char(cursor_line);
-                buf.replace(
-                    ls + pos..ls + pos + old_marker.len(),
-                    &new_marker,
-                );
+                buf.replace(ls + pos..ls + pos + old_marker.len(), &new_marker);
             }
         }
 
@@ -683,14 +692,21 @@ impl BloomEditor {
         };
         let (cursor_line, cursor_col) = self.cursor_position();
         let bid = {
-            let Some(buf) = self.writer.buffers().get(&page_id) else { return };
-            if cursor_line >= buf.len_lines() { return; }
+            let Some(buf) = self.writer.buffers().get(&page_id) else {
+                return;
+            };
+            if cursor_line >= buf.len_lines() {
+                return;
+            }
             let line_text = buf.line(cursor_line).to_string();
             let bid = bloom_md::parser::extensions::parse_block_id(&line_text, cursor_line);
             match bid {
                 Some(b) if b.is_mirror => b.id,
                 _ => {
-                    self.push_notification("Not on a mirrored block".into(), crate::render::NotificationLevel::Warning);
+                    self.push_notification(
+                        "Not on a mirrored block".into(),
+                        crate::render::NotificationLevel::Warning,
+                    );
                     return;
                 }
             }
@@ -709,7 +725,10 @@ impl BloomEditor {
             .collect();
 
         if items.is_empty() {
-            self.push_notification("No other mirrors found".into(), crate::render::NotificationLevel::Warning);
+            self.push_notification(
+                "No other mirrors found".into(),
+                crate::render::NotificationLevel::Warning,
+            );
             return;
         }
 
@@ -785,7 +804,9 @@ fn format_view_result(
                 let text = if is_tasks {
                     let done = done_col
                         .and_then(|i| row.values.get(i))
-                        .map(|v| matches!(v, query::CellValue::Bool(true) | query::CellValue::Int(1)))
+                        .map(|v| {
+                            matches!(v, query::CellValue::Bool(true) | query::CellValue::Int(1))
+                        })
                         .unwrap_or(false);
                     let checkbox = if done { "[x]" } else { "[ ]" };
                     let task_text = text_col

@@ -172,10 +172,12 @@ impl BufferManager {
 
     /// Get a mutable reference to a Buffer (mutable buffers only).
     pub fn get_mut(&mut self, page_id: &types::PageId) -> Option<&mut bloom_buffer::Buffer> {
-        self.buffers.get_mut(&page_id.to_hex()).and_then(|(slot, _)| match slot {
-            BufferSlot::Mutable(buf) => Some(buf),
-            BufferSlot::Frozen(_) => None,
-        })
+        self.buffers
+            .get_mut(&page_id.to_hex())
+            .and_then(|(slot, _)| match slot {
+                BufferSlot::Mutable(buf) => Some(buf),
+                BufferSlot::Frozen(_) => None,
+            })
     }
 
     /// Get a frozen (read-only) buffer reference.
@@ -185,7 +187,9 @@ impl BufferManager {
     }
 
     pub fn info_mut(&mut self, page_id: &types::PageId) -> Option<&mut BufferInfo> {
-        self.buffers.get_mut(&page_id.to_hex()).map(|(_, info)| info)
+        self.buffers
+            .get_mut(&page_id.to_hex())
+            .map(|(_, info)| info)
     }
 
     pub fn close(&mut self, page_id: &types::PageId) {
@@ -193,12 +197,7 @@ impl BufferManager {
     }
 
     /// Open or replace a buffer as read-only (frozen).
-    pub fn open_read_only(
-        &mut self,
-        page_id: &types::PageId,
-        title: &str,
-        content: &str,
-    ) {
+    pub fn open_read_only(&mut self, page_id: &types::PageId, title: &str, content: &str) {
         let key = page_id.to_hex();
         let buf = bloom_buffer::Buffer::from_text(content).freeze();
         let info = BufferInfo {
@@ -307,19 +306,37 @@ pub enum BufferMessage {
     /// Set cursor position.
     SetCursor { page_id: types::PageId, pos: usize },
     /// Set selection anchor.
-    SetAnchor { page_id: types::PageId, anchor: Option<usize> },
+    SetAnchor {
+        page_id: types::PageId,
+        anchor: Option<usize>,
+    },
     /// Close/remove a buffer from the manager.
     Close { page_id: types::PageId },
     /// Open a new mutable buffer (or reuse existing).
-    Open { page_id: types::PageId, title: String, path: std::path::PathBuf, content: String },
+    Open {
+        page_id: types::PageId,
+        title: String,
+        path: std::path::PathBuf,
+        content: String,
+    },
     /// Open a read-only (frozen) buffer.
-    OpenReadOnly { page_id: types::PageId, title: String, content: String },
+    OpenReadOnly {
+        page_id: types::PageId,
+        title: String,
+        content: String,
+    },
     /// Reload buffer content from string (external change).
-    Reload { page_id: types::PageId, content: String },
+    Reload {
+        page_id: types::PageId,
+        content: String,
+    },
     /// Run auto-alignment on entire page.
     AlignPage { page_id: types::PageId },
     /// Run auto-alignment on specific block.
-    AlignBlock { page_id: types::PageId, cursor_line: usize },
+    AlignBlock {
+        page_id: types::PageId,
+        cursor_line: usize,
+    },
     /// Ensure block IDs are assigned.
     EnsureBlockIds { page_id: types::PageId },
 }
@@ -357,7 +374,13 @@ impl BufferWriter {
     /// Returns true if the mutation was applied (buffer exists and is mutable).
     pub fn apply(&mut self, msg: BufferMessage) -> bool {
         match msg {
-            BufferMessage::Edit { page_id, range, replacement, cursor_after, cursor_idx } => {
+            BufferMessage::Edit {
+                page_id,
+                range,
+                replacement,
+                cursor_after,
+                cursor_idx,
+            } => {
                 if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                     if replacement.is_empty() && !range.is_empty() {
                         buf.delete(range);
@@ -376,7 +399,11 @@ impl BufferWriter {
                     false
                 }
             }
-            BufferMessage::MirrorEdit { page_id, range, replacement } => {
+            BufferMessage::MirrorEdit {
+                page_id,
+                range,
+                replacement,
+            } => {
                 // Same as Edit but no event bus emission, no further mirror propagation.
                 if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                     if replacement.is_empty() && !range.is_empty() {
@@ -452,11 +479,20 @@ impl BufferWriter {
                 self.buffer_mgr.close(&page_id);
                 true
             }
-            BufferMessage::Open { page_id, title, path, content } => {
+            BufferMessage::Open {
+                page_id,
+                title,
+                path,
+                content,
+            } => {
                 self.buffer_mgr.open(&page_id, &title, &path, &content);
                 true
             }
-            BufferMessage::OpenReadOnly { page_id, title, content } => {
+            BufferMessage::OpenReadOnly {
+                page_id,
+                title,
+                content,
+            } => {
                 self.buffer_mgr.open_read_only(&page_id, &title, &content);
                 true
             }
@@ -472,7 +508,10 @@ impl BufferWriter {
                     false
                 }
             }
-            BufferMessage::AlignBlock { page_id, cursor_line } => {
+            BufferMessage::AlignBlock {
+                page_id,
+                cursor_line,
+            } => {
                 if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                     crate::align::auto_align_block(buf, cursor_line);
                     true
@@ -689,14 +728,19 @@ pub(crate) struct TemporalStripState {
     /// Current buffer content (for diff computation).
     pub current_content: String,
     /// For BlockHistory: the block ID being tracked.
-    #[allow(dead_code)] pub block_id: Option<String>,
+    #[allow(dead_code)]
+    pub block_id: Option<String>,
     /// For BlockHistory: the line index of the block in the buffer.
     pub block_line: Option<usize>,
 }
 
 impl TemporalStripState {
     pub fn drawer_height(&self) -> u16 {
-        if self.compact { 4 } else { 6 }
+        if self.compact {
+            4
+        } else {
+            6
+        }
     }
 }
 
@@ -1002,7 +1046,9 @@ impl BloomEditor {
     pub(crate) fn set_cursor(&mut self, pos: usize) {
         let cidx = self.active_cursor_idx();
         if let Some(page_id) = self.active_page().cloned() {
-            self.writer.buffers_mut().set_cursor_idx(&page_id, cidx, pos);
+            self.writer
+                .buffers_mut()
+                .set_cursor_idx(&page_id, cidx, pos);
         } else {
             tracing::error!(pos, "set_cursor: no active page!");
         }
@@ -1231,12 +1277,12 @@ impl BloomEditor {
             // selected index) since multiple BlobAt requests are in flight.
             // For page history: use selected index (only one BlobAt at a time).
             let target_idx = if matches!(ts.mode, render::TemporalMode::BlockHistory) {
-                ts.items.iter().position(|i| {
-                    i.git_oid.as_deref() == Some(oid) && i.content.is_none()
-                })
+                ts.items
+                    .iter()
+                    .position(|i| i.git_oid.as_deref() == Some(oid) && i.content.is_none())
             } else {
                 let sel = ts.selected;
-                if ts.items.get(sel).map_or(false, |i| i.content.is_none()) {
+                if ts.items.get(sel).is_some_and(|i| i.content.is_none()) {
                     Some(sel)
                 } else {
                     None
@@ -1250,13 +1296,12 @@ impl BloomEditor {
                         let block_pat = format!("^{}", bid);
                         let mirror_pat = format!("^={}", bid);
                         let fallback = ts.block_line.unwrap_or(0);
-                        ts.items[idx].content =
-                            crate::editor::page_history::extract_block_line(
-                                &content,
-                                &block_pat,
-                                &mirror_pat,
-                                fallback,
-                            );
+                        ts.items[idx].content = crate::editor::page_history::extract_block_line(
+                            &content,
+                            &block_pat,
+                            &mirror_pat,
+                            fallback,
+                        );
                     }
                 } else {
                     ts.items[idx].content = Some(content.clone());
@@ -1399,7 +1444,11 @@ impl BloomEditor {
         } else {
             0
         };
-        let ts_h = self.temporal_strip.as_ref().map(|ts| ts.drawer_height()).unwrap_or(0);
+        let ts_h = self
+            .temporal_strip
+            .as_ref()
+            .map(|ts| ts.drawer_height())
+            .unwrap_or(0);
         let drawer_h = wk_h.max(ts_h);
         let pane_area_h = height.saturating_sub(drawer_h);
         let pane_rects = self.window_mgr.compute_pane_rects(width, pane_area_h);
@@ -1465,27 +1514,29 @@ impl BloomEditor {
             .filter_map(|(pane_id, state)| {
                 let page_id = state.page_id.as_ref()?;
                 let path = self
-                    .writer.buffers()
+                    .writer
+                    .buffers()
                     .open_buffers()
                     .iter()
                     .find(|b| b.page_id == *page_id)?
                     .path
                     .clone();
-                let (cursor_line, cursor_col) = if let Some(buf) = self.writer.buffers().get(page_id) {
-                    let rope = buf.text();
-                    let len = rope.len_chars();
-                    let cursor_pos = buf.cursor(0);
-                    let clamped = cursor_pos.min(len.saturating_sub(1));
-                    if len == 0 {
-                        (0, 0)
+                let (cursor_line, cursor_col) =
+                    if let Some(buf) = self.writer.buffers().get(page_id) {
+                        let rope = buf.text();
+                        let len = rope.len_chars();
+                        let cursor_pos = buf.cursor(0);
+                        let clamped = cursor_pos.min(len.saturating_sub(1));
+                        if len == 0 {
+                            (0, 0)
+                        } else {
+                            let line = rope.char_to_line(clamped);
+                            let line_start = rope.line_to_char(line);
+                            (line, clamped - line_start)
+                        }
                     } else {
-                        let line = rope.char_to_line(clamped);
-                        let line_start = rope.line_to_char(line);
-                        (line, clamped - line_start)
-                    }
-                } else {
-                    (0, 0)
-                };
+                        (0, 0)
+                    };
                 Some(session::SessionBuffer {
                     page_path: path,
                     cursor_line,
@@ -1919,7 +1970,8 @@ mod tests {
 
         // Buffer should be "abc"
         let buf = editor
-            .writer.buffers()
+            .writer
+            .buffers()
             .get(&editor.active_page().cloned().unwrap())
             .unwrap();
         assert_eq!(buf.text().to_string(), "abc");
@@ -1927,7 +1979,8 @@ mod tests {
         // One undo should revert the entire insert session
         editor.handle_key(KeyEvent::char('u'));
         let buf = editor
-            .writer.buffers()
+            .writer
+            .buffers()
             .get(&editor.active_page().cloned().unwrap())
             .unwrap();
         assert_eq!(buf.text().to_string(), "");
@@ -2099,7 +2152,7 @@ mod tests {
         editor.startup();
         let frame = editor.render(80, 24);
         assert!(!frame.panes.is_empty());
-        assert!(frame.panes[0].visible_lines.len() > 0 || frame.panes[0].title.contains("20"));
+        assert!(!frame.panes[0].visible_lines.is_empty() || frame.panes[0].title.contains("20"));
         // Keys should work — enter insert mode
         editor.handle_key(KeyEvent::char('i'));
         let frame = editor.render(80, 24);

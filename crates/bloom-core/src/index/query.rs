@@ -146,7 +146,10 @@ impl Index {
         };
         rows.filter_map(|r| {
             let (id, title, created, path, line) = r.ok()?;
-            Some((self.row_to_page_meta(&id, &title, &created, &path), line as usize))
+            Some((
+                self.row_to_page_meta(&id, &title, &created, &path),
+                line as usize,
+            ))
         })
         .collect()
     }

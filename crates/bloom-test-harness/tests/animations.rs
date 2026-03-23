@@ -17,10 +17,10 @@ fn anim_basic_editing() {
     rec.pause(800);
 
     // Navigate to "world"
-    rec.step("2j");       // down to "Hello world."
-    rec.step("w");        // on "world"
+    rec.step("2j"); // down to "Hello world."
+    rec.step("w"); // on "world"
     rec.caption("Change a word with ciw");
-    rec.step("ciw");      // change inner word
+    rec.step("ciw"); // change inner word
     rec.step_type("Bloom");
     rec.step("<Esc>");
     rec.pause(600);
@@ -35,12 +35,17 @@ fn anim_basic_editing() {
     let path = rec.save("basic-editing");
     assert!(path.exists());
     assert!(rec.frame_count() > 5);
-    eprintln!("Total duration: {}ms, {} frames", rec.total_duration_ms(), rec.frame_count());
+    eprintln!(
+        "Total duration: {}ms, {} frames",
+        rec.total_duration_ms(),
+        rec.frame_count()
+    );
 }
 
 #[test]
 fn anim_search() {
-    let content = "# Tasks\n\n- [ ] Buy milk\n- [ ] Review code\n- [x] Ship feature\n- [ ] Buy eggs\n";
+    let content =
+        "# Tasks\n\n- [ ] Buy milk\n- [ ] Review code\n- [x] Ship feature\n- [ ] Buy eggs\n";
     let mut rec = FrameRecorder::new(SimInput::with_content(content));
 
     rec.pause(600);
@@ -66,7 +71,8 @@ fn anim_search() {
 
 #[test]
 fn anim_block_history() {
-    let content = "---\nid: demo01\ntitle: \"Demo\"\n---\n\n- [ ] Original task ^task1\n\nSome notes.\n";
+    let content =
+        "---\nid: demo01\ntitle: \"Demo\"\n---\n\n- [ ] Original task ^task1\n\nSome notes.\n";
     let mut rec = FrameRecorder::new(SimInput::with_content(content));
 
     // Navigate to the task line
@@ -75,7 +81,7 @@ fn anim_block_history() {
 
     // Edit the task
     rec.caption("Edit a task");
-    rec.step("03w");    // on "Original"
+    rec.step("03w"); // on "Original"
     rec.step("ciw");
     rec.step_type("Updated");
     rec.step("<Esc>");

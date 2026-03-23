@@ -140,7 +140,11 @@ impl Index {
         for entry in changed {
             let page_id = entry.meta.id.to_hex();
             // Detect missing block IDs before wiping old data
-            let new_ids: Vec<&str> = entry.block_ids.iter().map(|(id, _, _)| id.0.as_str()).collect();
+            let new_ids: Vec<&str> = entry
+                .block_ids
+                .iter()
+                .map(|(id, _, _)| id.0.as_str())
+                .collect();
             retire_missing_block_ids(&tx, &page_id, &new_ids)?;
             remove_page_data(&tx, &page_id)?;
             insert_page_data(&tx, &page_id, entry)?;

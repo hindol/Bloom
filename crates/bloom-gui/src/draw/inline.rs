@@ -45,13 +45,7 @@ pub(crate) fn draw_inline_menu(
     let right_edge = area.x + area.width - CHAR_WIDTH / 2.0;
     let label_chars = chars_that_fit(area.width).saturating_sub(max_right + 5);
 
-    for (visible_index, item) in menu
-        .items
-        .iter()
-        .skip(scroll)
-        .take(viewport)
-        .enumerate()
-    {
+    for (visible_index, item) in menu.items.iter().skip(scroll).take(viewport).enumerate() {
         let item_y = area.y + visible_index as f32 * LINE_HEIGHT + 2.0;
         let selected = scroll + visible_index == menu.selected;
         if selected {

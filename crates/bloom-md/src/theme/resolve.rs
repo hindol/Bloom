@@ -65,14 +65,8 @@ pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
             bold: true,
             ..base
         },
-        Style::Heading { .. } => StyleProps {
-            bold: true,
-            ..base
-        },
-        Style::Bold => StyleProps {
-            bold: true,
-            ..base
-        },
+        Style::Heading { .. } => StyleProps { bold: true, ..base },
+        Style::Bold => StyleProps { bold: true, ..base },
         Style::Italic => StyleProps {
             italic: true,
             ..base
@@ -91,10 +85,7 @@ pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
             underline: true,
             ..base
         },
-        Style::LinkChrome => StyleProps {
-            fg: dimmed,
-            ..base
-        },
+        Style::LinkChrome => StyleProps { fg: dimmed, ..base },
         Style::Tag => StyleProps {
             fg: p.faded,
             ..base
@@ -108,18 +99,9 @@ pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
             fg: p.accent_red,
             ..base
         },
-        Style::TimestampParens => StyleProps {
-            fg: dimmed,
-            ..base
-        },
-        Style::BlockId => StyleProps {
-            fg: dimmed,
-            ..base
-        },
-        Style::BlockIdCaret => StyleProps {
-            fg: dimmed,
-            ..base
-        },
+        Style::TimestampParens => StyleProps { fg: dimmed, ..base },
+        Style::BlockId => StyleProps { fg: dimmed, ..base },
+        Style::BlockIdCaret => StyleProps { fg: dimmed, ..base },
         Style::ListMarker => base,
         Style::CheckboxUnchecked => StyleProps {
             fg: p.accent_yellow,
@@ -147,10 +129,7 @@ pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
             fg: p.faded,
             ..base
         },
-        Style::TableAlignmentRow => StyleProps {
-            fg: dimmed,
-            ..base
-        },
+        Style::TableAlignmentRow => StyleProps { fg: dimmed, ..base },
         Style::Frontmatter => StyleProps {
             fg: p.faded,
             italic: true,
@@ -185,10 +164,7 @@ pub fn resolve(style: &Style, p: &ThemePalette) -> StyleProps {
             strikethrough: true,
             ..base
         },
-        Style::SyntaxNoise => StyleProps {
-            fg: dimmed,
-            ..base
-        },
+        Style::SyntaxNoise => StyleProps { fg: dimmed, ..base },
         Style::SearchMatch => StyleProps {
             bg: Some(p.mild),
             ..base

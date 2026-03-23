@@ -107,7 +107,12 @@ impl UndoTree {
     }
 
     /// Push a new snapshot as a child of the current node. Returns the new node's ID.
-    pub fn push(&mut self, snapshot: ropey::Rope, cursor_pos: usize, description: String) -> UndoNodeId {
+    pub fn push(
+        &mut self,
+        snapshot: ropey::Rope,
+        cursor_pos: usize,
+        description: String,
+    ) -> UndoNodeId {
         let new_id = self.nodes.len() as UndoNodeId;
         let new_node = UndoNode {
             id: new_id,

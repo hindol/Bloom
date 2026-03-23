@@ -12,7 +12,8 @@ mod validate;
 pub use cache::QueryCache;
 pub use compile::{compile, compile_with_limit, CompileError, CompiledQuery, SqlParam};
 pub use execute::{
-    execute, run_query, run_query_with_limit, CellValue, QueryContext, QueryResult, QueryResultKind, Row, RowResult,
+    execute, run_query, run_query_with_limit, CellValue, QueryContext, QueryResult,
+    QueryResultKind, Row, RowResult,
 };
 pub use parse::{
     parse, tokenise, Clause, Expr, Field, Op, ParseError, Query, SortField, Source, Token,

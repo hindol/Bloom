@@ -1,9 +1,9 @@
+#[allow(clippy::type_complexity)]
 /// Demo vault generator — creates realistic pages, journal entries, and
 /// backdated git history so that page history, block history, and day
 /// activity views all light up immediately.
 ///
 /// Run: cargo run -p bloom-test-harness --example demo_vault
-
 fn main() {
     let vault = dirs::home_dir().unwrap().join("bloom");
     let index_dir = vault.join(".index");
@@ -255,7 +255,11 @@ fn main() {
     }
 
     println!("\n✓ Demo vault ready at {}", vault.display());
-    println!("  {} pages, {} journal entries, {} commits",
-        pages.len(), journals.len(), timeline.len());
+    println!(
+        "  {} pages, {} journal entries, {} commits",
+        pages.len(),
+        journals.len(),
+        timeline.len()
+    );
     println!("\n  Launch: cargo run -r -p bloom-tui");
 }

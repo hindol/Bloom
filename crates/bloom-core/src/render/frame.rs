@@ -309,7 +309,11 @@ pub struct TemporalStripFrame {
 impl TemporalStripFrame {
     /// Height of the drawer area (below status bar).
     pub fn drawer_height(&self) -> u16 {
-        if self.compact { 4 } else { 6 }
+        if self.compact {
+            4
+        } else {
+            6
+        }
     }
 }
 

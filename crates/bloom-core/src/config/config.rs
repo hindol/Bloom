@@ -462,9 +462,9 @@ fn views_eq(a: &[ViewConfig], b: &[ViewConfig]) -> bool {
     if a.len() != b.len() {
         return false;
     }
-    a.iter().zip(b.iter()).all(|(va, vb)| {
-        va.name == vb.name && va.query == vb.query && va.key == vb.key
-    })
+    a.iter()
+        .zip(b.iter())
+        .all(|(va, vb)| va.name == vb.name && va.query == vb.query && va.key == vb.key)
 }
 
 impl Default for FontConfig {

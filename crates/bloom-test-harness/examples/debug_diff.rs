@@ -4,7 +4,7 @@ fn main() {
     // Test what word_diff produces
     let old = "## Overview";
     let new = "## Overview ^bl3y4";
-    
+
     let diff = TextDiff::from_words(old, new);
     println!("Word diff: {:?} -> {:?}", old, new);
     for change in diff.iter_all_changes() {

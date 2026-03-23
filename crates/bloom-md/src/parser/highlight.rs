@@ -103,7 +103,11 @@ pub fn highlight_line(line: &str, context: &LineContext) -> Vec<StyledSpan> {
             for s in inline_spans {
                 spans.push(StyledSpan {
                     range: s.range,
-                    style: if s.style == Style::Normal { Style::Blockquote } else { s.style },
+                    style: if s.style == Style::Normal {
+                        Style::Blockquote
+                    } else {
+                        s.style
+                    },
                 });
             }
         }
@@ -146,7 +150,7 @@ pub fn highlight_line(line: &str, context: &LineContext) -> Vec<StyledSpan> {
             if let Some(caret_pos) = rest.rfind(" ^") {
                 let text_end = indent + 6 + caret_pos;
                 let block_start = text_end + 1; // position of ^
-                // CheckedTaskText for the body, then BlockId spans for the ID
+                                                // CheckedTaskText for the body, then BlockId spans for the ID
                 if text_end > indent + 6 {
                     spans.push(StyledSpan {
                         range: indent + 6..text_end,
@@ -701,7 +705,10 @@ mod tests {
         assert!(
             spans.iter().any(|s| s.style == Style::BlockIdCaret),
             "block ID caret should be styled in blockquote, spans: {:?}",
-            spans.iter().map(|s| format!("{:?} {:?}", s.range, s.style)).collect::<Vec<_>>()
+            spans
+                .iter()
+                .map(|s| format!("{:?} {:?}", s.range, s.style))
+                .collect::<Vec<_>>()
         );
         assert!(spans.iter().any(|s| s.style == Style::BlockId));
     }

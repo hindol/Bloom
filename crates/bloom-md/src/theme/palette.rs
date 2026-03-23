@@ -11,7 +11,11 @@ impl Rgb {
             let v = a as f32 + (b as f32 - a as f32) * amount;
             v.round().clamp(0.0, 255.0) as u8
         };
-        Rgb(lerp(self.0, target.0), lerp(self.1, target.1), lerp(self.2, target.2))
+        Rgb(
+            lerp(self.0, target.0),
+            lerp(self.1, target.1),
+            lerp(self.2, target.2),
+        )
     }
 }
 

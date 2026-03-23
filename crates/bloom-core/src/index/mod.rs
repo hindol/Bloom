@@ -319,7 +319,10 @@ mod tests {
     fn test_find_page_by_block_id() {
         let mut idx = Index::open_in_memory().unwrap();
         let mut entry = make_entry("aabbccdd", "Test Page", "content", &[]);
-        entry.block_ids = vec![(BlockId("k7m2x".into()), 5, false), (BlockId("p3a9f".into()), 10, false)];
+        entry.block_ids = vec![
+            (BlockId("k7m2x".into()), 5, false),
+            (BlockId("p3a9f".into()), 10, false),
+        ];
         idx.index_page(&entry).unwrap();
 
         let result = idx.find_page_by_block_id(&BlockId("k7m2x".into()));

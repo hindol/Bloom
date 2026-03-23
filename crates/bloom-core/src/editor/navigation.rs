@@ -67,33 +67,36 @@ impl BloomEditor {
             // Generate new ID and embed it in frontmatter
             crate::uuid::generate_hex_id()
         });
-        self.journal_id_cache.entry(title.clone()).or_insert_with(|| id.clone());
+        self.journal_id_cache
+            .entry(title.clone())
+            .or_insert_with(|| id.clone());
 
         if self.writer.buffers().is_open(&id) {
             self.set_active_page(Some(id));
         } else {
             // If content has no frontmatter ID, create content with one
-            let content = if content.is_empty() || !content.contains(&format!("id: {}", id.to_hex())) {
-                let fm = bloom_md::parser::traits::Frontmatter {
-                    id: Some(id.clone()),
-                    title: Some(title.clone()),
-                    created: Some(today),
-                    tags: vec![types::TagName("journal".to_string())],
-                    extra: std::collections::HashMap::new(),
-                };
-                let mut s = self.parser.serialize_frontmatter(&fm);
-                s.push('\n');
-                // If file had content beyond frontmatter, append it
-                if !content.is_empty() {
-                    if let Some(body_start) = content.find("\n---\n") {
-                        let body = &content[body_start + 5..];
-                        s.push_str(body);
+            let content =
+                if content.is_empty() || !content.contains(&format!("id: {}", id.to_hex())) {
+                    let fm = bloom_md::parser::traits::Frontmatter {
+                        id: Some(id.clone()),
+                        title: Some(title.clone()),
+                        created: Some(today),
+                        tags: vec![types::TagName("journal".to_string())],
+                        extra: std::collections::HashMap::new(),
+                    };
+                    let mut s = self.parser.serialize_frontmatter(&fm);
+                    s.push('\n');
+                    // If file had content beyond frontmatter, append it
+                    if !content.is_empty() {
+                        if let Some(body_start) = content.find("\n---\n") {
+                            let body = &content[body_start + 5..];
+                            s.push_str(body);
+                        }
                     }
-                }
-                s
-            } else {
-                content
-            };
+                    s
+                } else {
+                    content
+                };
             self.open_page_with_content(&id, &title, &path, &content);
         }
         self.last_viewed_journal_date = Some(today);
@@ -242,7 +245,9 @@ impl BloomEditor {
     /// Empty days are skipped — only days with actual journal files are visited.
     pub(crate) fn navigate_journal(&mut self, delta: i32) {
         let Some(journal) = &self.journal else { return };
-        let Some(store) = &self.note_store else { return };
+        let Some(store) = &self.note_store else {
+            return;
+        };
         let today = journal::Journal::today();
 
         // Use last_viewed_journal_date if available, else try active page, else today
@@ -311,16 +316,15 @@ impl BloomEditor {
         kind: &keymap::dispatch::QuickCaptureKind,
         text: &str,
     ) {
-        match kind {
-            keymap::dispatch::QuickCaptureKind::Rename => {
-                self.rename_current_page(text.to_string());
-                return;
-            }
-            _ => {}
+        if let keymap::dispatch::QuickCaptureKind::Rename = kind {
+            self.rename_current_page(text.to_string());
+            return;
         }
 
         let Some(journal) = &self.journal else { return };
-        let Some(store) = &self.note_store else { return };
+        let Some(store) = &self.note_store else {
+            return;
+        };
         let today = journal::Journal::today();
 
         let result = match kind {
@@ -354,7 +358,9 @@ impl BloomEditor {
     /// Rename the current page: update frontmatter title, rename file on disk,
     /// and update buffer metadata.
     fn rename_current_page(&mut self, new_title: String) {
-        let Some(page_id) = self.active_page().cloned() else { return };
+        let Some(page_id) = self.active_page().cloned() else {
+            return;
+        };
 
         // 1. Update the title in the buffer's frontmatter text.
         if let Some(buf) = self.writer.buffers().get(&page_id) {
@@ -368,11 +374,7 @@ impl BloomEditor {
         }
 
         // 2. Rename file on disk.
-        let old_path = self
-            .writer
-            .buffers()
-            .info(&page_id)
-            .map(|i| i.path.clone());
+        let old_path = self.writer.buffers().info(&page_id).map(|i| i.path.clone());
         if let Some(old) = &old_path {
             if old.to_string_lossy().starts_with('[') {
                 // Pseudo-path like [scratch] — skip disk rename

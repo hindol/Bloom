@@ -516,16 +516,18 @@ fn apply_mirror_markers(vault_root: &Path, index: &mut Index) {
     let mut file_actions: std::collections::HashMap<PathBuf, Vec<(&str, &str, usize)>> =
         std::collections::HashMap::new();
     for action in &promotions {
-        file_actions
-            .entry(action.path.clone())
-            .or_default()
-            .push(("promote", &action.block_id, action.line));
+        file_actions.entry(action.path.clone()).or_default().push((
+            "promote",
+            &action.block_id,
+            action.line,
+        ));
     }
     for action in &demotions {
-        file_actions
-            .entry(action.path.clone())
-            .or_default()
-            .push(("demote", &action.block_id, action.line));
+        file_actions.entry(action.path.clone()).or_default().push((
+            "demote",
+            &action.block_id,
+            action.line,
+        ));
     }
 
     let mut files_modified = 0;
@@ -549,14 +551,20 @@ fn apply_mirror_markers(vault_root: &Path, index: &mut Index) {
 
             match *kind {
                 "promote" if line.ends_with(&solo_marker) => {
-                    let new_line =
-                        format!("{}{}", &line[..line.len() - solo_marker.len()], mirror_marker);
+                    let new_line = format!(
+                        "{}{}",
+                        &line[..line.len() - solo_marker.len()],
+                        mirror_marker
+                    );
                     lines[*line_idx] = new_line;
                     changed = true;
                 }
                 "demote" if line.ends_with(&mirror_marker) => {
-                    let new_line =
-                        format!("{}{}", &line[..line.len() - mirror_marker.len()], solo_marker);
+                    let new_line = format!(
+                        "{}{}",
+                        &line[..line.len() - mirror_marker.len()],
+                        solo_marker
+                    );
                     lines[*line_idx] = new_line;
                     changed = true;
                 }
@@ -566,7 +574,11 @@ fn apply_mirror_markers(vault_root: &Path, index: &mut Index) {
 
         if changed {
             let has_trailing = content.ends_with('\n');
-            let sep = if content.contains("\r\n") { "\r\n" } else { "\n" };
+            let sep = if content.contains("\r\n") {
+                "\r\n"
+            } else {
+                "\n"
+            };
             let mut out = lines.join(sep);
             if has_trailing {
                 out.push_str(sep);

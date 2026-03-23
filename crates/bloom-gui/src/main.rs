@@ -228,7 +228,9 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
                         + status_bars_above as f32 * (STATUS_BAR_HEIGHT - LINE_HEIGHT);
                     let cursor_row = pane.cursor.line.saturating_sub(pane.scroll_offset);
                     let target_cursor_y = crate::draw::pane::cursor_y_in_pane(
-                        &pane.visible_lines, cursor_row, pane_y,
+                        &pane.visible_lines,
+                        cursor_row,
+                        pane_y,
                     );
                     let target_scroll_y = pane.scroll_offset as f32 * LINE_HEIGHT;
                     if state.remote.skip_animation() {
@@ -245,7 +247,8 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
             };
             let insert_mode = state.is_insert_mode();
             let blink_changed = state.tick_cursor_blink(insert_mode);
-            let keep_alive = state.keep_alive_until
+            let keep_alive = state
+                .keep_alive_until
                 .map(|deadline| Instant::now() < deadline)
                 .unwrap_or(false);
             state.animating = still_moving || insert_mode || state.frame.is_none() || keep_alive;
@@ -362,9 +365,7 @@ fn subscription(state: &BloomApp) -> Subscription<Message> {
     if state.animating {
         subs.push(window::frames().map(|_| Message::AnimTick));
     } else {
-        subs.push(
-            iced::time::every(std::time::Duration::from_secs(1)).map(|_| Message::AnimTick),
-        );
+        subs.push(iced::time::every(std::time::Duration::from_secs(1)).map(|_| Message::AnimTick));
     }
 
     Subscription::batch(subs)

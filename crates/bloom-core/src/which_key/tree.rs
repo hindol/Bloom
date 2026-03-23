@@ -207,7 +207,7 @@ pub fn default_tree() -> WhichKeyTree {
 pub fn configured_tree(config: &crate::config::Config) -> WhichKeyTree {
     let mut tree = WhichKeyTree::new();
     build_static_tree(&mut tree);
-    
+
     // Register dynamic view keybindings from config
     for view in &config.views {
         if let Some(key) = &view.key {
@@ -215,13 +215,12 @@ pub fn configured_tree(config: &crate::config::Config) -> WhichKeyTree {
             tree.register(key, &view.name, action_id);
         }
     }
-    
+
     tree
 }
 
 /// Build the static part of the which-key tree (all non-dynamic keybindings).
 fn build_static_tree(tree: &mut WhichKeyTree) {
-
     // Files
     tree.register("f f", "Find file", "find_page".into());
     tree.register("f r", "Rename page", "rename_page".into());

@@ -27,7 +27,13 @@ pub(crate) fn draw_which_key(
         rect(area.x, area.y, area.width, area.height),
         rgb_to_color(&theme.subtle),
     );
-    draw_hline(frame, area.x, area.x + area.width, area.y, rgb_to_color(&theme.faded));
+    draw_hline(
+        frame,
+        area.x,
+        area.x + area.width,
+        area.y,
+        rgb_to_color(&theme.faded),
+    );
 
     // Minimal prefix header in faded.
     if !which_key.prefix.is_empty() {
@@ -35,10 +41,7 @@ pub(crate) fn draw_which_key(
             frame,
             area.x + CHAR_WIDTH,
             area.y + 2.0,
-            truncate_text(
-                &which_key.prefix,
-                total_chars.saturating_sub(2),
-            ),
+            truncate_text(&which_key.prefix, total_chars.saturating_sub(2)),
             rgb_to_color(&theme.faded),
         );
     }
@@ -61,13 +64,7 @@ pub(crate) fn draw_which_key(
         let label_prefix = if entry.is_group { "+" } else { "" };
         let max_label = col_chars.saturating_sub(key.chars().count() + 1 + label_prefix.len());
         let label = format!("{}{}", label_prefix, truncate_text(&entry.label, max_label));
-        draw_text(
-            frame,
-            label_x,
-            y,
-            label,
-            rgb_to_color(&theme.foreground),
-        );
+        draw_text(frame, label_x, y, label, rgb_to_color(&theme.foreground));
     }
 }
 
@@ -94,10 +91,22 @@ pub(crate) fn draw_temporal_diff_preview(
         let y = area.y + i as f32 * LINE_HEIGHT;
 
         // Line number gutter: "old │ new"
-        let old_num = dl.old_line.map(|n| format!("{:>4}", n + 1)).unwrap_or_else(|| "    ".to_string());
-        let new_num = dl.new_line.map(|n| format!("{:<4}", n + 1)).unwrap_or_else(|| "    ".to_string());
+        let old_num = dl
+            .old_line
+            .map(|n| format!("{:>4}", n + 1))
+            .unwrap_or_else(|| "    ".to_string());
+        let new_num = dl
+            .new_line
+            .map(|n| format!("{:<4}", n + 1))
+            .unwrap_or_else(|| "    ".to_string());
         let gutter_text = format!("{}│{}", old_num, new_num);
-        draw_text(frame, area.x, y, gutter_text, rgb_to_color(&theme.faded.blend(theme.background, 0.4)));
+        draw_text(
+            frame,
+            area.x,
+            y,
+            gutter_text,
+            rgb_to_color(&theme.faded.blend(theme.background, 0.4)),
+        );
 
         // +/- prefix
         let prefix = match dl.kind {
@@ -145,7 +154,13 @@ pub(crate) fn draw_temporal_strip_drawer(
     let lines = (area.height / LINE_HEIGHT).floor() as usize;
 
     fill_rect(frame, area, rgb_to_color(&theme.highlight));
-    draw_hline(frame, area.x, area.x + area.width, area.y, rgb_to_color(&theme.faded));
+    draw_hline(
+        frame,
+        area.x,
+        area.x + area.width,
+        area.y,
+        rgb_to_color(&theme.faded),
+    );
 
     let total_chars = chars_that_fit(area.width);
     let node_chars = if strip.compact { 12usize } else { 16usize };
@@ -162,7 +177,7 @@ pub(crate) fn draw_temporal_strip_drawer(
     let end = (start + visible).min(total);
 
     let title = if strip.compact {
-        format!("{}", strip.title)
+        strip.title.to_string()
     } else {
         format!("{} · {} versions", strip.title, strip.items.len())
     };
@@ -182,7 +197,11 @@ pub(crate) fn draw_temporal_strip_drawer(
         // Selected node gets a background fill instead of a triangle prefix.
         if selected {
             let node_w = node_chars as f32 * CHAR_WIDTH;
-            fill_rect(frame, rect(x, y, node_w, LINE_HEIGHT), rgb_to_color(&theme.mild));
+            fill_rect(
+                frame,
+                rect(x, y, node_w, LINE_HEIGHT),
+                rgb_to_color(&theme.mild),
+            );
         }
 
         let marker = if node.branch_count > 1 {
@@ -195,7 +214,10 @@ pub(crate) fn draw_temporal_strip_drawer(
                 StripNodeKind::GitCommit => "○",
             }
         };
-        let cell = format!(" {marker} {}", truncate_text(&node.label, node_chars.saturating_sub(3)));
+        let cell = format!(
+            " {marker} {}",
+            truncate_text(&node.label, node_chars.saturating_sub(3))
+        );
         let color = if selected {
             rgb_to_color(&theme.strong)
         } else if node.skip {
@@ -208,7 +230,10 @@ pub(crate) fn draw_temporal_strip_drawer(
         draw_text(frame, x, y, truncate_text(&cell, node_chars), color);
     }
 
-    let selected_visual = strip.selected.saturating_sub(start).min(end.saturating_sub(start));
+    let selected_visual = strip
+        .selected
+        .saturating_sub(start)
+        .min(end.saturating_sub(start));
     let detail_x = area.x + CHAR_WIDTH + (selected_visual * node_chars) as f32 * CHAR_WIDTH;
     let detail = strip
         .items
@@ -219,7 +244,10 @@ pub(crate) fn draw_temporal_strip_drawer(
         frame,
         detail_x,
         area.y + 2.0 * LINE_HEIGHT + 2.0,
-        truncate_text(detail, total_chars.saturating_sub(selected_visual * node_chars + 2)),
+        truncate_text(
+            detail,
+            total_chars.saturating_sub(selected_visual * node_chars + 2),
+        ),
         rgb_to_color(&theme.accent_yellow),
     );
 
@@ -241,7 +269,10 @@ pub(crate) fn draw_temporal_strip_drawer(
             frame,
             area.x + CHAR_WIDTH,
             area.y + 3.0 * LINE_HEIGHT + 2.0,
-            truncate_text(&format!("{} · {}", mode, kinds), total_chars.saturating_sub(2)),
+            truncate_text(
+                &format!("{} · {}", mode, kinds),
+                total_chars.saturating_sub(2),
+            ),
             rgb_to_color(&theme.faded),
         );
         draw_text(
@@ -254,7 +285,12 @@ pub(crate) fn draw_temporal_strip_drawer(
                     .iter()
                     .skip(start)
                     .take(end.saturating_sub(start))
-                    .map(|node| truncate_text(node.detail.as_deref().unwrap_or(""), node_chars.saturating_sub(2)))
+                    .map(|node| {
+                        truncate_text(
+                            node.detail.as_deref().unwrap_or(""),
+                            node_chars.saturating_sub(2),
+                        )
+                    })
                     .collect::<Vec<_>>()
                     .join("  "),
                 total_chars.saturating_sub(2),
@@ -284,15 +320,26 @@ pub(crate) fn draw_context_strip(
     strip: &ContextStripFrame,
     theme: &ThemePalette,
 ) {
-    fill_rect(
+    fill_rect(frame, area, rgb_to_color(&theme.background));
+    draw_hline(
         frame,
-        area,
-        rgb_to_color(&theme.background),
+        area.x,
+        area.x + area.width,
+        area.y,
+        rgb_to_color(&theme.faded),
     );
-    draw_hline(frame, area.x, area.x + area.width, area.y, rgb_to_color(&theme.faded));
 
     let col_w = area.width / 3.0;
-    draw_context_column(frame, area.x, area.y, col_w, strip.prev.as_ref(), false, true, theme);
+    draw_context_column(
+        frame,
+        area.x,
+        area.y,
+        col_w,
+        strip.prev.as_ref(),
+        false,
+        true,
+        theme,
+    );
     draw_context_column(
         frame,
         area.x + col_w,
@@ -303,9 +350,19 @@ pub(crate) fn draw_context_strip(
         false,
         theme,
     );
-    draw_context_column(frame, area.x + col_w * 2.0, area.y, col_w, strip.next.as_ref(), false, false, theme);
+    draw_context_column(
+        frame,
+        area.x + col_w * 2.0,
+        area.y,
+        col_w,
+        strip.next.as_ref(),
+        false,
+        false,
+        theme,
+    );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_context_column(
     frame: &mut iced::widget::canvas::Frame,
     x: f32,
@@ -337,7 +394,13 @@ fn draw_context_column(
         } else {
             label = format!("{label} ►");
         }
-        draw_text(frame, x + CHAR_WIDTH / 2.0, y + 2.0, truncate_text(&label, max_chars), label_color);
+        draw_text(
+            frame,
+            x + CHAR_WIDTH / 2.0,
+            y + 2.0,
+            truncate_text(&label, max_chars),
+            label_color,
+        );
         draw_text(
             frame,
             x + CHAR_WIDTH / 2.0,

@@ -228,9 +228,9 @@ fn align_timestamps(buf: &mut Buffer, start: usize, end: usize) {
     let lines: Vec<String> = (start..end).map(|i| buf.line(i).to_string()).collect();
 
     // Check if the block has any timestamps worth aligning
-    let has_any = lines.iter().any(|l| {
-        is_task_line(l) && find_first_timestamp(l).is_some()
-    });
+    let has_any = lines
+        .iter()
+        .any(|l| is_task_line(l) && find_first_timestamp(l).is_some());
     if !has_any {
         return;
     }
@@ -365,9 +365,12 @@ fn align_frontmatter_block(buf: &mut Buffer, lines: &[String]) {
         return;
     }
 
-    let end = lines.iter().enumerate().skip(1).find_map(|(i, l)| {
-        if l.trim() == "---" { Some(i) } else { None }
-    }).unwrap_or(0);
+    let end = lines
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find_map(|(i, l)| if l.trim() == "---" { Some(i) } else { None })
+        .unwrap_or(0);
     if end == 0 {
         return;
     }
@@ -573,7 +576,11 @@ mod tests {
         assert_eq!(positions[0], positions[1]);
         assert_eq!(positions[1], positions[2]);
         for line in text.lines() {
-            assert!(line.contains(" ^"), "block ID should be preserved: {}", line);
+            assert!(
+                line.contains(" ^"),
+                "block ID should be preserved: {}",
+                line
+            );
         }
     }
 
@@ -587,10 +594,7 @@ mod tests {
         );
         auto_align_page(&mut buf);
         let text = buf.text().to_string();
-        let at_positions: Vec<usize> = text
-            .lines()
-            .filter_map(|l| find_first_timestamp(l))
-            .collect();
+        let at_positions: Vec<usize> = text.lines().filter_map(find_first_timestamp).collect();
         assert_eq!(at_positions.len(), 3);
         assert_eq!(at_positions[0], at_positions[1]);
         assert_eq!(at_positions[1], at_positions[2]);
@@ -639,7 +643,11 @@ mod tests {
         let mut buf = Buffer::from_text(input);
         auto_align_page(&mut buf);
         let text = buf.text().to_string();
-        assert!(!text.contains("  @due"), "single timestamp: no extra padding\n{}", text);
+        assert!(
+            !text.contains("  @due"),
+            "single timestamp: no extra padding\n{}",
+            text
+        );
     }
 
     #[test]

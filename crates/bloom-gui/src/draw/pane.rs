@@ -7,13 +7,13 @@ use bloom_md::theme::ThemePalette;
 use iced::{Color, Rectangle};
 
 use crate::draw::{
-    chars_that_fit, draw_bar_cursor, draw_text, draw_text_center, draw_text_right,
-    draw_text_sized, fill_rect, rect, text_width, truncate_text,
+    chars_that_fit, draw_bar_cursor, draw_text, draw_text_center, draw_text_right, draw_text_sized,
+    fill_rect, rect, text_width, truncate_text,
 };
 use crate::theme::{rgb_to_color, style_to_bg, style_to_color};
 use crate::{
-    CHAR_WIDTH, FONT_SIZE, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, MODELINE_H_PAD,
-    SPACING_MD, SPACING_SM, STATUS_BAR_HEIGHT,
+    CHAR_WIDTH, FONT_SIZE, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, MODELINE_H_PAD, SPACING_MD,
+    SPACING_SM, STATUS_BAR_HEIGHT,
 };
 
 /// Extra pixels the GUI status bar adds beyond what core allocates (1 cell row).
@@ -30,10 +30,13 @@ pub(crate) fn heading_font_size(level: u8) -> f32 {
 
 /// Row height for a line — taller for headings.
 pub(crate) fn line_row_height(line: &bloom_core::render::RenderedLine) -> f32 {
-    line.spans.iter().find_map(|s| match s.style {
-        Style::Heading { level } => Some(heading_font_size(level) * 1.4),
-        _ => None,
-    }).unwrap_or(LINE_HEIGHT)
+    line.spans
+        .iter()
+        .find_map(|s| match s.style {
+            Style::Heading { level } => Some(heading_font_size(level) * 1.4),
+            _ => None,
+        })
+        .unwrap_or(LINE_HEIGHT)
 }
 
 /// Compute the Y offset of a given visible line index, accounting for
@@ -159,7 +162,10 @@ fn draw_editor_content(
         } else {
             line_ys.get(logical_cursor_row).copied().unwrap_or(pane_y)
         };
-        let hl_h = line_heights.get(logical_cursor_row).copied().unwrap_or(LINE_HEIGHT);
+        let hl_h = line_heights
+            .get(logical_cursor_row)
+            .copied()
+            .unwrap_or(LINE_HEIGHT);
         fill_rect(
             frame,
             rect(pane_x, hl_y, pane_w, hl_h),
@@ -251,14 +257,24 @@ fn draw_editor_content(
                 // Strikethrough for checked task text (not the checkbox or block ID).
                 if span.style == Style::CheckedTaskText {
                     let leading = slice.chars().take_while(|c| c.is_whitespace()).count();
-                    let trailing = slice.chars().rev().take_while(|c| c.is_whitespace()).count();
+                    let trailing = slice
+                        .chars()
+                        .rev()
+                        .take_while(|c| c.is_whitespace())
+                        .count();
                     let text_chars = slice.chars().count();
                     let content_chars = text_chars.saturating_sub(leading).saturating_sub(trailing);
                     if content_chars > 0 {
                         let strike_start = text_x + span_x + leading as f32 * line_cw;
                         let strike_end = strike_start + content_chars as f32 * line_cw;
                         let strike_y = y + row_h / 2.0;
-                        crate::draw::draw_hline(frame, strike_start, strike_end, strike_y, style_to_color(&span.style, theme));
+                        crate::draw::draw_hline(
+                            frame,
+                            strike_start,
+                            strike_end,
+                            strike_y,
+                            style_to_color(&span.style, theme),
+                        );
                     }
                 }
             }
@@ -287,7 +303,10 @@ fn draw_editor_content(
 
     if pane.is_active && cursor_visible {
         let cursor_row_idx = pane.cursor.line.saturating_sub(pane.scroll_offset);
-        let cursor_row_h = line_heights.get(cursor_row_idx).copied().unwrap_or(LINE_HEIGHT);
+        let cursor_row_h = line_heights
+            .get(cursor_row_idx)
+            .copied()
+            .unwrap_or(LINE_HEIGHT);
 
         // Simple cursor positioning — uniform font size per line.
         let (cx, cursor_cw) = if let Some(line) = pane.visible_lines.get(cursor_row_idx) {
@@ -295,14 +314,19 @@ fn draw_editor_content(
                 Style::Heading { level } => Some(level),
                 _ => None,
             });
-            let cw = h_level.map(|l| CHAR_WIDTH * (heading_font_size(l) / FONT_SIZE)).unwrap_or(CHAR_WIDTH);
+            let cw = h_level
+                .map(|l| CHAR_WIDTH * (heading_font_size(l) / FONT_SIZE))
+                .unwrap_or(CHAR_WIDTH);
             (pane_x + GUTTER_WIDTH + pane.cursor.column as f32 * cw, cw)
         } else {
-            (pane_x + GUTTER_WIDTH + pane.cursor.column as f32 * CHAR_WIDTH, CHAR_WIDTH)
+            (
+                pane_x + GUTTER_WIDTH + pane.cursor.column as f32 * CHAR_WIDTH,
+                CHAR_WIDTH,
+            )
         };
-        let cy = anim.map(|(c, _)| c).unwrap_or(
-            line_ys.get(cursor_row_idx).copied().unwrap_or(pane_y),
-        );
+        let cy = anim
+            .map(|(c, _)| c)
+            .unwrap_or(line_ys.get(cursor_row_idx).copied().unwrap_or(pane_y));
 
         match pane.cursor.shape {
             CursorShape::Block => {
@@ -317,11 +341,15 @@ fn draw_editor_content(
                 if let Some(line) = pane.visible_lines.get(cursor_row_idx) {
                     let line_text = line.text.trim_end_matches(['\n', '\r']);
                     if let Some(ch) = line_text.chars().nth(pane.cursor.column) {
-                        let font_size = pane.visible_lines.get(cursor_row_idx)
-                            .and_then(|l| l.spans.iter().find_map(|s| match s.style {
-                                Style::Heading { level } => Some(heading_font_size(level)),
-                                _ => None,
-                            }))
+                        let font_size = pane
+                            .visible_lines
+                            .get(cursor_row_idx)
+                            .and_then(|l| {
+                                l.spans.iter().find_map(|s| match s.style {
+                                    Style::Heading { level } => Some(heading_font_size(level)),
+                                    _ => None,
+                                })
+                            })
                             .unwrap_or(FONT_SIZE);
                         draw_text_sized(
                             frame,
@@ -356,19 +384,11 @@ fn draw_active_status_bar(
             draw_normal_status(frame, pane, normal, theme, modeline_area)
         }
         StatusBarContent::CommandLine(command) => {
-            fill_rect(
-                frame,
-                modeline_area,
-                rgb_to_color(&theme.highlight),
-            );
+            fill_rect(frame, modeline_area, rgb_to_color(&theme.highlight));
             draw_command_line(frame, command, theme, modeline_area)
         }
         StatusBarContent::QuickCapture(capture) => {
-            fill_rect(
-                frame,
-                modeline_area,
-                rgb_to_color(&theme.highlight),
-            );
+            fill_rect(frame, modeline_area, rgb_to_color(&theme.highlight));
             draw_quick_capture(frame, capture, theme, modeline_area)
         }
     }
@@ -380,11 +400,7 @@ fn draw_inactive_status_bar(
     theme: &ThemePalette,
     modeline_area: Rectangle,
 ) {
-    fill_rect(
-        frame,
-        modeline_area,
-        rgb_to_color(&theme.subtle),
-    );
+    fill_rect(frame, modeline_area, rgb_to_color(&theme.subtle));
 
     let text_y = modeline_area.y + (modeline_area.height - LINE_HEIGHT) / 2.0;
     let max_chars = chars_that_fit((modeline_area.width - SPACING_MD * 2.0).max(0.0));
@@ -436,7 +452,11 @@ fn draw_normal_status(
     let pos_text = format!(" {}:{} ", normal.line + 1, normal.column + 1);
     let pos_w = pos_text.chars().count() as f32 * CHAR_WIDTH + SPACING_SM + h_pad;
     let pos_x = pane_x + pane_w - pos_w;
-    fill_rect(frame, rect(pos_x, bar_y, pos_w, bar_h), rgb_to_color(&theme.subtle));
+    fill_rect(
+        frame,
+        rect(pos_x, bar_y, pos_w, bar_h),
+        rgb_to_color(&theme.subtle),
+    );
     draw_text(frame, pos_x, text_y, &pos_text, rgb_to_color(&theme.faded));
 
     // ── 3. File + middle segment (fill between mode and position) ──
@@ -457,7 +477,7 @@ fn draw_normal_status(
         frame,
         file_x + SPACING_SM,
         text_y,
-        &truncate_text(&file_label, file_max),
+        truncate_text(&file_label, file_max),
         rgb_to_color(&theme.foreground),
     );
     // Overdraw the " [+]" portion in salient if dirty.
@@ -477,24 +497,24 @@ fn draw_normal_status(
         let hint_text = truncate_text(hints, max);
         let hint_w = text_width(&hint_text);
         let hint_x = (middle_right_edge - hint_w).max(file_x + SPACING_SM);
-        draw_text(frame, hint_x, text_y, &hint_text, rgb_to_color(&theme.faded));
+        draw_text(
+            frame,
+            hint_x,
+            text_y,
+            &hint_text,
+            rgb_to_color(&theme.faded),
+        );
     } else {
         // Build middle segments right-to-left.
         let mut segments: Vec<(String, Color)> = Vec::new();
 
         // Pending keys — salient.
         if !normal.pending_keys.is_empty() {
-            segments.push((
-                normal.pending_keys.clone(),
-                rgb_to_color(&theme.salient),
-            ));
+            segments.push((normal.pending_keys.clone(), rgb_to_color(&theme.salient)));
         }
         // Macro recording.
         if let Some(recording) = normal.recording_macro {
-            segments.push((
-                format!("@{recording}"),
-                rgb_to_color(&theme.accent_red),
-            ));
+            segments.push((format!("@{recording}"), rgb_to_color(&theme.accent_red)));
         }
         // MCP indicator.
         match &normal.mcp {

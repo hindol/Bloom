@@ -88,6 +88,15 @@ impl Vault {
     }
 }
 
+/// Generate 4 pseudo-random bytes using a simple xorshift on the current time.
+fn rand_bytes() -> [u8; 4] {
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos();
+    seed.to_le_bytes()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,13 +152,4 @@ mod tests {
         let content = Vault::gitignore_content();
         assert!(content.contains(".index/"));
     }
-}
-
-/// Generate 4 pseudo-random bytes using a simple xorshift on the current time.
-fn rand_bytes() -> [u8; 4] {
-    let seed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos();
-    seed.to_le_bytes()
 }

@@ -43,16 +43,24 @@ impl BloomEditor {
             ),
             PickerKind::SwitchBuffer => {
                 let items: Vec<GenericPickerItem> = self
-                    .writer.buffers()
+                    .writer
+                    .buffers()
                     .open_buffers()
                     .iter()
                     .map(|info| {
-                        let is_dirty = self.writer.buffers().get(&info.page_id)
+                        let is_dirty = self
+                            .writer
+                            .buffers()
+                            .get(&info.page_id)
                             .is_some_and(|b| b.is_dirty());
                         GenericPickerItem {
                             id: info.page_id.to_hex(),
                             label: info.title.clone(),
-                            middle: if is_dirty { Some("[+]".to_string()) } else { None },
+                            middle: if is_dirty {
+                                Some("[+]".to_string())
+                            } else {
+                                None
+                            },
                             right: Some(info.path.display().to_string()),
                             preview_text: None,
                             score_boost: 0,
@@ -117,26 +125,25 @@ impl BloomEditor {
                 ("All Commands".to_string(), "commands".to_string(), items)
             }
             PickerKind::Templates => {
-                let mut items: Vec<GenericPickerItem> =
-                    template::builtins::builtin_templates()
-                        .into_iter()
-                        .map(|t| {
-                            let placeholder_count =
-                                t.placeholders.iter().filter(|p| p.index != 0).count();
-                            GenericPickerItem {
-                                id: t.name.clone(),
-                                label: t.name.clone(),
-                                middle: Some(t.description.clone()),
-                                right: if placeholder_count > 0 {
-                                    Some(format!("{placeholder_count} fields"))
-                                } else {
-                                    None
-                                },
-                                preview_text: Some(t.content.clone()),
-                                score_boost: 1, // sort above user templates
-                            }
-                        })
-                        .collect();
+                let mut items: Vec<GenericPickerItem> = template::builtins::builtin_templates()
+                    .into_iter()
+                    .map(|t| {
+                        let placeholder_count =
+                            t.placeholders.iter().filter(|p| p.index != 0).count();
+                        GenericPickerItem {
+                            id: t.name.clone(),
+                            label: t.name.clone(),
+                            middle: Some(t.description.clone()),
+                            right: if placeholder_count > 0 {
+                                Some(format!("{placeholder_count} fields"))
+                            } else {
+                                None
+                            },
+                            preview_text: Some(t.content.clone()),
+                            score_boost: 1, // sort above user templates
+                        }
+                    })
+                    .collect();
                 if let Some(engine) = &self.template_engine {
                     items.extend(engine.list().into_iter().map(|t| {
                         let placeholder_count = t.placeholders.len();

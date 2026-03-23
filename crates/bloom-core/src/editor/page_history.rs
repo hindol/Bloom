@@ -89,8 +89,12 @@ impl BloomEditor {
 
         let (cursor_line, _) = self.cursor_position();
         let (block_id_str, current_line_text) = {
-            let Some(buf) = self.writer.buffers().get(&page_id) else { return };
-            if cursor_line >= buf.len_lines() { return; }
+            let Some(buf) = self.writer.buffers().get(&page_id) else {
+                return;
+            };
+            if cursor_line >= buf.len_lines() {
+                return;
+            }
             let line_text = buf.line(cursor_line).to_string();
             let bid = bloom_md::parser::extensions::parse_block_id(&line_text, cursor_line);
             match bid {
@@ -121,12 +125,8 @@ impl BloomEditor {
                 let snapshot = tree.node_snapshot_string(node_id);
                 // Find the line containing our block ID, or fall back to
                 // same line number if the ID didn't exist in this version.
-                let block_line_text = extract_block_line(
-                    &snapshot,
-                    &block_pattern,
-                    &mirror_pattern,
-                    cursor_line,
-                );
+                let block_line_text =
+                    extract_block_line(&snapshot, &block_pattern, &mirror_pattern, cursor_line);
 
                 if let Some(ref line) = block_line_text {
                     // Only add if content changed from the next (newer) version
@@ -187,8 +187,13 @@ impl BloomEditor {
 
     /// Append git history entries to the temporal strip when they arrive.
     pub(crate) fn append_git_history(&mut self, entries: &[history::PageHistoryEntry]) {
-        let Some(ts) = &mut self.temporal_strip else { return };
-        if !matches!(ts.mode, render::TemporalMode::PageHistory | render::TemporalMode::BlockHistory) {
+        let Some(ts) = &mut self.temporal_strip else {
+            return;
+        };
+        if !matches!(
+            ts.mode,
+            render::TemporalMode::PageHistory | render::TemporalMode::BlockHistory
+        ) {
             return;
         }
 
@@ -298,9 +303,18 @@ impl BloomEditor {
     /// Restore the selected temporal item to the buffer.
     fn temporal_strip_restore(&mut self) {
         let (content, undo_node_id, page_id, mode) = {
-            let Some(ts) = &self.temporal_strip else { return };
-            let Some(item) = ts.items.get(ts.selected) else { return };
-            (item.content.clone(), item.undo_node_id, ts.page_id.clone(), ts.mode)
+            let Some(ts) = &self.temporal_strip else {
+                return;
+            };
+            let Some(item) = ts.items.get(ts.selected) else {
+                return;
+            };
+            (
+                item.content.clone(),
+                item.undo_node_id,
+                ts.page_id.clone(),
+                ts.mode,
+            )
         };
 
         match mode {
@@ -344,8 +358,12 @@ impl BloomEditor {
 
     /// Load content for the selected temporal item (git commits are lazy-loaded).
     pub(crate) fn load_temporal_content_if_needed(&self) {
-        let Some(ts) = &self.temporal_strip else { return };
-        let Some(item) = ts.items.get(ts.selected) else { return };
+        let Some(ts) = &self.temporal_strip else {
+            return;
+        };
+        let Some(item) = ts.items.get(ts.selected) else {
+            return;
+        };
         if item.content.is_some() {
             return; // Already loaded
         }

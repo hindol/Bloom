@@ -20,7 +20,7 @@ fn uc01_open_journal() {
     let screen = sim.screen(80, 24);
     // Journal page should be active — title contains the date
     assert!(
-        screen.title().contains("202") || screen.title().is_empty() == false,
+        screen.title().contains("202") || !screen.title().is_empty(),
         "journal should be open, got title: '{}'",
         screen.title()
     );
@@ -655,7 +655,7 @@ fn uc12_close_buffer() {
     let mut sim = SimInput::with_content("hello");
 
     // Buffer is open
-    assert!(sim.screen(80, 24).title().len() > 0);
+    assert!(!sim.screen(80, 24).title().is_empty());
 
     // SPC b d closes buffer
     sim.keys("SPC b k");
@@ -663,7 +663,7 @@ fn uc12_close_buffer() {
     // After close, a new buffer should be open (journal or scratch)
     let screen = sim.screen(80, 24);
     assert!(
-        screen.title().len() > 0,
+        !screen.title().is_empty(),
         "new buffer should be open after close"
     );
 }
@@ -1634,7 +1634,7 @@ fn task_vault_agenda_opens() {
     sim.keys("SPC a a");
     let screen = sim.screen(80, 24);
     assert!(
-        screen.title().len() > 0 || screen.has_picker(),
+        !screen.title().is_empty() || screen.has_picker(),
         "agenda should open"
     );
 }
@@ -1734,7 +1734,7 @@ fn open_two_pages_and_switch() {
     sim.keys("SPC b b");
     assert!(sim.screen(80, 24).has_picker());
     sim.keys("Enter");
-    assert!(sim.screen(80, 24).title().len() > 0);
+    assert!(!sim.screen(80, 24).title().is_empty());
 }
 
 #[test]
@@ -3199,7 +3199,7 @@ fn block_history_opens_on_block_id() {
     );
     if let Some(ts) = &screen.frame.temporal_strip {
         assert!(
-            ts.items.len() >= 1,
+            !ts.items.is_empty(),
             "should have at least 1 version of the block"
         );
         assert_eq!(ts.mode, bloom_core::render::TemporalMode::BlockHistory);
@@ -3828,11 +3828,21 @@ fn uc09_rename_page_opens_input() {
     let pane = screen.frame.panes.iter().find(|p| p.is_active).unwrap();
     match &pane.status_bar.content {
         bloom_core::render::StatusBarContent::QuickCapture(qc) => {
-            assert!(qc.prompt.contains("Rename"), "prompt should mention Rename, got: {}", qc.prompt);
+            assert!(
+                qc.prompt.contains("Rename"),
+                "prompt should mention Rename, got: {}",
+                qc.prompt
+            );
             // Should be pre-filled with current title
-            assert!(!qc.input.is_empty(), "input should be pre-filled with current title");
+            assert!(
+                !qc.input.is_empty(),
+                "input should be pre-filled with current title"
+            );
         }
-        other => panic!("expected QuickCapture, got {:?}", std::mem::discriminant(other)),
+        other => panic!(
+            "expected QuickCapture, got {:?}",
+            std::mem::discriminant(other)
+        ),
     }
 }
 
@@ -3850,7 +3860,11 @@ fn uc09_rename_page_updates_title() {
     sim.keys("<CR>");
 
     let screen = sim.screen(80, 24);
-    assert!(screen.title().contains("Old Title"), "should show Old Title, got: {}", screen.title());
+    assert!(
+        screen.title().contains("Old Title"),
+        "should show Old Title, got: {}",
+        screen.title()
+    );
 
     // Rename: SPC f r
     sim.keys("SPC f r");
@@ -3873,7 +3887,11 @@ fn uc09_rename_page_updates_title() {
     sim.keys("<CR>");
 
     let screen = sim.screen(80, 24);
-    assert!(screen.title().contains("New Title"), "title should be New Title, got: {}", screen.title());
+    assert!(
+        screen.title().contains("New Title"),
+        "title should be New Title, got: {}",
+        screen.title()
+    );
 }
 
 #[test]
@@ -3904,7 +3922,11 @@ fn uc10_delete_page_cancel_keeps_page() {
 
     let screen = sim.screen(80, 24);
     assert!(!screen.has_dialog());
-    assert!(screen.title().contains("Keep Me"), "page should still exist, got: {}", screen.title());
+    assert!(
+        screen.title().contains("Keep Me"),
+        "page should still exist, got: {}",
+        screen.title()
+    );
 }
 
 #[test]
@@ -3934,7 +3956,11 @@ fn uc10_delete_page_confirm_removes_page() {
     let screen = sim.screen(80, 24);
     assert!(!screen.has_dialog());
     // Should have switched away from the deleted page
-    assert!(!screen.title().contains("To Delete"), "should not show deleted page, got: {}", screen.title());
+    assert!(
+        !screen.title().contains("To Delete"),
+        "should not show deleted page, got: {}",
+        screen.title()
+    );
 }
 
 #[test]
@@ -4493,7 +4519,7 @@ fn history_scrubber_navigation_updates_preview() {
     sim.keys("SPC H h");
     let screen = sim.screen(80, 30);
     assert!(screen.has_temporal_strip());
-    let initial_preview_count = screen.temporal_preview_line_count();
+    let _initial_preview_count = screen.temporal_preview_line_count();
 
     // Navigate to an older entry.
     sim.keys("h");

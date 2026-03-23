@@ -253,7 +253,10 @@ impl KeymapDispatcher {
             KeyCode::Esc => vec![Action::CancelQuickCapture],
             KeyCode::Enter if key.modifiers.ctrl => {
                 // Ctrl+Enter submits (content managed by caller)
-                vec![Action::SubmitQuickCapture(QuickCaptureKind::Note, String::new())]
+                vec![Action::SubmitQuickCapture(
+                    QuickCaptureKind::Note,
+                    String::new(),
+                )]
             }
             _ => vec![],
         }
