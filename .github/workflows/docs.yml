@@ -2,8 +2,6 @@ name: Docs
 
 on:
   push:
-    branches: [main]
-    paths: ['crates/**/*.rs', 'docs/ARCHITECTURE.md']
     tags: ['v*']
   workflow_dispatch:
 
