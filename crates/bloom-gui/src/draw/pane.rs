@@ -822,20 +822,26 @@ fn draw_dashboard(
     let salient = rgb_to_color(&theme.salient);
     let fg = rgb_to_color(&theme.foreground);
 
-    // --- Logo area (top center) ---
-    let logo_y = area.y + 3.0 * LINE_HEIGHT;
-    let logo_size = FONT_SIZE * 1.6;
-    let logo_row_h = logo_size * 1.4;
-    let logo_text = "Bloom \u{1F331}";
-    let logo_w = text_width(logo_text) * (logo_size / FONT_SIZE);
-    let logo_x = area.x + (area.width - logo_w).max(0.0) / 2.0;
-    draw_text_sized(frame, logo_x, logo_y, logo_text, strong, logo_size, logo_row_h);
+    // --- ASCII Art Logo (top center) ---
+    let logo_lines = [
+        "██████╗ ██╗      ██████╗  ██████╗ ███╗   ███╗",
+        "██╔══██╗██║     ██╔═══██╗██╔═══██╗████╗ ████║",
+        "██████╔╝██║     ██║   ██║██║   ██║██╔████╔██║",
+        "██╔══██╗██║     ██║   ██║██║   ██║██║╚██╔╝██║",
+        "██████╔╝███████╗╚██████╔╝╚██████╔╝██║ ╚═╝ ██║",
+        "╚═════╝ ╚══════╝ ╚═════╝  ╚═════╝ ╚═╝     ╚═╝",
+    ];
+    let logo_y = area.y + 2.0 * LINE_HEIGHT;
+    for (i, line) in logo_lines.iter().enumerate() {
+        draw_text_center(frame, area, logo_y + i as f32 * LINE_HEIGHT, line, strong);
+    }
 
     let tagline = "Write freely. Let patterns emerge.";
-    draw_text_center(frame, area, logo_y + logo_row_h + LINE_HEIGHT * 0.5, tagline, faded);
+    let tagline_y = logo_y + logo_lines.len() as f32 * LINE_HEIGHT + LINE_HEIGHT;
+    draw_text_center(frame, area, tagline_y, tagline, faded);
 
     // --- Two-column layout: Recent Pages + Quick Actions ---
-    let col_top = logo_y + logo_row_h + LINE_HEIGHT * 3.0;
+    let col_top = tagline_y + LINE_HEIGHT * 2.5;
     let left_x = area.x + area.width * 0.1;
     let right_x = area.x + area.width * 0.55;
 
