@@ -71,7 +71,10 @@ jobs:
       - name: Run tests with coverage
         run: |
           # Limit parallelism: e2e tests spawn indexer threads per test case.
-          RUST_TEST_THREADS=4 cargo llvm-cov --workspace --fail-under-regions 65
+          # Exclude bloom-gui from coverage — it's GPU rendering code tested manually.
+          RUST_TEST_THREADS=4 cargo llvm-cov --workspace \
+            --ignore-filename-regex 'bloom-gui/' \
+            --fail-under-regions 65
 
   build:
     name: Build
