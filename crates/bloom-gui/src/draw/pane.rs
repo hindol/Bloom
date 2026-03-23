@@ -217,12 +217,10 @@ fn draw_editor_content(
                 _ => None,
             });
             let line_font_size = heading_level.map(heading_font_size).unwrap_or(FONT_SIZE);
-            let heading_cw = CHAR_WIDTH * (line_font_size / FONT_SIZE);
-
-            // Accumulate X position — heading spans use wider char width,
-            // non-heading spans (block IDs, syntax noise) use base CHAR_WIDTH.
-            let mut x_cursor = 0.0_f32;
-            let mut last_end = 0usize;
+            // Uniform char width and font size for the entire line.
+            // Heading lines use the scaled size for ALL spans (including block IDs).
+            // This keeps width calculations simple and cursor positioning correct.
+            let line_cw = CHAR_WIDTH * (line_font_size / FONT_SIZE);
 
             for span in &line.spans {
                 let start = span.range.start.min(visible_text.len());
@@ -231,54 +229,38 @@ fn draw_editor_content(
                     continue;
                 }
 
-                // Advance x_cursor for any gap between last span end and this span start.
-                if start > last_end {
-                    let gap = &visible_text[last_end..start];
-                    let gap_is_heading = heading_level.is_some(); // gaps inherit heading width
-                    let gap_cw = if gap_is_heading { heading_cw } else { CHAR_WIDTH };
-                    x_cursor += gap.chars().count() as f32 * gap_cw;
-                }
-
                 let slice = &visible_text[start..end];
-                let is_heading_span = matches!(span.style, Style::Heading { .. } | Style::SyntaxNoise)
-                    && heading_level.is_some();
-                // Block IDs, tags, timestamps etc. on heading lines use base size.
-                let span_cw = if is_heading_span { heading_cw } else { CHAR_WIDTH };
-                let span_font = if is_heading_span { line_font_size } else { FONT_SIZE };
-                let span_w = slice.chars().count() as f32 * span_cw;
+                let span_x = start as f32 * line_cw;
+                let span_w = slice.chars().count() as f32 * line_cw;
 
                 // Background wash for styles that need it.
                 if let Some(bg) = style_to_bg(&span.style, theme) {
-                    fill_rect(frame, rect(text_x + x_cursor, y, span_w, row_h), bg);
+                    fill_rect(frame, rect(text_x + span_x, y, span_w, row_h), bg);
                 }
 
                 draw_text_sized(
                     frame,
-                    text_x + x_cursor,
+                    text_x + span_x,
                     y,
                     slice.to_string(),
                     style_to_color(&span.style, theme),
-                    span_font,
+                    line_font_size,
                     row_h,
                 );
 
                 // Strikethrough for checked task text (not the checkbox or block ID).
-                // Skip leading and trailing whitespace so the line covers only the words.
                 if span.style == Style::CheckedTaskText {
                     let leading = slice.chars().take_while(|c| c.is_whitespace()).count();
                     let trailing = slice.chars().rev().take_while(|c| c.is_whitespace()).count();
                     let text_chars = slice.chars().count();
                     let content_chars = text_chars.saturating_sub(leading).saturating_sub(trailing);
                     if content_chars > 0 {
-                        let strike_start = text_x + x_cursor + leading as f32 * span_cw;
-                        let strike_end = strike_start + content_chars as f32 * span_cw;
+                        let strike_start = text_x + span_x + leading as f32 * line_cw;
+                        let strike_end = strike_start + content_chars as f32 * line_cw;
                         let strike_y = y + row_h / 2.0;
                         crate::draw::draw_hline(frame, strike_start, strike_end, strike_y, style_to_color(&span.style, theme));
                     }
                 }
-
-                x_cursor += span_w;
-                last_end = end;
             }
         }
 
@@ -307,63 +289,14 @@ fn draw_editor_content(
         let cursor_row_idx = pane.cursor.line.saturating_sub(pane.scroll_offset);
         let cursor_row_h = line_heights.get(cursor_row_idx).copied().unwrap_or(LINE_HEIGHT);
 
-        // Compute cursor X using the same running-width logic as span rendering.
-        // Each span may have a different char width (heading vs base).
+        // Simple cursor positioning — uniform font size per line.
         let (cx, cursor_cw) = if let Some(line) = pane.visible_lines.get(cursor_row_idx) {
             let h_level = line.spans.iter().find_map(|s| match s.style {
                 Style::Heading { level } => Some(level),
                 _ => None,
             });
-            let h_cw = h_level.map(|l| CHAR_WIDTH * (heading_font_size(l) / FONT_SIZE)).unwrap_or(CHAR_WIDTH);
-            let line_text = line.text.trim_end_matches(['\n', '\r']);
-
-            // Walk spans to find the X of cursor.column
-            let mut x = 0.0_f32;
-            let mut last_end = 0usize;
-            let mut char_w_at_cursor = CHAR_WIDTH;
-            let col = pane.cursor.column;
-            let mut col_found = false;
-
-            for span in &line.spans {
-                let start = span.range.start.min(line_text.len());
-                let end = span.range.end.min(line_text.len());
-                if start >= end { continue; }
-
-                // Gap before this span
-                if start > last_end {
-                    let gap_chars = line_text[last_end..start].chars().count();
-                    let gap_cw = if h_level.is_some() { h_cw } else { CHAR_WIDTH };
-                    if col >= last_end && col < start {
-                        x += (col - last_end) as f32 * gap_cw;
-                        char_w_at_cursor = gap_cw;
-                        col_found = true;
-                        break;
-                    }
-                    x += gap_chars as f32 * gap_cw;
-                }
-
-                let is_heading_span = matches!(span.style, Style::Heading { .. } | Style::SyntaxNoise) && h_level.is_some();
-                let span_cw = if is_heading_span { h_cw } else { CHAR_WIDTH };
-                let span_chars = line_text[start..end].chars().count();
-
-                if col >= start && col < end {
-                    x += (col - start) as f32 * span_cw;
-                    char_w_at_cursor = span_cw;
-                    col_found = true;
-                    break;
-                }
-                x += span_chars as f32 * span_cw;
-                last_end = end;
-            }
-
-            if !col_found {
-                // Cursor past all spans — use base width for remaining
-                if col > last_end {
-                    x += (col - last_end) as f32 * CHAR_WIDTH;
-                }
-            }
-
-            (pane_x + GUTTER_WIDTH + x, char_w_at_cursor)
+            let cw = h_level.map(|l| CHAR_WIDTH * (heading_font_size(l) / FONT_SIZE)).unwrap_or(CHAR_WIDTH);
+            (pane_x + GUTTER_WIDTH + pane.cursor.column as f32 * cw, cw)
         } else {
             (pane_x + GUTTER_WIDTH + pane.cursor.column as f32 * CHAR_WIDTH, CHAR_WIDTH)
         };
