@@ -20,15 +20,15 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             os: macos-latest
-            binary: bloom-tui
+            binary: bloom-gui
             archive: tar.gz
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            binary: bloom-tui
+            binary: bloom-gui
             archive: tar.gz
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            binary: bloom-tui.exe
+            binary: bloom-gui.exe
             archive: zip
 
     steps:
@@ -46,27 +46,224 @@ jobs:
             target
           key: release-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Build
-        run: cargo build --release --target ${{ matrix.target }} -p bloom-tui
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libvulkan-dev
 
-      - name: Package (Unix)
-        if: matrix.archive == 'tar.gz'
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }} -p bloom-gui
+
+      # ── macOS: .app bundle + .dmg ──
+      - name: Create macOS .app bundle
+        if: runner.os == 'macOS'
+        run: |
+          APP="Bloom.app"
+          mkdir -p "$APP/Contents/MacOS"
+          mkdir -p "$APP/Contents/Resources"
+
+          cp target/${{ matrix.target }}/release/bloom-gui "$APP/Contents/MacOS/Bloom"
+
+          cp crates/bloom-gui/icons/icon.icns "$APP/Contents/Resources/AppIcon.icns"
+
+          cat > "$APP/Contents/Info.plist" << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key>
+            <string>Bloom</string>
+            <key>CFBundleDisplayName</key>
+            <string>Bloom</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.bloom.editor</string>
+            <key>CFBundleVersion</key>
+            <string>${{ github.ref_name }}</string>
+            <key>CFBundleShortVersionString</key>
+            <string>${{ github.ref_name }}</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleExecutable</key>
+            <string>Bloom</string>
+            <key>CFBundleIconFile</key>
+            <string>AppIcon</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>13.0</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+            <key>CFBundleDocumentTypes</key>
+            <array>
+              <dict>
+                <key>CFBundleTypeExtensions</key>
+                <array><string>md</string></array>
+                <key>CFBundleTypeName</key>
+                <string>Markdown Document</string>
+                <key>CFBundleTypeRole</key>
+                <string>Editor</string>
+              </dict>
+            </array>
+          </dict>
+          </plist>
+          PLIST
+
+      - name: Create macOS .dmg
+        if: runner.os == 'macOS'
+        run: |
+          DMG_NAME="Bloom-${{ github.ref_name }}-${{ matrix.target }}"
+          mkdir -p dmg-stage
+          cp -R Bloom.app dmg-stage/
+          ln -s /Applications dmg-stage/Applications
+          hdiutil create -volname "Bloom" -srcfolder dmg-stage \
+            -ov -format UDZO "${DMG_NAME}.dmg"
+
+      # ── Linux: .tar.gz + .deb ──
+      - name: Package (Linux tar.gz)
+        if: runner.os == 'Linux'
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../bloom-${{ github.ref_name }}-${{ matrix.target }}.tar.gz bloom-tui
+          tar czf ../../../bloom-${{ github.ref_name }}-${{ matrix.target }}.tar.gz bloom-gui
           cd ../../..
 
-      - name: Package (Windows)
-        if: matrix.archive == 'zip'
+      - name: Create .deb package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          PKG_DIR="bloom_${VERSION}_amd64"
+          mkdir -p "${PKG_DIR}/DEBIAN"
+          mkdir -p "${PKG_DIR}/usr/bin"
+          mkdir -p "${PKG_DIR}/usr/share/applications"
+          mkdir -p "${PKG_DIR}/usr/share/icons/hicolor/256x256/apps"
+          mkdir -p "${PKG_DIR}/usr/share/icons/hicolor/128x128/apps"
+          mkdir -p "${PKG_DIR}/usr/share/icons/hicolor/64x64/apps"
+          mkdir -p "${PKG_DIR}/usr/share/icons/hicolor/48x48/apps"
+          mkdir -p "${PKG_DIR}/usr/share/icons/hicolor/32x32/apps"
+          mkdir -p "${PKG_DIR}/usr/share/icons/hicolor/16x16/apps"
+
+          cp target/${{ matrix.target }}/release/bloom-gui "${PKG_DIR}/usr/bin/bloom"
+
+          cp crates/bloom-gui/icons/icon_256x256.png "${PKG_DIR}/usr/share/icons/hicolor/256x256/apps/bloom.png"
+          cp crates/bloom-gui/icons/icon_128x128.png "${PKG_DIR}/usr/share/icons/hicolor/128x128/apps/bloom.png"
+          cp crates/bloom-gui/icons/icon_64x64.png   "${PKG_DIR}/usr/share/icons/hicolor/64x64/apps/bloom.png"
+          cp crates/bloom-gui/icons/icon_48x48.png   "${PKG_DIR}/usr/share/icons/hicolor/48x48/apps/bloom.png"
+          cp crates/bloom-gui/icons/icon_32x32.png   "${PKG_DIR}/usr/share/icons/hicolor/32x32/apps/bloom.png"
+          cp crates/bloom-gui/icons/icon_16x16.png   "${PKG_DIR}/usr/share/icons/hicolor/16x16/apps/bloom.png"
+
+          cat > "${PKG_DIR}/usr/share/applications/bloom.desktop" << DESKTOP
+          [Desktop Entry]
+          Name=Bloom
+          Comment=Local-first keyboard-driven note-taking
+          Exec=bloom
+          Icon=bloom
+          Terminal=false
+          Type=Application
+          Categories=Office;TextEditor;
+          MimeType=text/markdown;text/x-markdown;
+          DESKTOP
+
+          cat > "${PKG_DIR}/DEBIAN/control" << CONTROL
+          Package: bloom
+          Version: ${VERSION}
+          Architecture: amd64
+          Maintainer: Hindol Adhya <hindol.adhya@gmail.com>
+          Description: Local-first keyboard-driven note-taking app
+           Bloom is a Vim-modal, Doom Emacs-inspired personal knowledge
+           management system with GPU-accelerated rendering.
+          Section: editors
+          Priority: optional
+          Installed-Size: $(du -sk "${PKG_DIR}/usr" | cut -f1)
+          Depends: libxkbcommon0, libwayland-client0, libvulkan1
+          Homepage: https://github.com/hindol/Bloom
+          CONTROL
+
+          dpkg-deb --build --root-owner-group "${PKG_DIR}"
+          mv "${PKG_DIR}.deb" "bloom-${{ github.ref_name }}-${{ matrix.target }}.deb"
+
+      # ── Windows: .zip + .msi ──
+      - name: Package (Windows zip)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Compress-Archive -Path "target/${{ matrix.target }}/release/bloom-tui.exe" -DestinationPath "bloom-${{ github.ref_name }}-${{ matrix.target }}.zip"
+          Compress-Archive -Path "target/${{ matrix.target }}/release/bloom-gui.exe" -DestinationPath "bloom-${{ github.ref_name }}-${{ matrix.target }}.zip"
 
+      - name: Create Windows .msi
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          # Ensure 3-part version for MSI (X.Y.Z)
+          $parts = $version.Split(".")
+          while ($parts.Count -lt 3) { $parts += "0" }
+          $msiVersion = ($parts[0..2]) -join "."
+
+          # Install WiX v4
+          dotnet tool install --global wix
+
+          # Create WiX source
+          @"
+          <?xml version="1.0" encoding="UTF-8"?>
+          <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+            <Package Name="Bloom"
+                     Version="$msiVersion"
+                     Manufacturer="Hindol Adhya"
+                     UpgradeCode="E8A3B2C4-1D5F-4A6B-8E9C-0F1A2B3C4D5E"
+                     InstallerVersion="500"
+                     Compressed="yes">
+              <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
+              <MediaTemplate EmbedCab="yes" />
+
+              <StandardDirectory Id="ProgramFiles6432Folder">
+                <Directory Id="INSTALLFOLDER" Name="Bloom">
+                  <Component Id="MainExecutable" Guid="A1B2C3D4-5E6F-7A8B-9C0D-E1F2A3B4C5D6">
+                    <File Id="BloomExe"
+                          Source="target\${{ matrix.target }}\release\bloom-gui.exe"
+                          Name="bloom.exe"
+                          KeyPath="yes" />
+                  </Component>
+                </Directory>
+              </StandardDirectory>
+
+              <StandardDirectory Id="ProgramMenuFolder">
+                <Component Id="StartMenuShortcut" Guid="B2C3D4E5-6F7A-8B9C-0D1E-F2A3B4C5D6E7">
+                  <Shortcut Id="BloomShortcut"
+                            Name="Bloom"
+                            Target="[INSTALLFOLDER]bloom.exe"
+                            WorkingDirectory="INSTALLFOLDER"
+                            Icon="BloomIcon" />
+                  <RegistryValue Root="HKCU" Key="Software\Bloom" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+                </Component>
+              </StandardDirectory>
+
+              <Icon Id="BloomIcon" SourceFile="crates\bloom-gui\icons\icon.ico" />
+              <Property Id="ARPPRODUCTICON" Value="BloomIcon" />
+
+              <Feature Id="Complete" Level="1">
+                <ComponentRef Id="MainExecutable" />
+                <ComponentRef Id="StartMenuShortcut" />
+              </Feature>
+
+              <!-- Add to PATH -->
+              <Component Id="PathEnv" Directory="INSTALLFOLDER" Guid="C3D4E5F6-7A8B-9C0D-1E2F-A3B4C5D6E7F8">
+                <Environment Id="PATH" Name="PATH" Value="[INSTALLFOLDER]" Separator=";" Action="set" Part="last" System="yes" />
+              </Component>
+              <Feature Id="PathFeature" Level="1">
+                <ComponentRef Id="PathEnv" />
+              </Feature>
+            </Package>
+          </Wix>
+          "@ | Out-File -Encoding UTF8 bloom.wxs
+
+          wix build bloom.wxs -o "bloom-${{ github.ref_name }}-${{ matrix.target }}.msi"
+
+      # ── Upload all artifacts ──
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: bloom-${{ matrix.target }}
-          path: bloom-${{ github.ref_name }}-${{ matrix.target }}.*
+          path: |
+            bloom-${{ github.ref_name }}-${{ matrix.target }}.*
+            Bloom-${{ github.ref_name }}-${{ matrix.target }}.*
 
   release:
     name: Create Release
@@ -81,9 +278,16 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
-          files: artifacts/*
+          files: |
+            artifacts/*

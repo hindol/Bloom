@@ -33,7 +33,7 @@ try {
     $ZipPath = Join-Path $TempDir "bloom.zip"
     Invoke-WebRequest -Uri $Url -OutFile $ZipPath -UseBasicParsing
     Expand-Archive -Path $ZipPath -DestinationPath $TempDir -Force
-    Copy-Item -Path (Join-Path $TempDir "bloom-tui.exe") -Destination (Join-Path $InstallDir "bloom.exe") -Force
+    Copy-Item -Path (Join-Path $TempDir "bloom-gui.exe") -Destination (Join-Path $InstallDir "bloom.exe") -Force
 } finally {
     Remove-Item -Recurse -Force $TempDir -ErrorAction SilentlyContinue
 }

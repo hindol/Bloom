@@ -16,4 +16,11 @@ tracing = "0.1"
 [package.metadata.bundle]
 name = "Bloom"
 identifier = "com.bloom.editor"
-icon = ["icons/icon.icns"]
+icon = [
+    "icons/icon.icns",
+    "icons/icon.ico",
+    "icons/icon.png",
+]
+category = "public.app-category.productivity"
+short_description = "Local-first keyboard-driven note-taking"
+copyright = "Copyright (c) Hindol Adhya"

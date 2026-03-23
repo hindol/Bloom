@@ -57,7 +57,7 @@ main() {
 
     curl -fsSL "$url" -o "$tmpdir/bloom.tar.gz"
     tar xzf "$tmpdir/bloom.tar.gz" -C "$tmpdir"
-    install -m 755 "$tmpdir/bloom-tui" "$INSTALL_DIR/bloom"
+    install -m 755 "$tmpdir/bloom-gui" "$INSTALL_DIR/bloom"
 
     echo ""
     echo "✓ Bloom installed to ${INSTALL_DIR}/bloom"
