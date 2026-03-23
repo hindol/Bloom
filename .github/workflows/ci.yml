@@ -54,6 +54,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libwayland-dev libvulkan-dev
+      - name: Configure git for tests
+        run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@bloom.local"
+          git config --global init.defaultBranch main
       - uses: actions/cache@v4
         with:
           path: |
@@ -65,8 +70,7 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
       - name: Run tests with coverage
         run: |
-          # E2e tests spawn background indexer threads per test case.
-          # Limit parallelism so indexers finish within flush_background timeouts.
+          # Limit parallelism: e2e tests spawn indexer threads per test case.
           RUST_TEST_THREADS=4 cargo llvm-cov --workspace --fail-under-regions 65
 
   build:

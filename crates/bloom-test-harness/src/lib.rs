@@ -288,16 +288,13 @@ impl SimInput {
 
             if let Some(rx) = &channels.indexer_rx {
                 // Use blocking recv_timeout so we yield CPU to the indexer thread
-                match rx.recv_timeout(timeout) {
-                    Ok(complete) => {
-                        self.editor.handle_index_complete(complete);
-                        progressed = true;
-                        // Drain any additional messages
-                        while let Ok(c) = rx.try_recv() {
-                            self.editor.handle_index_complete(c);
-                        }
+                if let Ok(complete) = rx.recv_timeout(timeout) {
+                    self.editor.handle_index_complete(complete);
+                    progressed = true;
+                    // Drain any additional messages
+                    while let Ok(c) = rx.try_recv() {
+                        self.editor.handle_index_complete(c);
                     }
-                    Err(_) => {}
                 }
             }
 
