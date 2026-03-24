@@ -14,6 +14,7 @@ pub mod picker;
 pub mod query;
 pub mod refactor;
 pub mod render;
+pub mod parse_tree;
 pub mod session;
 pub mod template;
 pub mod timeline;
@@ -25,6 +26,7 @@ pub mod window;
 
 mod editor;
 pub use editor::event_loop;
+pub use editor::section_mirror;
 
 // ---------------------------------------------------------------------------
 // BufferManager
@@ -102,8 +104,16 @@ impl BufferSlot {
     }
 }
 
+/// A buffer bundled with its metadata and persistent parse tree.
+/// Created together, closed together, evicted together.
+pub struct ManagedBuffer {
+    pub slot: BufferSlot,
+    pub info: BufferInfo,
+    pub parse_tree: parse_tree::ParseTree,
+}
+
 pub struct BufferManager {
-    buffers: HashMap<String, (BufferSlot, BufferInfo)>,
+    buffers: HashMap<String, ManagedBuffer>,
 }
 
 /// Metadata for an open buffer: identity, display title, file path, and dirty state.
@@ -145,9 +155,14 @@ impl BufferManager {
                 dirty: false,
                 last_focused: Instant::now(),
             };
-            (BufferSlot::Mutable(buf), info)
+            let parse_tree = parse_tree::ParseTree::build(content);
+            ManagedBuffer {
+                slot: BufferSlot::Mutable(buf),
+                info,
+                parse_tree,
+            }
         });
-        match &mut self.buffers.get_mut(&key).unwrap().0 {
+        match &mut self.buffers.get_mut(&key).unwrap().slot {
             BufferSlot::Mutable(buf) => buf,
             BufferSlot::Frozen(_) => panic!("open() called on a read-only buffer"),
         }
@@ -157,7 +172,7 @@ impl BufferManager {
     pub fn get(&self, page_id: &types::PageId) -> Option<&bloom_buffer::Buffer> {
         self.buffers
             .get(&page_id.to_hex())
-            .map(|(slot, _)| slot.as_buffer())
+            .map(|mb| mb.slot.as_buffer())
     }
 
     /// Get a Buffer with its info (both mutable and frozen).
@@ -167,29 +182,28 @@ impl BufferManager {
     ) -> Option<(&bloom_buffer::Buffer, &BufferInfo)> {
         self.buffers
             .get(&page_id.to_hex())
-            .map(|(slot, info)| (slot.as_buffer(), info))
+            .map(|mb| (mb.slot.as_buffer(), &mb.info))
     }
 
     /// Get a mutable reference to a Buffer (mutable buffers only).
     pub fn get_mut(&mut self, page_id: &types::PageId) -> Option<&mut bloom_buffer::Buffer> {
         self.buffers
             .get_mut(&page_id.to_hex())
-            .and_then(|(slot, _)| match slot {
+            .and_then(|mb| match &mut mb.slot {
                 BufferSlot::Mutable(buf) => Some(buf),
                 BufferSlot::Frozen(_) => None,
             })
     }
 
-    /// Get a frozen (read-only) buffer reference.
     /// Get the BufferInfo regardless of buffer type.
     pub fn info(&self, page_id: &types::PageId) -> Option<&BufferInfo> {
-        self.buffers.get(&page_id.to_hex()).map(|(_, info)| info)
+        self.buffers.get(&page_id.to_hex()).map(|mb| &mb.info)
     }
 
     pub fn info_mut(&mut self, page_id: &types::PageId) -> Option<&mut BufferInfo> {
         self.buffers
             .get_mut(&page_id.to_hex())
-            .map(|(_, info)| info)
+            .map(|mb| &mut mb.info)
     }
 
     pub fn close(&mut self, page_id: &types::PageId) {
@@ -207,18 +221,23 @@ impl BufferManager {
             dirty: false,
             last_focused: Instant::now(),
         };
-        self.buffers.insert(key, (BufferSlot::Frozen(buf), info));
+        let parse_tree = parse_tree::ParseTree::build(content);
+        self.buffers.insert(key, ManagedBuffer {
+            slot: BufferSlot::Frozen(buf),
+            info,
+            parse_tree,
+        });
     }
 
     pub fn is_read_only(&self, page_id: &types::PageId) -> bool {
         self.buffers
             .get(&page_id.to_hex())
-            .map(|(slot, _)| matches!(slot, BufferSlot::Frozen(_)))
+            .map(|mb| matches!(mb.slot, BufferSlot::Frozen(_)))
             .unwrap_or(false)
     }
 
     pub fn open_buffers(&self) -> Vec<&BufferInfo> {
-        self.buffers.values().map(|(_, info)| info).collect()
+        self.buffers.values().map(|mb| &mb.info).collect()
     }
 
     pub fn is_open(&self, page_id: &types::PageId) -> bool {
@@ -229,14 +248,14 @@ impl BufferManager {
     pub fn find_by_path(&self, path: &std::path::Path) -> Option<&types::PageId> {
         self.buffers
             .values()
-            .find(|(_, info)| info.path == path)
-            .map(|(_, info)| &info.page_id)
+            .find(|mb| mb.info.path == path)
+            .map(|mb| &mb.info.page_id)
     }
 
     /// Reload a buffer's content from a string (external file change).
     pub fn reload(&mut self, page_id: &types::PageId, content: &str) {
-        if let Some((slot, _)) = self.buffers.get_mut(&page_id.to_hex()) {
-            match slot {
+        if let Some(mb) = self.buffers.get_mut(&page_id.to_hex()) {
+            match &mut mb.slot {
                 BufferSlot::Mutable(buf) => {
                     *buf = bloom_buffer::Buffer::from_text(content);
                 }
@@ -244,6 +263,7 @@ impl BufferManager {
                     *buf = bloom_buffer::Buffer::from_text(content).freeze();
                 }
             }
+            mb.parse_tree = parse_tree::ParseTree::build(content);
         }
     }
 
@@ -254,9 +274,9 @@ impl BufferManager {
 
     /// Set cursor position for a specific cursor index (per-pane cursors).
     pub fn set_cursor_idx(&mut self, page_id: &types::PageId, idx: usize, pos: usize) {
-        if let Some((slot, _)) = self.buffers.get_mut(&page_id.to_hex()) {
+        if let Some(mb) = self.buffers.get_mut(&page_id.to_hex()) {
             // Ensure the buffer has enough cursors
-            match slot {
+            match &mut mb.slot {
                 BufferSlot::Mutable(buf) => {
                     buf.ensure_cursors(idx + 1);
                     buf.set_cursor(idx, pos);
@@ -266,6 +286,16 @@ impl BufferManager {
                 }
             }
         }
+    }
+
+    /// Get the parse tree for a buffer.
+    pub fn parse_tree(&self, page_id: &types::PageId) -> Option<&parse_tree::ParseTree> {
+        self.buffers.get(&page_id.to_hex()).map(|mb| &mb.parse_tree)
+    }
+
+    /// Get a mutable reference to the parse tree for a buffer.
+    pub fn parse_tree_mut(&mut self, page_id: &types::PageId) -> Option<&mut parse_tree::ParseTree> {
+        self.buffers.get_mut(&page_id.to_hex()).map(|mb| &mut mb.parse_tree)
     }
 }
 
@@ -381,42 +411,59 @@ impl BufferWriter {
                 cursor_after,
                 cursor_idx,
             } => {
-                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
-                    if replacement.is_empty() && !range.is_empty() {
-                        buf.delete(range);
-                    } else if range.is_empty() {
-                        buf.insert(range.start, &replacement);
-                    } else {
-                        buf.replace(range, &replacement);
-                    }
-                    buf.ensure_cursors(cursor_idx + 1);
-                    // Clamp to buffer length (not len-1, since Insert mode
-                    // needs cursor at len_chars for appending).
-                    let max_pos = buf.len_chars();
-                    buf.set_cursor(cursor_idx, cursor_after.min(max_pos));
-                    true
+                let Some(mb) = self.buffer_mgr.buffers.get_mut(&page_id.to_hex()) else {
+                    return false;
+                };
+                let buf = match &mut mb.slot {
+                    BufferSlot::Mutable(b) => b,
+                    BufferSlot::Frozen(_) => return false,
+                };
+                let line_before = buf.text().char_to_line(range.start.min(buf.len_chars().saturating_sub(1).max(0)));
+                let lines_before = buf.len_lines();
+                if replacement.is_empty() && !range.is_empty() {
+                    buf.delete(range);
+                } else if range.is_empty() {
+                    buf.insert(range.start, &replacement);
                 } else {
-                    false
+                    buf.replace(range, &replacement);
                 }
+                buf.ensure_cursors(cursor_idx + 1);
+                let max_pos = buf.len_chars();
+                buf.set_cursor(cursor_idx, cursor_after.min(max_pos));
+                let lines_after = buf.len_lines();
+                let delta = lines_after as isize - lines_before as isize;
+                let old_end = (line_before + 1).min(lines_before);
+                let new_end = ((old_end as isize + delta).max(line_before as isize + 1)) as usize;
+                mb.parse_tree.mark_dirty(line_before, old_end, new_end);
+                true
             }
             BufferMessage::MirrorEdit {
                 page_id,
                 range,
                 replacement,
             } => {
-                // Same as Edit but no event bus emission, no further mirror propagation.
-                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
-                    if replacement.is_empty() && !range.is_empty() {
-                        buf.delete(range);
-                    } else if range.is_empty() {
-                        buf.insert(range.start, &replacement);
-                    } else {
-                        buf.replace(range, &replacement);
-                    }
-                    true
+                let Some(mb) = self.buffer_mgr.buffers.get_mut(&page_id.to_hex()) else {
+                    return false;
+                };
+                let buf = match &mut mb.slot {
+                    BufferSlot::Mutable(b) => b,
+                    BufferSlot::Frozen(_) => return false,
+                };
+                let line_before = buf.text().char_to_line(range.start.min(buf.len_chars().saturating_sub(1).max(0)));
+                let lines_before = buf.len_lines();
+                if replacement.is_empty() && !range.is_empty() {
+                    buf.delete(range);
+                } else if range.is_empty() {
+                    buf.insert(range.start, &replacement);
                 } else {
-                    false
+                    buf.replace(range, &replacement);
                 }
+                let lines_after = buf.len_lines();
+                let delta = lines_after as isize - lines_before as isize;
+                let old_end = (line_before + 1).min(lines_before);
+                let new_end = ((old_end as isize + delta).max(line_before as isize + 1)) as usize;
+                mb.parse_tree.mark_dirty(line_before, old_end, new_end);
+                true
             }
             BufferMessage::ToggleTask { .. } => {
                 // Handled at BloomEditor level (needs index access).
@@ -424,19 +471,29 @@ impl BufferWriter {
                 false
             }
             BufferMessage::Undo { page_id } => {
-                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
-                    buf.undo();
-                    true
-                } else {
-                    false
+                let Some(mb) = self.buffer_mgr.buffers.get_mut(&page_id.to_hex()) else {
+                    return false;
+                };
+                match &mut mb.slot {
+                    BufferSlot::Mutable(buf) => {
+                        buf.undo();
+                        mb.parse_tree = parse_tree::ParseTree::build(&buf.text().to_string());
+                        true
+                    }
+                    BufferSlot::Frozen(_) => false,
                 }
             }
             BufferMessage::Redo { page_id } => {
-                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
-                    buf.redo();
-                    true
-                } else {
-                    false
+                let Some(mb) = self.buffer_mgr.buffers.get_mut(&page_id.to_hex()) else {
+                    return false;
+                };
+                match &mut mb.slot {
+                    BufferSlot::Mutable(buf) => {
+                        buf.redo();
+                        mb.parse_tree = parse_tree::ParseTree::build(&buf.text().to_string());
+                        true
+                    }
+                    BufferSlot::Frozen(_) => false,
                 }
             }
             BufferMessage::MarkClean { page_id } => {
@@ -503,6 +560,10 @@ impl BufferWriter {
             BufferMessage::AlignPage { page_id } => {
                 if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                     crate::align::auto_align_page(buf);
+                    let text = buf.text().to_string();
+                    if let Some(pt) = self.buffer_mgr.parse_tree_mut(&page_id) {
+                        *pt = parse_tree::ParseTree::build(&text);
+                    }
                     true
                 } else {
                     false
@@ -514,6 +575,10 @@ impl BufferWriter {
             } => {
                 if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
                     crate::align::auto_align_block(buf, cursor_line);
+                    let text = buf.text().to_string();
+                    if let Some(pt) = self.buffer_mgr.parse_tree_mut(&page_id) {
+                        *pt = parse_tree::ParseTree::build(&text);
+                    }
                     true
                 } else {
                     false
@@ -1464,6 +1529,48 @@ impl BloomEditor {
         let scrolloff = self.config.scrolloff;
         self.viewport_mut()
             .ensure_visible_with_scrolloff(cursor_line, scrolloff);
+
+        // Refresh any dirty parse trees before rendering.
+        self.refresh_dirty_parse_trees();
+    }
+
+    /// Re-parse dirty lines in all parse trees that have pending changes.
+    fn refresh_dirty_parse_trees(&mut self) {
+        let page_ids: Vec<types::PageId> = self
+            .writer
+            .buffers()
+            .open_buffers()
+            .iter()
+            .map(|info| info.page_id.clone())
+            .collect();
+        for pid in page_ids {
+            let needs_refresh = self
+                .writer
+                .buffers()
+                .parse_tree(&pid)
+                .is_some_and(|pt| pt.is_dirty());
+            if needs_refresh {
+                let line_count = self
+                    .writer
+                    .buffers()
+                    .get(&pid)
+                    .map(|b| b.len_lines())
+                    .unwrap_or(0);
+                // Collect line texts for refresh (avoids holding buf ref across mutable borrow).
+                let line_texts: Vec<String> = (0..line_count)
+                    .map(|i| {
+                        self.writer
+                            .buffers()
+                            .get(&pid)
+                            .map(|b| b.line(i).to_string())
+                            .unwrap_or_default()
+                    })
+                    .collect();
+                if let Some(pt) = self.writer.buffers_mut().parse_tree_mut(&pid) {
+                    pt.refresh(|i| line_texts.get(i).cloned().unwrap_or_default(), line_count);
+                }
+            }
+        }
     }
 
     // Buffer management

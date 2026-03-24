@@ -1,6 +1,8 @@
 use crate::types::BlockId;
 
-use super::extensions::{parse_block_id, parse_links, parse_tags, parse_task, parse_timestamps};
+use super::extensions::{
+    parse_block_id, parse_heading, parse_links, parse_tags, parse_task, parse_timestamps,
+};
 use super::frontmatter;
 use super::highlight;
 use super::traits::{Document, DocumentParser, Frontmatter, LineContext, Section, StyledSpan};
@@ -256,19 +258,6 @@ impl DocumentParser for BloomMarkdownParser {
     fn serialize_frontmatter(&self, fm: &Frontmatter) -> String {
         frontmatter::serialize_frontmatter(fm)
     }
-}
-
-/// Parse a heading line, returning (level, title text).
-fn parse_heading(line: &str) -> Option<(u8, &str)> {
-    let bytes = line.as_bytes();
-    if bytes.is_empty() || bytes[0] != b'#' {
-        return None;
-    }
-    let level = bytes.iter().take_while(|&&b| b == b'#').count();
-    if level > 6 || level >= line.len() || bytes[level] != b' ' {
-        return None;
-    }
-    Some((level as u8, line[level + 1..].trim_end()))
 }
 
 fn is_list_item(trimmed: &str) -> bool {

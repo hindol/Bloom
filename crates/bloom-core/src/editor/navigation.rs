@@ -342,13 +342,13 @@ impl BloomEditor {
             Ok(()) => {
                 let label = today.format("%b %-d").to_string();
                 self.push_notification(
-                    format!("✓ Added to {label} journal"),
+                    format!("Added to {label} journal"),
                     render::NotificationLevel::Info,
                 );
             }
             Err(e) => {
                 self.push_notification(
-                    format!("✗ Journal write failed: {e}"),
+                    format!("Journal write failed: {e}"),
                     render::NotificationLevel::Error,
                 );
             }

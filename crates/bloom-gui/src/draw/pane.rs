@@ -7,8 +7,8 @@ use bloom_md::theme::ThemePalette;
 use iced::{Color, Rectangle};
 
 use crate::draw::{
-    chars_that_fit, draw_bar_cursor, draw_text, draw_text_center, draw_text_right, draw_text_sized,
-    fill_rect, rect, text_width, truncate_text,
+    byte_offset_to_char_col, chars_that_fit, draw_bar_cursor, draw_text, draw_text_center,
+    draw_text_right, draw_text_sized, fill_rect, rect, text_width, truncate_text,
 };
 use crate::theme::{rgb_to_color, style_to_bg, style_to_color};
 use crate::{
@@ -229,15 +229,34 @@ fn draw_editor_content(
             let line_cw = CHAR_WIDTH * (line_font_size / FONT_SIZE);
 
             for span in &line.spans {
-                let start = span.range.start.min(visible_text.len());
-                let end = span.range.end.min(visible_text.len());
+                let start = span.byte_range.start.min(line_text.len());
+                let end = span.byte_range.end.min(line_text.len());
                 if start >= end {
                     continue;
                 }
 
-                let slice = &visible_text[start..end];
-                let span_x = start as f32 * line_cw;
-                let span_w = slice.chars().count() as f32 * line_cw;
+                // Convert byte offsets to char column positions for rendering.
+                let col_start = byte_offset_to_char_col(line_text, start);
+                let col_end = byte_offset_to_char_col(line_text, end);
+
+                // Skip spans entirely beyond the visible area.
+                if col_start >= text_chars {
+                    continue;
+                }
+
+                let slice = &line_text[start..end];
+
+                // Truncate the slice if it extends past the visible column limit.
+                let visible_col_end = col_end.min(text_chars);
+                let visible_slice: String = if col_end > text_chars {
+                    slice.chars().take(visible_col_end - col_start).collect()
+                } else {
+                    slice.to_string()
+                };
+                let span_chars = visible_col_end - col_start;
+
+                let span_x = col_start as f32 * line_cw;
+                let span_w = span_chars as f32 * line_cw;
 
                 // Background wash for styles that need it.
                 if let Some(bg) = style_to_bg(&span.style, theme) {
@@ -248,7 +267,7 @@ fn draw_editor_content(
                     frame,
                     text_x + span_x,
                     y,
-                    slice.to_string(),
+                    visible_slice.clone(),
                     style_to_color(&span.style, theme),
                     line_font_size,
                     row_h,
@@ -256,14 +275,17 @@ fn draw_editor_content(
 
                 // Strikethrough for checked task text (not the checkbox or block ID).
                 if span.style == Style::CheckedTaskText {
-                    let leading = slice.chars().take_while(|c| c.is_whitespace()).count();
-                    let trailing = slice
+                    let leading = visible_slice
+                        .chars()
+                        .take_while(|c| c.is_whitespace())
+                        .count();
+                    let trailing = visible_slice
                         .chars()
                         .rev()
                         .take_while(|c| c.is_whitespace())
                         .count();
-                    let text_chars = slice.chars().count();
-                    let content_chars = text_chars.saturating_sub(leading).saturating_sub(trailing);
+                    let vis_chars = visible_slice.chars().count();
+                    let content_chars = vis_chars.saturating_sub(leading).saturating_sub(trailing);
                     if content_chars > 0 {
                         let strike_start = text_x + span_x + leading as f32 * line_cw;
                         let strike_end = strike_start + content_chars as f32 * line_cw;
@@ -1052,7 +1074,7 @@ mod tests {
             is_mirror: false,
             text: text.to_string(),
             spans: vec![bloom_md::parser::traits::StyledSpan {
-                range: 0..text.len(),
+                byte_range: 0..text.len(),
                 style: bloom_md::parser::traits::Style::Normal,
             }],
         }

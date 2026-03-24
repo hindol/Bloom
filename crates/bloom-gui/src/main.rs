@@ -277,8 +277,6 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
                         .or_else(|| convert_key(key.clone(), modifiers));
                     if let Some(key_event) = bloom_key {
                         state.send_key_event(key_event);
-                    } else {
-                        eprintln!("[bloom-gui] unhandled key: key={key:?} modified_key={modified_key:?} modifiers={modifiers:?}");
                     }
                 }
 

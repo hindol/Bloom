@@ -15,7 +15,7 @@ pub fn highlight_line(line: &str, context: &LineContext) -> Vec<StyledSpan> {
     let trimmed_for_fence = line.trim_start();
     if trimmed_for_fence.starts_with("```") || trimmed_for_fence.starts_with("~~~") {
         return vec![StyledSpan {
-            range: 0..line.len(),
+            byte_range: 0..line.len(),
             style: Style::SyntaxNoise,
         }];
     }
@@ -23,7 +23,7 @@ pub fn highlight_line(line: &str, context: &LineContext) -> Vec<StyledSpan> {
     // Inside code block: everything is CodeBlock style
     if context.in_code_block {
         return vec![StyledSpan {
-            range: 0..line.len(),
+            byte_range: 0..line.len(),
             style: Style::CodeBlock,
         }];
     }
@@ -38,7 +38,7 @@ pub fn highlight_line(line: &str, context: &LineContext) -> Vec<StyledSpan> {
         if level <= 6 && len > level && bytes[level] == b' ' {
             // Heading markers are SyntaxNoise
             spans.push(StyledSpan {
-                range: 0..level + 1,
+                byte_range: 0..level + 1,
                 style: Style::SyntaxNoise,
             });
             // Check for trailing block ID (e.g. "## Heading ^block-id")
@@ -56,30 +56,30 @@ pub fn highlight_line(line: &str, context: &LineContext) -> Vec<StyledSpan> {
                     // Heading text before block ID
                     if abs_caret > level + 1 {
                         spans.push(StyledSpan {
-                            range: level + 1..abs_caret,
+                            byte_range: level + 1..abs_caret,
                             style: Style::Heading { level: level as u8 },
                         });
                     }
                     // Space before caret
                     spans.push(StyledSpan {
-                        range: abs_caret..abs_caret + 1,
+                        byte_range: abs_caret..abs_caret + 1,
                         style: Style::Heading { level: level as u8 },
                     });
                     // Caret
                     spans.push(StyledSpan {
-                        range: abs_caret + 1..abs_caret + 2,
+                        byte_range: abs_caret + 1..abs_caret + 2,
                         style: Style::BlockIdCaret,
                     });
                     // ID text
                     spans.push(StyledSpan {
-                        range: abs_caret + 2..block_end,
+                        byte_range: abs_caret + 2..block_end,
                         style: Style::BlockId,
                     });
                     return spans;
                 }
             }
             spans.push(StyledSpan {
-                range: level + 1..len,
+                byte_range: level + 1..len,
                 style: Style::Heading { level: level as u8 },
             });
             return spans;
@@ -92,7 +92,7 @@ pub fn highlight_line(line: &str, context: &LineContext) -> Vec<StyledSpan> {
 
     if trimmed.starts_with("> ") || trimmed == ">" {
         spans.push(StyledSpan {
-            range: indent..indent + 2.min(trimmed.len()),
+            byte_range: indent..indent + 2.min(trimmed.len()),
             style: Style::BlockquoteMarker,
         });
         if trimmed.len() > 2 {
@@ -102,7 +102,7 @@ pub fn highlight_line(line: &str, context: &LineContext) -> Vec<StyledSpan> {
             // Replace Normal spans with Blockquote — keep special styles (BlockId, Tag, etc.)
             for s in inline_spans {
                 spans.push(StyledSpan {
-                    range: s.range,
+                    byte_range: s.byte_range,
                     style: if s.style == Style::Normal {
                         Style::Blockquote
                     } else {
@@ -117,7 +117,7 @@ pub fn highlight_line(line: &str, context: &LineContext) -> Vec<StyledSpan> {
     // Check for table alignment row (e.g. |---|:---:|---:|)
     if is_table_alignment_row(trimmed) {
         spans.push(StyledSpan {
-            range: 0..len,
+            byte_range: 0..len,
             style: Style::TableAlignmentRow,
         });
         return spans;
@@ -133,15 +133,15 @@ pub fn highlight_line(line: &str, context: &LineContext) -> Vec<StyledSpan> {
     if trimmed.starts_with("- [x] ") || trimmed.starts_with("- [X] ") {
         // "-" is ListMarker, " " normal, "[x]" is CheckboxChecked, rest is CheckedTaskText
         spans.push(StyledSpan {
-            range: indent..indent + 1,
+            byte_range: indent..indent + 1,
             style: Style::ListMarker,
         });
         spans.push(StyledSpan {
-            range: indent + 1..indent + 2,
+            byte_range: indent + 1..indent + 2,
             style: Style::Normal,
         });
         spans.push(StyledSpan {
-            range: indent + 2..indent + 5,
+            byte_range: indent + 2..indent + 5,
             style: Style::CheckboxChecked,
         });
         if len > indent + 6 {
@@ -153,38 +153,38 @@ pub fn highlight_line(line: &str, context: &LineContext) -> Vec<StyledSpan> {
                                                 // CheckedTaskText for the body, then BlockId spans for the ID
                 if text_end > indent + 6 {
                     spans.push(StyledSpan {
-                        range: indent + 6..text_end,
+                        byte_range: indent + 6..text_end,
                         style: Style::CheckedTaskText,
                     });
                 }
                 // Space before block ID
                 spans.push(StyledSpan {
-                    range: text_end..block_start,
+                    byte_range: text_end..block_start,
                     style: Style::CheckedTaskText,
                 });
                 // Caret (^ or ^=)
                 let id_start = if line.as_bytes().get(block_start + 1) == Some(&b'=') {
                     spans.push(StyledSpan {
-                        range: block_start..block_start + 2,
+                        byte_range: block_start..block_start + 2,
                         style: Style::BlockIdCaret,
                     });
                     block_start + 2
                 } else {
                     spans.push(StyledSpan {
-                        range: block_start..block_start + 1,
+                        byte_range: block_start..block_start + 1,
                         style: Style::BlockIdCaret,
                     });
                     block_start + 1
                 };
                 if id_start < len {
                     spans.push(StyledSpan {
-                        range: id_start..len,
+                        byte_range: id_start..len,
                         style: Style::BlockId,
                     });
                 }
             } else {
                 spans.push(StyledSpan {
-                    range: indent + 6..len,
+                    byte_range: indent + 6..len,
                     style: Style::CheckedTaskText,
                 });
             }
@@ -195,15 +195,15 @@ pub fn highlight_line(line: &str, context: &LineContext) -> Vec<StyledSpan> {
     if trimmed.starts_with("- [ ] ") {
         // "-" is ListMarker, " " normal, "[ ]" is CheckboxUnchecked
         spans.push(StyledSpan {
-            range: indent..indent + 1,
+            byte_range: indent..indent + 1,
             style: Style::ListMarker,
         });
         spans.push(StyledSpan {
-            range: indent + 1..indent + 2,
+            byte_range: indent + 1..indent + 2,
             style: Style::Normal,
         });
         spans.push(StyledSpan {
-            range: indent + 2..indent + 5,
+            byte_range: indent + 2..indent + 5,
             style: Style::CheckboxUnchecked,
         });
         highlight_inline(line, indent + 6, &mut spans);
@@ -212,7 +212,7 @@ pub fn highlight_line(line: &str, context: &LineContext) -> Vec<StyledSpan> {
 
     if trimmed.starts_with("- ") {
         spans.push(StyledSpan {
-            range: indent..indent + 2,
+            byte_range: indent..indent + 2,
             style: Style::ListMarker,
         });
         highlight_inline(line, indent + 2, &mut spans);
@@ -224,7 +224,7 @@ pub fn highlight_line(line: &str, context: &LineContext) -> Vec<StyledSpan> {
         let num_part = &trimmed[..dot_pos];
         if !num_part.is_empty() && num_part.chars().all(|c| c.is_ascii_digit()) {
             spans.push(StyledSpan {
-                range: indent..indent + dot_pos + 2,
+                byte_range: indent..indent + dot_pos + 2,
                 style: Style::ListMarker,
             });
             highlight_inline(line, indent + dot_pos + 2, &mut spans);
@@ -258,7 +258,7 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
                 i += 1; // closing `
             }
             spans.push(StyledSpan {
-                range: code_start..i,
+                byte_range: code_start..i,
                 style: Style::Code,
             });
             normal_start = i;
@@ -270,7 +270,7 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
             flush_normal(normal_start, i, spans);
             // Opening [[ is link chrome
             spans.push(StyledSpan {
-                range: i..i + 2,
+                byte_range: i..i + 2,
                 style: Style::LinkChrome,
             });
             i += 2;
@@ -295,17 +295,17 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
                 let uuid_end = content_start + pipe_pos;
                 // UUID part — chrome
                 spans.push(StyledSpan {
-                    range: content_start..uuid_end,
+                    byte_range: content_start..uuid_end,
                     style: Style::LinkChrome,
                 });
                 // Pipe — chrome
                 spans.push(StyledSpan {
-                    range: uuid_end..uuid_end + 1,
+                    byte_range: uuid_end..uuid_end + 1,
                     style: Style::LinkChrome,
                 });
                 // Display text
                 spans.push(StyledSpan {
-                    range: uuid_end + 1..content_end,
+                    byte_range: uuid_end + 1..content_end,
                     style: if is_valid {
                         Style::LinkText
                     } else {
@@ -315,7 +315,7 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
             } else {
                 // No pipe — whole content is the link
                 spans.push(StyledSpan {
-                    range: content_start..content_end,
+                    byte_range: content_start..content_end,
                     style: if is_valid {
                         Style::LinkText
                     } else {
@@ -326,7 +326,7 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
 
             if i + 1 < len {
                 spans.push(StyledSpan {
-                    range: i..i + 2,
+                    byte_range: i..i + 2,
                     style: Style::LinkChrome,
                 });
                 i += 2;
@@ -339,7 +339,7 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
         if i + 1 < len && bytes[i] == b'*' && bytes[i + 1] == b'*' {
             flush_normal(normal_start, i, spans);
             spans.push(StyledSpan {
-                range: i..i + 2,
+                byte_range: i..i + 2,
                 style: Style::SyntaxNoise,
             });
             i += 2;
@@ -348,12 +348,12 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
                 i += 1;
             }
             spans.push(StyledSpan {
-                range: bold_start..i,
+                byte_range: bold_start..i,
                 style: Style::Bold,
             });
             if i + 1 < len {
                 spans.push(StyledSpan {
-                    range: i..i + 2,
+                    byte_range: i..i + 2,
                     style: Style::SyntaxNoise,
                 });
                 i += 2;
@@ -366,7 +366,7 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
         if bytes[i] == b'*' && (i + 1 >= len || bytes[i + 1] != b'*') {
             flush_normal(normal_start, i, spans);
             spans.push(StyledSpan {
-                range: i..i + 1,
+                byte_range: i..i + 1,
                 style: Style::SyntaxNoise,
             });
             i += 1;
@@ -375,12 +375,12 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
                 i += 1;
             }
             spans.push(StyledSpan {
-                range: italic_start..i,
+                byte_range: italic_start..i,
                 style: Style::Italic,
             });
             if i < len {
                 spans.push(StyledSpan {
-                    range: i..i + 1,
+                    byte_range: i..i + 1,
                     style: Style::SyntaxNoise,
                 });
                 i += 1;
@@ -410,7 +410,7 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
                         }
                         flush_normal(normal_start, tag_start, spans);
                         spans.push(StyledSpan {
-                            range: tag_start..i,
+                            byte_range: tag_start..i,
                             style: Style::Tag,
                         });
                         normal_start = i;
@@ -433,19 +433,19 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
                 let keyword = &line[ts_start..keyword_end];
                 // Keyword: @due, @start, @at
                 spans.push(StyledSpan {
-                    range: ts_start..keyword_end,
+                    byte_range: ts_start..keyword_end,
                     style: Style::TimestampKeyword,
                 });
                 // Opening paren
                 spans.push(StyledSpan {
-                    range: keyword_end..date_start,
+                    byte_range: keyword_end..date_start,
                     style: Style::TimestampParens,
                 });
                 // Date value — only @due can be overdue
                 let date_str = &line[date_start..date_end];
                 let is_overdue = keyword == "@due" && is_overdue_date(date_str);
                 spans.push(StyledSpan {
-                    range: date_start..date_end,
+                    byte_range: date_start..date_end,
                     style: if is_overdue {
                         Style::TimestampOverdue
                     } else {
@@ -454,7 +454,7 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
                 });
                 // Closing paren
                 spans.push(StyledSpan {
-                    range: date_end..close,
+                    byte_range: date_end..close,
                     style: Style::TimestampParens,
                 });
                 i = close;
@@ -476,12 +476,12 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
                 flush_normal(normal_start, i, spans);
                 // Caret
                 spans.push(StyledSpan {
-                    range: i..i + 1,
+                    byte_range: i..i + 1,
                     style: Style::BlockIdCaret,
                 });
                 // ID text
                 spans.push(StyledSpan {
-                    range: i + 1..block_end,
+                    byte_range: i + 1..block_end,
                     style: Style::BlockId,
                 });
                 i = len;
@@ -499,7 +499,7 @@ fn highlight_inline(line: &str, offset: usize, spans: &mut Vec<StyledSpan>) {
 fn flush_normal(start: usize, end: usize, spans: &mut Vec<StyledSpan>) {
     if start < end {
         spans.push(StyledSpan {
-            range: start..end,
+            byte_range: start..end,
             style: Style::Normal,
         });
     }
@@ -541,7 +541,7 @@ fn highlight_frontmatter_line(line: &str) -> Vec<StyledSpan> {
     // --- delimiters
     if line.trim() == "---" {
         return vec![StyledSpan {
-            range: 0..len,
+            byte_range: 0..len,
             style: Style::SyntaxNoise,
         }];
     }
@@ -553,7 +553,7 @@ fn highlight_frontmatter_line(line: &str) -> Vec<StyledSpan> {
 
         // Key span (including colon and space)
         let key_span = StyledSpan {
-            range: 0..value_start,
+            byte_range: 0..value_start,
             style: Style::FrontmatterKey,
         };
 
@@ -566,7 +566,7 @@ fn highlight_frontmatter_line(line: &str) -> Vec<StyledSpan> {
             _ => Style::Frontmatter,
         };
         let value_span = StyledSpan {
-            range: value_start..len,
+            byte_range: value_start..len,
             style: value_style,
         };
 
@@ -575,7 +575,7 @@ fn highlight_frontmatter_line(line: &str) -> Vec<StyledSpan> {
 
     // Fallback: entire line as generic frontmatter
     vec![StyledSpan {
-        range: 0..len,
+        byte_range: 0..len,
         style: Style::Frontmatter,
     }]
 }
@@ -601,7 +601,7 @@ fn highlight_table_row(line: &str, spans: &mut Vec<StyledSpan>) {
     while i < len {
         if bytes[i] == b'|' {
             spans.push(StyledSpan {
-                range: i..i + 1,
+                byte_range: i..i + 1,
                 style: Style::TablePipe,
             });
             i += 1;
@@ -612,7 +612,7 @@ fn highlight_table_row(line: &str, spans: &mut Vec<StyledSpan>) {
             }
             if start < i {
                 spans.push(StyledSpan {
-                    range: start..i,
+                    byte_range: start..i,
                     style: Style::Normal,
                 });
             }
@@ -707,7 +707,7 @@ mod tests {
             "block ID caret should be styled in blockquote, spans: {:?}",
             spans
                 .iter()
-                .map(|s| format!("{:?} {:?}", s.range, s.style))
+                .map(|s| format!("{:?} {:?}", s.byte_range, s.style))
                 .collect::<Vec<_>>()
         );
         assert!(spans.iter().any(|s| s.style == Style::BlockId));

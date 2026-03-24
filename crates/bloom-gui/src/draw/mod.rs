@@ -156,6 +156,13 @@ pub(crate) fn truncate_text(text: &str, max_chars: usize) -> String {
     truncated
 }
 
+/// Convert a byte offset in `text` to the number of characters preceding it.
+/// If `byte_offset` exceeds `text.len()`, returns the total char count.
+pub(crate) fn byte_offset_to_char_col(text: &str, byte_offset: usize) -> usize {
+    let clamped = byte_offset.min(text.len());
+    text[..clamped].chars().count()
+}
+
 pub(crate) fn draw_bar_cursor(frame: &mut Frame, x: f32, y: f32, h: f32, color: Color) {
     fill_rect(frame, rect(x, y, 2.0, h), color);
 }

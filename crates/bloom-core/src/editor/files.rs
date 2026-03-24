@@ -36,7 +36,7 @@ impl BloomEditor {
                                 .map(|f| f.to_string_lossy().to_string())
                                 .unwrap_or_else(|| "file".to_string());
                             self.push_notification(
-                                format!("✓ Saved {filename}"),
+                                format!("Saved {filename}"),
                                 render::NotificationLevel::Info,
                             );
                             return true;
@@ -127,11 +127,24 @@ impl BloomEditor {
                         visual_changed = true;
                     } else {
                         // Clean buffer + disk differs → auto-reload
+                        // Preserve cursor position across reload.
+                        let cursor_pos = self
+                            .writer
+                            .buffers()
+                            .get(&page_id)
+                            .map(|b| b.cursor(0))
+                            .unwrap_or(0);
                         self.writer.apply(crate::BufferMessage::Reload {
                             page_id: page_id.clone(),
                             content: disk_content,
                         });
-                        self.set_cursor(0);
+                        let max_pos = self
+                            .writer
+                            .buffers()
+                            .get(&page_id)
+                            .map(|b| b.len_chars())
+                            .unwrap_or(0);
+                        self.set_cursor(cursor_pos.min(max_pos));
                         visual_changed = true;
                     }
                 }

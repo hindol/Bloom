@@ -409,6 +409,20 @@ pub fn parse_line(line: &str, line_number: usize) -> LineElements {
     }
 }
 
+/// Parse a Markdown ATX heading. Returns `(level, title_text)` if the line
+/// is a valid heading (1–6 `#` characters followed by a space).
+pub fn parse_heading(line: &str) -> Option<(u8, &str)> {
+    let bytes = line.as_bytes();
+    if bytes.is_empty() || bytes[0] != b'#' {
+        return None;
+    }
+    let level = bytes.iter().take_while(|&&b| b == b'#').count();
+    if level > 6 || level >= line.len() || bytes[level] != b' ' {
+        return None;
+    }
+    Some((level as u8, line[level + 1..].trim_end()))
+}
+
 /// Extract the link target from a `[[...]]` pattern at the given column.
 /// Returns either a page ID hex string or `^block_id` for block links.
 pub fn extract_link_at_col(line: &str, col: usize) -> Option<String> {

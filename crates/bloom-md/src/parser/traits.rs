@@ -103,7 +103,9 @@ pub struct ParsedBlock {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct StyledSpan {
-    pub range: Range<usize>,
+    /// Byte offsets into the line text. Consumers that need char indices or
+    /// display-column positions must convert at the rendering boundary.
+    pub byte_range: Range<usize>,
     pub style: Style,
 }
 
@@ -146,7 +148,7 @@ pub enum Style {
     DiffRemoved,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct LineContext {
     pub in_code_block: bool,
     pub in_frontmatter: bool,

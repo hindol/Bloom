@@ -1243,6 +1243,7 @@ impl BloomEditor {
                             // Propagate mirrors after any edit (not just Insert→Normal).
                             // Normal mode ops like x, r, dd also mutate mirrored lines.
                             self.propagate_mirror_edit(&page_id);
+                            self.propagate_section_structure(&page_id);
                         }
                     }
                     // Auto-align only on Insert→Normal transition, skip for read-only

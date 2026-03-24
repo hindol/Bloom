@@ -4549,3 +4549,81 @@ fn history_scrubber_navigation_updates_preview() {
         "should still have undo nodes after navigation"
     );
 }
+
+// =======================================================================
+// Section mirroring: heading-level ^= structural sync
+// =======================================================================
+
+#[test]
+fn section_mirror_child_ids_from_parse_tree() {
+    // Verify ParseTree correctly identifies children under a ^= heading
+    use bloom_core::parse_tree::ParseTree;
+
+    let text = "## Tasks ^=head1\n- [ ] Task A ^=t0001\n- [ ] Task B ^=t0002\n\n## Other ^oth01\n- Item ^it001\n";
+    let tree = ParseTree::build(text);
+    let mirrors = tree.mirror_sections();
+    assert_eq!(mirrors.len(), 1, "only one ^= section");
+    assert_eq!(
+        mirrors[0].block_id.as_ref().unwrap().0,
+        "head1",
+        "mirror section heading ID"
+    );
+
+    // Children should be t0001 and t0002, NOT head1 or oth01 or it001
+    let bids: Vec<&str> = tree
+        .block_ids()
+        .iter()
+        .filter(|b| {
+            mirrors[0].line_range.contains(&b.line) && b.line != mirrors[0].line_range.start
+        })
+        .map(|b| b.id.0.as_str())
+        .collect();
+    assert_eq!(bids, vec!["t0001", "t0002"]);
+}
+
+#[test]
+fn section_mirror_structural_diff_detects_insert() {
+    use bloom_core::parse_tree::ParseTree;
+    use bloom_core::section_mirror::{section_child_ids, structural_diff};
+
+    let source_text =
+        "## Tasks ^=head1\n- [ ] A ^=t0001\n- [ ] B ^=t0002\n- [ ] C ^=t0003\n";
+    let peer_text = "## Tasks ^=head1\n- [ ] A ^=t0001\n- [ ] B ^=t0002\n";
+
+    let source_tree = ParseTree::build(source_text);
+    let peer_tree = ParseTree::build(peer_text);
+
+    let source_sections = source_tree.mirror_sections();
+    let peer_sections = peer_tree.mirror_sections();
+
+    let source_children = section_child_ids(&source_tree, &source_sections[0]);
+    let peer_children = section_child_ids(&peer_tree, &peer_sections[0]);
+
+    let diff = structural_diff(&source_children, &peer_children);
+    assert_eq!(diff.inserts.len(), 1);
+    assert_eq!(diff.inserts[0].0 .0, "t0003");
+    assert!(diff.removals.is_empty());
+}
+
+#[test]
+fn section_mirror_structural_diff_detects_removal() {
+    use bloom_core::parse_tree::ParseTree;
+    use bloom_core::section_mirror::{section_child_ids, structural_diff};
+
+    let source_text = "## Tasks ^=head1\n- [ ] A ^=t0001\n";
+    let peer_text = "## Tasks ^=head1\n- [ ] A ^=t0001\n- [ ] B ^=t0002\n";
+
+    let source_tree = ParseTree::build(source_text);
+    let peer_tree = ParseTree::build(peer_text);
+
+    let source_sections = source_tree.mirror_sections();
+    let peer_sections = peer_tree.mirror_sections();
+
+    let source_children = section_child_ids(&source_tree, &source_sections[0]);
+    let peer_children = section_child_ids(&peer_tree, &peer_sections[0]);
+
+    let diff = structural_diff(&source_children, &peer_children);
+    assert!(diff.inserts.is_empty());
+    assert_eq!(diff.removals.len(), 1);
+    assert_eq!(diff.removals[0].0, "t0002");
+}

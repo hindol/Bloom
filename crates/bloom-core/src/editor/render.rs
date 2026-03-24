@@ -381,7 +381,7 @@ impl BloomEditor {
                             .map(|i| i.path.extension().and_then(|e| e.to_str()) == Some("md"))
                             .unwrap_or(true);
                         let lines =
-                            self.render_buffer_lines_with_viewport(buf, &ps.viewport, is_md);
+                            self.render_buffer_lines_with_viewport(buf, &ps.viewport, is_md, page_id);
                         let (cl, cc) = Self::cursor_position_for(
                             buf.cursor(ps.cursor_idx),
                             buf,
@@ -1224,86 +1224,35 @@ impl BloomEditor {
         buf: &bloom_buffer::Buffer,
         viewport: &render::Viewport,
         is_markdown: bool,
+        page_id: &types::PageId,
     ) -> Vec<render::RenderedLine> {
         let range = viewport.visible_range();
         let screen_height = viewport.height;
         let mut lines = Vec::new();
         let line_count = buf.len_lines();
 
-        let mut in_frontmatter = false;
-        let mut in_code_block = false;
-        let mut code_fence_lang: Option<String> = None;
-        let mut seen_first_delimiter = false;
+        // Use ParseTree for O(1) context lookup when available.
+        let parse_tree = self.writer.buffers().parse_tree(page_id);
 
-        // Scan from line 0 for state tracking (frontmatter/code-block), but only
-        // emit lines from range.start onward. Stop when the screen is full or we
-        // run out of buffer lines.
-        let mut line_idx = 0;
-        while line_idx < line_count {
-            // Stop once we've filled the screen (only count emitted lines).
-            if line_idx >= range.start && lines.len() >= screen_height {
-                break;
-            }
+        let mut line_idx = range.start;
+        while line_idx < line_count && lines.len() < screen_height {
             let line_text = buf.line(line_idx).to_string();
-            let trimmed = line_text.trim().to_string();
-
-            if line_idx == 0 && trimmed == "---" {
-                in_frontmatter = true;
-                seen_first_delimiter = true;
-            } else if in_frontmatter && seen_first_delimiter && trimmed == "---" {
-                if line_idx >= range.start {
-                    let spans = self.parser.highlight_line(
-                        &line_text,
-                        &bloom_md::parser::traits::LineContext {
-                            in_code_block: false,
-                            in_frontmatter: true,
-                            code_fence_lang: None,
-                        },
-                    );
-                    lines.push(render::RenderedLine {
-                        source: render::LineSource::Buffer(line_idx),
-                        is_mirror: line_text.contains(" ^="),
-                        text: line_text,
-                        spans,
-                    });
-                }
-                in_frontmatter = false;
-                line_idx += 1;
-                continue;
-            }
-
-            if !in_frontmatter && (trimmed.starts_with("```") || trimmed.starts_with("~~~")) {
-                if in_code_block {
-                    in_code_block = false;
-                    code_fence_lang = None;
-                } else {
-                    in_code_block = true;
-                    let lang = trimmed
-                        .trim_start_matches('`')
-                        .trim_start_matches('~')
-                        .trim();
-                    code_fence_lang = if lang.is_empty() {
-                        None
-                    } else {
-                        Some(lang.to_string())
-                    };
-                }
-            }
 
             if line_idx >= range.start {
-                let mut spans = if is_markdown {
-                    self.parser.highlight_line(
-                        &line_text,
-                        &bloom_md::parser::traits::LineContext {
-                            in_code_block,
-                            in_frontmatter,
-                            code_fence_lang: code_fence_lang.clone(),
-                        },
-                    )
+                // Get context from ParseTree (O(1)) or fall back to default.
+                let ctx = if is_markdown {
+                    parse_tree
+                        .map(|pt| pt.context_before(line_idx))
+                        .unwrap_or_default()
                 } else {
-                    // Non-markdown: render as plain text
+                    bloom_md::parser::traits::LineContext::default()
+                };
+
+                let mut spans = if is_markdown {
+                    self.parser.highlight_line(&line_text, &ctx)
+                } else {
                     vec![bloom_md::parser::traits::StyledSpan {
-                        range: 0..line_text.len(),
+                        byte_range: 0..line_text.len(),
                         style: bloom_md::parser::traits::Style::Normal,
                     }]
                 };
@@ -1346,7 +1295,7 @@ impl BloomEditor {
                                     };
                                     let end = pos + seg.text.len();
                                     diff_spans.push(bloom_md::parser::traits::StyledSpan {
-                                        range: pos..end,
+                                        byte_range: pos..end,
                                         style,
                                     });
                                     pos = end;

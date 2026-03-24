@@ -17,7 +17,7 @@ pub fn highlight_matches(text: &str, query: &str) -> Vec<StyledSpan> {
         while let Some(pos) = text_lower[start..].find(&frag_lower) {
             let abs = start + pos;
             spans.push(StyledSpan {
-                range: abs..abs + frag_lower.len(),
+                byte_range: abs..abs + frag_lower.len(),
                 style: Style::SearchMatch,
             });
             start = abs + frag_lower.len();
@@ -25,7 +25,7 @@ pub fn highlight_matches(text: &str, query: &str) -> Vec<StyledSpan> {
     }
 
     // Sort by position and merge overlapping ranges
-    spans.sort_by_key(|s| s.range.start);
+    spans.sort_by_key(|s| s.byte_range.start);
     merge_overlapping(&mut spans);
     spans
 }
@@ -39,8 +39,8 @@ fn merge_overlapping(spans: &mut Vec<StyledSpan>) {
     merged.push(spans[0].clone());
     for s in &spans[1..] {
         let last = merged.last_mut().unwrap();
-        if s.range.start <= last.range.end {
-            last.range.end = last.range.end.max(s.range.end);
+        if s.byte_range.start <= last.byte_range.end {
+            last.byte_range.end = last.byte_range.end.max(s.byte_range.end);
         } else {
             merged.push(s.clone());
         }
@@ -62,7 +62,7 @@ pub fn overlay_search_spans(
     // Build a flag array: which byte positions are search-highlighted
     let mut is_match = vec![false; line_len];
     for s in search {
-        for i in s.range.clone() {
+        for i in s.byte_range.clone() {
             if i < line_len {
                 is_match[i] = true;
             }
@@ -71,7 +71,7 @@ pub fn overlay_search_spans(
 
     let mut result = Vec::new();
     for span in base {
-        let Range { start, end } = span.range.clone();
+        let Range { start, end } = span.byte_range.clone();
         let end = end.min(line_len);
         if start >= end {
             continue;
@@ -86,7 +86,7 @@ pub fn overlay_search_spans(
                 run_end += 1;
             }
             result.push(StyledSpan {
-                range: pos..run_end,
+                byte_range: pos..run_end,
                 style: if in_search {
                     Style::SearchMatch
                 } else {
@@ -107,15 +107,15 @@ mod tests {
     fn test_highlight_single_match() {
         let spans = highlight_matches("Hello World", "world");
         assert_eq!(spans.len(), 1);
-        assert_eq!(spans[0].range, 6..11);
+        assert_eq!(spans[0].byte_range, 6..11);
     }
 
     #[test]
     fn test_highlight_multiple_fragments() {
         let spans = highlight_matches("The quick brown fox", "quick fox");
         assert_eq!(spans.len(), 2);
-        assert_eq!(spans[0].range, 4..9);
-        assert_eq!(spans[1].range, 16..19);
+        assert_eq!(spans[0].byte_range, 4..9);
+        assert_eq!(spans[1].byte_range, 16..19);
     }
 
     #[test]
@@ -136,24 +136,24 @@ mod tests {
         // All overlap → should merge to single span
         let spans = highlight_matches("abab", "ab ba");
         assert_eq!(spans.len(), 1);
-        assert_eq!(spans[0].range, 0..4);
+        assert_eq!(spans[0].byte_range, 0..4);
     }
 
     #[test]
     fn test_overlay_splits_base_spans() {
         let base = vec![StyledSpan {
-            range: 0..11,
+            byte_range: 0..11,
             style: Style::Normal,
         }];
         let search = vec![StyledSpan {
-            range: 6..11,
+            byte_range: 6..11,
             style: Style::SearchMatch,
         }];
         let result = overlay_search_spans(&base, &search, 11);
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].style, Style::Normal);
-        assert_eq!(result[0].range, 0..6);
+        assert_eq!(result[0].byte_range, 0..6);
         assert_eq!(result[1].style, Style::SearchMatch);
-        assert_eq!(result[1].range, 6..11);
+        assert_eq!(result[1].byte_range, 6..11);
     }
 }

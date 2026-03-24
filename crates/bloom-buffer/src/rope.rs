@@ -165,7 +165,8 @@ impl Buffer {
             let desc = if text.len() <= 20 {
                 format!("insert '{text}'")
             } else {
-                format!("insert '{}...'", &text[..17])
+                let truncated: String = text.chars().take(17).collect();
+                format!("insert '{truncated}...'")
             };
             self.undo_tree
                 .push(self.rope.clone(), self.cursor_pos_for_undo(), desc);
@@ -199,7 +200,8 @@ impl Buffer {
             let desc = if text.len() <= 20 {
                 format!("replace with '{text}'")
             } else {
-                format!("replace with '{}...'", &text[..17])
+                let truncated: String = text.chars().take(17).collect();
+                format!("replace with '{truncated}...'")
             };
             self.undo_tree
                 .push(self.rope.clone(), self.cursor_pos_for_undo(), desc);

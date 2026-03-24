@@ -14,3 +14,4 @@ mod notifications;
 pub(crate) mod page_history;
 mod pickers;
 mod render;
+pub mod section_mirror;
