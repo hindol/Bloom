@@ -43,6 +43,10 @@ pub struct IndexComplete {
     pub timing: IndexTiming,
     /// If set, the indexer encountered an error. The UI should surface this.
     pub error: Option<String>,
+    /// Files needing mirror marker updates (^ ↔ ^=). The UI thread applies
+    /// these to open buffers and routes to DiskWriter. The indexer never
+    /// writes to disk directly.
+    pub pending_writes: Vec<PendingMirrorWrite>,
 }
 
 #[derive(Debug)]
@@ -233,6 +237,7 @@ fn send_error_completion(tx: &Sender<IndexComplete>, error: String) {
             files_changed: 0,
         },
         error: Some(error),
+        pending_writes: Vec::new(),
     });
 }
 
@@ -298,6 +303,7 @@ fn run_full_rebuild(
             files_changed: files_scanned, // all files re-indexed
         },
         error: None,
+        pending_writes: Vec::new(), // full rebuild doesn't do mirror promotion inline
     })
 }
 
@@ -398,8 +404,8 @@ fn run_incremental(
         .collect();
     index.set_fingerprints_batch(&fp_batch);
 
-    // Phase 4: Mirror promotion/demotion
-    apply_mirror_markers(vault_root, index);
+    // Phase 4: Mirror promotion/demotion (computed, not written to disk)
+    let pending_writes = compute_mirror_markers(vault_root, index);
 
     let write_ms = t_write.elapsed().as_millis() as u64;
     let total_ms = t_total.elapsed().as_millis() as u64;
@@ -427,6 +433,7 @@ fn run_incremental(
             files_changed,
         },
         error: None,
+        pending_writes,
     })
 }
 
@@ -476,8 +483,8 @@ fn run_batch(
         }
     }
 
-    // Mirror promotion/demotion
-    apply_mirror_markers(vault_root, index);
+    // Mirror promotion/demotion (computed, not written to disk)
+    let pending_writes = compute_mirror_markers(vault_root, index);
 
     let write_ms = t_write.elapsed().as_millis() as u64;
     let total_ms = t_total.elapsed().as_millis() as u64;
@@ -497,22 +504,32 @@ fn run_batch(
             files_changed: entries.len() + deleted.len(),
         },
         error: None,
+        pending_writes,
     })
 }
 
-/// Promote solo blocks (^) to mirrored (^=) and demote orphaned mirrors (^=) back to (^).
-/// Rewrites files on disk and updates the index.
-fn apply_mirror_markers(vault_root: &Path, index: &mut Index) {
-    // Promotions: ^ → ^= (block appears in multiple pages but not marked as mirror)
+/// A file that needs its mirror markers updated on disk.
+/// Computed by the indexer, applied by the UI thread.
+#[derive(Debug)]
+pub struct PendingMirrorWrite {
+    /// Absolute path to the file.
+    pub path: PathBuf,
+    /// New file content with markers updated.
+    pub content: String,
+}
+
+/// Compute mirror marker promotions (^ → ^=) and demotions (^= → ^).
+/// Returns pending writes for the UI thread to apply. Does NOT write to disk.
+/// Updates is_mirror flags in the index.
+fn compute_mirror_markers(vault_root: &Path, index: &mut Index) -> Vec<PendingMirrorWrite> {
     let promotions = index.find_blocks_needing_promotion();
-    // Demotions: ^= → ^ (block only in one page but still marked as mirror)
     let demotions = index.find_blocks_needing_demotion();
 
     if promotions.is_empty() && demotions.is_empty() {
-        return;
+        return Vec::new();
     }
 
-    // Group actions by file path to batch file writes
+    // Group actions by file path to batch
     let mut file_actions: std::collections::HashMap<PathBuf, Vec<(&str, &str, usize)>> =
         std::collections::HashMap::new();
     for action in &promotions {
@@ -530,7 +547,7 @@ fn apply_mirror_markers(vault_root: &Path, index: &mut Index) {
         ));
     }
 
-    let mut files_modified = 0;
+    let mut pending = Vec::new();
     for (rel_path, actions) in &file_actions {
         let full = vault_root.join(rel_path);
         let content = match std::fs::read_to_string(&full) {
@@ -583,21 +600,22 @@ fn apply_mirror_markers(vault_root: &Path, index: &mut Index) {
             if has_trailing {
                 out.push_str(sep);
             }
-            if bloom_store::disk_writer::atomic_write(&full, &out).is_ok() {
-                files_modified += 1;
-            }
+            pending.push(PendingMirrorWrite {
+                path: full,
+                content: out,
+            });
         }
     }
 
-    if files_modified > 0 {
+    if !pending.is_empty() {
         tracing::info!(
             promotions = promotions.len(),
             demotions = demotions.len(),
-            files_modified,
-            "mirror markers updated"
+            files = pending.len(),
+            "mirror markers computed"
         );
 
-        // Update is_mirror flags in the index to match the files
+        // Update is_mirror flags in the index
         for action in &promotions {
             let _ = index.connection().execute(
                 "UPDATE block_ids SET is_mirror = 1 WHERE block_id = ?1 AND page_id = ?2",
@@ -611,6 +629,7 @@ fn apply_mirror_markers(vault_root: &Path, index: &mut Index) {
             );
         }
     }
+    pending
 }
 
 /// Read and parse a set of relative paths into IndexEntry objects.

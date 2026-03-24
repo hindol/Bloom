@@ -1292,6 +1292,44 @@ impl BloomEditor {
             }
         }
 
+        // Apply pending mirror marker writes from the indexer.
+        // Open clean buffers: reload with new content (buffer + parse tree updated).
+        // Non-open files: write to disk via DiskWriter or atomic_write.
+        // Dirty buffers: skip (user is editing, don't clobber).
+        for pw in &complete.pending_writes {
+            if let Some(page_id) = self.writer.buffers().find_by_path(&pw.path).cloned() {
+                let is_dirty = self
+                    .writer
+                    .buffers()
+                    .get(&page_id)
+                    .is_some_and(|b| b.is_dirty());
+                if !is_dirty {
+                    let cursor_pos = self
+                        .writer
+                        .buffers()
+                        .get(&page_id)
+                        .map(|b| b.cursor(0))
+                        .unwrap_or(0);
+                    self.writer.apply(crate::BufferMessage::Reload {
+                        page_id: page_id.clone(),
+                        content: pw.content.clone(),
+                    });
+                    let max_pos = self
+                        .writer
+                        .buffers()
+                        .get(&page_id)
+                        .map(|b| b.len_chars())
+                        .unwrap_or(0);
+                    self.set_cursor(cursor_pos.min(max_pos));
+                    // Save via DiskWriter so the file matches the buffer
+                    self.save_page(&page_id);
+                }
+            } else {
+                // Not open — write directly to disk
+                let _ = bloom_store::disk_writer::atomic_write(&pw.path, &pw.content);
+            }
+        }
+
         // Invalidate the BQL query cache so visible queries re-execute.
         self.query_cache.borrow_mut().invalidate();
     }
