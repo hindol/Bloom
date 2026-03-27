@@ -397,9 +397,10 @@ fn draw_editor_content(
     }
 }
 
-/// Draw cursor and current-line highlight for the active pane.
+/// Draw cursor for the active pane.
 /// This is called from the dedicated CursorCanvas layer so that cursor
 /// animation (60fps) doesn't force a full text re-render.
+/// The line highlight is drawn in BaseCanvas (under text), not here.
 pub(crate) fn draw_pane_cursor(
     frame: &mut iced::widget::canvas::Frame,
     pane: &PaneFrame,
@@ -410,7 +411,6 @@ pub(crate) fn draw_pane_cursor(
 ) {
     let pane_x = content_area.x;
     let pane_y = content_area.y;
-    let pane_w = content_area.width;
 
     // Recompute per-line Y offsets (same logic as draw_editor_content).
     let mut line_ys: Vec<f32> = Vec::with_capacity(pane.visible_lines.len());
@@ -424,26 +424,13 @@ pub(crate) fn draw_pane_cursor(
     }
 
     let logical_cursor_row = pane.cursor.line.saturating_sub(pane.scroll_offset);
-
-    // Current line highlight.
-    let hl_y = if let Some((_, hl)) = anim {
-        hl
-    } else {
-        line_ys.get(logical_cursor_row).copied().unwrap_or(pane_y)
-    };
-    let hl_h = line_heights
+    let cursor_row_h = line_heights
         .get(logical_cursor_row)
         .copied()
         .unwrap_or(LINE_HEIGHT);
-    fill_rect(
-        frame,
-        rect(pane_x, hl_y, pane_w, hl_h),
-        rgb_to_color(&theme.highlight),
-    );
 
     // Cursor glyph.
     if cursor_visible {
-        let cursor_row_h = hl_h;
         let (cx, cursor_cw) = if let Some(line) = pane.visible_lines.get(logical_cursor_row) {
             let h_level = line.spans.iter().find_map(|s| match s.style {
                 Style::Heading { level } => Some(level),
