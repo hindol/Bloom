@@ -11,17 +11,18 @@ use bloom_core::config::Config;
 use bloom_core::default_vault_path;
 use bloom_core::event_loop::{FrontendEvent, LoopAction};
 use bloom_core::render::RenderFrame;
-use bloom_core::types::KeyEvent;
+use bloom_core::types::{KeyEvent, PaneId};
 use bloom_core::BloomEditor;
 use bloom_md::theme::{ThemePalette, BLOOM_DARK};
 use crossbeam::channel::{Receiver, Sender};
 use iced::widget::canvas::{Cache, Canvas};
 use iced::{keyboard, window, Element, Font, Length, Size, Subscription, Task};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::canvas::{AnimationState, BaseCanvas, DiffCanvas, OverlayCanvas};
+use crate::canvas::{AnimationState, BaseCanvas, CursorCanvas, DiffCanvas, OverlayCanvas};
 use crate::keys::convert_key;
 use crate::remote::RemoteHints;
 
@@ -93,7 +94,9 @@ struct BloomApp {
     frame_rx: Receiver<Box<RenderFrame>>,
     frame: Option<Box<RenderFrame>>,
     theme: &'static ThemePalette,
-    base_cache: Cache,
+    pane_caches: HashMap<PaneId, Cache>,
+    chrome_cache: Cache,
+    cursor_cache: Cache,
     overlay_cache: Cache,
     diff_cache: Cache,
     quit_flag: Arc<AtomicBool>,
@@ -111,6 +114,10 @@ struct BloomApp {
     /// Font metrics for layout calculations (prep for proportional fonts).
     #[allow(dead_code)]
     font_metrics: FontMetrics,
+    /// Track previous active pane to invalidate status bar on pane switch.
+    prev_active_pane: Option<PaneId>,
+    /// Set on window resize — forces all pane caches to clear on next frame.
+    full_invalidation_pending: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -187,7 +194,9 @@ fn boot() -> (BloomApp, Task<Message>) {
             frame_rx,
             frame: None,
             theme: &BLOOM_DARK,
-            base_cache: Cache::default(),
+            pane_caches: HashMap::new(),
+            chrome_cache: Cache::default(),
+            cursor_cache: Cache::default(),
             diff_cache: Cache::default(),
             overlay_cache: Cache::default(),
             quit_flag,
@@ -199,6 +208,8 @@ fn boot() -> (BloomApp, Task<Message>) {
             last_size: (initial_cols, initial_rows),
             remote,
             font_metrics: FontMetrics::default(),
+            prev_active_pane: None,
+            full_invalidation_pending: false,
         },
         Task::none(),
     )
@@ -256,7 +267,7 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
                 state.keep_alive_until = None;
             }
             if still_moving || blink_changed {
-                state.clear_caches();
+                state.clear_cursor_cache();
             }
         }
         Message::KeyboardEvent(event) => {
@@ -284,14 +295,14 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
                 // core events (which-key popup at ~500ms, notification expiry).
                 state.animating = true;
                 state.keep_alive_until = Some(Instant::now() + Duration::from_millis(600));
-                state.clear_caches();
+                state.clear_cursor_cache();
             }
         }
         Message::Scroll(lines) => {
             if lines != 0 {
                 state.scroll(lines);
                 state.animating = true;
-                state.clear_caches();
+                state.clear_cursor_cache();
             }
         }
         Message::WindowResized(size) => {
@@ -301,6 +312,7 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
                 state.last_size = (cols, rows);
                 let _ = state.frontend_tx.send(FrontendEvent::Resize { cols, rows });
                 state.animating = true;
+                state.full_invalidation_pending = true;
             }
         }
     }
@@ -312,7 +324,16 @@ fn view(state: &BloomApp) -> Element<'_, Message> {
     let base = Canvas::new(BaseCanvas {
         frame: state.frame.as_deref(),
         theme: state.theme,
-        cache: &state.base_cache,
+        pane_caches: &state.pane_caches,
+        chrome_cache: &state.chrome_cache,
+    })
+    .width(Length::Fill)
+    .height(Length::Fill);
+
+    let cursor_layer = Canvas::new(CursorCanvas {
+        frame: state.frame.as_deref(),
+        theme: state.theme,
+        cache: &state.cursor_cache,
         anim: &state.anim,
         remote: state.remote,
         cursor_visible: !state.is_insert_mode() || state.cursor_visible,
@@ -336,7 +357,7 @@ fn view(state: &BloomApp) -> Element<'_, Message> {
     .width(Length::Fill)
     .height(Length::Fill);
 
-    iced::widget::stack![base, diff, overlay]
+    iced::widget::stack![base, cursor_layer, diff, overlay]
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
@@ -387,10 +408,60 @@ fn is_primary_shortcut(modifiers: keyboard::Modifiers) -> bool {
 }
 
 impl BloomApp {
-    fn clear_caches(&mut self) {
-        self.base_cache.clear();
+    /// Clear only the lightweight cursor/highlight layer (for animation, blink).
+    fn clear_cursor_cache(&mut self) {
+        self.cursor_cache.clear();
+    }
+
+    /// Clear content caches (text, chrome, overlays) — for new frames from core.
+    /// Only invalidates the active pane cache (inactive panes stay cached).
+    fn clear_content_caches(&mut self) {
+        self.chrome_cache.clear();
         self.diff_cache.clear();
         self.overlay_cache.clear();
+
+        // Determine current active pane and clear its cache.
+        let new_active = self
+            .frame
+            .as_ref()
+            .and_then(|f| f.panes.iter().find(|p| p.is_active).map(|p| p.id));
+
+        if let Some(id) = new_active {
+            if let Some(cache) = self.pane_caches.get(&id) {
+                cache.clear();
+            }
+        }
+
+        // If active pane changed, also clear the old active (its status bar changed).
+        if self.prev_active_pane != new_active {
+            if let Some(old_id) = self.prev_active_pane {
+                if let Some(cache) = self.pane_caches.get(&old_id) {
+                    cache.clear();
+                }
+            }
+            self.prev_active_pane = new_active;
+        }
+
+        // Ensure all current panes have caches; prune stale entries.
+        if let Some(ref frame) = self.frame {
+            let current_ids: Vec<PaneId> = frame.panes.iter().map(|p| p.id).collect();
+            self.pane_caches
+                .retain(|id, _| current_ids.contains(id));
+            for id in current_ids {
+                self.pane_caches.entry(id).or_insert_with(Cache::default);
+            }
+        }
+    }
+
+    /// Clear everything — for resize or full invalidation.
+    fn clear_all_caches(&mut self) {
+        self.chrome_cache.clear();
+        self.diff_cache.clear();
+        self.overlay_cache.clear();
+        self.cursor_cache.clear();
+        for cache in self.pane_caches.values() {
+            cache.clear();
+        }
     }
 
     fn is_insert_mode(&self) -> bool {
@@ -531,7 +602,13 @@ impl BloomApp {
         }
         if got_frame {
             self.animating = true;
-            self.clear_caches();
+            if self.full_invalidation_pending {
+                self.full_invalidation_pending = false;
+                self.clear_all_caches();
+            } else {
+                self.clear_content_caches();
+                self.clear_cursor_cache();
+            }
         }
     }
 }

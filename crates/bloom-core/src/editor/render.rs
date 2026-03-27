@@ -1249,7 +1249,13 @@ impl BloomEditor {
                 };
 
                 let mut spans = if is_markdown {
-                    self.parser.highlight_line(&line_text, &ctx)
+                    self.span_cache.borrow_mut().get_or_highlight(
+                        page_id,
+                        line_idx,
+                        &line_text,
+                        &ctx,
+                        &self.parser,
+                    )
                 } else {
                     vec![bloom_md::parser::traits::StyledSpan {
                         byte_range: 0..line_text.len(),
@@ -1324,6 +1330,27 @@ impl BloomEditor {
             }
             line_idx += 1;
         }
+
+        // Pre-warm span cache for ±20 lines beyond the viewport so that
+        // scrolling hits cached spans instead of re-highlighting.
+        if is_markdown {
+            let overscan: usize = 20;
+            let pre_start = range.start.saturating_sub(overscan);
+            let pre_end = (range.start + screen_height + overscan).min(line_count);
+            let mut sc = self.span_cache.borrow_mut();
+            for pre_idx in pre_start..pre_end {
+                // Skip lines we already highlighted above.
+                if pre_idx >= range.start && pre_idx < range.start + lines.len() {
+                    continue;
+                }
+                let pre_text = buf.line(pre_idx).to_string();
+                let pre_ctx = parse_tree
+                    .map(|pt| pt.context_before(pre_idx))
+                    .unwrap_or_default();
+                sc.get_or_highlight(page_id, pre_idx, &pre_text, &pre_ctx, &self.parser);
+            }
+        }
+
         lines
     }
 

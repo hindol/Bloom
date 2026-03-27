@@ -397,6 +397,116 @@ fn draw_editor_content(
     }
 }
 
+/// Draw cursor and current-line highlight for the active pane.
+/// This is called from the dedicated CursorCanvas layer so that cursor
+/// animation (60fps) doesn't force a full text re-render.
+pub(crate) fn draw_pane_cursor(
+    frame: &mut iced::widget::canvas::Frame,
+    pane: &PaneFrame,
+    theme: &ThemePalette,
+    anim: Option<(f32, f32)>,
+    cursor_visible: bool,
+    content_area: Rectangle,
+) {
+    let pane_x = content_area.x;
+    let pane_y = content_area.y;
+    let pane_w = content_area.width;
+
+    // Recompute per-line Y offsets (same logic as draw_editor_content).
+    let mut line_ys: Vec<f32> = Vec::with_capacity(pane.visible_lines.len());
+    let mut line_heights: Vec<f32> = Vec::with_capacity(pane.visible_lines.len());
+    let mut y_acc = pane_y;
+    for line in &pane.visible_lines {
+        let row_h = line_row_height(line);
+        line_ys.push(y_acc);
+        line_heights.push(row_h);
+        y_acc += row_h;
+    }
+
+    let logical_cursor_row = pane.cursor.line.saturating_sub(pane.scroll_offset);
+
+    // Current line highlight.
+    let hl_y = if let Some((_, hl)) = anim {
+        hl
+    } else {
+        line_ys.get(logical_cursor_row).copied().unwrap_or(pane_y)
+    };
+    let hl_h = line_heights
+        .get(logical_cursor_row)
+        .copied()
+        .unwrap_or(LINE_HEIGHT);
+    fill_rect(
+        frame,
+        rect(pane_x, hl_y, pane_w, hl_h),
+        rgb_to_color(&theme.highlight),
+    );
+
+    // Cursor glyph.
+    if cursor_visible {
+        let cursor_row_h = hl_h;
+        let (cx, cursor_cw) = if let Some(line) = pane.visible_lines.get(logical_cursor_row) {
+            let h_level = line.spans.iter().find_map(|s| match s.style {
+                Style::Heading { level } => Some(level),
+                _ => None,
+            });
+            let cw = h_level
+                .map(|l| CHAR_WIDTH * (heading_font_size(l) / FONT_SIZE))
+                .unwrap_or(CHAR_WIDTH);
+            (pane_x + GUTTER_WIDTH + pane.cursor.column as f32 * cw, cw)
+        } else {
+            (
+                pane_x + GUTTER_WIDTH + pane.cursor.column as f32 * CHAR_WIDTH,
+                CHAR_WIDTH,
+            )
+        };
+        let cy = anim
+            .map(|(c, _)| c)
+            .unwrap_or(line_ys.get(logical_cursor_row).copied().unwrap_or(pane_y));
+
+        match pane.cursor.shape {
+            CursorShape::Block => {
+                fill_rect(
+                    frame,
+                    rect(cx, cy, cursor_cw, cursor_row_h),
+                    rgb_to_color(&theme.foreground),
+                );
+                if let Some(line) = pane.visible_lines.get(logical_cursor_row) {
+                    let line_text = line.text.trim_end_matches(['\n', '\r']);
+                    if let Some(ch) = line_text.chars().nth(pane.cursor.column) {
+                        let font_size = pane
+                            .visible_lines
+                            .get(logical_cursor_row)
+                            .and_then(|l| {
+                                l.spans.iter().find_map(|s| match s.style {
+                                    Style::Heading { level } => Some(heading_font_size(level)),
+                                    _ => None,
+                                })
+                            })
+                            .unwrap_or(FONT_SIZE);
+                        draw_text_sized(
+                            frame,
+                            cx,
+                            cy,
+                            ch.to_string(),
+                            rgb_to_color(&theme.background),
+                            font_size,
+                            cursor_row_h,
+                        );
+                    }
+                }
+            }
+            CursorShape::Bar => {
+                draw_bar_cursor(frame, cx, cy, cursor_row_h, rgb_to_color(&theme.foreground))
+            }
+            CursorShape::Underline => fill_rect(
+                frame,
+                rect(cx, cy + cursor_row_h - 2.0, cursor_cw, 2.0),
+                rgb_to_color(&theme.foreground),
+            ),
+        }
+    }
+}
+
 fn draw_active_status_bar(
     frame: &mut iced::widget::canvas::Frame,
     pane: &PaneFrame,

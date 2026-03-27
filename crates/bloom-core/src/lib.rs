@@ -703,6 +703,8 @@ pub struct BloomEditor {
     pub(crate) mirror_menu: Option<MirrorMenu>,
     // BQL query cache (invalidated on IndexComplete)
     pub(crate) query_cache: std::cell::RefCell<query::QueryCache>,
+    // Syntax highlight span cache (avoids redundant highlight_line calls)
+    pub(crate) span_cache: std::cell::RefCell<render::span_cache::SpanCache>,
     // Live Views state
     pub(crate) active_view: Option<ViewState>,
     // Single-instance vault lock (held for the lifetime of the editor)
@@ -1082,6 +1084,7 @@ impl BloomEditor {
             inline_completion: None,
             mirror_menu: None,
             query_cache: std::cell::RefCell::new(query::QueryCache::new()),
+            span_cache: std::cell::RefCell::new(render::span_cache::SpanCache::new()),
             active_view: None,
             vault_lock: None,
             history_tx: None,

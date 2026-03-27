@@ -687,11 +687,18 @@ impl VimState {
                 let (insert_pos, replacement, cursor_after) = if next_line_start == rope.len_chars()
                     && (rope.len_chars() == 0 || rope.char(rope.len_chars() - 1) != '\n')
                 {
-                    // Last line has no trailing newline — insert \n
+                    // Last line has no trailing newline — insert \n, cursor after it
+                    (next_line_start, "\n".to_string(), next_line_start + 1)
+                } else if next_line_start == rope.len_chars() && cursor >= rope.len_chars() {
+                    // Cursor is ON the trailing empty line itself — the empty
+                    // line has no \n of its own, so this is like the no-trailing-
+                    // newline case: cursor needs +1 to land on the new line.
                     (next_line_start, "\n".to_string(), next_line_start + 1)
                 } else if next_line_start == rope.len_chars() {
-                    // At end of buffer (last line has trailing \n) — cursor after the new \n
-                    (next_line_start, "\n".to_string(), next_line_start + 1)
+                    // Content line before the trailing empty line — inserting \n
+                    // pushes that empty line down; cursor lands at the insertion
+                    // point (the new empty line), same as mid-file.
+                    (next_line_start, "\n".to_string(), next_line_start)
                 } else {
                     // Mid-file — cursor at start of the new empty line
                     (next_line_start, "\n".to_string(), next_line_start)
@@ -1419,6 +1426,117 @@ mod tests {
         let buf = Buffer::from_text("hello\nworld");
         let _action = vim.process_key(key('O'), &buf, 8);
         assert!(matches!(vim.mode(), Mode::Insert));
+    }
+
+    /// dd on the last content line of a file ending with \n should place the
+    /// cursor on the previous line (standard Vim: last-line deletion → up).
+    #[test]
+    fn test_dd_last_content_line_cursor_goes_to_previous_line() {
+        let mut vim = VimState::new();
+        // 3 content lines + trailing \n → 4 lines total (line 3 is empty)
+        let buf = Buffer::from_text("aaa\nbbb\nccc\n");
+        // Cursor on line 2 ("ccc\n"), char offset = 8
+        let cursor = 8;
+        assert_eq!(buf.text().char_to_line(cursor), 2);
+
+        vim.process_key(key('d'), &buf, cursor);
+        let action = vim.process_key(key('d'), &buf, cursor);
+        match action {
+            VimAction::Edit(edit) => {
+                assert!(edit.replacement.is_empty());
+                assert_eq!(edit.range, 8..12); // delete "ccc\n"
+                // cursor_after = min(8, 8-1) = 7 → on "bbb" (line 1).
+                // Standard Vim: deleting the last line moves cursor up.
+                assert_eq!(
+                    edit.cursor_after, 7,
+                    "cursor should land on previous line after deleting last content line"
+                );
+            }
+            _ => panic!("expected Edit for dd, got {:?}", action),
+        }
+    }
+
+    /// Regression: 'o' on the last content line of a buffer ending with \n
+    /// should place the cursor exactly one line below, not two.
+    #[test]
+    fn test_o_at_end_of_buffer_with_trailing_newline() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("aaa\nbbb\n");
+        // Cursor on line 1 ("bbb\n"), char offset = 4
+        let cursor = 4;
+        assert_eq!(buf.text().char_to_line(cursor), 1);
+
+        let action = vim.process_key(key('o'), &buf, cursor);
+        let edits: Vec<_> = match action {
+            VimAction::Composite(actions) => actions
+                .into_iter()
+                .filter_map(|a| match a {
+                    VimAction::Edit(e) => Some(e),
+                    _ => None,
+                })
+                .collect(),
+            _ => panic!("expected Composite for o, got {:?}", action),
+        };
+        assert_eq!(edits.len(), 1);
+        let edit = &edits[0];
+        // Inserting \n at position 8 (end of buffer).
+        // cursor_after should be 8 (the new empty line = line 2),
+        // NOT 9 (which would resolve to line 3, a 2-line jump).
+        assert_eq!(
+            edit.cursor_after, 8,
+            "cursor should be on the new line (line 2), not past it (line 3)"
+        );
+    }
+
+    /// Regression: dd then o should produce a 1-line jump, not 2.
+    #[test]
+    fn test_dd_then_o_single_line_jump() {
+        let mut vim = VimState::new();
+        let buf = Buffer::from_text("aaa\nbbb\nccc\n");
+        // Cursor on line 2 ("ccc\n")
+        let cursor = 8;
+
+        // dd — delete line 2
+        vim.process_key(key('d'), &buf, cursor);
+        let dd_action = vim.process_key(key('d'), &buf, cursor);
+        let dd_edit = match dd_action {
+            VimAction::Edit(e) => e,
+            _ => panic!("expected Edit for dd"),
+        };
+        // Simulate buffer after deletion: "aaa\nbbb\n"
+        let buf_after = Buffer::from_text("aaa\nbbb\n");
+        let dd_cursor = dd_edit.cursor_after; // 7 → on "bbb" (line 1)
+        let dd_line = buf_after.text().char_to_line(dd_cursor);
+        assert_eq!(dd_line, 1, "dd should place cursor on line 1 (bbb)");
+
+        // o — open line below
+        let mut vim2 = VimState::new();
+        let o_action = vim2.process_key(key('o'), &buf_after, dd_cursor);
+        let o_edits: Vec<_> = match o_action {
+            VimAction::Composite(actions) => actions
+                .into_iter()
+                .filter_map(|a| match a {
+                    VimAction::Edit(e) => Some(e),
+                    _ => None,
+                })
+                .collect(),
+            _ => panic!("expected Composite for o"),
+        };
+        let o_edit = &o_edits[0];
+
+        // After inserting \n, compute the resulting cursor line
+        let mut after_text = String::from("aaa\nbbb\n");
+        after_text.insert(o_edit.range.start, '\n');
+        let result_buf = Buffer::from_text(&after_text);
+        let result_line = result_buf.text().char_to_line(o_edit.cursor_after);
+
+        assert_eq!(
+            result_line,
+            dd_line + 1,
+            "o after dd should jump exactly 1 line: dd_line={} result_line={}",
+            dd_line,
+            result_line
+        );
     }
 
     // Insert mode: typing goes through as Unhandled

@@ -1,6 +1,7 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use bloom_core::render::{InlineMenuAnchor, InlineMenuFrame, PaneFrame, PaneKind, RenderFrame};
+use bloom_core::types::PaneId;
 use bloom_md::theme::ThemePalette;
 use iced::mouse;
 use iced::widget::canvas::{self, Action, Cache, Event, Geometry};
@@ -83,10 +84,8 @@ impl AnimationState {
 pub(crate) struct BaseCanvas<'a> {
     pub(crate) frame: Option<&'a RenderFrame>,
     pub(crate) theme: &'a ThemePalette,
-    pub(crate) cache: &'a Cache,
-    pub(crate) anim: &'a AnimationState,
-    pub(crate) remote: RemoteHints,
-    pub(crate) cursor_visible: bool,
+    pub(crate) pane_caches: &'a HashMap<PaneId, Cache>,
+    pub(crate) chrome_cache: &'a Cache,
 }
 
 impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
@@ -151,67 +150,40 @@ impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
         bounds: Rectangle,
         _cursor: iced::mouse::Cursor,
     ) -> Vec<Geometry> {
-        let geometry = self.cache.draw(renderer, bounds.size(), |frame| {
+        let Some(rf) = self.frame else {
+            let bg = self.chrome_cache.draw(renderer, bounds.size(), |frame| {
+                frame.fill_rectangle(
+                    iced::Point::ORIGIN,
+                    bounds.size(),
+                    rgb_to_color(&self.theme.background),
+                );
+            });
+            return vec![bg];
+        };
+
+        if let Some(wizard) = rf.panes.iter().find_map(|p| match &p.kind {
+            PaneKind::SetupWizard(w) => Some(w),
+            _ => None,
+        }) {
+            let geom = self.chrome_cache.draw(renderer, bounds.size(), |frame| {
+                let window_rect = Rectangle::new(iced::Point::ORIGIN, bounds.size());
+                overlay::draw_setup_wizard(frame, window_rect, wizard, self.theme);
+            });
+            return vec![geom];
+        }
+
+        // Compute layout once for the entire frame.
+        let layout = FrameLayout::compute(bounds.size().width, bounds.size().height, rf);
+
+        let mut geometries = Vec::with_capacity(rf.panes.len() + 1);
+
+        // Chrome layer: background fill, split borders, hidden count, drawers.
+        let chrome = self.chrome_cache.draw(renderer, bounds.size(), |frame| {
             frame.fill_rectangle(
                 iced::Point::ORIGIN,
                 bounds.size(),
                 rgb_to_color(&self.theme.background),
             );
-
-            let Some(rf) = self.frame else {
-                return;
-            };
-
-            if let Some(wizard) = rf.panes.iter().find_map(|p| match &p.kind {
-                PaneKind::SetupWizard(w) => Some(w),
-                _ => None,
-            }) {
-                let window_rect = Rectangle::new(iced::Point::ORIGIN, bounds.size());
-                overlay::draw_setup_wizard(frame, window_rect, wizard, self.theme);
-                return;
-            }
-
-            // Compute layout once for the entire frame.
-            let layout = FrameLayout::compute(bounds.size().width, bounds.size().height, rf);
-
-            // Compute how many status bars are above each pane's Y origin.
-            // Panes are sorted by Y in the frame. For each pane, count panes
-            // whose total_height boundary is at or above this pane's Y.
-            for pf in &rf.panes {
-                let status_bars_above = rf
-                    .panes
-                    .iter()
-                    .filter(|other| other.rect.y + other.rect.total_height <= pf.rect.y)
-                    .count();
-                let (px, py, pw, ch) =
-                    pane::pane_pixel_rect(&pf.rect, status_bars_above, bounds.size());
-                let content_area = Rectangle {
-                    x: px,
-                    y: py,
-                    width: pw,
-                    height: ch,
-                };
-                let pane_modeline = Rectangle {
-                    x: px,
-                    y: layout.modeline.y,
-                    width: pw,
-                    height: layout.modeline.height,
-                };
-                let anim = if pf.is_active && !self.remote.skip_animation() {
-                    Some((self.anim.cursor_y(), self.anim.highlight_y()))
-                } else {
-                    None
-                };
-                pane::draw_pane(
-                    frame,
-                    pf,
-                    self.theme,
-                    anim,
-                    self.cursor_visible,
-                    content_area,
-                    pane_modeline,
-                );
-            }
 
             draw_split_borders(frame, &rf.panes, self.theme);
             draw_hidden_count(frame, bounds.size(), rf.hidden_pane_count, self.theme);
@@ -231,6 +203,109 @@ impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
                     drawer::draw_which_key(frame, dr, wk, self.theme);
                 }
             }
+        });
+        geometries.push(chrome);
+
+        // Per-pane geometries — each pane has its own cache.
+        for pf in &rf.panes {
+            let Some(cache) = self.pane_caches.get(&pf.id) else {
+                continue;
+            };
+            let status_bars_above = rf
+                .panes
+                .iter()
+                .filter(|other| other.rect.y + other.rect.total_height <= pf.rect.y)
+                .count();
+            let (px, py, pw, ch) =
+                pane::pane_pixel_rect(&pf.rect, status_bars_above, bounds.size());
+            let content_area = Rectangle {
+                x: px,
+                y: py,
+                width: pw,
+                height: ch,
+            };
+            let pane_modeline = Rectangle {
+                x: px,
+                y: layout.modeline.y,
+                width: pw,
+                height: layout.modeline.height,
+            };
+            let theme = self.theme;
+            let geom = cache.draw(renderer, bounds.size(), |frame| {
+                let anim = None; // cursor drawn by CursorCanvas layer
+                pane::draw_pane(
+                    frame,
+                    pf,
+                    theme,
+                    anim,
+                    false, // cursor_visible — drawn by CursorCanvas
+                    content_area,
+                    pane_modeline,
+                );
+            });
+            geometries.push(geom);
+        }
+
+        geometries
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Cursor layer: cursor block/bar + current-line highlight.
+// Redrawn at 60fps during animation without re-rendering text content.
+// ---------------------------------------------------------------------------
+
+pub(crate) struct CursorCanvas<'a> {
+    pub(crate) frame: Option<&'a RenderFrame>,
+    pub(crate) theme: &'a ThemePalette,
+    pub(crate) cache: &'a Cache,
+    pub(crate) anim: &'a AnimationState,
+    pub(crate) remote: RemoteHints,
+    pub(crate) cursor_visible: bool,
+}
+
+impl<'a> canvas::Program<Message> for CursorCanvas<'a> {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<Geometry> {
+        let Some(rf) = self.frame else {
+            return vec![];
+        };
+        let active_pane = rf.panes.iter().find(|p| p.is_active);
+        let Some(pf) = active_pane else {
+            return vec![];
+        };
+        if !matches!(pf.kind, PaneKind::Editor) {
+            return vec![];
+        }
+
+        let geometry = self.cache.draw(renderer, bounds.size(), |frame| {
+            let status_bars_above = rf
+                .panes
+                .iter()
+                .filter(|other| other.rect.y + other.rect.total_height <= pf.rect.y)
+                .count();
+            let (px, py, pw, ch) =
+                pane::pane_pixel_rect(&pf.rect, status_bars_above, bounds.size());
+            let content_area = Rectangle {
+                x: px,
+                y: py,
+                width: pw,
+                height: ch,
+            };
+            let anim = if !self.remote.skip_animation() {
+                Some((self.anim.cursor_y(), self.anim.highlight_y()))
+            } else {
+                None
+            };
+            pane::draw_pane_cursor(frame, pf, self.theme, anim, self.cursor_visible, content_area);
         });
         vec![geometry]
     }

@@ -9,6 +9,7 @@ mod frame;
 mod layout;
 mod measure;
 pub mod search_highlight;
+pub(crate) mod span_cache;
 mod viewport;
 
 pub use frame::*;
