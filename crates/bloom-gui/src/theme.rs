@@ -46,7 +46,48 @@ pub(crate) fn style_to_color(style: &Style, theme: &ThemePalette) -> Color {
     }
 }
 
-/// Return an optional background color for styles that need a bg wash.
+/// Compute a semi-transparent overlay color that, when composited over the
+/// theme background, approximates the theme highlight color.  Used by the
+/// CursorCanvas layer so the line highlight can be drawn *above* text content
+/// with minimal text-color distortion (~1-2%).
+///
+/// Dark themes (highlight brighter than bg): white overlay with low alpha.
+/// Light themes (highlight darker than bg): black overlay with low alpha.
+pub(crate) fn highlight_overlay_color(theme: &ThemePalette) -> Color {
+    let bg = &theme.background;
+    let hl = &theme.highlight;
+    let bg_lum = (bg.0 as f32 + bg.1 as f32 + bg.2 as f32) / 3.0;
+    let hl_lum = (hl.0 as f32 + hl.1 as f32 + hl.2 as f32) / 3.0;
+
+    if hl_lum >= bg_lum {
+        // Highlight is lighter → white overlay
+        let denom = 255.0 - bg_lum;
+        let alpha = if denom > 0.0 {
+            ((hl_lum - bg_lum) / denom).clamp(0.01, 0.15)
+        } else {
+            0.05
+        };
+        Color {
+            r: 1.0,
+            g: 1.0,
+            b: 1.0,
+            a: alpha,
+        }
+    } else {
+        // Highlight is darker → black overlay
+        let alpha = if bg_lum > 0.0 {
+            ((bg_lum - hl_lum) / bg_lum).clamp(0.01, 0.15)
+        } else {
+            0.05
+        };
+        Color {
+            r: 0.0,
+            g: 0.0,
+            b: 0.0,
+            a: alpha,
+        }
+    }
+}
 pub(crate) fn style_to_bg(style: &Style, theme: &ThemePalette) -> Option<Color> {
     match style {
         Style::Code | Style::CodeBlock => Some(rgb_to_color(&theme.subtle)),

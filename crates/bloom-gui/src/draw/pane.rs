@@ -153,25 +153,8 @@ fn draw_editor_content(
         y_acc += row_h;
     }
 
-    let logical_cursor_row = pane.cursor.line.saturating_sub(pane.scroll_offset);
-
-    // Current line highlight.
-    if pane.is_active {
-        let hl_y = if let Some((_, hl)) = anim {
-            hl
-        } else {
-            line_ys.get(logical_cursor_row).copied().unwrap_or(pane_y)
-        };
-        let hl_h = line_heights
-            .get(logical_cursor_row)
-            .copied()
-            .unwrap_or(LINE_HEIGHT);
-        fill_rect(
-            frame,
-            rect(pane_x, hl_y, pane_w, hl_h),
-            rgb_to_color(&theme.highlight),
-        );
-    }
+    // Line highlight is drawn on CursorCanvas (alpha-blended overlay) so it
+    // animates smoothly with the cursor without re-rendering text content.
 
     for (i, line) in pane.visible_lines.iter().enumerate() {
         let y = line_ys[i];
@@ -397,10 +380,10 @@ fn draw_editor_content(
     }
 }
 
-/// Draw cursor for the active pane.
-/// This is called from the dedicated CursorCanvas layer so that cursor
-/// animation (60fps) doesn't force a full text re-render.
-/// The line highlight is drawn in BaseCanvas (under text), not here.
+/// Draw cursor and current-line highlight for the active pane.
+/// This is called from the dedicated CursorCanvas layer so that both cursor
+/// and line highlight animate smoothly at 60fps without re-rendering text.
+/// The highlight uses a semi-transparent overlay (see theme::highlight_overlay_color).
 pub(crate) fn draw_pane_cursor(
     frame: &mut iced::widget::canvas::Frame,
     pane: &PaneFrame,
@@ -411,6 +394,7 @@ pub(crate) fn draw_pane_cursor(
 ) {
     let pane_x = content_area.x;
     let pane_y = content_area.y;
+    let pane_w = content_area.width;
 
     // Recompute per-line Y offsets (same logic as draw_editor_content).
     let mut line_ys: Vec<f32> = Vec::with_capacity(pane.visible_lines.len());
@@ -428,6 +412,15 @@ pub(crate) fn draw_pane_cursor(
         .get(logical_cursor_row)
         .copied()
         .unwrap_or(LINE_HEIGHT);
+
+    // Current-line highlight — semi-transparent overlay so text shows through.
+    let hl_y = if let Some((_, hl)) = anim {
+        hl
+    } else {
+        line_ys.get(logical_cursor_row).copied().unwrap_or(pane_y)
+    };
+    let hl_color = crate::theme::highlight_overlay_color(theme);
+    fill_rect(frame, rect(pane_x, hl_y, pane_w, cursor_row_h), hl_color);
 
     // Cursor glyph.
     if cursor_visible {
