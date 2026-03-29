@@ -1,5 +1,7 @@
-use crate::{UndoNodeData, UndoNodeId, UndoPersistData};
+use crate::{EditDelta, UndoNodeData, UndoNodeId, UndoPersistData};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+const KEYFRAME_INTERVAL: usize = 50;
 
 struct UndoNode {
     id: UndoNodeId,
@@ -11,6 +13,7 @@ struct UndoNode {
     /// Epoch milliseconds — for persistence (Instant can't be serialized).
     epoch_ms: i64,
     description: String,
+    edit_delta: Option<EditDelta>,
 }
 
 /// Branching undo tree. Persisted to SQLite on session save, restored on launch.
@@ -37,6 +40,7 @@ impl UndoTree {
             timestamp: Instant::now(),
             epoch_ms: now_epoch_ms(),
             description: String::from("initial"),
+            edit_delta: None,
         };
         UndoTree {
             nodes: vec![root],
@@ -107,11 +111,23 @@ impl UndoTree {
     }
 
     /// Push a new snapshot as a child of the current node. Returns the new node's ID.
+    /// Backward-compat wrapper — calls `push_with_delta` with no delta.
     pub fn push(
         &mut self,
         snapshot: ropey::Rope,
         cursor_pos: usize,
         description: String,
+    ) -> UndoNodeId {
+        self.push_with_delta(snapshot, cursor_pos, description, None)
+    }
+
+    /// Push a new snapshot with an optional edit delta.
+    pub fn push_with_delta(
+        &mut self,
+        snapshot: ropey::Rope,
+        cursor_pos: usize,
+        description: String,
+        edit_delta: Option<EditDelta>,
     ) -> UndoNodeId {
         let new_id = self.nodes.len() as UndoNodeId;
         let new_node = UndoNode {
@@ -123,6 +139,7 @@ impl UndoTree {
             timestamp: Instant::now(),
             epoch_ms: now_epoch_ms(),
             description,
+            edit_delta,
         };
         self.nodes.push(new_node);
         self.nodes[self.current as usize].children.push(new_id);
@@ -167,12 +184,44 @@ impl UndoTree {
         let nodes = self
             .nodes
             .iter()
-            .map(|n| UndoNodeData {
-                node_id: n.id as i64,
-                parent_id: n.parent.map(|p| p as i64),
-                content: n.snapshot.to_string(),
-                timestamp_ms: n.epoch_ms,
-                description: n.description.clone(),
+            .map(|n| {
+                let is_root = n.parent.is_none();
+                let is_keyframe = (n.id as usize) % KEYFRAME_INTERVAL == 0;
+                if is_root || is_keyframe {
+                    UndoNodeData {
+                        node_id: n.id as i64,
+                        parent_id: n.parent.map(|p| p as i64),
+                        content: Some(n.snapshot.to_string()),
+                        delta_offset: None,
+                        delta_del_len: None,
+                        delta_insert: None,
+                        timestamp_ms: n.epoch_ms,
+                        description: n.description.clone(),
+                    }
+                } else if let Some(ref delta) = n.edit_delta {
+                    UndoNodeData {
+                        node_id: n.id as i64,
+                        parent_id: n.parent.map(|p| p as i64),
+                        content: None,
+                        delta_offset: Some(delta.offset as i64),
+                        delta_del_len: Some(delta.delete_len as i64),
+                        delta_insert: Some(delta.insert_text.clone()),
+                        timestamp_ms: n.epoch_ms,
+                        description: n.description.clone(),
+                    }
+                } else {
+                    // Fallback: no delta available (old push() path), store content
+                    UndoNodeData {
+                        node_id: n.id as i64,
+                        parent_id: n.parent.map(|p| p as i64),
+                        content: Some(n.snapshot.to_string()),
+                        delta_offset: None,
+                        delta_del_len: None,
+                        delta_insert: None,
+                        timestamp_ms: n.epoch_ms,
+                        description: n.description.clone(),
+                    }
+                }
             })
             .collect();
         UndoPersistData {
@@ -191,21 +240,53 @@ impl UndoTree {
         conn.execute("DELETE FROM undo_tree WHERE page_id = ?1", [page_id])?;
 
         let mut stmt = conn.prepare(
-            "INSERT INTO undo_tree (page_id, node_id, parent_id, content, timestamp_ms, description)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO undo_tree (page_id, node_id, parent_id, content, delta_offset, delta_del_len, delta_insert, timestamp_ms, description)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )?;
 
         for node in &self.nodes {
-            let content: String = node.snapshot.to_string();
             let parent_id: Option<i64> = node.parent.map(|p| p as i64);
-            stmt.execute(rusqlite::params![
-                page_id,
-                node.id as i64,
-                parent_id,
-                content,
-                node.epoch_ms,
-                node.description,
-            ])?;
+            let is_root = node.parent.is_none();
+            let is_keyframe = (node.id as usize) % KEYFRAME_INTERVAL == 0;
+
+            if is_root || is_keyframe {
+                stmt.execute(rusqlite::params![
+                    page_id,
+                    node.id as i64,
+                    parent_id,
+                    node.snapshot.to_string(),
+                    Option::<i64>::None,
+                    Option::<i64>::None,
+                    Option::<String>::None,
+                    node.epoch_ms,
+                    node.description,
+                ])?;
+            } else if let Some(ref delta) = node.edit_delta {
+                stmt.execute(rusqlite::params![
+                    page_id,
+                    node.id as i64,
+                    parent_id,
+                    Option::<String>::None,
+                    delta.offset as i64,
+                    delta.delete_len as i64,
+                    delta.insert_text,
+                    node.epoch_ms,
+                    node.description,
+                ])?;
+            } else {
+                // Fallback: no delta available, store full content
+                stmt.execute(rusqlite::params![
+                    page_id,
+                    node.id as i64,
+                    parent_id,
+                    node.snapshot.to_string(),
+                    Option::<i64>::None,
+                    Option::<i64>::None,
+                    Option::<String>::None,
+                    node.epoch_ms,
+                    node.description,
+                ])?;
+            }
         }
 
         conn.execute(
@@ -237,44 +318,121 @@ impl UndoTree {
         };
 
         let mut stmt = conn.prepare(
-            "SELECT node_id, parent_id, content, timestamp_ms, description
+            "SELECT node_id, parent_id, content, delta_offset, delta_del_len, delta_insert, timestamp_ms, description
              FROM undo_tree WHERE page_id = ?1 ORDER BY node_id ASC",
         )?;
 
-        let rows = stmt.query_map([page_id], |row| {
-            let node_id: i64 = row.get(0)?;
-            let parent_id: Option<i64> = row.get(1)?;
-            let content: String = row.get(2)?;
-            let timestamp_ms: i64 = row.get(3)?;
-            let description: String = row.get(4)?;
-            Ok((node_id, parent_id, content, timestamp_ms, description))
-        })?;
-
-        let mut nodes: Vec<UndoNode> = Vec::new();
-        for row in rows {
-            let (node_id, parent_id, content, timestamp_ms, description) = row?;
-            nodes.push(UndoNode {
-                id: node_id as UndoNodeId,
-                parent: parent_id.map(|p| p as UndoNodeId),
-                children: Vec::new(),
-                snapshot: ropey::Rope::from_str(&content),
-                cursor_pos: 0, // Persisted trees don't store cursor; default to 0
-                timestamp: Instant::now(),
-                epoch_ms: timestamp_ms,
-                description,
-            });
+        struct RawRow {
+            node_id: i64,
+            parent_id: Option<i64>,
+            content: Option<String>,
+            delta_offset: Option<i64>,
+            delta_del_len: Option<i64>,
+            delta_insert: Option<String>,
+            timestamp_ms: i64,
+            description: String,
         }
 
-        if nodes.is_empty() {
+        let rows: Vec<RawRow> = stmt
+            .query_map([page_id], |row| {
+                Ok(RawRow {
+                    node_id: row.get(0)?,
+                    parent_id: row.get(1)?,
+                    content: row.get(2)?,
+                    delta_offset: row.get(3)?,
+                    delta_del_len: row.get(4)?,
+                    delta_insert: row.get(5)?,
+                    timestamp_ms: row.get(6)?,
+                    description: row.get(7)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        if rows.is_empty() {
             return Ok(None);
         }
 
-        // Rebuild children from parent pointers.
+        // Phase 1: Build nodes; populate snapshots where content is available.
+        let mut nodes: Vec<UndoNode> = Vec::with_capacity(rows.len());
+        let mut has_rope: Vec<bool> = Vec::with_capacity(rows.len());
+        let mut deltas: Vec<Option<EditDelta>> = Vec::with_capacity(rows.len());
+
+        for r in &rows {
+            let (snapshot, delta) = if let Some(ref content) = r.content {
+                (ropey::Rope::from_str(content), None)
+            } else if let (Some(off), Some(del), Some(ref ins)) =
+                (r.delta_offset, r.delta_del_len, &r.delta_insert)
+            {
+                let delta = EditDelta {
+                    offset: off as usize,
+                    delete_len: del as usize,
+                    insert_text: ins.clone(),
+                };
+                // Placeholder rope — will be replaced by BFS
+                (ropey::Rope::from_str(""), Some(delta))
+            } else {
+                // Corrupted row: no content and no delta
+                eprintln!(
+                    "bloom-buffer: node {} has no content and no delta; using empty rope",
+                    r.node_id
+                );
+                (ropey::Rope::from_str(""), None)
+            };
+
+            has_rope.push(r.content.is_some());
+            deltas.push(delta.clone());
+
+            nodes.push(UndoNode {
+                id: r.node_id as UndoNodeId,
+                parent: r.parent_id.map(|p| p as UndoNodeId),
+                children: Vec::new(),
+                snapshot,
+                cursor_pos: 0,
+                timestamp: Instant::now(),
+                epoch_ms: r.timestamp_ms,
+                description: r.description.clone(),
+                edit_delta: delta,
+            });
+        }
+
+        // Phase 2: Rebuild children from parent pointers.
         let len = nodes.len();
         for i in 0..len {
             if let Some(parent) = nodes[i].parent {
                 let child_id = nodes[i].id;
                 nodes[parent as usize].children.push(child_id);
+            }
+        }
+
+        // Phase 3: BFS to reconstruct ropes for delta nodes.
+        let mut queue = std::collections::VecDeque::new();
+        for i in 0..len {
+            if has_rope[i] {
+                queue.push_back(i);
+            }
+        }
+
+        while let Some(idx) = queue.pop_front() {
+            let child_ids: Vec<UndoNodeId> = nodes[idx].children.clone();
+            for &child_id in &child_ids {
+                let ci = child_id as usize;
+                if !has_rope[ci] {
+                    if let Some(ref delta) = deltas[ci] {
+                        let mut child_rope = nodes[idx].snapshot.clone();
+                        let del_end = delta.offset + delta.delete_len;
+                        if del_end <= child_rope.len_chars() {
+                            child_rope.remove(delta.offset..del_end);
+                        }
+                        if !delta.insert_text.is_empty()
+                            && delta.offset <= child_rope.len_chars()
+                        {
+                            child_rope.insert(delta.offset, &delta.insert_text);
+                        }
+                        nodes[ci].snapshot = child_rope;
+                    }
+                    has_rope[ci] = true;
+                    queue.push_back(ci);
+                }
             }
         }
 
@@ -292,16 +450,35 @@ fn now_epoch_ms() -> i64 {
         .as_millis() as i64
 }
 
+/// Compute the minimal single-edit delta between two ropes.
+pub fn compute_diff(old: &ropey::Rope, new: &ropey::Rope) -> EditDelta {
+    let old_len = old.len_chars();
+    let new_len = new.len_chars();
+    let prefix = old.chars().zip(new.chars()).take_while(|(a, b)| a == b).count();
+    let max_suffix = old_len.min(new_len) - prefix;
+    let suffix = (0..max_suffix)
+        .take_while(|&i| old.char(old_len - 1 - i) == new.char(new_len - 1 - i))
+        .count();
+    EditDelta {
+        offset: prefix,
+        delete_len: old_len - prefix - suffix,
+        insert_text: new.slice(prefix..new_len - suffix).to_string(),
+    }
+}
+
 /// Create the undo persistence tables if they don't exist.
 pub fn create_undo_tables(conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS undo_tree (
-            page_id      TEXT NOT NULL,
-            node_id      INTEGER NOT NULL,
-            parent_id    INTEGER,
-            content      TEXT NOT NULL,
-            timestamp_ms INTEGER NOT NULL,
-            description  TEXT NOT NULL DEFAULT '',
+            page_id        TEXT NOT NULL,
+            node_id        INTEGER NOT NULL,
+            parent_id      INTEGER,
+            content        TEXT,
+            delta_offset   INTEGER,
+            delta_del_len  INTEGER,
+            delta_insert   TEXT,
+            timestamp_ms   INTEGER NOT NULL,
+            description    TEXT NOT NULL DEFAULT '',
             PRIMARY KEY (page_id, node_id)
         );
         CREATE TABLE IF NOT EXISTS undo_tree_state (
@@ -356,5 +533,232 @@ mod tests {
         assert!(UndoTree::load_from_db(&conn, "nonexistent")
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn test_delta_round_trip() {
+        let conn = setup_db();
+        let initial = ropey::Rope::from_str("hello world");
+        let mut tree = UndoTree::new(initial.clone());
+
+        let after1 = ropey::Rope::from_str("hello brave world");
+        let delta1 = compute_diff(&initial, &after1);
+        tree.push_with_delta(after1.clone(), 0, "insert brave".into(), Some(delta1));
+
+        let after2 = ropey::Rope::from_str("hello brave new world");
+        let delta2 = compute_diff(&after1, &after2);
+        tree.push_with_delta(after2, 0, "insert new".into(), Some(delta2));
+
+        tree.save_to_db(&conn, "page1").unwrap();
+        let restored = UndoTree::load_from_db(&conn, "page1").unwrap().unwrap();
+
+        assert_eq!(restored.node_count(), 3);
+        assert_eq!(restored.node_snapshot_string(0), "hello world");
+        assert_eq!(restored.node_snapshot_string(1), "hello brave world");
+        assert_eq!(restored.node_snapshot_string(2), "hello brave new world");
+    }
+
+    #[test]
+    fn test_edit_group_delta() {
+        let old = ropey::Rope::from_str("abcdef");
+        let new = ropey::Rope::from_str("abXYZef");
+        let delta = compute_diff(&old, &new);
+        assert_eq!(delta.offset, 2);
+        assert_eq!(delta.delete_len, 2); // "cd" removed
+        assert_eq!(delta.insert_text, "XYZ");
+    }
+
+    #[test]
+    fn test_keyframe_persistence() {
+        let conn = setup_db();
+        let mut tree = UndoTree::new(ropey::Rope::from_str("root"));
+
+        // Push 60 nodes (ids 1..=60)
+        let mut prev = ropey::Rope::from_str("root");
+        for i in 1..=60 {
+            let text = format!("edit {i}");
+            let next = ropey::Rope::from_str(&text);
+            let delta = compute_diff(&prev, &next);
+            tree.push_with_delta(next.clone(), 0, format!("edit {i}"), Some(delta));
+            prev = next;
+        }
+
+        tree.save_to_db(&conn, "page1").unwrap();
+
+        // Verify: nodes 0 and 50 should have content (keyframes), node 1 should have delta
+        let has_content_0: Option<String> = conn
+            .query_row(
+                "SELECT content FROM undo_tree WHERE page_id='page1' AND node_id=0",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(has_content_0.is_some());
+
+        let has_content_50: Option<String> = conn
+            .query_row(
+                "SELECT content FROM undo_tree WHERE page_id='page1' AND node_id=50",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(has_content_50.is_some());
+
+        let has_content_1: Option<String> = conn
+            .query_row(
+                "SELECT content FROM undo_tree WHERE page_id='page1' AND node_id=1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(has_content_1.is_none());
+
+        let delta_offset_1: Option<i64> = conn
+            .query_row(
+                "SELECT delta_offset FROM undo_tree WHERE page_id='page1' AND node_id=1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(delta_offset_1.is_some());
+
+        // Verify round-trip correctness
+        let restored = UndoTree::load_from_db(&conn, "page1").unwrap().unwrap();
+        assert_eq!(restored.node_count(), 61);
+        assert_eq!(restored.node_snapshot_string(0), "root");
+        assert_eq!(restored.node_snapshot_string(50), "edit 50");
+        assert_eq!(restored.node_snapshot_string(60), "edit 60");
+    }
+
+    #[test]
+    fn test_branching_delta() {
+        let conn = setup_db();
+        let initial = ropey::Rope::from_str("root");
+        let mut tree = UndoTree::new(initial.clone());
+
+        let branch_a = ropey::Rope::from_str("root-A");
+        let delta_a = compute_diff(&initial, &branch_a);
+        tree.push_with_delta(branch_a, 0, "branch A".into(), Some(delta_a));
+
+        tree.undo(); // back to root
+
+        let branch_b = ropey::Rope::from_str("root-B");
+        let delta_b = compute_diff(&initial, &branch_b);
+        tree.push_with_delta(branch_b, 0, "branch B".into(), Some(delta_b));
+
+        tree.save_to_db(&conn, "page1").unwrap();
+        let restored = UndoTree::load_from_db(&conn, "page1").unwrap().unwrap();
+
+        assert_eq!(restored.node_count(), 3);
+        assert_eq!(restored.children(0).len(), 2);
+        assert_eq!(restored.node_snapshot_string(0), "root");
+        assert_eq!(restored.node_snapshot_string(1), "root-A");
+        assert_eq!(restored.node_snapshot_string(2), "root-B");
+    }
+
+    #[test]
+    fn test_backward_compat() {
+        let conn = setup_db();
+        // Insert data in old format: all nodes have content, no delta columns
+        conn.execute(
+            "INSERT INTO undo_tree (page_id, node_id, parent_id, content, timestamp_ms, description)
+             VALUES ('page1', 0, NULL, 'root text', 1000, 'initial')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO undo_tree (page_id, node_id, parent_id, content, timestamp_ms, description)
+             VALUES ('page1', 1, 0, 'after edit', 1001, 'edit 1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO undo_tree_state (page_id, current_node_id) VALUES ('page1', 1)",
+            [],
+        )
+        .unwrap();
+
+        let restored = UndoTree::load_from_db(&conn, "page1").unwrap().unwrap();
+        assert_eq!(restored.node_count(), 2);
+        assert_eq!(restored.node_snapshot_string(0), "root text");
+        assert_eq!(restored.node_snapshot_string(1), "after edit");
+        assert_eq!(restored.current(), 1);
+    }
+
+    #[test]
+    fn test_compute_diff_identical() {
+        let rope = ropey::Rope::from_str("hello world");
+        let delta = compute_diff(&rope, &rope);
+        assert_eq!(delta.delete_len, 0);
+        assert_eq!(delta.insert_text, "");
+    }
+
+    #[test]
+    fn test_compute_diff_prefix_only() {
+        let old = ropey::Rope::from_str("hello");
+        let new = ropey::Rope::from_str("hello world");
+        let delta = compute_diff(&old, &new);
+        assert_eq!(delta.offset, 5);
+        assert_eq!(delta.delete_len, 0);
+        assert_eq!(delta.insert_text, " world");
+    }
+
+    #[test]
+    fn test_compute_diff_suffix_only() {
+        let old = ropey::Rope::from_str("world");
+        let new = ropey::Rope::from_str("hello world");
+        let delta = compute_diff(&old, &new);
+        assert_eq!(delta.offset, 0);
+        assert_eq!(delta.delete_len, 0);
+        assert_eq!(delta.insert_text, "hello ");
+    }
+
+    #[test]
+    fn test_deep_chain_with_keyframes() {
+        let conn = setup_db();
+        let mut tree = UndoTree::new(ropey::Rope::from_str("node0"));
+
+        let mut prev = ropey::Rope::from_str("node0");
+        for i in 1..=120 {
+            let text = format!("node{i}");
+            let next = ropey::Rope::from_str(&text);
+            let delta = compute_diff(&prev, &next);
+            tree.push_with_delta(next.clone(), 0, format!("edit {i}"), Some(delta));
+            prev = next;
+        }
+
+        tree.save_to_db(&conn, "page1").unwrap();
+
+        // Verify keyframes at 0, 50, 100 have content
+        for kf in [0, 50, 100] {
+            let content: Option<String> = conn
+                .query_row(
+                    &format!(
+                        "SELECT content FROM undo_tree WHERE page_id='page1' AND node_id={kf}"
+                    ),
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(content.is_some(), "keyframe node {kf} should have content");
+        }
+
+        // Verify non-keyframe node 25 does NOT have content
+        let content_25: Option<String> = conn
+            .query_row(
+                "SELECT content FROM undo_tree WHERE page_id='page1' AND node_id=25",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(content_25.is_none(), "non-keyframe node 25 should not have content");
+
+        // Round-trip verify all 121 nodes
+        let restored = UndoTree::load_from_db(&conn, "page1").unwrap().unwrap();
+        assert_eq!(restored.node_count(), 121);
+        assert_eq!(restored.node_snapshot_string(0), "node0");
+        assert_eq!(restored.node_snapshot_string(50), "node50");
+        assert_eq!(restored.node_snapshot_string(100), "node100");
+        assert_eq!(restored.node_snapshot_string(120), "node120");
     }
 }

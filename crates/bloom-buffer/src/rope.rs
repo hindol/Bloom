@@ -157,6 +157,11 @@ impl Buffer {
 
     /// Insert `text` at the given character index.
     pub fn insert(&mut self, char_idx: usize, text: &str) {
+        let delta = crate::EditDelta {
+            offset: char_idx,
+            delete_len: 0,
+            insert_text: text.to_string(),
+        };
         let len = text.chars().count();
         self.rope.insert(char_idx, text);
         self.adjust_cursors_after_insert(char_idx, len);
@@ -169,26 +174,37 @@ impl Buffer {
                 format!("insert '{truncated}...'")
             };
             self.undo_tree
-                .push(self.rope.clone(), self.cursor_pos_for_undo(), desc);
+                .push_with_delta(self.rope.clone(), self.cursor_pos_for_undo(), desc, Some(delta));
         }
     }
 
     /// Delete the character range.
     pub fn delete(&mut self, range: Range<usize>) {
+        let delta = crate::EditDelta {
+            offset: range.start,
+            delete_len: range.len(),
+            insert_text: String::new(),
+        };
         self.adjust_cursors_after_delete(&range);
         self.rope.remove(range);
         self.bump_version();
         if self.edit_group_checkpoint.is_none() {
-            self.undo_tree.push(
+            self.undo_tree.push_with_delta(
                 self.rope.clone(),
                 self.cursor_pos_for_undo(),
                 "delete".to_string(),
+                Some(delta),
             );
         }
     }
 
     /// Replace the character range with `text`.
     pub fn replace(&mut self, range: Range<usize>, text: &str) {
+        let delta = crate::EditDelta {
+            offset: range.start,
+            delete_len: range.len(),
+            insert_text: text.to_string(),
+        };
         let insert_len = text.chars().count();
         self.adjust_cursors_after_delete(&range);
         let start = range.start;
@@ -204,7 +220,7 @@ impl Buffer {
                 format!("replace with '{truncated}...'")
             };
             self.undo_tree
-                .push(self.rope.clone(), self.cursor_pos_for_undo(), desc);
+                .push_with_delta(self.rope.clone(), self.cursor_pos_for_undo(), desc, Some(delta));
         }
     }
 
@@ -289,10 +305,12 @@ impl Buffer {
     pub fn end_edit_group(&mut self) {
         if let Some(checkpoint) = self.edit_group_checkpoint.take() {
             if self.rope != checkpoint {
-                self.undo_tree.push(
+                let delta = crate::undo::compute_diff(&checkpoint, &self.rope);
+                self.undo_tree.push_with_delta(
                     self.rope.clone(),
                     self.cursor_pos_for_undo(),
                     "insert session".to_string(),
+                    Some(delta),
                 );
             }
         }

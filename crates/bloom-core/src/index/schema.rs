@@ -85,12 +85,15 @@ pub(crate) fn create_tables(conn: &Connection) -> Result<(), BloomError> {
         -- Persistent undo tree. Serialized on session save, restored on launch.
         -- Pruned when a buffer is closed or after 24 hours.
         CREATE TABLE IF NOT EXISTS undo_tree (
-            page_id      TEXT NOT NULL,
-            node_id      INTEGER NOT NULL,
-            parent_id    INTEGER,
-            content      TEXT NOT NULL,
-            timestamp_ms INTEGER NOT NULL,
-            description  TEXT NOT NULL DEFAULT '',
+            page_id       TEXT NOT NULL,
+            node_id       INTEGER NOT NULL,
+            parent_id     INTEGER,
+            content       TEXT,
+            delta_offset  INTEGER,
+            delta_del_len INTEGER,
+            delta_insert  TEXT,
+            timestamp_ms  INTEGER NOT NULL,
+            description   TEXT NOT NULL DEFAULT '',
             PRIMARY KEY (page_id, node_id)
         );
 
@@ -105,6 +108,11 @@ pub(crate) fn create_tables(conn: &Connection) -> Result<(), BloomError> {
     // Migration: add is_mirror column if missing (existing databases).
     let _ =
         conn.execute_batch("ALTER TABLE block_ids ADD COLUMN is_mirror INTEGER NOT NULL DEFAULT 0");
+
+    // Migration: add delta columns if missing (existing databases).
+    let _ = conn.execute_batch("ALTER TABLE undo_tree ADD COLUMN delta_offset INTEGER");
+    let _ = conn.execute_batch("ALTER TABLE undo_tree ADD COLUMN delta_del_len INTEGER");
+    let _ = conn.execute_batch("ALTER TABLE undo_tree ADD COLUMN delta_insert TEXT");
 
     Ok(())
 }

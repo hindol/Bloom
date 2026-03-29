@@ -197,8 +197,8 @@ fn persist_undo_trees(
         )?;
 
         let mut stmt = tx.prepare_cached(
-            "INSERT INTO undo_tree (page_id, node_id, parent_id, content, timestamp_ms, description)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO undo_tree (page_id, node_id, parent_id, content, delta_offset, delta_del_len, delta_insert, timestamp_ms, description)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )?;
         for node in &page.nodes {
             stmt.execute(rusqlite::params![
@@ -206,6 +206,9 @@ fn persist_undo_trees(
                 node.node_id,
                 node.parent_id,
                 node.content,
+                node.delta_offset,
+                node.delta_del_len,
+                node.delta_insert,
                 node.timestamp_ms,
                 node.description,
             ])?;

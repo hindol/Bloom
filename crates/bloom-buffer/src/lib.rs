@@ -101,12 +101,26 @@ impl Cursor {
     }
 }
 
+/// An edit delta: the minimal edit that transforms a parent node's text into this node's text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditDelta {
+    /// Character offset in the parent's text where the edit starts.
+    pub offset: usize,
+    /// Number of characters deleted from the parent at `offset`.
+    pub delete_len: usize,
+    /// Text inserted at `offset` (after deletion).
+    pub insert_text: String,
+}
+
 /// Data for persisting a single undo node to SQLite.
 #[derive(Debug, Clone)]
 pub struct UndoNodeData {
     pub node_id: i64,
     pub parent_id: Option<i64>,
-    pub content: String,
+    pub content: Option<String>,
+    pub delta_offset: Option<i64>,
+    pub delta_del_len: Option<i64>,
+    pub delta_insert: Option<String>,
     pub timestamp_ms: i64,
     pub description: String,
 }
