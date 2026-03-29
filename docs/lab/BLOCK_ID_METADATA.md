@@ -1,5 +1,16 @@
 # Block IDs: Pre-Edit Transform Model
 
+> Status: **Superseded as the primary direction** by the unified document layer investigation.
+>
+> See:
+> - `UNIFIED_DOCUMENT_LAYER.md`
+> - `UNIFIED_DOCUMENT_LAYER_ARCHITECTURE.md`
+> - `UNIFIED_DOCUMENT_LAYER_OPTIONS.md`
+> - `UNIFIED_DOCUMENT_LAYER_RISKS.md`
+>
+> This document is still useful as a **narrow design branch** for how block-ID placement might work inside a stronger document-model owner.
+> It should no longer be treated as the active top-level architecture on its own.
+
 ## Problem
 
 Block IDs (` ^k7m2x`) are structural metadata. The editing buffer should
