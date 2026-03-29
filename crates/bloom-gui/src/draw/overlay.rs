@@ -26,7 +26,7 @@ pub(crate) fn draw_picker(
     let panel_bottom = area.y + area.height;
 
     let available_h = panel_bottom - panel_top;
-    let available_lines = (available_h / LINE_HEIGHT) as usize;
+    let available_lines = (available_h / LINE_HEIGHT + 0.5) as usize;
     let num_visible = num_results.min(available_lines.saturating_sub(3));
 
     // Layout from bottom up within the allocated rect.
