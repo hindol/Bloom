@@ -521,15 +521,24 @@ impl VimState {
                 count,
             } => {
                 self.update_find_state(&motion);
-                let spec = motion::execute_operator_motion(
-                    operator,
-                    &motion,
-                    buffer,
-                    cursor,
-                    count,
-                    &self.last_find,
-                );
-                let range = motion::range_from_operator_spec(cursor, spec);
+                let range = if matches!(
+                    motion,
+                    motion::MotionType::DocumentStart | motion::MotionType::DocumentEnd
+                ) {
+                    let target =
+                        motion::execute_motion(&motion, buffer, cursor, count, &self.last_find);
+                    linewise_motion_range(buffer, cursor, target)
+                } else {
+                    let spec = motion::execute_operator_motion(
+                        operator,
+                        &motion,
+                        buffer,
+                        cursor,
+                        count,
+                        &self.last_find,
+                    );
+                    motion::range_from_operator_spec(cursor, spec)
+                };
                 self.apply_operator(operator, buffer, &range, cursor)
             }
             // ── operator doubled (line-wise) ─────────────────────────
@@ -917,6 +926,21 @@ fn line_range(buffer: &Buffer, cursor: usize, count: usize) -> Range<usize> {
     } else {
         start..end
     }
+}
+
+fn linewise_motion_range(buffer: &Buffer, cursor: usize, target: usize) -> Range<usize> {
+    let rope = buffer.text();
+    let start_line = rope.char_to_line(cursor);
+    let target_line = rope.char_to_line(target);
+    let first_line = start_line.min(target_line);
+    let last_line = start_line.max(target_line);
+    let start = rope.line_to_char(first_line);
+    let end = if last_line + 1 < rope.len_lines() {
+        rope.line_to_char(last_line + 1)
+    } else {
+        buffer.len_chars()
+    };
+    start..end
 }
 
 fn indent_range(buffer: &Buffer, range: &Range<usize>) -> EditOp {
@@ -1445,8 +1469,8 @@ mod tests {
             VimAction::Edit(edit) => {
                 assert!(edit.replacement.is_empty());
                 assert_eq!(edit.range, 8..12); // delete "ccc\n"
-                // cursor_after = min(8, 8-1) = 7 → on "bbb" (line 1).
-                // Standard Vim: deleting the last line moves cursor up.
+                                               // cursor_after = min(8, 8-1) = 7 → on "bbb" (line 1).
+                                               // Standard Vim: deleting the last line moves cursor up.
                 assert_eq!(
                     edit.cursor_after, 7,
                     "cursor should land on previous line after deleting last content line"

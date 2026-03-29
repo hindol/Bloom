@@ -900,6 +900,19 @@ fn vim_gg_and_G() {
 }
 
 #[test]
+#[allow(non_snake_case)]
+fn vim_dG_deletes_through_last_line() {
+    let mut sim = SimInput::with_content("line 1\nline 2\nline 3\n");
+
+    sim.keys("j");
+    sim.keys("dG");
+
+    assert_eq!(sim.buffer_text(), "line 1\n");
+    let (line, _) = sim.screen(80, 24).cursor();
+    assert_eq!(line, 0, "cursor should stay on the remaining line");
+}
+
+#[test]
 fn vim_w_b_word_motions() {
     let mut sim = SimInput::with_content("one two three four\n");
 
@@ -2814,6 +2827,31 @@ fn cursor_after_undo_insert() {
     );
 }
 
+#[test]
+fn cursor_after_undo_in_split_pane() {
+    let mut sim = SimInput::with_content("hello world");
+
+    sim.keys("SPC w v");
+    sim.keys("w");
+    let (_, col_before_edit) = sim.screen(80, 24).cursor();
+    assert_eq!(
+        col_before_edit, 6,
+        "split pane cursor should move independently"
+    );
+
+    sim.keys("i");
+    sim.type_text("X");
+    sim.keys("<Esc>");
+    sim.keys("u");
+
+    assert_eq!(sim.buffer_text(), "hello world");
+    let (_, col_after_undo) = sim.screen(80, 24).cursor();
+    assert_eq!(
+        col_after_undo, 6,
+        "undo should restore the active split pane cursor"
+    );
+}
+
 // 2dd → deletes two lines, cursor on next remaining line
 #[test]
 fn cursor_after_count_dd() {
@@ -4586,8 +4624,7 @@ fn section_mirror_structural_diff_detects_insert() {
     use bloom_core::parse_tree::ParseTree;
     use bloom_core::section_mirror::{section_child_ids, structural_diff};
 
-    let source_text =
-        "## Tasks ^=head1\n- [ ] A ^=t0001\n- [ ] B ^=t0002\n- [ ] C ^=t0003\n";
+    let source_text = "## Tasks ^=head1\n- [ ] A ^=t0001\n- [ ] B ^=t0002\n- [ ] C ^=t0003\n";
     let peer_text = "## Tasks ^=head1\n- [ ] A ^=t0001\n- [ ] B ^=t0002\n";
 
     let source_tree = ParseTree::build(source_text);
