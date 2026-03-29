@@ -364,6 +364,236 @@ That owner would absorb the responsibilities that are currently split between:
 
 ---
 
+## Current implementation checkpoint after the first slice
+
+Bloom now has a real `document.rs` owner in `bloom-core`, but it is still only
+the **first slice** of the intended shape.
+
+Today `Document` / `DocumentMut` already own:
+
+- local edit application
+- parse-tree dirtying / rebuild
+- undo / redo / restore through the active cursor index
+- reload and align coordination
+- the current save-time `ensure_block_ids()` bridge
+
+That means the next step should **evolve this owner**, not replace it with a new
+parallel abstraction.
+
+The main missing piece is that block identity is still represented as visible
+text in the rope and consumed by callers through `parse_block_id(...)` or
+`ParseTree` block-ID queries. That is exactly the seam the next slice should
+close.
+
+## Recommended concrete runtime shape for the next slice
+
+Keep the current layering:
+
+- `bloom-buffer` remains the low-level rope / cursor / undo substrate
+- `Document` / `DocumentMut` remain the runtime owner exposed by `BufferManager`
+- `ParseTree` remains the authority on structure for the **clean editing text**
+
+Refine the in-memory shape like this:
+
+```text
+ManagedBuffer {
+  slot: BufferSlot,        // clean editing text only
+  info: BufferInfo,
+  document: DocumentState,
+}
+
+DocumentState {
+  parse_tree: ParseTree,           // built from clean text
+  block_ids: Vec<BlockIdEntry>,    // block identity overlay
+}
+```
+
+Recommended details:
+
+- `slot` continues to hold the only mutable rope and the undo tree
+- `parse_tree` is built from the **clean** rope, not canonical disk text
+- `block_ids` becomes the authoritative open-document identity overlay
+- no persistent char/byte projection map is needed initially; line-based spans
+  are enough for the current block-ID and mirror workflows
+
+If a future feature truly needs stable intra-line canonical/display mapping,
+that should be added as a narrower serialization helper rather than as a
+per-edit projection structure carried everywhere.
+
+### Recommended concrete types
+
+```rust
+pub struct BlockIdEntry {
+    pub id: BlockId,
+    pub first_line: usize,
+    pub last_line: usize,
+    pub is_mirror: bool,
+}
+
+pub struct DocumentSection {
+    pub level: u8,
+    pub title: String,
+    pub line_range: Range<usize>,
+    pub block_id: Option<BlockId>,
+    pub is_mirror: bool,
+}
+```
+
+Notes:
+
+- keep `is_mirror: bool` initially for lower churn with existing parser/index
+  concepts
+- `DocumentSection` should be a **document-layer overlay** built from
+  `ParseTree::sections()` plus `BlockIdEntry` lookup on the heading line
+- do **not** make `ParseTree` itself the long-term owner of block identity for
+  open buffers once the rope is clean
+
+### Recommended `Document` API shape
+
+The existing `Document` / `DocumentMut` wrappers are the right place to grow the
+API. The next slice should add queries like:
+
+```rust
+impl Document<'_> {
+    pub fn buffer(&self) -> &Buffer;
+    pub fn parse_tree(&self) -> &ParseTree; // clean-text parse
+
+    pub fn block_ids(&self) -> &[BlockIdEntry];
+    pub fn block_id_at_line(&self, line: usize) -> Option<&BlockIdEntry>;
+    pub fn block_id(&self, id: &BlockId) -> Option<&BlockIdEntry>;
+
+    pub fn sections(&self) -> Vec<DocumentSection>;
+    pub fn mirror_sections(&self) -> Vec<DocumentSection>;
+    pub fn section_by_block_id(&self, id: &BlockId) -> Option<DocumentSection>;
+
+    pub fn canonical_text(&self) -> String;
+}
+
+impl DocumentMut<'_> {
+    pub fn apply_edit(&mut self, request: EditRequest<'_>) -> bool;
+    pub fn reload_from_disk(&mut self, canonical_text: &str);
+    pub fn assign_missing_block_ids(&mut self, known_ids: Option<&mut HashSet<String>>) -> bool;
+}
+```
+
+Internal helpers should own the projection boundary:
+
+```rust
+fn deserialize_canonical(text: &str, parser: &impl DocumentParser)
+    -> (String, Vec<BlockIdEntry>);
+
+fn serialize_canonical(clean_text: &str, block_ids: &[BlockIdEntry]) -> String;
+
+fn refresh_structure_after_edit(&mut self);
+```
+
+Important recommendation:
+
+- `canonical_text()` is the save/reload boundary
+- `assign_missing_block_ids()` replaces the *concept* of visible-rope
+  `ensure_block_ids()`
+- callers should query `Document`, not re-parse suffixes from `buf.line(...)`
+
+## Recommended migration boundary
+
+The key migration is not "move everything at once." It is:
+
+1. keep the rope clean in open documents
+2. move block-ID-aware reads to `Document`
+3. keep file truth at the serialize / deserialize boundary
+
+### Phase 1: open / reload / save through the document projection
+
+- `BufferManager::open(...)` and reload paths should deserialize canonical disk
+  text into:
+  - clean rope text in `BufferSlot`
+  - `DocumentState.block_ids`
+  - `DocumentState.parse_tree` built from clean text
+- `save_page()` should call `Document::canonical_text()` and write that result
+- once this lands, `ensure_block_ids()` should stop meaning "insert visible
+  suffixes into the rope"
+
+### Phase 2: replace direct block-ID parsing in editor call sites
+
+These callers should stop reading inline suffixes from buffer text and instead
+query `Document`:
+
+- `editor/commands.rs`
+  - `mirror_sever`
+  - `mirror_goto`
+- `editor/render.rs`
+  - mirror context-strip lookup
+- `editor/page_history.rs`
+  - current-block history lookup
+- `editor/keys.rs`
+  - mirror propagation
+  - task toggle mirror propagation
+
+The concrete replacement is mostly:
+
+```rust
+let bid = doc.block_id_at_line(cursor_line);
+```
+
+instead of:
+
+```rust
+parse_block_id(&buf.line(cursor_line).to_string(), cursor_line)
+```
+
+### Phase 3: move block-ID-aware section queries out of `ParseTree`
+
+Open-buffer section and mirror logic should no longer depend on
+`ParseTree::block_ids()`, `ParseTree::mirror_sections()`, or
+`ParseTree::section_by_block_id()` once the rope is clean.
+
+Those queries should migrate to the document layer because they combine:
+
+- clean-text structure from `ParseTree`
+- block identity from `BlockIdEntry`
+
+This especially affects:
+
+- `editor/section_mirror.rs`
+- any open-buffer mirror-heading lookup
+- tests that currently assert via `parse_tree.block_ids()`
+
+`ParseTree` can still retain canonical-text block-ID parsing helpers for
+disk-oriented or parser-unit-test scenarios, but it should not remain the
+primary runtime API for open-document identity queries.
+
+### Phase 4: alignment ignores block IDs
+
+`align/engine.rs` currently splits visible ` ^id` suffixes directly from rope
+lines. That will not hold once the open rope is clean.
+
+Recommendation:
+
+- alignment should operate on clean text in memory
+- block-ID suffix placement should happen only during canonical serialization
+- block IDs should **not** be treated as alignment participants
+- auto-alignment should stay focused on user-facing fields such as
+  `@due(...)`, `@start(...)`, and similar visible content
+- do not add document/runtime complexity just to preserve pretty ID columns in
+  canonical file text
+
+## Most important concrete recommendation
+
+Do **not** make the next slice "block IDs in `ParseTree` but not in the rope."
+
+That would keep the same coupling in a different place.
+
+The cleaner contract is:
+
+- `ParseTree` owns structure from clean text
+- `Document` owns identity overlay and canonical serialization
+- editor consumers ask `Document` for identity-aware queries
+
+That gives Bloom one coherent runtime owner for open-document structure without
+weakening the file-on-disk source-of-truth model.
+
+---
+
 ## Questions to resolve next
 
 1. Should the document owner live inside `bloom-core` or as a new crate?

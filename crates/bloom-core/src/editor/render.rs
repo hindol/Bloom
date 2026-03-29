@@ -1411,13 +1411,10 @@ impl BloomEditor {
     /// If the cursor is on a `^=` line, return a status bar hint with mirror count.
     fn mirror_hint_for_cursor(&self) -> Option<String> {
         let page_id = self.active_page()?;
-        let buf = self.writer.buffers().get(page_id)?;
-        let (cursor_line, _) = Self::cursor_position_for(self.cursor(), buf, &self.vim_state);
-        if cursor_line >= buf.len_lines() {
-            return None;
-        }
-        let line_text = buf.line(cursor_line).to_string();
-        let bid = bloom_md::parser::extensions::parse_block_id(&line_text, cursor_line)?;
+        let doc = self.writer.buffers().document(page_id)?;
+        let (cursor_line, _) =
+            Self::cursor_position_for(self.cursor(), doc.buffer(), &self.vim_state);
+        let bid = doc.block_id_at_line(cursor_line)?;
         if !bid.is_mirror {
             return None;
         }

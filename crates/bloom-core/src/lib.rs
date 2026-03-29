@@ -105,12 +105,12 @@ impl BufferSlot {
     }
 }
 
-/// A buffer bundled with its metadata and persistent parse tree.
+/// A buffer bundled with its metadata and document-level derived state.
 /// Created together, closed together, evicted together.
 pub struct ManagedBuffer {
     pub slot: BufferSlot,
     pub info: BufferInfo,
-    pub parse_tree: parse_tree::ParseTree,
+    pub(crate) document: document::DocumentState,
 }
 
 pub struct BufferManager {
@@ -148,7 +148,17 @@ impl BufferManager {
     ) -> &mut bloom_buffer::Buffer {
         let key = page_id.to_hex();
         self.buffers.entry(key.clone()).or_insert_with(|| {
-            let buf = bloom_buffer::Buffer::from_text(content);
+            let is_markdown = uses_markdown_projection(path);
+            let (buffer_text, mut document) = if is_markdown {
+                document::DocumentState::from_markdown_disk_text(content)
+            } else {
+                (content.to_string(), document::DocumentState::from_clean_text(content))
+            };
+            let buf = bloom_buffer::Buffer::from_text(&buffer_text);
+            let root = buf.current_undo_node();
+            document
+                .block_id_history
+                .insert(root, document.block_ids.clone());
             let info = BufferInfo {
                 page_id: page_id.clone(),
                 title: title.to_string(),
@@ -156,11 +166,10 @@ impl BufferManager {
                 dirty: false,
                 last_focused: Instant::now(),
             };
-            let parse_tree = parse_tree::ParseTree::build(content);
             ManagedBuffer {
                 slot: BufferSlot::Mutable(buf),
                 info,
-                parse_tree,
+                document,
             }
         });
         match &mut self.buffers.get_mut(&key).unwrap().slot {
@@ -215,6 +224,7 @@ impl BufferManager {
     pub fn open_read_only(&mut self, page_id: &types::PageId, title: &str, content: &str) {
         let key = page_id.to_hex();
         let buf = bloom_buffer::Buffer::from_text(content).freeze();
+        let root = buf.as_buffer().current_undo_node();
         let info = BufferInfo {
             page_id: page_id.clone(),
             title: title.to_string(),
@@ -222,13 +232,16 @@ impl BufferManager {
             dirty: false,
             last_focused: Instant::now(),
         };
-        let parse_tree = parse_tree::ParseTree::build(content);
+        let mut document = document::DocumentState::from_clean_text(content);
+        document
+            .block_id_history
+            .insert(root, document.block_ids.clone());
         self.buffers.insert(
             key,
             ManagedBuffer {
                 slot: BufferSlot::Frozen(buf),
                 info,
-                parse_tree,
+                document,
             },
         );
     }
@@ -259,15 +272,29 @@ impl BufferManager {
     /// Reload a buffer's content from a string (external file change).
     pub fn reload(&mut self, page_id: &types::PageId, content: &str) {
         if let Some(mb) = self.buffers.get_mut(&page_id.to_hex()) {
+            let is_markdown = uses_markdown_projection(&mb.info.path);
+            let (buffer_text, mut document) = if is_markdown {
+                document::DocumentState::from_markdown_disk_text(content)
+            } else {
+                (content.to_string(), document::DocumentState::from_clean_text(content))
+            };
             match &mut mb.slot {
                 BufferSlot::Mutable(buf) => {
-                    *buf = bloom_buffer::Buffer::from_text(content);
+                    *buf = bloom_buffer::Buffer::from_text(&buffer_text);
+                    let root = buf.current_undo_node();
+                    document
+                        .block_id_history
+                        .insert(root, document.block_ids.clone());
                 }
                 BufferSlot::Frozen(buf) => {
-                    *buf = bloom_buffer::Buffer::from_text(content).freeze();
+                    *buf = bloom_buffer::Buffer::from_text(&buffer_text).freeze();
+                    let root = buf.as_buffer().current_undo_node();
+                    document
+                        .block_id_history
+                        .insert(root, document.block_ids.clone());
                 }
             }
-            mb.parse_tree = parse_tree::ParseTree::build(content);
+            mb.document = document;
         }
     }
 
@@ -294,7 +321,9 @@ impl BufferManager {
 
     /// Get the parse tree for a buffer.
     pub fn parse_tree(&self, page_id: &types::PageId) -> Option<&parse_tree::ParseTree> {
-        self.buffers.get(&page_id.to_hex()).map(|mb| &mb.parse_tree)
+        self.buffers
+            .get(&page_id.to_hex())
+            .map(|mb| &mb.document.parse_tree)
     }
 
     pub(crate) fn document(&self, page_id: &types::PageId) -> Option<document::Document<'_>> {
@@ -310,7 +339,7 @@ impl BufferManager {
     ) -> Option<&mut parse_tree::ParseTree> {
         self.buffers
             .get_mut(&page_id.to_hex())
-            .map(|mb| &mut mb.parse_tree)
+            .map(|mb| &mut mb.document.parse_tree)
     }
 
     pub(crate) fn document_mut(
@@ -321,6 +350,12 @@ impl BufferManager {
             .get_mut(&page_id.to_hex())
             .map(document::DocumentMut::new)
     }
+}
+
+fn uses_markdown_projection(path: &std::path::Path) -> bool {
+    path.extension()
+        .is_some_and(|ext: &std::ffi::OsStr| ext.eq_ignore_ascii_case("md"))
+        || path.to_string_lossy().starts_with('[')
 }
 
 // ---------------------------------------------------------------------------
@@ -554,10 +589,18 @@ impl BufferWriter {
                 true
             }
             BufferMessage::Reload { page_id, content } => {
+                let is_markdown = self
+                    .buffer_mgr
+                    .info(&page_id)
+                    .is_some_and(|info| uses_markdown_projection(&info.path));
                 let Some(mut doc) = self.buffer_mgr.document_mut(&page_id) else {
                     return false;
                 };
-                doc.reload(&content);
+                if is_markdown {
+                    doc.reload_from_disk_markdown(&content);
+                } else {
+                    doc.reload(&content);
+                }
                 true
             }
             BufferMessage::AlignPage { page_id } => {
@@ -1246,6 +1289,16 @@ impl BloomEditor {
         self.indexing
     }
 
+    /// Whether the editor currently has an open index connection.
+    pub fn has_index(&self) -> bool {
+        self.index.is_some()
+    }
+
+    /// Whether an autosave debounce timer is currently pending.
+    pub fn has_pending_autosave(&self) -> bool {
+        self.autosave_deadline.is_some()
+    }
+
     /// Return cloned channel receivers for use with `crossbeam::select!`.
     /// Returns None for channels not yet initialized (pre-init_vault).
     pub fn channels(&self) -> EditorChannels {
@@ -1420,7 +1473,8 @@ impl BloomEditor {
                         );
                     }
                 } else {
-                    ts.items[idx].content = Some(content.clone());
+                    ts.items[idx].content =
+                        Some(crate::document::clean_text_from_canonical_markdown(&content));
                 }
 
                 // For block history: mark the RIGHT neighbor as skip if its
@@ -1445,7 +1499,8 @@ impl BloomEditor {
         // Otherwise restore into the active buffer (legacy path)
         if let Some(page_id) = self.active_page().cloned() {
             if let Some(mut doc) = self.writer.buffers_mut().document_mut(&page_id) {
-                doc.replace_all(&content, crate::document::CursorUpdate::Preserve);
+                let clean = crate::document::clean_text_from_canonical_markdown(&content);
+                doc.replace_all(&clean, crate::document::CursorUpdate::Preserve);
                 self.push_notification(
                     "Restored from history (undo with u)".into(),
                     render::NotificationLevel::Info,

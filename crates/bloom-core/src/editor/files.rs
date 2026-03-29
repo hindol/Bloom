@@ -135,8 +135,8 @@ impl BloomEditor {
                 let buf_content = self
                     .writer
                     .buffers()
-                    .get(&page_id)
-                    .map(|b| b.text().to_string());
+                    .document(&page_id)
+                    .map(|doc| doc.canonical_text());
                 if buf_content.as_deref() == Some(disk_content.as_str()) {
                     // Content matches — our write or identical external. No action.
                     tracing::debug!(path = %path.display(), "file event: content matches buffer");
@@ -234,15 +234,23 @@ impl BloomEditor {
         // materialized into the document before we snapshot content for disk.
         self.ensure_block_ids(page_id);
 
-        // Extract content, path, and version.
+        // Extract canonical content, path, and version.
         let (content, path, buffer_version) = {
-            let Some((buf, info)) = self.writer.buffers().get_with_info(page_id) else {
+            let Some(doc) = self.writer.buffers().document(page_id) else {
                 return;
             };
-            if !buf.is_dirty() {
+            let Some(info) = self.writer.buffers().info(page_id) else {
+                return;
+            };
+            let content = doc.canonical_text();
+            let should_write = doc.buffer().is_dirty()
+                || std::fs::read_to_string(&info.path)
+                    .map(|disk| disk != content)
+                    .unwrap_or(true);
+            if !should_write {
                 return;
             }
-            (buf.text().to_string(), info.path.clone(), buf.version())
+            (content, info.path.clone(), doc.buffer().version())
         };
 
         // Write with monotonic write ID.

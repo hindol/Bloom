@@ -636,28 +636,24 @@ impl BloomEditor {
             None => return,
         };
         let cursor_line = self.cursor_position().0;
-        let (old_marker, _bid) = {
-            let Some(buf) = self.writer.buffers().get(&page_id) else {
-                return;
-            };
-            if cursor_line >= buf.len_lines() {
-                return;
-            }
-            let line_text = buf.line(cursor_line).to_string();
-            let bid = bloom_md::parser::extensions::parse_block_id(&line_text, cursor_line);
-            match bid {
-                Some(b) if b.is_mirror => {
-                    let marker = format!(" ^={}", b.id.0);
-                    (marker, b.id.0)
-                }
-                _ => {
-                    self.push_notification(
-                        "Not on a mirrored block".into(),
-                        crate::render::NotificationLevel::Warning,
-                    );
-                    return;
-                }
-            }
+        let is_mirror = self
+            .writer
+            .buffers()
+            .document(&page_id)
+            .and_then(|doc| doc.block_id_at_line(cursor_line).cloned());
+        let Some(entry) = is_mirror else {
+            self.push_notification(
+                "Not on a mirrored block".into(),
+                crate::render::NotificationLevel::Warning,
+            );
+            return;
+        };
+        if !entry.is_mirror {
+            self.push_notification(
+                "Not on a mirrored block".into(),
+                crate::render::NotificationLevel::Warning,
+            );
+            return;
         };
 
         // Generate a new unique ID
@@ -665,30 +661,8 @@ impl BloomEditor {
             self.index.as_ref().map(|i| i.connection()).unwrap(),
         );
         let new_id = bloom_buffer::block_id::next_block_id(&existing);
-        let new_marker = format!(" ^{}", new_id);
-
-        // Replace in buffer
-        let replacement_range = if let Some(buf) = self.writer.buffers().get(&page_id) {
-            let line_text = buf.line(cursor_line).to_string();
-            let trimmed = line_text.trim_end_matches('\n');
-            if let Some(pos) = trimmed.rfind(&old_marker) {
-                let ls = buf.text().line_to_char(cursor_line);
-                Some(ls + pos..ls + pos + old_marker.len())
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        if let Some(range) = replacement_range {
-            if let Some(mut doc) = self.writer.buffers_mut().document_mut(&page_id) {
-                doc.apply_edit(crate::document::EditRequest {
-                    range,
-                    replacement: &new_marker,
-                    cursor: crate::document::CursorUpdate::Preserve,
-                });
-            }
+        if let Some(mut doc) = self.writer.buffers_mut().document_mut(&page_id) {
+            let _ = doc.set_block_id_at_line(cursor_line, crate::types::BlockId(new_id.clone()), false);
         }
 
         self.save_page(&page_id);
@@ -706,16 +680,11 @@ impl BloomEditor {
         };
         let (cursor_line, cursor_col) = self.cursor_position();
         let bid = {
-            let Some(buf) = self.writer.buffers().get(&page_id) else {
+            let Some(doc) = self.writer.buffers().document(&page_id) else {
                 return;
             };
-            if cursor_line >= buf.len_lines() {
-                return;
-            }
-            let line_text = buf.line(cursor_line).to_string();
-            let bid = bloom_md::parser::extensions::parse_block_id(&line_text, cursor_line);
-            match bid {
-                Some(b) if b.is_mirror => b.id,
+            match doc.block_id_at_line(cursor_line) {
+                Some(entry) if entry.is_mirror => entry.id.clone(),
                 _ => {
                     self.push_notification(
                         "Not on a mirrored block".into(),

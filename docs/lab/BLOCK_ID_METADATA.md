@@ -1,4 +1,4 @@
-# Block IDs: Pre-Edit Transform Model
+# Block IDs: Document-Layer Metadata Projection
 
 > Status: **Superseded as the primary direction** by the unified document layer investigation.
 >
@@ -10,51 +10,128 @@
 >
 > This document is still useful as a **narrow design branch** for how block-ID placement might work inside a stronger document-model owner.
 > It should no longer be treated as the active top-level architecture on its own.
+>
+> Updated direction after landing `crates/bloom-core/src/document.rs`:
+>
+> - keep block IDs in **file text on disk**
+> - keep the in-memory editing rope **clean** (no visible ` ^id` suffixes)
+> - keep block-ID state as **document-layer metadata in `bloom-core`**
+> - do **not** push Markdown-aware block metadata ownership down into `bloom-buffer`
+>
+> The concrete runtime API and migration path for this now live in:
+>
+> - `UNIFIED_DOCUMENT_LAYER_ARCHITECTURE.md`
 
 ## Problem
 
-Block IDs (` ^k7m2x`) are structural metadata. The editing buffer should
-contain only content. IDs live as metadata, serialized to disk/undo/git.
+Block IDs (` ^k7m2x`) are structural metadata.
+
+They must stay in the Markdown files on disk because:
+
+- files are Bloom's source of truth
+- mirror markers (`^=`) must survive index rebuilds
+- external reads of the vault should still see canonical IDs
+
+But they should **not** live inline in the editing rope because they get in the
+way of writing and cursor motion.
+
+So the editor needs two views of the same document:
+
+1. **Canonical disk text** — includes `^id` / `^=id`
+2. **Editing projection** — clean text in the rope, with block IDs tracked as metadata
+
+The document layer is now the right place to own that projection boundary.
 
 ## Core Principle
 
-**Block ID metadata is computed alongside each edit, not reconciled after.**
+**Block ID metadata is document-layer state, derived from disk text on open/reload, updated alongside edits, and re-serialized back into file text on save.**
 
-When we have an edit op AND the unedited buffer, we have maximum information.
-We use both to deterministically compute the new block ID state. After the
-edit is applied, the metadata is already correct. No heuristic matching.
+The clean editing rope is what the user edits, what Vim motions should see, and
+what the in-memory parse tree should be built from.
+
+The document layer additionally owns `BlockIdEntry` metadata and is responsible
+for deterministically round-tripping between:
+
+- `disk text -> clean rope + block metadata`
+- `clean rope + block metadata -> disk text`
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  1. PRE-EDIT: transform entries (line arithmetic)         │
-│     buffer (clean) + edit op → shifted/pruned entries     │
+│  1. OPEN / RELOAD: deserialize canonical file text        │
+│     disk text -> clean rope + BlockIdEntry metadata       │
 │                                                           │
-│  2. APPLY EDIT: mutate rope                               │
+│  2. EDIT: mutate clean rope only                          │
+│     transform metadata alongside the edit                 │
 │                                                           │
-│  3. PARSE: refresh parse tree (synchronous, ~µs)          │
-│     → definitive new block boundaries                     │
+│  3. PARSE: refresh parse tree on clean text               │
+│     parser remains the authority on block boundaries      │
 │                                                           │
-│  4. PLACE: entries into parser's blocks                   │
+│  4. PLACE: snap metadata to parser blocks                 │
 │     - entry.first_line falls in block → entry gets span   │
 │     - entry.first_line in no block → entry orphaned, gone │
 │     - two entries in same block → merge, keep first       │
 │     - block has no entry → assign new ID immediately      │
 │                                                           │
-│  Result: entries always complete and correct.              │
+│  5. SAVE: serialize clean rope + metadata                 │
+│     -> canonical disk text with ^id / ^=id                │
+│                                                           │
+│  Result: note-taking uses clean text, disk keeps IDs.     │
 └──────────────────────────────────────────────────────────┘
 ```
 
-**The parser is the authority on block boundaries.** The pre-edit transform
-preserves ID→position associations through line arithmetic. The parser then
-provides exact block boundaries. Placement is deterministic — not matching.
+**The parser is still the authority on block boundaries.** But the parser used
+for live editing should operate on **clean text**, while block identity lives in
+the document layer as an overlay.
 
-**ID assignment happens during parsing, not during save.** When the parser
-finds a block with no entry, an ID is generated immediately. This is
-metadata-only — no buffer mutation, no cursor jump, no undo node.
+**ID assignment still happens during the edit pipeline, not as a last-minute
+save hack.** But that assignment should update metadata entries, not inject
+visible suffixes into the rope.
+
+## Updated recommendation now that the document layer exists
+
+1. **Store block metadata in `bloom-core`'s document layer, not in `bloom-buffer`.**
+   `bloom-buffer` should remain rope/cursor/undo infrastructure.
+
+2. **Open buffers as a clean editing projection.**
+   On open/reload, read canonical Markdown from disk, parse out valid block ID
+   markers, strip those markers from the rope, and keep the recovered IDs as
+   document metadata.
+
+3. **Build the live parse tree from clean text.**
+   Inline `^id` markers should not influence everyday editing motions, wrapping,
+   or visual noise. Features that need block identity should query the document
+   layer's block metadata instead of re-parsing visible suffixes from the rope.
+
+4. **Serialize at save boundaries.**
+   Save should deterministically re-inject IDs from metadata into the canonical
+   Markdown representation written to disk.
+
+5. **Treat deserialization as a strict projection step.**
+   Only syntactically valid, parser-recognized block markers should be stripped.
+   If text does not parse as a valid Bloom block ID marker, it stays as user
+   content.
+
+## Concrete runtime checkpoint
+
+The next slice should extend the existing `Document` / `DocumentMut` owner in
+`crates/bloom-core/src/document.rs`, not invent a second document abstraction.
+
+The practical shape is:
+
+- `BufferSlot` continues to own the clean rope and undo state
+- `Document` owns:
+  - `ParseTree` for clean text
+  - `Vec<BlockIdEntry>` as the identity overlay
+  - canonical serialize / deserialize helpers
+- block-ID-aware section and mirror queries move to the document layer
+
+That last point matters: once the rope is clean, open-buffer callers should stop
+depending on `parse_block_id(...)`, `ParseTree::block_ids()`, and similar
+visible-marker assumptions. They should query the document owner instead.
 
 ## Data Model
 
-### BlockIdEntry (stored in Buffer, bloom-buffer)
+### BlockIdEntry (stored in the `bloom-core` document layer)
 
 ```rust
 #[derive(Debug, Clone)]
@@ -69,6 +146,15 @@ pub struct BlockIdEntry {
 Entries track the **full block span**, not a single point. This is what the
 parser gives us (ParsedBlock { first_line, last_line, has_id }). We maintain
 it through edits.
+
+The important revision is ownership:
+
+- `bloom-buffer` owns rope / cursors / undo
+- the `Document` owner in `bloom-core` owns:
+  - the clean editing rope
+  - parse-tree lifecycle
+  - block metadata (`Vec<BlockIdEntry>`)
+  - serialize / deserialize for canonical disk text
 
 ### The Edit Pipeline
 
@@ -223,8 +309,9 @@ fn place_entries_in_blocks(
 }
 ```
 
-**This replaces `ensure_block_ids` entirely.** ID assignment is part of
-the edit pipeline, not a separate post-Insert step.
+**This replaces `ensure_block_ids` as a post-edit rope repair mechanism.**
+ID assignment is part of the metadata pipeline, not a separate visible-text
+rewrite after Insert mode.
 
 ### What the pipeline handles
 
@@ -242,7 +329,7 @@ the edit pipeline, not a separate post-Insert step.
 
 ## Serialize / Deserialize
 
-### Serialize (buffer → file text)
+### Serialize (clean rope + metadata → file text)
 
 Uses entries directly. **No parser needed** — entries already know each
 block's last_line.
@@ -276,7 +363,7 @@ fn serialize(rope: &Rope, entries: &[BlockIdEntry]) -> String {
 }
 ```
 
-### Deserialize (file text → clean buffer + entries)
+### Deserialize (file text → clean rope + entries)
 
 Uses the parser to extract block IDs and block boundaries.
 
@@ -299,66 +386,77 @@ fn deserialize(text: &str, parser: &BloomMarkdownParser) -> (String, Vec<BlockId
         }
     }
 
-    // Strip IDs from text
-    let clean = text.split('\n').enumerate().map(|(idx, line)| {
-        strip_block_id_suffix(line)
-    }).collect::<Vec<_>>().join("\n");
+    // Strip only recognized ID markers from text.
+    // The output is the clean editing projection that lives in the rope.
+    let clean = text
+        .split('\n')
+        .map(strip_recognized_block_id_suffix)
+        .collect::<Vec<_>>()
+        .join("\n");
 
     (clean, entries)
 }
 ```
 
+**Important:** after deserialization, the live parse tree should be built from
+`clean`, not from the original disk text. The block metadata remains in the
+document layer as an overlay.
+
 ---
 
 ## Phases
 
-### Phase 1: BlockIdEntry + transform + place
+### Phase 1: Document-layer metadata + transform + place
 
-**bloom-buffer** (`rope.rs`, `lib.rs`):
+**bloom-core document layer** (`document.rs` + supporting module):
 1. Add `BlockIdEntry` struct (id, first_line, last_line, is_mirror)
-2. Add `block_ids: Vec<BlockIdEntry>` field to `Buffer`
-3. Add `transform_entries()` — pre-edit line arithmetic
-4. Wire into `insert()`, `delete()`, `replace()`:
-   - Call `transform_entries()` BEFORE rope mutation
-   - Set transformed entries AFTER rope mutation
-5. Accessors: `block_ids()`, `set_block_ids()`
+2. Add `block_ids: Vec<BlockIdEntry>` to the document owner, not to `Buffer`
+3. Add `transform_entries()` — pre-edit line arithmetic on clean-text edits
+4. Wire into document-layer edit application:
+   - transform metadata BEFORE rope mutation
+   - apply clean-text rope edit
+   - refresh parse tree on clean text
+   - place entries into definitive parser blocks
+5. Expose read APIs for:
+   - block metadata by line / block
+   - block ID lookup for save, mirror, and task features
 
-**bloom-core** (`lib.rs` or `editor/block_ids.rs`):
-1. Add `place_entries_in_blocks()` — takes shifted entries + parser blocks
-   → final entries with exact spans + new IDs for unclaimed blocks
-2. Wire into the post-edit pipeline:
-   ```rust
-   // In BufferWriter::apply(BufferMessage::Edit { ... })
-   buf.transform_and_apply(range, replacement); // Steps 1+2
-   mb.parse_tree.refresh(...);                  // Step 3
-   buf.set_block_ids(place_entries_in_blocks(   // Step 4
-       buf.block_ids(), mb.parse_tree.blocks(),
-   ));
-   ```
-3. ID generation (`next_block_id`) for new blocks is inside `place_entries_in_blocks`
+**bloom-buffer**:
 
-**This replaces `ensure_block_ids`.** No separate post-Insert step needed.
-ID assignment is part of the edit pipeline — metadata only, no cursor jump.
+- stays low-level
+- remains unaware of Markdown block metadata
+- does not become the owner of `Vec<BlockIdEntry>`
 
-### Phase 2: Serialize / Deserialize (bloom-core)
+**This replaces `ensure_block_ids` as a visible-rope repair step.**
+ID assignment becomes metadata work in the document pipeline — no cursor jump,
+no visible suffix insertion during note taking.
+
+### Phase 2: Serialize / Deserialize boundary (bloom-core)
 
 **Files**: `crates/bloom-core/src/editor/block_id_serde.rs` (new)
 
-1. `serialize(rope, entries) -> String` — entries provide last_line, no parser
-2. `deserialize(text, parser) -> (String, Vec<BlockIdEntry>)` — parser extracts blocks + IDs
-3. `strip_block_id_suffix(line) -> &str`
+1. `serialize(clean_rope, entries) -> String` — entries provide last_line, no parser
+2. `deserialize(text, parser) -> (clean_text, Vec<BlockIdEntry>)`
+3. `strip_recognized_block_id_suffix(line) -> &str`
 4. Tests: round-trip identity, edge cases (empty, headings, code blocks, mirrors)
 
 ### Phase 3: Open / Save / Reload
 
-**Open**: `read file → deserialize → Buffer::from_text(clean) + set_block_ids`
-Then `place_entries_in_blocks` assigns IDs to blocks without entries.
+**Open**:
 
-**Save**: `serialize(rope, entries) → atomic_write`
+`read file -> deserialize -> Document { clean rope, block metadata, parse tree on clean text }`
+
+Then `place_entries_in_blocks` assigns IDs to clean-text blocks without entries.
+
+**Save**:
+
+`serialize(clean rope, entries) -> canonical markdown -> atomic_write`
 
 **Reload**: same as Open (full deserialize).
 
-Parse tree parses clean text. `parse_block_id()` returns None for buffer text.
+The live parse tree parses clean text. `parse_block_id()` is still useful for
+disk-text deserialization and indexer parsing, but open buffers should not rely
+on visible inline markers being present in the rope.
 
 ### Phase 4: Undo (Rope + entries + delta persistence)
 
@@ -505,8 +603,8 @@ Edit:  insert "\n" at end of line 5, delta = +1
 Check: A contains edit → grows to [3, 6]. B below → shifts to [9, 11].
 ```
 New empty line 6 is part of A's block. Cursor enters Insert mode on line 6.
-On Insert exit, if the new line is blank AND is at block boundary,
-ensure_block_ids handles it. ✅
+On Insert exit, the parser and metadata placement logic determine whether the
+new structure is still one block or has split into multiple blocks. ✅
 
 **S7: `cc` — change line content**
 ```
@@ -524,7 +622,7 @@ Entries: A [3, 5], B [8, 10]
 Edit:  insert text with 2 newlines at start of line 6, delta = +3
 Check: A above edit → unchanged [3, 5]. B below → shifts to [11, 13].
 ```
-Pasted text has no entries. ensure_block_ids assigns IDs to new blocks. ✅
+Pasted text has no entries. Metadata placement assigns IDs to new blocks. ✅
 
 **S9: Single character edits (typing, `x`, `r`)**
 ```

@@ -2399,24 +2399,29 @@ fn mirror_marker_parsed_and_indexed() {
         .page("Mirror")
         .with_content("- [ ] Mirrored task @due(2026-03-15) ^=k7m2x\n")
         .build();
+    let vault_root = vault.root().to_path_buf();
     let mut sim = SimInput::with_vault(vault);
 
-    // Open the source page and verify ^= content renders
+    // Open the source page and verify block IDs are hidden in the editing buffer.
     sim.keys("SPC p p");
     sim.type_text("Source");
     sim.keys("Enter");
 
     let text = sim.buffer_text();
     assert!(
-        text.contains("^=k7m2x"),
-        "^= marker should be preserved in buffer: {}",
+        !text.contains("^=k7m2x"),
+        "^= marker should be hidden in the editing buffer: {}",
         text
     );
     assert!(
-        text.contains("^abc01"),
-        "solo block ID should be preserved: {}",
+        !text.contains("^abc01"),
+        "solo block ID should be hidden in the editing buffer: {}",
         text
     );
+
+    let source_disk = std::fs::read_to_string(vault_root.join("pages/source.md")).unwrap();
+    assert!(source_disk.contains("^=k7m2x"));
+    assert!(source_disk.contains("^abc01"));
 }
 
 // =======================================================================
@@ -3755,6 +3760,10 @@ fn flush_background(editor: &mut bloom_core::BloomEditor) {
             }
         }
 
+        if editor.flush_autosave_debounce() {
+            progressed = true;
+        }
+
         if !progressed {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
@@ -4621,20 +4630,17 @@ fn section_mirror_child_ids_from_parse_tree() {
 
 #[test]
 fn section_mirror_structural_diff_detects_insert() {
-    use bloom_core::parse_tree::ParseTree;
-    use bloom_core::section_mirror::{section_child_ids, structural_diff};
+    use bloom_core::section_mirror::structural_diff;
 
-    let source_text = "## Tasks ^=head1\n- [ ] A ^=t0001\n- [ ] B ^=t0002\n- [ ] C ^=t0003\n";
-    let peer_text = "## Tasks ^=head1\n- [ ] A ^=t0001\n- [ ] B ^=t0002\n";
-
-    let source_tree = ParseTree::build(source_text);
-    let peer_tree = ParseTree::build(peer_text);
-
-    let source_sections = source_tree.mirror_sections();
-    let peer_sections = peer_tree.mirror_sections();
-
-    let source_children = section_child_ids(&source_tree, &source_sections[0]);
-    let peer_children = section_child_ids(&peer_tree, &peer_sections[0]);
+    let source_children = vec![
+        (bloom_core::types::BlockId("t0001".into()), 1),
+        (bloom_core::types::BlockId("t0002".into()), 2),
+        (bloom_core::types::BlockId("t0003".into()), 3),
+    ];
+    let peer_children = vec![
+        (bloom_core::types::BlockId("t0001".into()), 1),
+        (bloom_core::types::BlockId("t0002".into()), 2),
+    ];
 
     let diff = structural_diff(&source_children, &peer_children);
     assert_eq!(diff.inserts.len(), 1);
@@ -4644,20 +4650,13 @@ fn section_mirror_structural_diff_detects_insert() {
 
 #[test]
 fn section_mirror_structural_diff_detects_removal() {
-    use bloom_core::parse_tree::ParseTree;
-    use bloom_core::section_mirror::{section_child_ids, structural_diff};
+    use bloom_core::section_mirror::structural_diff;
 
-    let source_text = "## Tasks ^=head1\n- [ ] A ^=t0001\n";
-    let peer_text = "## Tasks ^=head1\n- [ ] A ^=t0001\n- [ ] B ^=t0002\n";
-
-    let source_tree = ParseTree::build(source_text);
-    let peer_tree = ParseTree::build(peer_text);
-
-    let source_sections = source_tree.mirror_sections();
-    let peer_sections = peer_tree.mirror_sections();
-
-    let source_children = section_child_ids(&source_tree, &source_sections[0]);
-    let peer_children = section_child_ids(&peer_tree, &peer_sections[0]);
+    let source_children = vec![(bloom_core::types::BlockId("t0001".into()), 1)];
+    let peer_children = vec![
+        (bloom_core::types::BlockId("t0001".into()), 1),
+        (bloom_core::types::BlockId("t0002".into()), 2),
+    ];
 
     let diff = structural_diff(&source_children, &peer_children);
     assert!(diff.inserts.is_empty());

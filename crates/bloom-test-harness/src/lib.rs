@@ -216,15 +216,32 @@ impl SimInput {
         let config = Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         let _ = editor.init_vault(vault.root());
-
-        // Wait for indexer to complete
-        let ch = editor.channels();
-        if let Some(rx) = &ch.indexer_rx {
-            for _ in 0..300 {
-                if let Ok(complete) = rx.try_recv() {
-                    editor.handle_index_complete(complete);
-                    break;
+        let timeout = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        while std::time::Instant::now() < timeout {
+            let mut progressed = false;
+            let ch = editor.channels();
+            if let Some(rx) = &ch.write_result_rx {
+                while let Ok(result) = rx.try_recv() {
+                    editor.handle_write_result(result);
+                    progressed = true;
                 }
+            }
+            if let Some(rx) = &ch.indexer_rx {
+                if let Ok(complete) = rx.recv_timeout(std::time::Duration::from_millis(50)) {
+                    editor.handle_index_complete(complete);
+                    progressed = true;
+                    while let Ok(extra) = rx.try_recv() {
+                        editor.handle_index_complete(extra);
+                    }
+                }
+            }
+            if editor.flush_autosave_debounce() {
+                progressed = true;
+            }
+            if editor.has_index() && !editor.is_indexing() && !editor.has_pending_autosave() {
+                break;
+            }
+            if !progressed {
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
         }
@@ -298,8 +315,19 @@ impl SimInput {
                 }
             }
 
-            if !progressed && !self.editor.is_indexing() {
+            if self.editor.flush_autosave_debounce() {
+                progressed = true;
+            }
+
+            if !progressed
+                && !self.editor.is_indexing()
+                && !self.editor.has_pending_autosave()
+            {
                 break;
+            }
+
+            if !progressed {
+                std::thread::sleep(std::time::Duration::from_millis(10));
             }
         }
         self

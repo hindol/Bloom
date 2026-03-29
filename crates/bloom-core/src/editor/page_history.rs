@@ -89,16 +89,18 @@ impl BloomEditor {
 
         let (cursor_line, _) = self.cursor_position();
         let (block_id_str, current_line_text) = {
-            let Some(buf) = self.writer.buffers().get(&page_id) else {
+            let Some(doc) = self.writer.buffers().document(&page_id) else {
                 return;
             };
-            if cursor_line >= buf.len_lines() {
+            if cursor_line >= doc.buffer().len_lines() {
                 return;
             }
-            let line_text = buf.line(cursor_line).to_string();
-            let bid = bloom_md::parser::extensions::parse_block_id(&line_text, cursor_line);
-            match bid {
-                Some(b) => (b.id.0, line_text.trim_end_matches('\n').to_string()),
+            let line_text = doc.buffer().line(cursor_line).to_string();
+            match doc.block_id_at_line(cursor_line) {
+                Some(entry) => (
+                    entry.id.0.clone(),
+                    canonical_block_line(line_text.trim_end_matches('\n'), &entry.id.0, entry.is_mirror),
+                ),
                 None => {
                     self.push_notification(
                         "No block ID on this line".into(),
@@ -338,9 +340,10 @@ impl BloomEditor {
                 let Some(new_line) = content else { return };
                 let (cursor_line, _) = self.cursor_position();
                 if let Some(mut doc) = self.writer.buffers_mut().document_mut(&page_id) {
+                    let clean_line = crate::document::clean_text_from_canonical_markdown(&new_line);
                     doc.replace_trimmed_line(
                         cursor_line,
-                        &new_line,
+                        &clean_line,
                         crate::document::CursorUpdate::Preserve,
                     );
                 }
@@ -395,5 +398,18 @@ pub(crate) fn extract_block_line(
         return Some(line.to_string());
     }
     // Fallback: same line number (block ID may not have existed in this version)
-    content.lines().nth(fallback_line).map(|l| l.to_string())
+    content.lines().nth(fallback_line).map(ToString::to_string)
+}
+
+fn canonical_block_line(line: &str, block_id: &str, is_mirror: bool) -> String {
+    let suffix = if is_mirror {
+        format!(" ^={block_id}")
+    } else {
+        format!(" ^{block_id}")
+    };
+    if line.ends_with(&suffix) {
+        line.to_string()
+    } else {
+        format!("{line}{suffix}")
+    }
 }

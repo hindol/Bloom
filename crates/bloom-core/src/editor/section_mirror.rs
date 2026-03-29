@@ -9,8 +9,6 @@
 use bloom_md::parser::traits::Section;
 use bloom_md::types::BlockId;
 
-use crate::parse_tree::ParseTree;
-
 /// One-way diff: source section children are truth.
 pub struct SectionDiff {
     /// Blocks present in source but missing in peer: (block_id, source_line_idx).
@@ -25,19 +23,21 @@ impl SectionDiff {
     }
 }
 
-/// Collect ordered child block IDs within a section's line_range from the ParseTree.
+/// Collect ordered child block IDs within a section's line_range from the document layer.
 /// Excludes the heading's own block ID.
-pub fn section_child_ids(tree: &ParseTree, section: &Section) -> Vec<(BlockId, usize)> {
-    let mut children = Vec::new();
-    let start = section.line_range.start + 1; // skip the heading line itself
+pub(crate) fn section_child_ids(
+    doc: &crate::document::Document<'_>,
+    section: &Section,
+) -> Vec<(BlockId, usize)> {
+    let start = section.line_range.start + 1;
     let end = section.line_range.end;
-    for line_idx in start..end.min(tree.len()) {
-        if let Some(ld) = tree.line(line_idx) {
-            if let Some(bid) = &ld.elements.block_id {
-                children.push((bid.id.clone(), line_idx));
-            }
-        }
-    }
+    let mut children: Vec<(BlockId, usize)> = doc
+        .block_ids()
+        .iter()
+        .filter(|entry| entry.first_line >= start && entry.last_line < end)
+        .map(|entry| (entry.id.clone(), entry.last_line))
+        .collect();
+    children.sort_by_key(|(_, line)| *line);
     children
 }
 
@@ -80,7 +80,7 @@ impl BloomEditor {
             let Some(doc) = self.writer.buffers().document(page_id) else {
                 return;
             };
-            doc.parse_tree().mirror_sections()
+            doc.mirror_sections()
         };
         if mirror_sections.is_empty() {
             return;
@@ -99,7 +99,7 @@ impl BloomEditor {
                 let heading_bid = section.block_id.as_ref()?.clone();
                 let source_children = {
                     let doc = self.writer.buffers().document(page_id)?;
-                    section_child_ids(doc.parse_tree(), section)
+                    section_child_ids(&doc, section)
                 };
                 let peers = self
                     .index
@@ -128,7 +128,7 @@ impl BloomEditor {
                     let Some(doc) = self.writer.buffers().document(&meta.id) else {
                         continue;
                     };
-                    doc.parse_tree().section_by_block_id(&sw.heading_bid)
+                    doc.section_by_block_id(&sw.heading_bid)
                 };
                 let Some(peer_section) = peer_section else {
                     continue;
@@ -138,7 +138,7 @@ impl BloomEditor {
                     let Some(doc) = self.writer.buffers().document(&meta.id) else {
                         continue;
                     };
-                    section_child_ids(doc.parse_tree(), &peer_section)
+                    section_child_ids(&doc, &peer_section)
                 };
 
                 let diff = structural_diff(&sw.source_children, &peer_children);
@@ -214,18 +214,17 @@ impl BloomEditor {
         // Find lines to remove (within peer section, in reverse order)
         let mut lines_to_remove: Vec<usize> = Vec::new();
         {
-            let Some(tree) = self.writer.buffers().parse_tree(peer_id) else {
+            let Some(doc) = self.writer.buffers().document(peer_id) else {
                 return;
             };
             let start = peer_section.line_range.start + 1;
-            let end = peer_section.line_range.end.min(tree.len());
-            for line_idx in start..end {
-                if let Some(ld) = tree.line(line_idx) {
-                    if let Some(bid) = &ld.elements.block_id {
-                        if removal_set.contains(bid.id.0.as_str()) {
-                            lines_to_remove.push(line_idx);
-                        }
-                    }
+            let end = peer_section.line_range.end;
+            for entry in doc.block_ids() {
+                if entry.first_line >= start
+                    && entry.last_line < end
+                    && removal_set.contains(entry.id.0.as_str())
+                {
+                    lines_to_remove.push(entry.last_line);
                 }
             }
         }
@@ -264,15 +263,6 @@ impl BloomEditor {
                     continue;
                 }
                 let mut text = buf.line(*source_line).to_string();
-                // Ensure the block has ^= marker (auto-promote)
-                if text.contains(&format!(" ^{}", insert_bid.0))
-                    && !text.contains(&format!(" ^={}", insert_bid.0))
-                {
-                    text = text.replace(
-                        &format!(" ^{}", insert_bid.0),
-                        &format!(" ^={}", insert_bid.0),
-                    );
-                }
                 if !text.ends_with('\n') {
                     text.push('\n');
                 }
@@ -281,7 +271,7 @@ impl BloomEditor {
 
             // Find insertion point in peer: after the preceding sibling, or
             // right after the heading if this is the first child.
-            let insert_char_pos = {
+            let (insert_char_pos, inserted_line) = {
                 let Some(buf) = self.writer.buffers().get(peer_id) else {
                     continue;
                 };
@@ -294,31 +284,25 @@ impl BloomEditor {
 
                 if let Some(prev_bid) = preceding_bid {
                     // Find the preceding sibling's line in peer, insert after it
-                    let Some(tree) = self.writer.buffers().parse_tree(peer_id) else {
+                    let Some(doc) = self.writer.buffers().document(peer_id) else {
                         continue;
                     };
-                    let prev_line = (0..tree.len()).find(|&i| {
-                        tree.line(i)
-                            .and_then(|ld| ld.elements.block_id.as_ref())
-                            .is_some_and(|b| b.id == *prev_bid)
-                    });
+                    let prev_line = doc.block_id(prev_bid).map(|entry| entry.last_line);
                     match prev_line {
-                        Some(pl) if pl + 1 < buf.len_lines() => buf.text().line_to_char(pl + 1),
-                        _ => buf.len_chars(), // fallback: end of buffer
+                        Some(pl) if pl + 1 < buf.len_lines() => (buf.text().line_to_char(pl + 1), pl + 1),
+                        Some(pl) => (buf.len_chars(), pl + 1),
+                        _ => (buf.len_chars(), buf.len_lines().saturating_sub(1)),
                     }
                 } else {
                     // No preceding sibling — insert right after the heading
-                    let Some(tree) = self.writer.buffers().parse_tree(peer_id) else {
+                    let Some(doc) = self.writer.buffers().document(peer_id) else {
                         continue;
                     };
-                    let heading_line = (0..tree.len()).find(|&i| {
-                        tree.line(i)
-                            .and_then(|ld| ld.elements.block_id.as_ref())
-                            .is_some_and(|b| b.id == *heading_bid)
-                    });
+                    let heading_line = doc.block_id(heading_bid).map(|entry| entry.last_line);
                     match heading_line {
-                        Some(hl) if hl + 1 < buf.len_lines() => buf.text().line_to_char(hl + 1),
-                        _ => buf.len_chars(),
+                        Some(hl) if hl + 1 < buf.len_lines() => (buf.text().line_to_char(hl + 1), hl + 1),
+                        Some(hl) => (buf.len_chars(), hl + 1),
+                        _ => (buf.len_chars(), buf.len_lines().saturating_sub(1)),
                     }
                 }
             };
@@ -330,6 +314,7 @@ impl BloomEditor {
                     &block_text,
                     crate::document::CursorUpdate::Preserve,
                 ) {
+                    let _ = doc.set_block_id_at_line(inserted_line, insert_bid.clone(), true);
                     self.refresh_parse_tree(peer_id);
                 }
             }
@@ -340,6 +325,27 @@ impl BloomEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
+
+    use bloom_buffer::Buffer;
+
+    use crate::{document::DocumentState, BufferInfo, BufferSlot, ManagedBuffer};
+
+    fn test_document(text: &str) -> crate::document::Document<'_> {
+        let (clean_text, document) = DocumentState::from_markdown_disk_text(text);
+        let managed = Box::new(ManagedBuffer {
+            slot: BufferSlot::Mutable(Buffer::from_text(&clean_text)),
+            info: BufferInfo {
+                page_id: crate::types::PageId::from_hex("aaaaaaaa").unwrap(),
+                title: "Test".to_string(),
+                path: std::path::PathBuf::from("test.md"),
+                dirty: false,
+                last_focused: Instant::now(),
+            },
+            document,
+        });
+        crate::document::Document::new(Box::leak(managed))
+    }
 
     #[test]
     fn diff_identical_sections() {
@@ -387,10 +393,10 @@ mod tests {
     #[test]
     fn section_child_ids_basic() {
         let text = "## Tasks ^=head1\n- [ ] Task A ^=t0001\n- [ ] Task B ^=t0002\n\n## Other\n";
-        let tree = ParseTree::build(text);
-        let sections = tree.sections();
+        let doc = test_document(text);
+        let sections = doc.mirror_sections();
         let task_section = sections.iter().find(|s| s.title.contains("Tasks")).unwrap();
-        let children = section_child_ids(&tree, task_section);
+        let children = section_child_ids(&doc, task_section);
         assert_eq!(children.len(), 2);
         assert_eq!(children[0].0, BlockId("t0001".into()));
         assert_eq!(children[1].0, BlockId("t0002".into()));
@@ -399,9 +405,9 @@ mod tests {
     #[test]
     fn section_child_ids_excludes_heading() {
         let text = "## Tasks ^=head1\n- [ ] Task ^=t0001\n";
-        let tree = ParseTree::build(text);
-        let sections = tree.sections();
-        let children = section_child_ids(&tree, &sections[0]);
+        let doc = test_document(text);
+        let sections = doc.mirror_sections();
+        let children = section_child_ids(&doc, &sections[0]);
         // heading's own block ID should not appear in children
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].0, BlockId("t0001".into()));

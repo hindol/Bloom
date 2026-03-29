@@ -1695,16 +1695,15 @@ impl BloomEditor {
     fn propagate_mirror_edit(&mut self, page_id: &types::PageId) {
         let cursor_line = self.cursor_position().0;
         let (line_text, block_id) = {
-            let Some(buf) = self.writer.buffers().get(page_id) else {
+            let Some(doc) = self.writer.buffers().document(page_id) else {
                 return;
             };
-            if cursor_line >= buf.len_lines() {
+            if cursor_line >= doc.buffer().len_lines() {
                 return;
             }
-            let line_text = buf.line(cursor_line).to_string();
-            let bid = bloom_md::parser::extensions::parse_block_id(&line_text, cursor_line);
-            match bid {
-                Some(b) if b.is_mirror => (line_text, b.id.0),
+            let line_text = doc.buffer().line(cursor_line).to_string();
+            match doc.block_id_at_line(cursor_line) {
+                Some(entry) if entry.is_mirror => (line_text, entry.id.0.clone()),
                 _ => return, // not a mirror line — nothing to propagate
             }
         };
@@ -1804,7 +1803,6 @@ impl BloomEditor {
                 } else {
                     return; // not a task line
                 };
-                let old_trimmed = line_text.trim_end_matches('\n');
                 let new_trimmed = new_text.trim_end_matches('\n');
                 if let Some(mut doc) = self.writer.buffers_mut().document_mut(&pid) {
                     doc.replace_trimmed_line(
@@ -1814,10 +1812,11 @@ impl BloomEditor {
                     );
                 }
                 toggled_new_text = Some(new_trimmed.to_string());
-                if let Some(bid) = bloom_md::parser::extensions::parse_block_id(old_trimmed, *line)
-                {
-                    block_id_on_line = Some(bid.id.0);
-                }
+                block_id_on_line = self
+                    .writer
+                    .buffers()
+                    .document(&pid)
+                    .and_then(|doc| doc.block_id_at_line(*line).map(|entry| entry.id.0.clone()));
             }
         }
 

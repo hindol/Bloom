@@ -313,6 +313,14 @@ impl Buffer {
         &self.undo_tree
     }
 
+    pub fn current_undo_node(&self) -> UndoNodeId {
+        self.undo_tree.current()
+    }
+
+    pub fn in_edit_group(&self) -> bool {
+        self.edit_group_checkpoint.is_some()
+    }
+
     pub fn set_undo_tree(&mut self, tree: UndoTree) {
         self.undo_tree = tree;
     }
