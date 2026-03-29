@@ -17,8 +17,22 @@ pub fn load_all_known_ids(conn: &Connection) -> HashSet<String> {
 }
 
 /// Compute block ID assignments for a parsed document.
-pub fn compute_block_id_assignments(doc: &Document) -> Vec<BlockIdInsertion> {
-    let existing: HashSet<String> = doc.block_ids.iter().map(|b| b.id.0.clone()).collect();
+///
+/// `known_ids` provides vault-wide collision avoidance (from the index cache).
+/// When `None`, only document-level IDs are checked (fallback for no-index).
+pub fn compute_block_id_assignments(
+    doc: &Document,
+    known_ids: Option<&HashSet<String>>,
+) -> Vec<BlockIdInsertion> {
+    let doc_ids: HashSet<String> = doc.block_ids.iter().map(|b| b.id.0.clone()).collect();
+    let existing = if let Some(vault_ids) = known_ids {
+        // Merge vault-wide IDs with document-level IDs
+        let mut merged = vault_ids.clone();
+        merged.extend(doc_ids);
+        merged
+    } else {
+        doc_ids
+    };
     let blocks: Vec<BlockNeedingId> = doc
         .blocks
         .iter()
@@ -33,7 +47,7 @@ pub fn compute_block_id_assignments(doc: &Document) -> Vec<BlockIdInsertion> {
 /// Compute assignments and apply them to text.
 /// Returns `None` if no blocks needed IDs.
 pub fn assign_block_ids(text: &str, doc: &Document) -> Option<String> {
-    let insertions = compute_block_id_assignments(doc);
+    let insertions = compute_block_id_assignments(doc, None);
     bloom_buffer::block_id::apply_insertions(text, &insertions)
 }
 
@@ -86,7 +100,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         // Only line 1 should need an ID assignment
-        let insertions = compute_block_id_assignments(&doc);
+        let insertions = compute_block_id_assignments(&doc, None);
         assert_eq!(
             insertions.len(),
             1,

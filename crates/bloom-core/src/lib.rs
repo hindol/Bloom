@@ -700,7 +700,9 @@ pub struct BloomEditor {
     /// Used to recognize file-watcher echoes of our own saves.
     pub(crate) self_write_hashes:
         std::collections::HashMap<std::path::PathBuf, std::collections::VecDeque<u64>>,
-    /// Deferred autosave deadline (undo/redo debounce).
+    /// Debounced autosave deadline. Set by `schedule_autosave()` after any
+    /// buffer-mutating key. Flushed by `flush_autosave_debounce()` in the
+    /// event loop tick. Cleared on explicit save.
     pub(crate) autosave_deadline: Option<Instant>,
     // External file change dialog
     pub(crate) active_dialog: Option<ActiveDialog>,
@@ -722,6 +724,9 @@ pub struct BloomEditor {
     pub(crate) page_history_selected: usize,
     /// Text pending delivery to the system clipboard (drained by render).
     pub(crate) pending_clipboard: Option<String>,
+    /// Cached vault-wide known block IDs (live + retired). Refreshed on
+    /// IndexComplete. Used by `ensure_block_ids()` for collision avoidance.
+    pub(crate) known_block_ids: std::collections::HashSet<String>,
 }
 
 pub(crate) struct ViewState {
@@ -1100,6 +1105,7 @@ impl BloomEditor {
             page_history_entries: None,
             page_history_selected: 0,
             pending_clipboard: None,
+            known_block_ids: std::collections::HashSet::new(),
             config,
         })
     }
@@ -1301,6 +1307,11 @@ impl BloomEditor {
             if let Ok(idx) = index::Index::open_readonly(&index_path) {
                 self.index = Some(idx);
             }
+        }
+
+        // Refresh vault-wide known block IDs cache for collision avoidance.
+        if let Some(idx) = &self.index {
+            self.known_block_ids = block_id_gen::load_all_known_ids(idx.connection());
         }
 
         // Apply pending mirror marker writes from the indexer.

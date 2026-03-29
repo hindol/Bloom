@@ -216,6 +216,8 @@ impl BloomEditor {
     /// 3. Extracts content and writes via DiskWriter (or inline in tests)
     pub(crate) fn save_page(&mut self, page_id: &types::PageId) {
         tracing::debug!(page = %page_id.to_hex(), "save_page called");
+        // Clear any pending autosave deadline (we're saving now).
+        self.autosave_deadline = None;
         // Skip pseudo-paths like [scratch].
         let is_pseudo = self
             .writer
@@ -306,9 +308,21 @@ impl BloomEditor {
         };
         let text = buf.text().to_string();
         let doc = self.parser.parse(&text);
-        let insertions = block_id_gen::compute_block_id_assignments(&doc);
+        let insertions = block_id_gen::compute_block_id_assignments(
+            &doc,
+            if self.known_block_ids.is_empty() {
+                None
+            } else {
+                Some(&self.known_block_ids)
+            },
+        );
         if insertions.is_empty() {
             return false;
+        }
+
+        // Register newly assigned IDs in the cache immediately.
+        for ins in &insertions {
+            self.known_block_ids.insert(ins.id.clone());
         }
 
         let Some(buf) = self.writer.buffers_mut().get_mut(page_id) else {
