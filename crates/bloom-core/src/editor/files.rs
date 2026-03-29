@@ -2,9 +2,22 @@
 //!
 //! All saves go through [`BloomEditor::save_page`] — the single save path.
 //! Write IDs track each request so that stale completions don't clear dirty flags.
-//! FileEvent handling uses content comparison (no fingerprints).
+//! FileEvent handling uses content-hash self-write detection: we hash every
+//! file we save and recognise watcher echoes of our own writes by matching
+//! the disk content hash against the stored set.
 
 use crate::*;
+
+/// Hash content bytes with DefaultHasher (SipHash-2-4). Fast, in stdlib.
+fn hash_content(content: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    content.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Max hashes to retain per path (bounded buffer).
+const MAX_SELF_WRITE_HASHES: usize = 8;
 
 impl BloomEditor {
     /// Handle a DiskWriter result (success or failure).
@@ -103,6 +116,22 @@ impl BloomEditor {
         if let Some(page_id) = self.writer.buffers().find_by_path(&path).cloned() {
             // Content comparison: read disk, compare to buffer. No fingerprints.
             if let Ok(disk_content) = std::fs::read_to_string(&path) {
+                // ── Self-write detection ──
+                // If the disk content hash matches one we recently wrote,
+                // this is an echo of our own save — suppress entirely.
+                let disk_hash = hash_content(&disk_content);
+                if let Some(hashes) = self.self_write_hashes.get_mut(&path) {
+                    if let Some(pos) = hashes.iter().position(|&h| h == disk_hash) {
+                        hashes.remove(pos);
+                        tracing::debug!(path = %path.display(), "file event: self-write detected, suppressing");
+                        // Still queue for indexer (file changed on disk)
+                        self.pending_file_events.insert(rel.to_path_buf());
+                        self.file_event_deadline =
+                            Some(std::time::Instant::now() + std::time::Duration::from_millis(300));
+                        return false;
+                    }
+                }
+
                 let buf_content = self
                     .writer
                     .buffers()
@@ -214,6 +243,13 @@ impl BloomEditor {
         if let Some(tx) = &self.autosave_tx {
             self.write_counter += 1;
             let write_id = self.write_counter;
+            // Record content hash for self-write detection
+            let content_hash = hash_content(&content);
+            let hashes = self.self_write_hashes.entry(path.clone()).or_default();
+            hashes.push_back(content_hash);
+            if hashes.len() > MAX_SELF_WRITE_HASHES {
+                hashes.pop_front();
+            }
             // Set pending write ID on buffer so WriteComplete can match
             if let Some(buf) = self.writer.buffers_mut().get_mut(page_id) {
                 buf.set_pending_write_id(write_id);

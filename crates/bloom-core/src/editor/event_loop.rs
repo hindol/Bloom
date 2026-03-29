@@ -139,6 +139,9 @@ pub fn run_event_loop(
         if editor.flush_file_event_debounce() {
             needs_render = true;
         }
+        if editor.flush_autosave_debounce() {
+            needs_render = true;
+        }
         if editor.tick(Instant::now()) {
             needs_render = true;
         }

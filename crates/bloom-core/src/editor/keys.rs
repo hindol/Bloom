@@ -179,17 +179,38 @@ impl BloomEditor {
 
     /// Save if the active buffer is dirty.
     /// Skipped during Insert mode (mid-edit, partial state) and for read-only buffers.
+    /// Also skipped when an autosave deadline is pending (undo/redo debounce).
     /// Autosave fires naturally when Insert→Normal transition completes
     /// (after edit group close, block IDs, and alignment).
     fn autosave_if_dirty(&mut self) {
         if matches!(self.vim_state.mode(), bloom_vim::Mode::Insert) {
             return; // Don't save mid-edit
         }
+        if self.autosave_deadline.is_some() {
+            return; // Undo/redo debounce active — wait for deadline
+        }
         if let Some(page_id) = self.active_page().cloned() {
             if !self.writer.buffers().is_read_only(&page_id) {
                 self.save_page(&page_id);
             }
         }
+    }
+
+    /// Flush the autosave debounce deadline if it has passed.
+    /// Call from the event loop tick. Returns true if a save was triggered.
+    pub fn flush_autosave_debounce(&mut self) -> bool {
+        if let Some(deadline) = self.autosave_deadline {
+            if Instant::now() >= deadline {
+                self.autosave_deadline = None;
+                if let Some(page_id) = self.active_page().cloned() {
+                    if !self.writer.buffers().is_read_only(&page_id) {
+                        self.save_page(&page_id);
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 
     /// Execute actions on editor state. Returns the actions for the TUI to handle
@@ -289,6 +310,10 @@ impl BloomEditor {
                                 self.set_cursor(len.saturating_sub(1));
                             }
                         }
+                        // Debounce autosave: set deadline instead of saving immediately
+                        self.autosave_deadline = Some(
+                            Instant::now() + std::time::Duration::from_millis(300),
+                        );
                     }
                 }
                 keymap::dispatch::Action::Redo => {
@@ -303,6 +328,10 @@ impl BloomEditor {
                                 self.set_cursor(len.saturating_sub(1));
                             }
                         }
+                        // Debounce autosave: set deadline instead of saving immediately
+                        self.autosave_deadline = Some(
+                            Instant::now() + std::time::Duration::from_millis(300),
+                        );
                     }
                 }
                 keymap::dispatch::Action::FollowLink => {

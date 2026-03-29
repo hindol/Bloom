@@ -696,6 +696,12 @@ pub struct BloomEditor {
     pub(crate) watcher_rx: Option<crossbeam::channel::Receiver<bloom_store::traits::FileEvent>>,
     pub(crate) pending_file_events: std::collections::HashSet<std::path::PathBuf>,
     pub(crate) file_event_deadline: Option<Instant>,
+    /// Content hashes of files WE wrote. Bounded buffer (max 8 per path).
+    /// Used to recognize file-watcher echoes of our own saves.
+    pub(crate) self_write_hashes:
+        std::collections::HashMap<std::path::PathBuf, std::collections::VecDeque<u64>>,
+    /// Deferred autosave deadline (undo/redo debounce).
+    pub(crate) autosave_deadline: Option<Instant>,
     // External file change dialog
     pub(crate) active_dialog: Option<ActiveDialog>,
     // Inline completion (link picker / tag completion)
@@ -1080,6 +1086,8 @@ impl BloomEditor {
             watcher_rx: None,
             pending_file_events: std::collections::HashSet::new(),
             file_event_deadline: None,
+            self_write_hashes: std::collections::HashMap::new(),
+            autosave_deadline: None,
             active_dialog: None,
             inline_completion: None,
             mirror_menu: None,
@@ -1632,6 +1640,10 @@ impl BloomEditor {
 
     pub fn close_buffer(&mut self, _pane: types::PaneId) -> Result<(), error::BloomError> {
         if let Some(page_id) = self.active_page().cloned() {
+            // Clean up self-write hashes for this buffer's path
+            if let Some(info) = self.writer.buffers().info(&page_id) {
+                self.self_write_hashes.remove(&info.path);
+            }
             self.set_active_page(None);
             self.writer.apply(crate::BufferMessage::Close {
                 page_id: page_id.clone(),
