@@ -27,10 +27,7 @@ impl SectionDiff {
 
 /// Collect ordered child block IDs within a section's line_range from the ParseTree.
 /// Excludes the heading's own block ID.
-pub fn section_child_ids(
-    tree: &ParseTree,
-    section: &Section,
-) -> Vec<(BlockId, usize)> {
+pub fn section_child_ids(tree: &ParseTree, section: &Section) -> Vec<(BlockId, usize)> {
     let mut children = Vec::new();
     let start = section.line_range.start + 1; // skip the heading line itself
     let end = section.line_range.end;
@@ -45,10 +42,7 @@ pub fn section_child_ids(
 }
 
 /// Pure diff: source children are truth.
-pub fn structural_diff(
-    source: &[(BlockId, usize)],
-    peer: &[(BlockId, usize)],
-) -> SectionDiff {
+pub fn structural_diff(source: &[(BlockId, usize)], peer: &[(BlockId, usize)]) -> SectionDiff {
     use std::collections::HashSet;
 
     let peer_set: HashSet<&str> = peer.iter().map(|(id, _)| id.0.as_str()).collect();
@@ -83,10 +77,10 @@ impl BloomEditor {
         self.refresh_parse_tree(page_id);
 
         let mirror_sections = {
-            let Some(tree) = self.writer.buffers().parse_tree(page_id) else {
+            let Some(doc) = self.writer.buffers().document(page_id) else {
                 return;
             };
-            tree.mirror_sections()
+            doc.parse_tree().mirror_sections()
         };
         if mirror_sections.is_empty() {
             return;
@@ -104,8 +98,8 @@ impl BloomEditor {
             .filter_map(|section| {
                 let heading_bid = section.block_id.as_ref()?.clone();
                 let source_children = {
-                    let tree = self.writer.buffers().parse_tree(page_id)?;
-                    section_child_ids(tree, section)
+                    let doc = self.writer.buffers().document(page_id)?;
+                    section_child_ids(doc.parse_tree(), section)
                 };
                 let peers = self
                     .index
@@ -131,20 +125,20 @@ impl BloomEditor {
                 self.refresh_parse_tree(&meta.id);
 
                 let peer_section = {
-                    let Some(tree) = self.writer.buffers().parse_tree(&meta.id) else {
+                    let Some(doc) = self.writer.buffers().document(&meta.id) else {
                         continue;
                     };
-                    tree.section_by_block_id(&sw.heading_bid)
+                    doc.parse_tree().section_by_block_id(&sw.heading_bid)
                 };
                 let Some(peer_section) = peer_section else {
                     continue;
                 };
 
                 let peer_children = {
-                    let Some(tree) = self.writer.buffers().parse_tree(&meta.id) else {
+                    let Some(doc) = self.writer.buffers().document(&meta.id) else {
                         continue;
                     };
-                    section_child_ids(tree, &peer_section)
+                    section_child_ids(doc.parse_tree(), &peer_section)
                 };
 
                 let diff = structural_diff(&sw.source_children, &peer_children);
@@ -199,34 +193,8 @@ impl BloomEditor {
 
     /// Refresh a single parse tree if dirty.
     fn refresh_parse_tree(&mut self, page_id: &types::PageId) {
-        let needs_refresh = self
-            .writer
-            .buffers()
-            .parse_tree(page_id)
-            .is_some_and(|pt| pt.is_dirty());
-        if !needs_refresh {
-            return;
-        }
-        let line_count = self
-            .writer
-            .buffers()
-            .get(page_id)
-            .map(|b| b.len_lines())
-            .unwrap_or(0);
-        let line_texts: Vec<String> = (0..line_count)
-            .map(|i| {
-                self.writer
-                    .buffers()
-                    .get(page_id)
-                    .map(|b| b.line(i).to_string())
-                    .unwrap_or_default()
-            })
-            .collect();
-        if let Some(pt) = self.writer.buffers_mut().parse_tree_mut(page_id) {
-            pt.refresh(
-                |i| line_texts.get(i).cloned().unwrap_or_default(),
-                line_count,
-            );
+        if let Some(mut doc) = self.writer.buffers_mut().document_mut(page_id) {
+            doc.refresh_parse_tree_if_dirty();
         }
     }
 
@@ -265,17 +233,9 @@ impl BloomEditor {
         // Remove in reverse order to preserve line indices
         lines_to_remove.reverse();
         for line_idx in lines_to_remove {
-            if let Some(buf) = self.writer.buffers_mut().get_mut(peer_id) {
-                if line_idx < buf.len_lines() {
-                    let ls = buf.text().line_to_char(line_idx);
-                    let le = if line_idx + 1 < buf.len_lines() {
-                        buf.text().line_to_char(line_idx + 1)
-                    } else {
-                        buf.len_chars()
-                    };
-                    if ls < le {
-                        buf.delete(ls..le);
-                    }
+            if let Some(mut doc) = self.writer.buffers_mut().document_mut(peer_id) {
+                if doc.delete_line(line_idx, crate::document::CursorUpdate::Preserve) {
+                    self.refresh_parse_tree(peer_id);
                 }
             }
         }
@@ -343,9 +303,7 @@ impl BloomEditor {
                             .is_some_and(|b| b.id == *prev_bid)
                     });
                     match prev_line {
-                        Some(pl) if pl + 1 < buf.len_lines() => {
-                            buf.text().line_to_char(pl + 1)
-                        }
+                        Some(pl) if pl + 1 < buf.len_lines() => buf.text().line_to_char(pl + 1),
                         _ => buf.len_chars(), // fallback: end of buffer
                     }
                 } else {
@@ -359,17 +317,21 @@ impl BloomEditor {
                             .is_some_and(|b| b.id == *heading_bid)
                     });
                     match heading_line {
-                        Some(hl) if hl + 1 < buf.len_lines() => {
-                            buf.text().line_to_char(hl + 1)
-                        }
+                        Some(hl) if hl + 1 < buf.len_lines() => buf.text().line_to_char(hl + 1),
                         _ => buf.len_chars(),
                     }
                 }
             };
 
             // Insert the block text
-            if let Some(buf) = self.writer.buffers_mut().get_mut(peer_id) {
-                buf.insert(insert_char_pos, &block_text);
+            if let Some(mut doc) = self.writer.buffers_mut().document_mut(peer_id) {
+                if doc.insert_at(
+                    insert_char_pos,
+                    &block_text,
+                    crate::document::CursorUpdate::Preserve,
+                ) {
+                    self.refresh_parse_tree(peer_id);
+                }
             }
         }
     }
@@ -381,14 +343,8 @@ mod tests {
 
     #[test]
     fn diff_identical_sections() {
-        let source = vec![
-            (BlockId("t0001".into()), 2),
-            (BlockId("t0002".into()), 3),
-        ];
-        let peer = vec![
-            (BlockId("t0001".into()), 2),
-            (BlockId("t0002".into()), 3),
-        ];
+        let source = vec![(BlockId("t0001".into()), 2), (BlockId("t0002".into()), 3)];
+        let peer = vec![(BlockId("t0001".into()), 2), (BlockId("t0002".into()), 3)];
         let diff = structural_diff(&source, &peer);
         assert!(diff.is_empty());
     }
@@ -400,10 +356,7 @@ mod tests {
             (BlockId("t0002".into()), 3),
             (BlockId("t0003".into()), 4),
         ];
-        let peer = vec![
-            (BlockId("t0001".into()), 2),
-            (BlockId("t0002".into()), 3),
-        ];
+        let peer = vec![(BlockId("t0001".into()), 2), (BlockId("t0002".into()), 3)];
         let diff = structural_diff(&source, &peer);
         assert_eq!(diff.inserts.len(), 1);
         assert_eq!(diff.inserts[0].0, BlockId("t0003".into()));
@@ -413,10 +366,7 @@ mod tests {
     #[test]
     fn diff_remove_block() {
         let source = vec![(BlockId("t0001".into()), 2)];
-        let peer = vec![
-            (BlockId("t0001".into()), 2),
-            (BlockId("t0002".into()), 3),
-        ];
+        let peer = vec![(BlockId("t0001".into()), 2), (BlockId("t0002".into()), 3)];
         let diff = structural_diff(&source, &peer);
         assert!(diff.inserts.is_empty());
         assert_eq!(diff.removals.len(), 1);
@@ -425,14 +375,8 @@ mod tests {
 
     #[test]
     fn diff_insert_and_remove() {
-        let source = vec![
-            (BlockId("t0001".into()), 2),
-            (BlockId("t0003".into()), 3),
-        ];
-        let peer = vec![
-            (BlockId("t0001".into()), 2),
-            (BlockId("t0002".into()), 3),
-        ];
+        let source = vec![(BlockId("t0001".into()), 2), (BlockId("t0003".into()), 3)];
+        let peer = vec![(BlockId("t0001".into()), 2), (BlockId("t0002".into()), 3)];
         let diff = structural_diff(&source, &peer);
         assert_eq!(diff.inserts.len(), 1);
         assert_eq!(diff.inserts[0].0, BlockId("t0003".into()));

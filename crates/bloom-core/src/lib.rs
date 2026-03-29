@@ -4,17 +4,18 @@ pub mod agenda;
 pub mod align;
 pub mod block_id_gen;
 pub mod config;
+pub mod document;
 pub mod error;
 pub mod history;
 pub mod index;
 pub mod journal;
 pub mod keymap;
 pub mod linker;
+pub mod parse_tree;
 pub mod picker;
 pub mod query;
 pub mod refactor;
 pub mod render;
-pub mod parse_tree;
 pub mod session;
 pub mod template;
 pub mod timeline;
@@ -222,11 +223,14 @@ impl BufferManager {
             last_focused: Instant::now(),
         };
         let parse_tree = parse_tree::ParseTree::build(content);
-        self.buffers.insert(key, ManagedBuffer {
-            slot: BufferSlot::Frozen(buf),
-            info,
-            parse_tree,
-        });
+        self.buffers.insert(
+            key,
+            ManagedBuffer {
+                slot: BufferSlot::Frozen(buf),
+                info,
+                parse_tree,
+            },
+        );
     }
 
     pub fn is_read_only(&self, page_id: &types::PageId) -> bool {
@@ -293,9 +297,29 @@ impl BufferManager {
         self.buffers.get(&page_id.to_hex()).map(|mb| &mb.parse_tree)
     }
 
+    pub(crate) fn document(&self, page_id: &types::PageId) -> Option<document::Document<'_>> {
+        self.buffers
+            .get(&page_id.to_hex())
+            .map(document::Document::new)
+    }
+
     /// Get a mutable reference to the parse tree for a buffer.
-    pub fn parse_tree_mut(&mut self, page_id: &types::PageId) -> Option<&mut parse_tree::ParseTree> {
-        self.buffers.get_mut(&page_id.to_hex()).map(|mb| &mut mb.parse_tree)
+    pub fn parse_tree_mut(
+        &mut self,
+        page_id: &types::PageId,
+    ) -> Option<&mut parse_tree::ParseTree> {
+        self.buffers
+            .get_mut(&page_id.to_hex())
+            .map(|mb| &mut mb.parse_tree)
+    }
+
+    pub(crate) fn document_mut(
+        &mut self,
+        page_id: &types::PageId,
+    ) -> Option<document::DocumentMut<'_>> {
+        self.buffers
+            .get_mut(&page_id.to_hex())
+            .map(document::DocumentMut::new)
     }
 }
 
@@ -324,15 +348,27 @@ pub enum BufferMessage {
     /// Toggle a task checkbox by block ID (resolves page via index).
     ToggleTask { block_id: String },
     /// Undo last edit.
-    Undo { page_id: types::PageId },
+    Undo {
+        page_id: types::PageId,
+        cursor_idx: usize,
+    },
     /// Redo last undo.
-    Redo { page_id: types::PageId },
+    Redo {
+        page_id: types::PageId,
+        cursor_idx: usize,
+    },
     /// Mark buffer as clean (after successful disk write).
     MarkClean { page_id: types::PageId },
     /// Begin an edit group (for atomic undo).
-    BeginEditGroup { page_id: types::PageId },
+    BeginEditGroup {
+        page_id: types::PageId,
+        cursor_idx: usize,
+    },
     /// End an edit group.
-    EndEditGroup { page_id: types::PageId },
+    EndEditGroup {
+        page_id: types::PageId,
+        cursor_idx: usize,
+    },
     /// Set cursor position.
     SetCursor { page_id: types::PageId, pos: usize },
     /// Set selection anchor.
@@ -411,114 +447,78 @@ impl BufferWriter {
                 cursor_after,
                 cursor_idx,
             } => {
-                let Some(mb) = self.buffer_mgr.buffers.get_mut(&page_id.to_hex()) else {
+                let Some(mut doc) = self.buffer_mgr.document_mut(&page_id) else {
                     return false;
                 };
-                let buf = match &mut mb.slot {
-                    BufferSlot::Mutable(b) => b,
-                    BufferSlot::Frozen(_) => return false,
-                };
-                let line_before = buf.text().char_to_line(range.start.min(buf.len_chars().saturating_sub(1).max(0)));
-                let lines_before = buf.len_lines();
-                if replacement.is_empty() && !range.is_empty() {
-                    buf.delete(range);
-                } else if range.is_empty() {
-                    buf.insert(range.start, &replacement);
-                } else {
-                    buf.replace(range, &replacement);
-                }
-                buf.ensure_cursors(cursor_idx + 1);
-                let max_pos = buf.len_chars();
-                buf.set_cursor(cursor_idx, cursor_after.min(max_pos));
-                let lines_after = buf.len_lines();
-                let delta = lines_after as isize - lines_before as isize;
-                let old_end = (line_before + 1).min(lines_before);
-                let new_end = ((old_end as isize + delta).max(line_before as isize + 1)) as usize;
-                mb.parse_tree.mark_dirty(line_before, old_end, new_end);
-                true
+                doc.apply_edit(document::EditRequest {
+                    range,
+                    replacement: &replacement,
+                    cursor: document::CursorUpdate::Set {
+                        idx: cursor_idx,
+                        pos: cursor_after,
+                    },
+                })
             }
             BufferMessage::MirrorEdit {
                 page_id,
                 range,
                 replacement,
             } => {
-                let Some(mb) = self.buffer_mgr.buffers.get_mut(&page_id.to_hex()) else {
+                let Some(mut doc) = self.buffer_mgr.document_mut(&page_id) else {
                     return false;
                 };
-                let buf = match &mut mb.slot {
-                    BufferSlot::Mutable(b) => b,
-                    BufferSlot::Frozen(_) => return false,
-                };
-                let line_before = buf.text().char_to_line(range.start.min(buf.len_chars().saturating_sub(1).max(0)));
-                let lines_before = buf.len_lines();
-                if replacement.is_empty() && !range.is_empty() {
-                    buf.delete(range);
-                } else if range.is_empty() {
-                    buf.insert(range.start, &replacement);
-                } else {
-                    buf.replace(range, &replacement);
-                }
-                let lines_after = buf.len_lines();
-                let delta = lines_after as isize - lines_before as isize;
-                let old_end = (line_before + 1).min(lines_before);
-                let new_end = ((old_end as isize + delta).max(line_before as isize + 1)) as usize;
-                mb.parse_tree.mark_dirty(line_before, old_end, new_end);
-                true
+                doc.apply_edit(document::EditRequest {
+                    range,
+                    replacement: &replacement,
+                    cursor: document::CursorUpdate::Preserve,
+                })
             }
             BufferMessage::ToggleTask { .. } => {
                 // Handled at BloomEditor level (needs index access).
                 // See BloomEditor::handle_view_toggle_task().
                 false
             }
-            BufferMessage::Undo { page_id } => {
-                let Some(mb) = self.buffer_mgr.buffers.get_mut(&page_id.to_hex()) else {
+            BufferMessage::Undo {
+                page_id,
+                cursor_idx,
+            } => {
+                let Some(mut doc) = self.buffer_mgr.document_mut(&page_id) else {
                     return false;
                 };
-                match &mut mb.slot {
-                    BufferSlot::Mutable(buf) => {
-                        buf.undo();
-                        mb.parse_tree = parse_tree::ParseTree::build(&buf.text().to_string());
-                        true
-                    }
-                    BufferSlot::Frozen(_) => false,
-                }
+                doc.undo(cursor_idx)
             }
-            BufferMessage::Redo { page_id } => {
-                let Some(mb) = self.buffer_mgr.buffers.get_mut(&page_id.to_hex()) else {
+            BufferMessage::Redo {
+                page_id,
+                cursor_idx,
+            } => {
+                let Some(mut doc) = self.buffer_mgr.document_mut(&page_id) else {
                     return false;
                 };
-                match &mut mb.slot {
-                    BufferSlot::Mutable(buf) => {
-                        buf.redo();
-                        mb.parse_tree = parse_tree::ParseTree::build(&buf.text().to_string());
-                        true
-                    }
-                    BufferSlot::Frozen(_) => false,
-                }
+                doc.redo(cursor_idx)
             }
             BufferMessage::MarkClean { page_id } => {
-                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
-                    buf.mark_clean();
-                    true
-                } else {
-                    false
-                }
+                let Some(mut doc) = self.buffer_mgr.document_mut(&page_id) else {
+                    return false;
+                };
+                doc.mark_clean()
             }
-            BufferMessage::BeginEditGroup { page_id } => {
-                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
-                    buf.begin_edit_group();
-                    true
-                } else {
-                    false
-                }
+            BufferMessage::BeginEditGroup {
+                page_id,
+                cursor_idx,
+            } => {
+                let Some(mut doc) = self.buffer_mgr.document_mut(&page_id) else {
+                    return false;
+                };
+                doc.begin_edit_group(cursor_idx)
             }
-            BufferMessage::EndEditGroup { page_id } => {
-                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
-                    buf.end_edit_group();
-                    true
-                } else {
-                    false
-                }
+            BufferMessage::EndEditGroup {
+                page_id,
+                cursor_idx,
+            } => {
+                let Some(mut doc) = self.buffer_mgr.document_mut(&page_id) else {
+                    return false;
+                };
+                doc.end_edit_group(cursor_idx)
             }
             BufferMessage::SetCursor { page_id, pos } => {
                 self.buffer_mgr.set_cursor(&page_id, pos);
@@ -554,35 +554,26 @@ impl BufferWriter {
                 true
             }
             BufferMessage::Reload { page_id, content } => {
-                self.buffer_mgr.reload(&page_id, &content);
+                let Some(mut doc) = self.buffer_mgr.document_mut(&page_id) else {
+                    return false;
+                };
+                doc.reload(&content);
                 true
             }
             BufferMessage::AlignPage { page_id } => {
-                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
-                    crate::align::auto_align_page(buf);
-                    let text = buf.text().to_string();
-                    if let Some(pt) = self.buffer_mgr.parse_tree_mut(&page_id) {
-                        *pt = parse_tree::ParseTree::build(&text);
-                    }
-                    true
-                } else {
-                    false
-                }
+                let Some(mut doc) = self.buffer_mgr.document_mut(&page_id) else {
+                    return false;
+                };
+                doc.align_page()
             }
             BufferMessage::AlignBlock {
                 page_id,
                 cursor_line,
             } => {
-                if let Some(buf) = self.buffer_mgr.get_mut(&page_id) {
-                    crate::align::auto_align_block(buf, cursor_line);
-                    let text = buf.text().to_string();
-                    if let Some(pt) = self.buffer_mgr.parse_tree_mut(&page_id) {
-                        *pt = parse_tree::ParseTree::build(&text);
-                    }
-                    true
-                } else {
-                    false
-                }
+                let Some(mut doc) = self.buffer_mgr.document_mut(&page_id) else {
+                    return false;
+                };
+                doc.align_block(cursor_line)
             }
             BufferMessage::EnsureBlockIds { page_id: _ } => {
                 // Block ID assignment needs the index — return false, handled by BloomEditor
@@ -1453,9 +1444,8 @@ impl BloomEditor {
 
         // Otherwise restore into the active buffer (legacy path)
         if let Some(page_id) = self.active_page().cloned() {
-            if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
-                let len = buf.len_chars();
-                buf.replace(0..len, &content);
+            if let Some(mut doc) = self.writer.buffers_mut().document_mut(&page_id) {
+                doc.replace_all(&content, crate::document::CursorUpdate::Preserve);
                 self.push_notification(
                     "Restored from history (undo with u)".into(),
                     render::NotificationLevel::Info,
@@ -1503,11 +1493,13 @@ impl BloomEditor {
             return;
         };
         let cursor = self.cursor();
-        let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) else {
-            return;
-        };
-        buf.insert(cursor, text);
-        self.set_cursor(cursor + text.chars().count());
+        self.writer.apply(crate::BufferMessage::Edit {
+            page_id,
+            range: cursor..cursor,
+            replacement: text.to_string(),
+            cursor_after: cursor + text.chars().count(),
+            cursor_idx: self.active_cursor_idx(),
+        });
     }
 
     /// Tick for timers, notifications, debounce. Returns true if state changed.
@@ -1604,31 +1596,8 @@ impl BloomEditor {
             .map(|info| info.page_id.clone())
             .collect();
         for pid in page_ids {
-            let needs_refresh = self
-                .writer
-                .buffers()
-                .parse_tree(&pid)
-                .is_some_and(|pt| pt.is_dirty());
-            if needs_refresh {
-                let line_count = self
-                    .writer
-                    .buffers()
-                    .get(&pid)
-                    .map(|b| b.len_lines())
-                    .unwrap_or(0);
-                // Collect line texts for refresh (avoids holding buf ref across mutable borrow).
-                let line_texts: Vec<String> = (0..line_count)
-                    .map(|i| {
-                        self.writer
-                            .buffers()
-                            .get(&pid)
-                            .map(|b| b.line(i).to_string())
-                            .unwrap_or_default()
-                    })
-                    .collect();
-                if let Some(pt) = self.writer.buffers_mut().parse_tree_mut(&pid) {
-                    pt.refresh(|i| line_texts.get(i).cloned().unwrap_or_default(), line_count);
-                }
+            if let Some(mut doc) = self.writer.buffers_mut().document_mut(&pid) {
+                doc.refresh_parse_tree_if_dirty();
             }
         }
     }
@@ -2194,6 +2163,27 @@ mod tests {
         editor.save_current().unwrap();
         let frame = editor.render(80, 24);
         assert!(!frame.panes[0].dirty);
+    }
+
+    #[test]
+    fn test_save_clean_buffer_assigns_missing_block_ids() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file_path = dir.path().join("test.md");
+        std::fs::write(&file_path, "hello").unwrap();
+
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        editor.vault_root = Some(dir.path().to_path_buf());
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(&id, "Test", &file_path, "hello");
+
+        editor.save_current().unwrap();
+
+        let on_disk = std::fs::read_to_string(&file_path).unwrap();
+        assert!(
+            on_disk.starts_with("hello ^"),
+            "expected save path to assign block ID, got: {on_disk}"
+        );
     }
 
     // save_current writes to disk

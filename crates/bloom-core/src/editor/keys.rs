@@ -306,28 +306,16 @@ impl BloomEditor {
                     if let Some(page_id) = self.active_page().cloned() {
                         self.writer.apply(crate::BufferMessage::Undo {
                             page_id: page_id.clone(),
+                            cursor_idx: self.active_cursor_idx(),
                         });
-                        // Fix cursor bounds after undo
-                        if let Some(buf) = self.writer.buffers().get(&page_id) {
-                            let len = buf.len_chars();
-                            if self.cursor() > len {
-                                self.set_cursor(len.saturating_sub(1));
-                            }
-                        }
                     }
                 }
                 keymap::dispatch::Action::Redo => {
                     if let Some(page_id) = self.active_page().cloned() {
                         self.writer.apply(crate::BufferMessage::Redo {
                             page_id: page_id.clone(),
+                            cursor_idx: self.active_cursor_idx(),
                         });
-                        // Fix cursor bounds after redo
-                        if let Some(buf) = self.writer.buffers().get(&page_id) {
-                            let len = buf.len_chars();
-                            if self.cursor() > len {
-                                self.set_cursor(len.saturating_sub(1));
-                            }
-                        }
                     }
                 }
                 keymap::dispatch::Action::FollowLink => {
@@ -1249,8 +1237,10 @@ impl BloomEditor {
                 // Edit group lifecycle: begin on Insert entry, end on Insert exit
                 if matches!(mode, bloom_vim::Mode::Insert) {
                     if let Some(page_id) = self.active_page().cloned() {
-                        self.writer
-                            .apply(crate::BufferMessage::BeginEditGroup { page_id });
+                        self.writer.apply(crate::BufferMessage::BeginEditGroup {
+                            page_id,
+                            cursor_idx: self.active_cursor_idx(),
+                        });
                     }
                 } else if matches!(mode, bloom_vim::Mode::Normal) {
                     // Leaving Insert (or Visual, Command) → close the edit group first,
@@ -1262,6 +1252,7 @@ impl BloomEditor {
                         let is_ro = self.writer.buffers().is_read_only(&page_id);
                         self.writer.apply(crate::BufferMessage::EndEditGroup {
                             page_id: page_id.clone(),
+                            cursor_idx: self.active_cursor_idx(),
                         });
                         if !is_ro {
                             self.ensure_block_ids(&page_id);
@@ -1311,8 +1302,8 @@ impl BloomEditor {
             bloom_vim::VimAction::Unhandled => vec![keymap::dispatch::Action::Noop],
             bloom_vim::VimAction::RestoreCheckpoint => {
                 if let Some(page_id) = self.active_page().cloned() {
-                    if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
-                        buf.restore_edit_group_checkpoint();
+                    if let Some(mut doc) = self.writer.buffers_mut().document_mut(&page_id) {
+                        doc.restore_edit_group_checkpoint();
                         self.set_cursor(0);
                     }
                 }
@@ -1745,13 +1736,12 @@ impl BloomEditor {
                 }
             }
             // Replace the mirror line
-            if let Some(buf) = self.writer.buffers_mut().get_mut(&meta.id) {
-                if *mirror_line < buf.len_lines() {
-                    let old_line = buf.line(*mirror_line).to_string();
-                    let old_trimmed = old_line.trim_end_matches('\n');
-                    let ls = buf.text().line_to_char(*mirror_line);
-                    buf.replace(ls..ls + old_trimmed.len(), new_trimmed);
-                }
+            if let Some(mut doc) = self.writer.buffers_mut().document_mut(&meta.id) {
+                doc.replace_trimmed_line(
+                    *mirror_line,
+                    new_trimmed,
+                    crate::document::CursorUpdate::Preserve,
+                );
             }
             self.save_page(&meta.id);
             mirror_count += 1;
@@ -1803,7 +1793,7 @@ impl BloomEditor {
         // Find the line and flip the checkbox
         let mut toggled_new_text: Option<String> = None;
         let mut block_id_on_line: Option<String> = None;
-        if let Some(buf) = self.writer.buffers_mut().get_mut(&pid) {
+        if let Some(buf) = self.writer.buffers().get(&pid) {
             let line_count = buf.len_lines();
             if *line < line_count {
                 let line_text = buf.line(*line).to_string();
@@ -1814,12 +1804,16 @@ impl BloomEditor {
                 } else {
                     return; // not a task line
                 };
-                let line_start = buf.text().line_to_char(*line);
                 let old_trimmed = line_text.trim_end_matches('\n');
                 let new_trimmed = new_text.trim_end_matches('\n');
-                buf.replace(line_start..line_start + old_trimmed.len(), new_trimmed);
+                if let Some(mut doc) = self.writer.buffers_mut().document_mut(&pid) {
+                    doc.replace_trimmed_line(
+                        *line,
+                        new_trimmed,
+                        crate::document::CursorUpdate::Preserve,
+                    );
+                }
                 toggled_new_text = Some(new_trimmed.to_string());
-                // Extract block ID via parser
                 if let Some(bid) = bloom_md::parser::extensions::parse_block_id(old_trimmed, *line)
                 {
                     block_id_on_line = Some(bid.id.0);
@@ -1857,13 +1851,12 @@ impl BloomEditor {
                             });
                         }
                     }
-                    if let Some(buf) = self.writer.buffers_mut().get_mut(&meta.id) {
-                        if *mirror_line < buf.len_lines() {
-                            let old_line = buf.line(*mirror_line).to_string();
-                            let old_trimmed = old_line.trim_end_matches('\n');
-                            let ls = buf.text().line_to_char(*mirror_line);
-                            buf.replace(ls..ls + old_trimmed.len(), new_text);
-                        }
+                    if let Some(mut doc) = self.writer.buffers_mut().document_mut(&meta.id) {
+                        doc.replace_trimmed_line(
+                            *mirror_line,
+                            new_text,
+                            crate::document::CursorUpdate::Preserve,
+                        );
                     }
                     self.save_page(&meta.id);
                 }

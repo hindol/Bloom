@@ -320,8 +320,9 @@ impl BloomEditor {
         match mode {
             render::TemporalMode::PageHistory => {
                 if let Some(node_id) = undo_node_id {
-                    if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
-                        buf.restore_state(node_id);
+                    let cursor_idx = self.active_cursor_idx();
+                    if let Some(mut doc) = self.writer.buffers_mut().document_mut(&page_id) {
+                        doc.restore_state(node_id, cursor_idx);
                     }
                 } else if let Some(content) = content {
                     self.writer.apply(crate::BufferMessage::Reload {
@@ -336,13 +337,12 @@ impl BloomEditor {
                 // Block restore: replace only the line containing the block ID
                 let Some(new_line) = content else { return };
                 let (cursor_line, _) = self.cursor_position();
-                if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
-                    if cursor_line < buf.len_lines() {
-                        let old_line = buf.line(cursor_line).to_string();
-                        let old_trimmed = old_line.trim_end_matches('\n');
-                        let ls = buf.text().line_to_char(cursor_line);
-                        buf.replace(ls..ls + old_trimmed.len(), &new_line);
-                    }
+                if let Some(mut doc) = self.writer.buffers_mut().document_mut(&page_id) {
+                    doc.replace_trimmed_line(
+                        cursor_line,
+                        &new_line,
+                        crate::document::CursorUpdate::Preserve,
+                    );
                 }
             }
             render::TemporalMode::DayActivity => return,

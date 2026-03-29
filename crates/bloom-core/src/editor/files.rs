@@ -230,6 +230,10 @@ impl BloomEditor {
             return;
         }
 
+        // Saving is the file-truth boundary: make sure missing block IDs are
+        // materialized into the document before we snapshot content for disk.
+        self.ensure_block_ids(page_id);
+
         // Extract content, path, and version.
         let (content, path, buffer_version) = {
             let Some((buf, info)) = self.writer.buffers().get_with_info(page_id) else {
@@ -303,53 +307,15 @@ impl BloomEditor {
             return false;
         }
 
-        let Some(buf) = self.writer.buffers().get(page_id) else {
+        let parser = &self.parser;
+        let known_ids = if self.known_block_ids.is_empty() {
+            None
+        } else {
+            Some(&mut self.known_block_ids)
+        };
+        let Some(mut doc) = self.writer.buffers_mut().document_mut(page_id) else {
             return false;
         };
-        let text = buf.text().to_string();
-        let doc = self.parser.parse(&text);
-        let insertions = block_id_gen::compute_block_id_assignments(
-            &doc,
-            if self.known_block_ids.is_empty() {
-                None
-            } else {
-                Some(&self.known_block_ids)
-            },
-        );
-        if insertions.is_empty() {
-            return false;
-        }
-
-        // Register newly assigned IDs in the cache immediately.
-        for ins in &insertions {
-            self.known_block_ids.insert(ins.id.clone());
-        }
-
-        let Some(buf) = self.writer.buffers_mut().get_mut(page_id) else {
-            return false;
-        };
-
-        // Buffer owns cursors — insert() auto-adjusts them.
-        buf.begin_edit_group();
-        for ins in insertions.iter().rev() {
-            let line_idx = ins.line;
-            if line_idx >= buf.len_lines() {
-                continue;
-            }
-            let line_start = buf.text().line_to_char(line_idx);
-            let line_slice = buf.line(line_idx);
-            let mut content_chars = line_slice.len_chars();
-            let chars: Vec<char> = line_slice.chars().collect();
-            while content_chars > 0 && matches!(chars[content_chars - 1], '\n' | '\r' | ' ' | '\t')
-            {
-                content_chars -= 1;
-            }
-            let insert_at = line_start + content_chars;
-            let insertion_text = format!(" ^{}", ins.id);
-            buf.insert(insert_at, &insertion_text);
-        }
-        buf.end_edit_group();
-
-        true
+        doc.ensure_block_ids(parser, known_ids)
     }
 }

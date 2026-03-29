@@ -668,12 +668,26 @@ impl BloomEditor {
         let new_marker = format!(" ^{}", new_id);
 
         // Replace in buffer
-        if let Some(buf) = self.writer.buffers_mut().get_mut(&page_id) {
+        let replacement_range = if let Some(buf) = self.writer.buffers().get(&page_id) {
             let line_text = buf.line(cursor_line).to_string();
             let trimmed = line_text.trim_end_matches('\n');
             if let Some(pos) = trimmed.rfind(&old_marker) {
                 let ls = buf.text().line_to_char(cursor_line);
-                buf.replace(ls + pos..ls + pos + old_marker.len(), &new_marker);
+                Some(ls + pos..ls + pos + old_marker.len())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(range) = replacement_range {
+            if let Some(mut doc) = self.writer.buffers_mut().document_mut(&page_id) {
+                doc.apply_edit(crate::document::EditRequest {
+                    range,
+                    replacement: &new_marker,
+                    cursor: crate::document::CursorUpdate::Preserve,
+                });
             }
         }
 

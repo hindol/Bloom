@@ -117,9 +117,12 @@ impl Buffer {
         self.dirty = self.version != self.clean_version;
     }
 
-    /// Primary cursor position for undo snapshots.
-    fn cursor_pos_for_undo(&self) -> usize {
-        self.cursors.first().map(|c| c.position).unwrap_or(0)
+    fn cursor_pos_for_undo_idx(&self, idx: usize) -> usize {
+        self.cursors
+            .get(idx)
+            .or_else(|| self.cursors.first())
+            .map(|c| c.position)
+            .unwrap_or(0)
     }
 
     /// Adjust all cursors after an insertion at `at` of `len` chars.
@@ -157,6 +160,10 @@ impl Buffer {
 
     /// Insert `text` at the given character index.
     pub fn insert(&mut self, char_idx: usize, text: &str) {
+        self.insert_with_undo_cursor(char_idx, text, 0);
+    }
+
+    pub fn insert_with_undo_cursor(&mut self, char_idx: usize, text: &str, undo_cursor_idx: usize) {
         let delta = crate::EditDelta {
             offset: char_idx,
             delete_len: 0,
@@ -173,13 +180,21 @@ impl Buffer {
                 let truncated: String = text.chars().take(17).collect();
                 format!("insert '{truncated}...'")
             };
-            self.undo_tree
-                .push_with_delta(self.rope.clone(), self.cursor_pos_for_undo(), desc, Some(delta));
+            self.undo_tree.push_with_delta(
+                self.rope.clone(),
+                self.cursor_pos_for_undo_idx(undo_cursor_idx),
+                desc,
+                Some(delta),
+            );
         }
     }
 
     /// Delete the character range.
     pub fn delete(&mut self, range: Range<usize>) {
+        self.delete_with_undo_cursor(range, 0);
+    }
+
+    pub fn delete_with_undo_cursor(&mut self, range: Range<usize>, undo_cursor_idx: usize) {
         let delta = crate::EditDelta {
             offset: range.start,
             delete_len: range.len(),
@@ -191,7 +206,7 @@ impl Buffer {
         if self.edit_group_checkpoint.is_none() {
             self.undo_tree.push_with_delta(
                 self.rope.clone(),
-                self.cursor_pos_for_undo(),
+                self.cursor_pos_for_undo_idx(undo_cursor_idx),
                 "delete".to_string(),
                 Some(delta),
             );
@@ -200,6 +215,15 @@ impl Buffer {
 
     /// Replace the character range with `text`.
     pub fn replace(&mut self, range: Range<usize>, text: &str) {
+        self.replace_with_undo_cursor(range, text, 0);
+    }
+
+    pub fn replace_with_undo_cursor(
+        &mut self,
+        range: Range<usize>,
+        text: &str,
+        undo_cursor_idx: usize,
+    ) {
         let delta = crate::EditDelta {
             offset: range.start,
             delete_len: range.len(),
@@ -219,8 +243,12 @@ impl Buffer {
                 let truncated: String = text.chars().take(17).collect();
                 format!("replace with '{truncated}...'")
             };
-            self.undo_tree
-                .push_with_delta(self.rope.clone(), self.cursor_pos_for_undo(), desc, Some(delta));
+            self.undo_tree.push_with_delta(
+                self.rope.clone(),
+                self.cursor_pos_for_undo_idx(undo_cursor_idx),
+                desc,
+                Some(delta),
+            );
         }
     }
 
@@ -243,11 +271,16 @@ impl Buffer {
     // -- Undo/Redo --
 
     pub fn undo(&mut self) -> bool {
+        self.undo_with_cursor(0)
+    }
+
+    pub fn undo_with_cursor(&mut self, cursor_idx: usize) -> bool {
         if let Some((snapshot, cursor_pos)) = self.undo_tree.undo() {
             self.rope = snapshot;
             // Restore cursor, clamped to new buffer length
             let clamped = cursor_pos.min(self.rope.len_chars().saturating_sub(1));
-            if let Some(c) = self.cursors.first_mut() {
+            self.ensure_cursors(cursor_idx + 1);
+            if let Some(c) = self.cursors.get_mut(cursor_idx) {
                 c.position = clamped;
             }
             self.bump_version();
@@ -258,10 +291,15 @@ impl Buffer {
     }
 
     pub fn redo(&mut self) -> bool {
+        self.redo_with_cursor(0)
+    }
+
+    pub fn redo_with_cursor(&mut self, cursor_idx: usize) -> bool {
         if let Some((snapshot, cursor_pos)) = self.undo_tree.redo() {
             self.rope = snapshot;
             let clamped = cursor_pos.min(self.rope.len_chars().saturating_sub(1));
-            if let Some(c) = self.cursors.first_mut() {
+            self.ensure_cursors(cursor_idx + 1);
+            if let Some(c) = self.cursors.get_mut(cursor_idx) {
                 c.position = clamped;
             }
             self.bump_version();
@@ -280,10 +318,15 @@ impl Buffer {
     }
 
     pub fn restore_state(&mut self, node_id: UndoNodeId) {
+        self.restore_state_with_cursor(node_id, 0);
+    }
+
+    pub fn restore_state_with_cursor(&mut self, node_id: UndoNodeId, cursor_idx: usize) {
         let (snapshot, cursor_pos) = self.undo_tree.restore(node_id);
         self.rope = snapshot;
         let clamped = cursor_pos.min(self.rope.len_chars().saturating_sub(1));
-        if let Some(c) = self.cursors.first_mut() {
+        self.ensure_cursors(cursor_idx + 1);
+        if let Some(c) = self.cursors.get_mut(cursor_idx) {
             c.position = clamped;
         }
         self.bump_version();
@@ -295,20 +338,28 @@ impl Buffer {
     }
 
     pub fn begin_edit_group(&mut self) {
+        self.begin_edit_group_with_cursor(0);
+    }
+
+    pub fn begin_edit_group_with_cursor(&mut self, undo_cursor_idx: usize) {
         self.edit_group_checkpoint = Some(self.rope.clone());
         // Store current cursor on the current undo node so that undoing TO
         // this state restores the cursor to where it was before the edit.
         self.undo_tree
-            .update_current_cursor(self.cursor_pos_for_undo());
+            .update_current_cursor(self.cursor_pos_for_undo_idx(undo_cursor_idx));
     }
 
     pub fn end_edit_group(&mut self) {
+        self.end_edit_group_with_cursor(0);
+    }
+
+    pub fn end_edit_group_with_cursor(&mut self, undo_cursor_idx: usize) {
         if let Some(checkpoint) = self.edit_group_checkpoint.take() {
             if self.rope != checkpoint {
                 let delta = crate::undo::compute_diff(&checkpoint, &self.rope);
                 self.undo_tree.push_with_delta(
                     self.rope.clone(),
-                    self.cursor_pos_for_undo(),
+                    self.cursor_pos_for_undo_idx(undo_cursor_idx),
                     "insert session".to_string(),
                     Some(delta),
                 );
