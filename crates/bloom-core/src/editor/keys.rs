@@ -13,6 +13,13 @@ use crate::*;
 impl BloomEditor {
     /// Process a key event.
     pub fn handle_key(&mut self, key: types::KeyEvent) -> Vec<keymap::dispatch::Action> {
+        let result = self.handle_key_inner(key);
+        self.schedule_autosave();
+        result
+    }
+
+    /// Inner dispatch — routes keys through the modal pipeline.
+    fn handle_key_inner(&mut self, key: types::KeyEvent) -> Vec<keymap::dispatch::Action> {
         // If wizard is active, route all keys there
         if self.wizard.is_some() {
             return self.handle_wizard_key(&key);
@@ -29,7 +36,6 @@ impl BloomEditor {
             self.pending_since = None;
             self.which_key_visible = false;
             let result = self.execute_actions(vec![action]);
-            self.autosave_if_dirty();
             return result;
         }
 
@@ -47,7 +53,6 @@ impl BloomEditor {
         if self.quick_capture.is_some() {
             let actions = self.handle_quick_capture_key(&key);
             let result = self.execute_actions(actions);
-            self.autosave_if_dirty();
             return result;
         }
 
@@ -97,7 +102,6 @@ impl BloomEditor {
         if !self.leader_keys.is_empty() {
             let actions = self.handle_leader_key(key);
             let result = self.execute_actions(actions);
-            self.autosave_if_dirty();
             return result;
         }
 
@@ -171,27 +175,27 @@ impl BloomEditor {
             }
 
             let actions = self.translate_vim_action(action, mode_before_key);
-            let result = self.execute_actions(actions);
-            self.autosave_if_dirty();
-            result
+            self.execute_actions(actions)
         }
     }
 
-    /// Save if the active buffer is dirty.
-    /// Skipped during Insert mode (mid-edit, partial state) and for read-only buffers.
-    /// Also skipped when an autosave deadline is pending (undo/redo debounce).
-    /// Autosave fires naturally when Insert→Normal transition completes
-    /// (after edit group close, block IDs, and alignment).
-    fn autosave_if_dirty(&mut self) {
+    /// Schedule an autosave after any key that mutated the buffer.
+    /// Called once at the end of every `handle_key` path that might edit.
+    /// Skips Insert mode (partial state) and read-only buffers.
+    /// Each call resets the debounce timer, coalescing rapid edits/undo/redo.
+    fn schedule_autosave(&mut self) {
         if matches!(self.vim_state.mode(), bloom_vim::Mode::Insert) {
-            return; // Don't save mid-edit
-        }
-        if self.autosave_deadline.is_some() {
-            return; // Undo/redo debounce active — wait for deadline
+            return;
         }
         if let Some(page_id) = self.active_page().cloned() {
-            if !self.writer.buffers().is_read_only(&page_id) {
-                self.save_page(&page_id);
+            let is_dirty = self
+                .writer
+                .buffers()
+                .get(&page_id)
+                .is_some_and(|b| b.is_dirty());
+            if is_dirty && !self.writer.buffers().is_read_only(&page_id) {
+                self.autosave_deadline =
+                    Some(Instant::now() + std::time::Duration::from_millis(300));
             }
         }
     }
@@ -310,10 +314,6 @@ impl BloomEditor {
                                 self.set_cursor(len.saturating_sub(1));
                             }
                         }
-                        // Debounce autosave: set deadline instead of saving immediately
-                        self.autosave_deadline = Some(
-                            Instant::now() + std::time::Duration::from_millis(300),
-                        );
                     }
                 }
                 keymap::dispatch::Action::Redo => {
@@ -328,10 +328,6 @@ impl BloomEditor {
                                 self.set_cursor(len.saturating_sub(1));
                             }
                         }
-                        // Debounce autosave: set deadline instead of saving immediately
-                        self.autosave_deadline = Some(
-                            Instant::now() + std::time::Duration::from_millis(300),
-                        );
                     }
                 }
                 keymap::dispatch::Action::FollowLink => {
