@@ -153,6 +153,7 @@ crates/
 | Document | Description |
 |----------|-------------|
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Threading model, data flow, data safety |
+| [AGENT_WORKFLOW.md](docs/AGENT_WORKFLOW.md) | Solo-developer Copilot CLI workflow, role ownership, and approval gates |
 | [KEYBINDINGS.md](docs/KEYBINDINGS.md) | Full keybinding reference |
 | [THEMING.md](docs/THEMING.md) | Colour philosophy and palette structure |
 | [FILE_FORMAT.md](docs/FILE_FORMAT.md) | Bloom Markdown extensions |
