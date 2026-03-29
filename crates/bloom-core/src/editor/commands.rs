@@ -662,7 +662,8 @@ impl BloomEditor {
         );
         let new_id = bloom_buffer::block_id::next_block_id(&existing);
         if let Some(mut doc) = self.writer.buffers_mut().document_mut(&page_id) {
-            let _ = doc.set_block_id_at_line(cursor_line, crate::types::BlockId(new_id.clone()), false);
+            let _ =
+                doc.set_block_id_at_line(cursor_line, crate::types::BlockId(new_id.clone()), false);
         }
 
         self.save_page(&page_id);

@@ -913,6 +913,31 @@ fn vim_dG_deletes_through_last_line() {
 }
 
 #[test]
+#[allow(non_snake_case)]
+fn vim_dG_undo_restores_firing_cursor() {
+    let mut sim = SimInput::with_content("line 1\nline 2\nline 3\nline 4\nline 5\n");
+
+    sim.keys("jjj");
+    let (line_before, col_before) = sim.screen(80, 24).cursor();
+    assert_eq!(line_before, 3, "cursor should be on line 4 before dG");
+
+    sim.keys("dG");
+    sim.keys("u");
+
+    assert_eq!(
+        sim.buffer_text(),
+        "line 1\nline 2\nline 3\nline 4\nline 5\n",
+        "undo should restore deleted text"
+    );
+    let (line_after, col_after) = sim.screen(80, 24).cursor();
+    assert_eq!(line_after, 3, "undo should restore the line where dG fired");
+    assert_eq!(
+        col_after, col_before,
+        "undo should restore the firing column"
+    );
+}
+
+#[test]
 fn vim_w_b_word_motions() {
     let mut sim = SimInput::with_content("one two three four\n");
 

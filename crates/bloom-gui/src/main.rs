@@ -445,8 +445,7 @@ impl BloomApp {
         // Ensure all current panes have caches; prune stale entries.
         if let Some(ref frame) = self.frame {
             let current_ids: Vec<PaneId> = frame.panes.iter().map(|p| p.id).collect();
-            self.pane_caches
-                .retain(|id, _| current_ids.contains(id));
+            self.pane_caches.retain(|id, _| current_ids.contains(id));
             for id in current_ids {
                 self.pane_caches.entry(id).or_insert_with(Cache::default);
             }

@@ -319,10 +319,7 @@ impl SimInput {
                 progressed = true;
             }
 
-            if !progressed
-                && !self.editor.is_indexing()
-                && !self.editor.has_pending_autosave()
-            {
+            if !progressed && !self.editor.is_indexing() && !self.editor.has_pending_autosave() {
                 break;
             }
 

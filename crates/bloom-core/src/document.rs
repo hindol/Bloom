@@ -181,7 +181,11 @@ impl<'a> DocumentMut<'a> {
             if request.replacement.is_empty() && !request.range.is_empty() {
                 buf.delete_with_undo_cursor(request.range.clone(), undo_cursor_idx);
             } else if request.range.is_empty() {
-                buf.insert_with_undo_cursor(request.range.start, request.replacement, undo_cursor_idx);
+                buf.insert_with_undo_cursor(
+                    request.range.start,
+                    request.replacement,
+                    undo_cursor_idx,
+                );
             } else {
                 buf.replace_with_undo_cursor(
                     request.range.clone(),
@@ -285,10 +289,7 @@ impl<'a> DocumentMut<'a> {
     }
 
     pub(crate) fn end_edit_group(&mut self, cursor_idx: usize) -> bool {
-        let Some(before_node) = self
-            .mutable_buffer()
-            .map(|buf| buf.current_undo_node())
-        else {
+        let Some(before_node) = self.mutable_buffer().map(|buf| buf.current_undo_node()) else {
             return false;
         };
 
@@ -377,15 +378,14 @@ impl<'a> DocumentMut<'a> {
         let (clean_text, mut state) = DocumentState::from_markdown_disk_text(content);
         replace_slot_with_text(&mut self.managed.slot, &clean_text);
         let current_node = self.managed.slot.as_buffer().current_undo_node();
-        state.block_id_history.insert(current_node, state.block_ids.clone());
+        state
+            .block_id_history
+            .insert(current_node, state.block_ids.clone());
         self.managed.document = state;
     }
 
     pub(crate) fn align_page(&mut self) -> bool {
-        let Some(before_node) = self
-            .mutable_buffer()
-            .map(|buf| buf.current_undo_node())
-        else {
+        let Some(before_node) = self.mutable_buffer().map(|buf| buf.current_undo_node()) else {
             return false;
         };
 
@@ -407,10 +407,7 @@ impl<'a> DocumentMut<'a> {
     }
 
     pub(crate) fn align_block(&mut self, cursor_line: usize) -> bool {
-        let Some(before_node) = self
-            .mutable_buffer()
-            .map(|buf| buf.current_undo_node())
-        else {
+        let Some(before_node) = self.mutable_buffer().map(|buf| buf.current_undo_node()) else {
             return false;
         };
 
@@ -513,7 +510,9 @@ impl<'a> DocumentMut<'a> {
         replace_slot_with_text(&mut self.managed.slot, content);
         let mut state = DocumentState::from_clean_text(content);
         let current_node = self.managed.slot.as_buffer().current_undo_node();
-        state.block_id_history.insert(current_node, state.block_ids.clone());
+        state
+            .block_id_history
+            .insert(current_node, state.block_ids.clone());
         self.managed.document = state;
     }
 
@@ -526,12 +525,8 @@ impl<'a> DocumentMut<'a> {
         let clean_text = self.managed.slot.text_string();
         let parsed = markdown_parser().parse(&clean_text);
         self.managed.document.parse_tree = ParseTree::build(&clean_text);
-        self.managed.document.block_ids = place_entries_in_blocks(
-            shifted,
-            &parsed.blocks,
-            assign_missing,
-            known_ids,
-        );
+        self.managed.document.block_ids =
+            place_entries_in_blocks(shifted, &parsed.blocks, assign_missing, known_ids);
         self.managed.document.sort_block_ids();
     }
 
@@ -545,7 +540,13 @@ impl<'a> DocumentMut<'a> {
 
     fn restore_history_snapshot_for_current_node(&mut self) {
         let node_id = self.managed.slot.as_buffer().current_undo_node();
-        if let Some(entries) = self.managed.document.block_id_history.get(&node_id).cloned() {
+        if let Some(entries) = self
+            .managed
+            .document
+            .block_id_history
+            .get(&node_id)
+            .cloned()
+        {
             self.managed.document.block_ids = entries;
             self.managed.document.parse_tree = ParseTree::build(&self.managed.slot.text_string());
         } else {
@@ -566,12 +567,9 @@ pub(crate) fn deserialize_canonical_markdown(text: &str) -> (String, Vec<BlockId
     let mut claimed_blocks = HashSet::new();
 
     for parsed_id in &parsed.block_ids {
-        if let Some((block_idx, block)) = parsed
-            .blocks
-            .iter()
-            .enumerate()
-            .find(|(_, block)| parsed_id.line >= block.first_line && parsed_id.line <= block.last_line)
-        {
+        if let Some((block_idx, block)) = parsed.blocks.iter().enumerate().find(|(_, block)| {
+            parsed_id.line >= block.first_line && parsed_id.line <= block.last_line
+        }) {
             if claimed_blocks.insert(block_idx) {
                 entries.push(BlockIdEntry {
                     id: parsed_id.id.clone(),
@@ -668,8 +666,12 @@ fn transform_entries(
 ) -> Vec<BlockIdEntry> {
     let edit_start_line = char_pos_to_line(buf, edit_range.start);
     let edit_end_line = if edit_range.end > edit_range.start && buf.len_chars() > 0 {
-        buf.text()
-            .char_to_line(edit_range.end.saturating_sub(1).min(buf.len_chars().saturating_sub(1)))
+        buf.text().char_to_line(
+            edit_range
+                .end
+                .saturating_sub(1)
+                .min(buf.len_chars().saturating_sub(1)),
+        )
     } else {
         edit_start_line
     };
@@ -735,11 +737,9 @@ fn place_entries_in_blocks(
     let mut claimed_blocks = HashSet::new();
 
     for entry in shifted {
-        if let Some((block_idx, block)) = blocks
-            .iter()
-            .enumerate()
-            .find(|(_, block)| entry.first_line >= block.first_line && entry.first_line <= block.last_line)
-        {
+        if let Some((block_idx, block)) = blocks.iter().enumerate().find(|(_, block)| {
+            entry.first_line >= block.first_line && entry.first_line <= block.last_line
+        }) {
             if claimed_blocks.insert(block_idx) {
                 result.push(BlockIdEntry {
                     id: entry.id,
@@ -752,7 +752,8 @@ fn place_entries_in_blocks(
     }
 
     if assign_missing {
-        let mut existing_ids: HashSet<String> = result.iter().map(|entry| entry.id.0.clone()).collect();
+        let mut existing_ids: HashSet<String> =
+            result.iter().map(|entry| entry.id.0.clone()).collect();
         if let Some(known_ids) = known_ids {
             existing_ids.extend(known_ids.iter().cloned());
         }

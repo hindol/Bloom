@@ -92,6 +92,10 @@ pub(crate) fn create_tables(conn: &Connection) -> Result<(), BloomError> {
             delta_offset  INTEGER,
             delta_del_len INTEGER,
             delta_insert  TEXT,
+            before_cursor_pos INTEGER,
+            before_cursor_anchor INTEGER,
+            after_cursor_pos INTEGER,
+            after_cursor_anchor INTEGER,
             timestamp_ms  INTEGER NOT NULL,
             description   TEXT NOT NULL DEFAULT '',
             PRIMARY KEY (page_id, node_id)
@@ -113,6 +117,10 @@ pub(crate) fn create_tables(conn: &Connection) -> Result<(), BloomError> {
     let _ = conn.execute_batch("ALTER TABLE undo_tree ADD COLUMN delta_offset INTEGER");
     let _ = conn.execute_batch("ALTER TABLE undo_tree ADD COLUMN delta_del_len INTEGER");
     let _ = conn.execute_batch("ALTER TABLE undo_tree ADD COLUMN delta_insert TEXT");
+    let _ = conn.execute_batch("ALTER TABLE undo_tree ADD COLUMN before_cursor_pos INTEGER");
+    let _ = conn.execute_batch("ALTER TABLE undo_tree ADD COLUMN before_cursor_anchor INTEGER");
+    let _ = conn.execute_batch("ALTER TABLE undo_tree ADD COLUMN after_cursor_pos INTEGER");
+    let _ = conn.execute_batch("ALTER TABLE undo_tree ADD COLUMN after_cursor_anchor INTEGER");
 
     Ok(())
 }

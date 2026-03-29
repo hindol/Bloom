@@ -1812,11 +1812,10 @@ impl BloomEditor {
                     );
                 }
                 toggled_new_text = Some(new_trimmed.to_string());
-                block_id_on_line = self
-                    .writer
-                    .buffers()
-                    .document(&pid)
-                    .and_then(|doc| doc.block_id_at_line(*line).map(|entry| entry.id.0.clone()));
+                block_id_on_line =
+                    self.writer.buffers().document(&pid).and_then(|doc| {
+                        doc.block_id_at_line(*line).map(|entry| entry.id.0.clone())
+                    });
             }
         }
 

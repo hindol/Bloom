@@ -380,8 +380,12 @@ impl BloomEditor {
                             .info(page_id)
                             .map(|i| i.path.extension().and_then(|e| e.to_str()) == Some("md"))
                             .unwrap_or(true);
-                        let lines =
-                            self.render_buffer_lines_with_viewport(buf, &ps.viewport, is_md, page_id);
+                        let lines = self.render_buffer_lines_with_viewport(
+                            buf,
+                            &ps.viewport,
+                            is_md,
+                            page_id,
+                        );
                         let (cl, cc) = Self::cursor_position_for(
                             buf.cursor(ps.cursor_idx),
                             buf,

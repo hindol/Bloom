@@ -152,7 +152,10 @@ impl BufferManager {
             let (buffer_text, mut document) = if is_markdown {
                 document::DocumentState::from_markdown_disk_text(content)
             } else {
-                (content.to_string(), document::DocumentState::from_clean_text(content))
+                (
+                    content.to_string(),
+                    document::DocumentState::from_clean_text(content),
+                )
             };
             let buf = bloom_buffer::Buffer::from_text(&buffer_text);
             let root = buf.current_undo_node();
@@ -276,7 +279,10 @@ impl BufferManager {
             let (buffer_text, mut document) = if is_markdown {
                 document::DocumentState::from_markdown_disk_text(content)
             } else {
-                (content.to_string(), document::DocumentState::from_clean_text(content))
+                (
+                    content.to_string(),
+                    document::DocumentState::from_clean_text(content),
+                )
             };
             match &mut mb.slot {
                 BufferSlot::Mutable(buf) => {
@@ -1473,8 +1479,9 @@ impl BloomEditor {
                         );
                     }
                 } else {
-                    ts.items[idx].content =
-                        Some(crate::document::clean_text_from_canonical_markdown(&content));
+                    ts.items[idx].content = Some(
+                        crate::document::clean_text_from_canonical_markdown(&content),
+                    );
                 }
 
                 // For block history: mark the RIGHT neighbor as skip if its

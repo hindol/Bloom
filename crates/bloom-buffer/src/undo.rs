@@ -1,4 +1,4 @@
-use crate::{EditDelta, UndoNodeData, UndoNodeId, UndoPersistData};
+use crate::{Cursor, EditDelta, UndoNodeData, UndoNodeId, UndoPersistData};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 const KEYFRAME_INTERVAL: usize = 50;
@@ -8,7 +8,8 @@ struct UndoNode {
     parent: Option<UndoNodeId>,
     children: Vec<UndoNodeId>,
     snapshot: ropey::Rope,
-    cursor_pos: usize,
+    before_cursor: Cursor,
+    after_cursor: Cursor,
     timestamp: Instant,
     /// Epoch milliseconds — for persistence (Instant can't be serialized).
     epoch_ms: i64,
@@ -31,12 +32,14 @@ pub struct UndoNodeInfo {
 impl UndoTree {
     /// Create a new undo tree with the given initial rope snapshot.
     pub fn new(initial_snapshot: ropey::Rope) -> Self {
+        let initial_cursor = Cursor::new(0);
         let root = UndoNode {
             id: 0,
             parent: None,
             children: Vec::new(),
             snapshot: initial_snapshot,
-            cursor_pos: 0,
+            before_cursor: initial_cursor,
+            after_cursor: initial_cursor,
             timestamp: Instant::now(),
             epoch_ms: now_epoch_ms(),
             description: String::from("initial"),
@@ -50,12 +53,6 @@ impl UndoTree {
 
     pub fn current(&self) -> UndoNodeId {
         self.current
-    }
-
-    /// Update the cursor position on the current node.
-    /// Called at begin_edit_group so that undoing TO this node restores the cursor.
-    pub fn update_current_cursor(&mut self, cursor_pos: usize) {
-        self.nodes[self.current as usize].cursor_pos = cursor_pos;
     }
 
     /// Get the content of the current node as a string (for comparison).
@@ -118,14 +115,16 @@ impl UndoTree {
         cursor_pos: usize,
         description: String,
     ) -> UndoNodeId {
-        self.push_with_delta(snapshot, cursor_pos, description, None)
+        let cursor = Cursor::new(cursor_pos);
+        self.push_with_delta(snapshot, cursor, cursor, description, None)
     }
 
     /// Push a new snapshot with an optional edit delta.
     pub fn push_with_delta(
         &mut self,
         snapshot: ropey::Rope,
-        cursor_pos: usize,
+        before_cursor: Cursor,
+        after_cursor: Cursor,
         description: String,
         edit_delta: Option<EditDelta>,
     ) -> UndoNodeId {
@@ -135,7 +134,8 @@ impl UndoTree {
             parent: Some(self.current),
             children: Vec::new(),
             snapshot,
-            cursor_pos,
+            before_cursor,
+            after_cursor,
             timestamp: Instant::now(),
             epoch_ms: now_epoch_ms(),
             description,
@@ -147,29 +147,31 @@ impl UndoTree {
         new_id
     }
 
-    /// Move to parent node. Returns `(rope, cursor_pos)` of the parent.
-    pub fn undo(&mut self) -> Option<(ropey::Rope, usize)> {
-        let parent = self.nodes[self.current as usize].parent?;
+    /// Move to parent node. Returns `(rope, cursor)` using the undone edge's `before` snapshot.
+    pub fn undo(&mut self) -> Option<(ropey::Rope, Cursor)> {
+        let child = &self.nodes[self.current as usize];
+        let parent = child.parent?;
+        let restore_cursor = child.before_cursor;
         self.current = parent;
         let node = &self.nodes[parent as usize];
-        Some((node.snapshot.clone(), node.cursor_pos))
+        Some((node.snapshot.clone(), restore_cursor))
     }
 
-    /// Move to the most recent child. Returns `(rope, cursor_pos)` of the child.
-    pub fn redo(&mut self) -> Option<(ropey::Rope, usize)> {
+    /// Move to the most recent child. Returns `(rope, cursor)` using the redone edge's `after` snapshot.
+    pub fn redo(&mut self) -> Option<(ropey::Rope, Cursor)> {
         let children = &self.nodes[self.current as usize].children;
         let &last_child = children.last()?;
         self.current = last_child;
         let node = &self.nodes[last_child as usize];
-        Some((node.snapshot.clone(), node.cursor_pos))
+        Some((node.snapshot.clone(), node.after_cursor))
     }
 
-    /// Restore to an arbitrary node. Returns `(rope, cursor_pos)`.
-    pub fn restore(&mut self, node_id: UndoNodeId) -> (ropey::Rope, usize) {
+    /// Restore to an arbitrary node. Returns `(rope, cursor)` using the node's canonical landing.
+    pub fn restore(&mut self, node_id: UndoNodeId) -> (ropey::Rope, Cursor) {
         assert!((node_id as usize) < self.nodes.len(), "invalid UndoNodeId");
         self.current = node_id;
         let node = &self.nodes[node_id as usize];
-        (node.snapshot.clone(), node.cursor_pos)
+        (node.snapshot.clone(), node.after_cursor)
     }
 
     /// Number of nodes in the tree.
@@ -195,6 +197,10 @@ impl UndoTree {
                         delta_offset: None,
                         delta_del_len: None,
                         delta_insert: None,
+                        before_cursor_pos: Some(n.before_cursor.position as i64),
+                        before_cursor_anchor: n.before_cursor.anchor.map(|a| a as i64),
+                        after_cursor_pos: Some(n.after_cursor.position as i64),
+                        after_cursor_anchor: n.after_cursor.anchor.map(|a| a as i64),
                         timestamp_ms: n.epoch_ms,
                         description: n.description.clone(),
                     }
@@ -206,6 +212,10 @@ impl UndoTree {
                         delta_offset: Some(delta.offset as i64),
                         delta_del_len: Some(delta.delete_len as i64),
                         delta_insert: Some(delta.insert_text.clone()),
+                        before_cursor_pos: Some(n.before_cursor.position as i64),
+                        before_cursor_anchor: n.before_cursor.anchor.map(|a| a as i64),
+                        after_cursor_pos: Some(n.after_cursor.position as i64),
+                        after_cursor_anchor: n.after_cursor.anchor.map(|a| a as i64),
                         timestamp_ms: n.epoch_ms,
                         description: n.description.clone(),
                     }
@@ -218,6 +228,10 @@ impl UndoTree {
                         delta_offset: None,
                         delta_del_len: None,
                         delta_insert: None,
+                        before_cursor_pos: Some(n.before_cursor.position as i64),
+                        before_cursor_anchor: n.before_cursor.anchor.map(|a| a as i64),
+                        after_cursor_pos: Some(n.after_cursor.position as i64),
+                        after_cursor_anchor: n.after_cursor.anchor.map(|a| a as i64),
                         timestamp_ms: n.epoch_ms,
                         description: n.description.clone(),
                     }
@@ -240,8 +254,8 @@ impl UndoTree {
         conn.execute("DELETE FROM undo_tree WHERE page_id = ?1", [page_id])?;
 
         let mut stmt = conn.prepare(
-            "INSERT INTO undo_tree (page_id, node_id, parent_id, content, delta_offset, delta_del_len, delta_insert, timestamp_ms, description)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO undo_tree (page_id, node_id, parent_id, content, delta_offset, delta_del_len, delta_insert, before_cursor_pos, before_cursor_anchor, after_cursor_pos, after_cursor_anchor, timestamp_ms, description)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         )?;
 
         for node in &self.nodes {
@@ -258,6 +272,10 @@ impl UndoTree {
                     Option::<i64>::None,
                     Option::<i64>::None,
                     Option::<String>::None,
+                    node.before_cursor.position as i64,
+                    node.before_cursor.anchor.map(|a| a as i64),
+                    node.after_cursor.position as i64,
+                    node.after_cursor.anchor.map(|a| a as i64),
                     node.epoch_ms,
                     node.description,
                 ])?;
@@ -270,6 +288,10 @@ impl UndoTree {
                     delta.offset as i64,
                     delta.delete_len as i64,
                     delta.insert_text,
+                    node.before_cursor.position as i64,
+                    node.before_cursor.anchor.map(|a| a as i64),
+                    node.after_cursor.position as i64,
+                    node.after_cursor.anchor.map(|a| a as i64),
                     node.epoch_ms,
                     node.description,
                 ])?;
@@ -283,6 +305,10 @@ impl UndoTree {
                     Option::<i64>::None,
                     Option::<i64>::None,
                     Option::<String>::None,
+                    node.before_cursor.position as i64,
+                    node.before_cursor.anchor.map(|a| a as i64),
+                    node.after_cursor.position as i64,
+                    node.after_cursor.anchor.map(|a| a as i64),
                     node.epoch_ms,
                     node.description,
                 ])?;
@@ -318,7 +344,7 @@ impl UndoTree {
         };
 
         let mut stmt = conn.prepare(
-            "SELECT node_id, parent_id, content, delta_offset, delta_del_len, delta_insert, timestamp_ms, description
+            "SELECT node_id, parent_id, content, delta_offset, delta_del_len, delta_insert, before_cursor_pos, before_cursor_anchor, after_cursor_pos, after_cursor_anchor, timestamp_ms, description
              FROM undo_tree WHERE page_id = ?1 ORDER BY node_id ASC",
         )?;
 
@@ -329,6 +355,10 @@ impl UndoTree {
             delta_offset: Option<i64>,
             delta_del_len: Option<i64>,
             delta_insert: Option<String>,
+            before_cursor_pos: Option<i64>,
+            before_cursor_anchor: Option<i64>,
+            after_cursor_pos: Option<i64>,
+            after_cursor_anchor: Option<i64>,
             timestamp_ms: i64,
             description: String,
         }
@@ -342,8 +372,12 @@ impl UndoTree {
                     delta_offset: row.get(3)?,
                     delta_del_len: row.get(4)?,
                     delta_insert: row.get(5)?,
-                    timestamp_ms: row.get(6)?,
-                    description: row.get(7)?,
+                    before_cursor_pos: row.get(6)?,
+                    before_cursor_anchor: row.get(7)?,
+                    after_cursor_pos: row.get(8)?,
+                    after_cursor_anchor: row.get(9)?,
+                    timestamp_ms: row.get(10)?,
+                    description: row.get(11)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -358,6 +392,19 @@ impl UndoTree {
         let mut deltas: Vec<Option<EditDelta>> = Vec::with_capacity(rows.len());
 
         for r in &rows {
+            let before_cursor = Cursor {
+                position: r.before_cursor_pos.unwrap_or(0) as usize,
+                anchor: r.before_cursor_anchor.map(|a| a as usize),
+            };
+            let after_cursor_missing = r.after_cursor_pos.is_none();
+            let after_cursor = Cursor {
+                position: r.after_cursor_pos.unwrap_or(before_cursor.position as i64) as usize,
+                anchor: if after_cursor_missing {
+                    before_cursor.anchor
+                } else {
+                    r.after_cursor_anchor.map(|a| a as usize)
+                },
+            };
             let (snapshot, delta) = if let Some(ref content) = r.content {
                 (ropey::Rope::from_str(content), None)
             } else if let (Some(off), Some(del), Some(ref ins)) =
@@ -387,7 +434,8 @@ impl UndoTree {
                 parent: r.parent_id.map(|p| p as UndoNodeId),
                 children: Vec::new(),
                 snapshot,
-                cursor_pos: 0,
+                before_cursor,
+                after_cursor,
                 timestamp: Instant::now(),
                 epoch_ms: r.timestamp_ms,
                 description: r.description.clone(),
@@ -423,9 +471,7 @@ impl UndoTree {
                         if del_end <= child_rope.len_chars() {
                             child_rope.remove(delta.offset..del_end);
                         }
-                        if !delta.insert_text.is_empty()
-                            && delta.offset <= child_rope.len_chars()
-                        {
+                        if !delta.insert_text.is_empty() && delta.offset <= child_rope.len_chars() {
                             child_rope.insert(delta.offset, &delta.insert_text);
                         }
                         nodes[ci].snapshot = child_rope;
@@ -454,7 +500,11 @@ fn now_epoch_ms() -> i64 {
 pub fn compute_diff(old: &ropey::Rope, new: &ropey::Rope) -> EditDelta {
     let old_len = old.len_chars();
     let new_len = new.len_chars();
-    let prefix = old.chars().zip(new.chars()).take_while(|(a, b)| a == b).count();
+    let prefix = old
+        .chars()
+        .zip(new.chars())
+        .take_while(|(a, b)| a == b)
+        .count();
     let max_suffix = old_len.min(new_len) - prefix;
     let suffix = (0..max_suffix)
         .take_while(|&i| old.char(old_len - 1 - i) == new.char(new_len - 1 - i))
@@ -477,6 +527,10 @@ pub fn create_undo_tables(conn: &rusqlite::Connection) -> Result<(), rusqlite::E
             delta_offset   INTEGER,
             delta_del_len  INTEGER,
             delta_insert   TEXT,
+            before_cursor_pos INTEGER,
+            before_cursor_anchor INTEGER,
+            after_cursor_pos INTEGER,
+            after_cursor_anchor INTEGER,
             timestamp_ms   INTEGER NOT NULL,
             description    TEXT NOT NULL DEFAULT '',
             PRIMARY KEY (page_id, node_id)
@@ -486,6 +540,10 @@ pub fn create_undo_tables(conn: &rusqlite::Connection) -> Result<(), rusqlite::E
             current_node_id INTEGER NOT NULL
         );",
     )?;
+    let _ = conn.execute_batch("ALTER TABLE undo_tree ADD COLUMN before_cursor_pos INTEGER");
+    let _ = conn.execute_batch("ALTER TABLE undo_tree ADD COLUMN before_cursor_anchor INTEGER");
+    let _ = conn.execute_batch("ALTER TABLE undo_tree ADD COLUMN after_cursor_pos INTEGER");
+    let _ = conn.execute_batch("ALTER TABLE undo_tree ADD COLUMN after_cursor_anchor INTEGER");
     Ok(())
 }
 
@@ -540,14 +598,21 @@ mod tests {
         let conn = setup_db();
         let initial = ropey::Rope::from_str("hello world");
         let mut tree = UndoTree::new(initial.clone());
+        let cursor = Cursor::new(0);
 
         let after1 = ropey::Rope::from_str("hello brave world");
         let delta1 = compute_diff(&initial, &after1);
-        tree.push_with_delta(after1.clone(), 0, "insert brave".into(), Some(delta1));
+        tree.push_with_delta(
+            after1.clone(),
+            cursor,
+            cursor,
+            "insert brave".into(),
+            Some(delta1),
+        );
 
         let after2 = ropey::Rope::from_str("hello brave new world");
         let delta2 = compute_diff(&after1, &after2);
-        tree.push_with_delta(after2, 0, "insert new".into(), Some(delta2));
+        tree.push_with_delta(after2, cursor, cursor, "insert new".into(), Some(delta2));
 
         tree.save_to_db(&conn, "page1").unwrap();
         let restored = UndoTree::load_from_db(&conn, "page1").unwrap().unwrap();
@@ -575,11 +640,18 @@ mod tests {
 
         // Push 60 nodes (ids 1..=60)
         let mut prev = ropey::Rope::from_str("root");
+        let cursor = Cursor::new(0);
         for i in 1..=60 {
             let text = format!("edit {i}");
             let next = ropey::Rope::from_str(&text);
             let delta = compute_diff(&prev, &next);
-            tree.push_with_delta(next.clone(), 0, format!("edit {i}"), Some(delta));
+            tree.push_with_delta(
+                next.clone(),
+                cursor,
+                cursor,
+                format!("edit {i}"),
+                Some(delta),
+            );
             prev = next;
         }
 
@@ -635,16 +707,17 @@ mod tests {
         let conn = setup_db();
         let initial = ropey::Rope::from_str("root");
         let mut tree = UndoTree::new(initial.clone());
+        let cursor = Cursor::new(0);
 
         let branch_a = ropey::Rope::from_str("root-A");
         let delta_a = compute_diff(&initial, &branch_a);
-        tree.push_with_delta(branch_a, 0, "branch A".into(), Some(delta_a));
+        tree.push_with_delta(branch_a, cursor, cursor, "branch A".into(), Some(delta_a));
 
         tree.undo(); // back to root
 
         let branch_b = ropey::Rope::from_str("root-B");
         let delta_b = compute_diff(&initial, &branch_b);
-        tree.push_with_delta(branch_b, 0, "branch B".into(), Some(delta_b));
+        tree.push_with_delta(branch_b, cursor, cursor, "branch B".into(), Some(delta_b));
 
         tree.save_to_db(&conn, "page1").unwrap();
         let restored = UndoTree::load_from_db(&conn, "page1").unwrap().unwrap();
@@ -717,13 +790,20 @@ mod tests {
     fn test_deep_chain_with_keyframes() {
         let conn = setup_db();
         let mut tree = UndoTree::new(ropey::Rope::from_str("node0"));
+        let cursor = Cursor::new(0);
 
         let mut prev = ropey::Rope::from_str("node0");
         for i in 1..=120 {
             let text = format!("node{i}");
             let next = ropey::Rope::from_str(&text);
             let delta = compute_diff(&prev, &next);
-            tree.push_with_delta(next.clone(), 0, format!("edit {i}"), Some(delta));
+            tree.push_with_delta(
+                next.clone(),
+                cursor,
+                cursor,
+                format!("edit {i}"),
+                Some(delta),
+            );
             prev = next;
         }
 
@@ -751,7 +831,10 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert!(content_25.is_none(), "non-keyframe node 25 should not have content");
+        assert!(
+            content_25.is_none(),
+            "non-keyframe node 25 should not have content"
+        );
 
         // Round-trip verify all 121 nodes
         let restored = UndoTree::load_from_db(&conn, "page1").unwrap().unwrap();
@@ -760,5 +843,62 @@ mod tests {
         assert_eq!(restored.node_snapshot_string(50), "node50");
         assert_eq!(restored.node_snapshot_string(100), "node100");
         assert_eq!(restored.node_snapshot_string(120), "node120");
+    }
+
+    #[test]
+    fn undo_uses_child_before_cursor_and_redo_uses_child_after_cursor() {
+        let mut tree = UndoTree::new(ropey::Rope::from_str("root"));
+        tree.push_with_delta(
+            ropey::Rope::from_str("after"),
+            Cursor {
+                position: 4,
+                anchor: Some(2),
+            },
+            Cursor {
+                position: 1,
+                anchor: None,
+            },
+            "edit".into(),
+            None,
+        );
+
+        let (undo_snapshot, undo_cursor) = tree.undo().unwrap();
+        assert_eq!(undo_snapshot.to_string(), "root");
+        assert_eq!(undo_cursor.position, 4);
+        assert_eq!(undo_cursor.anchor, Some(2));
+
+        let (redo_snapshot, redo_cursor) = tree.redo().unwrap();
+        assert_eq!(redo_snapshot.to_string(), "after");
+        assert_eq!(redo_cursor.position, 1);
+        assert_eq!(redo_cursor.anchor, None);
+    }
+
+    #[test]
+    fn round_trip_preserves_cursor_snapshots() {
+        let conn = setup_db();
+        let mut tree = UndoTree::new(ropey::Rope::from_str("root"));
+        tree.push_with_delta(
+            ropey::Rope::from_str("after"),
+            Cursor {
+                position: 3,
+                anchor: Some(1),
+            },
+            Cursor {
+                position: 5,
+                anchor: None,
+            },
+            "edit".into(),
+            None,
+        );
+        tree.save_to_db(&conn, "page1").unwrap();
+
+        let mut restored = UndoTree::load_from_db(&conn, "page1").unwrap().unwrap();
+        let (_, undo_cursor) = restored.undo().unwrap();
+        assert_eq!(undo_cursor.position, 3);
+        assert_eq!(undo_cursor.anchor, Some(1));
+
+        let (_, redo_cursor) = restored.redo().unwrap();
+        assert_eq!(redo_cursor.position, 5);
+        assert_eq!(redo_cursor.anchor, None);
     }
 }

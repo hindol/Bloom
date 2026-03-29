@@ -101,6 +101,9 @@ impl Cursor {
     }
 }
 
+/// Cursor state captured for undo/redo transition replay.
+pub type CursorSnapshot = Cursor;
+
 /// An edit delta: the minimal edit that transforms a parent node's text into this node's text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditDelta {
@@ -121,6 +124,10 @@ pub struct UndoNodeData {
     pub delta_offset: Option<i64>,
     pub delta_del_len: Option<i64>,
     pub delta_insert: Option<String>,
+    pub before_cursor_pos: Option<i64>,
+    pub before_cursor_anchor: Option<i64>,
+    pub after_cursor_pos: Option<i64>,
+    pub after_cursor_anchor: Option<i64>,
     pub timestamp_ms: i64,
     pub description: String,
 }

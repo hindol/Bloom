@@ -305,7 +305,14 @@ impl<'a> canvas::Program<Message> for CursorCanvas<'a> {
             } else {
                 None
             };
-            pane::draw_pane_cursor(frame, pf, self.theme, anim, self.cursor_visible, content_area);
+            pane::draw_pane_cursor(
+                frame,
+                pf,
+                self.theme,
+                anim,
+                self.cursor_visible,
+                content_area,
+            );
         });
         vec![geometry]
     }

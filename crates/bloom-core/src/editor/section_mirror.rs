@@ -289,7 +289,9 @@ impl BloomEditor {
                     };
                     let prev_line = doc.block_id(prev_bid).map(|entry| entry.last_line);
                     match prev_line {
-                        Some(pl) if pl + 1 < buf.len_lines() => (buf.text().line_to_char(pl + 1), pl + 1),
+                        Some(pl) if pl + 1 < buf.len_lines() => {
+                            (buf.text().line_to_char(pl + 1), pl + 1)
+                        }
                         Some(pl) => (buf.len_chars(), pl + 1),
                         _ => (buf.len_chars(), buf.len_lines().saturating_sub(1)),
                     }
@@ -300,7 +302,9 @@ impl BloomEditor {
                     };
                     let heading_line = doc.block_id(heading_bid).map(|entry| entry.last_line);
                     match heading_line {
-                        Some(hl) if hl + 1 < buf.len_lines() => (buf.text().line_to_char(hl + 1), hl + 1),
+                        Some(hl) if hl + 1 < buf.len_lines() => {
+                            (buf.text().line_to_char(hl + 1), hl + 1)
+                        }
                         Some(hl) => (buf.len_chars(), hl + 1),
                         _ => (buf.len_chars(), buf.len_lines().saturating_sub(1)),
                     }

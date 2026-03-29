@@ -99,7 +99,11 @@ impl BloomEditor {
             match doc.block_id_at_line(cursor_line) {
                 Some(entry) => (
                     entry.id.0.clone(),
-                    canonical_block_line(line_text.trim_end_matches('\n'), &entry.id.0, entry.is_mirror),
+                    canonical_block_line(
+                        line_text.trim_end_matches('\n'),
+                        &entry.id.0,
+                        entry.is_mirror,
+                    ),
                 ),
                 None => {
                     self.push_notification(

@@ -164,9 +164,7 @@ impl ParseTree {
         // Merge with existing dirty range
         let new_dirty = start..new_end.max(start + 1);
         self.dirty = Some(match self.dirty.take() {
-            Some(existing) => {
-                existing.start.min(new_dirty.start)..existing.end.max(new_dirty.end)
-            }
+            Some(existing) => existing.start.min(new_dirty.start)..existing.end.max(new_dirty.end),
             None => new_dirty,
         });
     }
@@ -367,7 +365,6 @@ impl ParseTree {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -421,11 +418,7 @@ mod tests {
         let text = "Normal #tag1\n\n```\n#tag2 inside code\n```\n\nNormal #tag3\n";
         let tree = ParseTree::build(text);
         // tag1 and tag3 should be found, tag2 inside code block should not
-        let all_tags: Vec<_> = tree
-            .lines
-            .iter()
-            .flat_map(|ld| &ld.elements.tags)
-            .collect();
+        let all_tags: Vec<_> = tree.lines.iter().flat_map(|ld| &ld.elements.tags).collect();
         assert_eq!(all_tags.len(), 2);
     }
 
@@ -453,13 +446,11 @@ mod tests {
         // Simulate editing line 0 to no longer be a heading
         tree.mark_dirty(0, 1, 1);
         tree.refresh(
-            |idx| {
-                match idx {
-                    0 => "Plain text\n".to_string(),
-                    1 => "\n".to_string(),
-                    2 => "Some text\n".to_string(),
-                    _ => String::new(),
-                }
+            |idx| match idx {
+                0 => "Plain text\n".to_string(),
+                1 => "\n".to_string(),
+                2 => "Some text\n".to_string(),
+                _ => String::new(),
             },
             3,
         );
