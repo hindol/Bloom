@@ -56,6 +56,40 @@ fn uc08_find_page_opens_picker() {
     assert!(!screen.has_picker(), "picker should close on Esc");
 }
 
+#[test]
+fn reopening_existing_page_from_picker_preserves_cursor() {
+    let vault = TestVault::new()
+        .page("Page A")
+        .with_content("Page A line 1\nPage A line 2\nPage A line 3\n")
+        .page("Page B")
+        .with_content("Page B line 1\nPage B line 2\n")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    sim.type_text("Page A");
+    sim.keys("Enter");
+    sim.keys("jjll");
+    let before = sim.screen(80, 24).cursor();
+    assert_eq!(before, (2, 2), "expected a non-zero cursor on Page A");
+
+    sim.keys("SPC f f");
+    sim.type_text("Page B");
+    sim.keys("Enter");
+    assert_eq!(sim.screen(80, 24).title(), "Page B");
+
+    sim.keys("SPC f f");
+    sim.type_text("Page A");
+    sim.keys("Enter");
+    let screen = sim.screen(80, 24);
+    assert_eq!(screen.title(), "Page A");
+    assert_eq!(
+        screen.cursor(),
+        before,
+        "reopening an already-open page should preserve cursor position"
+    );
+}
+
 // -----------------------------------------------------------------------
 // UC-14: Basic Vim editing — insert, navigate, delete
 // -----------------------------------------------------------------------
@@ -731,6 +765,40 @@ fn uc11_switch_buffer() {
     assert!(screen.has_picker(), "buffer picker should open on SPC b b");
 
     sim.keys("<Esc>");
+}
+
+#[test]
+fn switching_back_to_open_buffer_preserves_cursor() {
+    let vault = TestVault::new()
+        .page("Page A")
+        .with_content("Page A line 1\nPage A line 2\nPage A line 3\n")
+        .page("Page B")
+        .with_content("Page B line 1\nPage B line 2\n")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC f f");
+    sim.type_text("Page A");
+    sim.keys("Enter");
+    sim.keys("jjll");
+    let before = sim.screen(80, 24).cursor();
+    assert_eq!(before, (2, 2), "expected a non-zero cursor on Page A");
+
+    sim.keys("SPC f f");
+    sim.type_text("Page B");
+    sim.keys("Enter");
+    assert_eq!(sim.screen(80, 24).title(), "Page B");
+
+    sim.keys("SPC b b");
+    sim.type_text("Page A");
+    sim.keys("Enter");
+    let screen = sim.screen(80, 24);
+    assert_eq!(screen.title(), "Page A");
+    assert_eq!(
+        screen.cursor(),
+        before,
+        "switching back to an already-open buffer should preserve cursor position"
+    );
 }
 
 // -----------------------------------------------------------------------

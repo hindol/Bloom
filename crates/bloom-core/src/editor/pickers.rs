@@ -777,8 +777,7 @@ impl BloomEditor {
                     // Index-based: use the real page ID
                     if self.writer.buffers().is_open(&page_id) {
                         // Already open — just switch to it
-                        self.set_active_page(Some(page_id));
-                        self.set_cursor(0);
+                        let _ = self.open_page(&page_id);
                         return;
                     }
                     if let Some(idx) = &self.index {
@@ -806,8 +805,7 @@ impl BloomEditor {
                             .and_then(|f| f.id)
                             .unwrap_or_else(crate::uuid::generate_hex_id);
                         if self.writer.buffers().is_open(&id) {
-                            self.set_active_page(Some(id));
-                            self.set_cursor(0);
+                            let _ = self.open_page(&id);
                         } else {
                             self.open_page_with_content(&id, &title, &path, &content);
                         }
@@ -848,8 +846,7 @@ impl BloomEditor {
             }
             PickerAction::SwitchBuffer => {
                 if let Some(page_id) = types::PageId::from_hex(&item.id) {
-                    self.set_active_page(Some(page_id));
-                    self.set_cursor(0);
+                    let _ = self.open_page(&page_id);
                 }
             }
             PickerAction::ExecuteCommand => {
