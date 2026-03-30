@@ -847,6 +847,28 @@ fn vim_append_end_of_line() {
 }
 
 #[test]
+fn vim_append_end_of_line_before_hidden_block_id() {
+    let mut sim = SimInput::with_content("- [ ] original text ^blk01\n");
+
+    sim.keys("A");
+    sim.type_text(" updated");
+    sim.keys("<Esc>");
+
+    assert_eq!(sim.buffer_text(), "- [ ] original text updated\n");
+}
+
+#[test]
+fn vim_append_end_of_line_before_hidden_mirror_block_id() {
+    let mut sim = SimInput::with_content("- [ ] original text ^=mir01\n");
+
+    sim.keys("A");
+    sim.type_text(" updated");
+    sim.keys("<Esc>");
+
+    assert_eq!(sim.buffer_text(), "- [ ] original text updated\n");
+}
+
+#[test]
 fn vim_change_word() {
     let mut sim = SimInput::with_content("old text here");
 
