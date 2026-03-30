@@ -17,11 +17,13 @@
 | `SPC b b` | Switch buffer (fuzzy picker) | G16 |
 | `SPC b d` | Close current buffer | — |
 | **Journal** | | |
-| `SPC j j` | Open today's journal | G14 |
+| `SPC j j` | Open the journal picker | G14 |
 | `SPC j p` / `SPC j n` | Previous / next day's journal | G14 |
 | `SPC j d` | Jump to journal by date (date picker) | G14 |
+| `SPC j t` | Open today's journal | G14 |
 | `SPC j a` | Quick-append to today's journal (inline input) | G14 |
-| `SPC j t` | Quick-append task to today's journal | G14 |
+| **Tasks** | | |
+| `SPC x a` | Quick-append task to today's journal | G14 |
 | **Search** | | |
 | `SPC s s` | Full-text search across all notes | G16 |
 | `SPC s j` | Search journal entries | G16 |

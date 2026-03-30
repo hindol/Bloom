@@ -155,7 +155,7 @@ An earlier design had `{{query}}` blocks rendering live results inline in page c
 | `SPC v e` | **Edit view** — picker, select, opens query prompt pre-filled |
 | `SPC a a` | **Agenda** — shortcut for the built-in Agenda view |
 
-Same pattern as `SPC f f/r/D` (files), `SPC t a/r` (tags), `SPC j j/p/n/a/t` (journal).
+Same pattern as `SPC f f/r/D` (files), `SPC t a/r` (tags), and the current journal family split across `SPC j j`, `SPC j t`, `SPC j a`, and `SPC x a`.
 
 ### Configuration
 

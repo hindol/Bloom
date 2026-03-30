@@ -493,7 +493,7 @@ Same inline menu, but sourced from the current page's tags only.
 
 ---
 
-## 14. Quick Capture — `SPC j a` / `SPC j t`
+## 14. Quick Capture — `SPC j a` / `SPC x a`
 
 Not a full picker — a minimal single-line input anchored to the bottom of the screen.
 
@@ -509,7 +509,7 @@ Not a full picker — a minimal single-line input anchored to the bottom of the 
 └──────────────────────────────────────────────────────────────┘
 ```
 
-For `SPC j t` (task variant):
+For `SPC x a` (task variant):
 ```
 ├──────────────────────────────────────────────────────────────┤
 │ - [ ] Append task to journal > Review the ropey crate API_       │

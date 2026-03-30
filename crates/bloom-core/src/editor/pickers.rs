@@ -101,7 +101,10 @@ impl BloomEditor {
                 let items: Vec<GenericPickerItem> = vec![
                     ("find_page", "Find page", "SPC f f"),
                     ("switch_buffer", "Switch buffer", "SPC b b"),
-                    ("journal_today", "Journal today", "SPC j j"),
+                    ("journal_picker", "Journal picker", "SPC j j"),
+                    ("journal_today", "Journal today", "SPC j t"),
+                    ("journal_append", "Quick append", "SPC j a"),
+                    ("journal_task", "Append task", "SPC x a"),
                     ("search", "Search", "SPC s s"),
                     ("search_tags", "Search tags", "SPC s t"),
                     ("split_vertical", "Split vertical", "SPC w v"),

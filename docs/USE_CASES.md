@@ -15,7 +15,7 @@
 
 Verifies: G14 (Daily Journal)
 
-1. User presses `SPC j j` in Normal mode.
+1. User presses `SPC j t` in Normal mode.
 2. Today's journal page opens in the current window.
 3. If the journal file doesn't exist on disk, a buffer is created in memory with frontmatter (`id`, `title: "YYYY-MM-DD"`, `created`). The file is NOT written to disk yet.
 4. If the file already exists, it opens normally.

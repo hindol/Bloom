@@ -270,7 +270,7 @@ After completion:
 │         Journal:   4 entries                                  │
 │                                                               │
 │         Tips:                                                 │
-│           SPC j j     open today's journal                    │
+│           SPC j t     open today's journal                    │
 │           SPC f f     find a page                             │
 │           SPC p n     create a new page                       │
 │           SPC ?       all commands                            │

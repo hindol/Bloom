@@ -455,7 +455,7 @@ pub enum StatusBarContent {
     Normal(NormalStatus),
     /// Active when user presses `:` (Command mode).
     CommandLine(CommandLineSlot),
-    /// Active during SPC j a / SPC j t.
+    /// Active during quick capture, such as SPC j a or SPC x a.
     QuickCapture(QuickCaptureSlot),
 }
 

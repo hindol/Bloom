@@ -33,12 +33,6 @@ Current Bloom history surfaces are:
 - block history via the temporal strip
 - restore from historical entries back into the current buffer
 
-One thing is *not* implemented yet and should not be documented as if it were:
-
-- day activity
-
-The code currently exposes a placeholder command for day activity and explicitly reports that it is not implemented yet. So the docs should treat that as future work, not present reality.
-
 ## Page History
 
 Page history is the broad view: how this page changed over time.
@@ -102,22 +96,16 @@ You edit more freely when you trust that the last good version is still nearby.
 
 That last point matters more than it sounds. Good history changes behavior. It makes bolder editing feel safe.
 
-## What This Doc No Longer Does
+## What This Doc Covers
 
-The older version tried to document every cache, prefetch strategy, schema sketch, and future day-activity idea in one place. That was too much for a root-level doc.
+This doc stays intentionally narrow. It describes the history surfaces that exist in Bloom today:
 
-The useful current truth is smaller:
+- page history
+- block history
+- restore into the current buffer
+- the relationship between undo and git-backed history
 
-- Bloom has a real page-history surface.
-- Bloom has a real block-history surface.
-- undo and git-backed history cooperate in one temporal UI.
-- day activity is still future work.
-
-That is a better contract with the reader.
-
-## Future Direction
-
-Day activity still makes sense as a future Bloom feature. It fits the product well. It just should live in planning material until it is real instead of occupying current docs as if it had already landed.
+That is the useful contract with the reader.
 
 ## Related Documents
 

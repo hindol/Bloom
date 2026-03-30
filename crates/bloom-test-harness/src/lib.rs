@@ -463,6 +463,27 @@ impl TestScreen {
         self.frame.dialog.is_some()
     }
 
+    /// Whether the active pane status bar is showing a quick-capture prompt.
+    pub fn has_quick_capture(&self) -> bool {
+        self.active_pane().is_some_and(|p| {
+            matches!(
+                p.status_bar.content,
+                bloom_core::render::StatusBarContent::QuickCapture(_)
+            )
+        })
+    }
+
+    /// Quick-capture prompt text from the active pane, if visible.
+    pub fn quick_capture_prompt(&self) -> Option<&str> {
+        self.active_pane()
+            .and_then(|p| match &p.status_bar.content {
+                bloom_core::render::StatusBarContent::QuickCapture(slot) => {
+                    Some(slot.prompt.as_str())
+                }
+                _ => None,
+            })
+    }
+
     /// Number of panes.
     pub fn pane_count(&self) -> usize {
         self.frame.panes.len()

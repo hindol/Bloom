@@ -8,7 +8,7 @@ Bloom treats the journal as the place you write before you know exactly where so
 
 ```mermaid
 flowchart LR
-    T["Open Today<br/>SPC j t"] --> A["Append Fast<br/>SPC j a / journal task"]
+    T["Open Today<br/>SPC j t"] --> A["Append Fast<br/>SPC j a / SPC x a"]
     A --> N["Navigate by Date<br/>previous / next journal day"]
     N --> C["Jump with Calendar<br/>SPC j c"]
 ```
@@ -47,7 +47,7 @@ Files are created lazily. Opening today's journal can create the buffer in memor
 | --- | --- |
 | `SPC j t` | Open today's journal |
 | `SPC j a` | Quick-append a note to today's journal |
-| journal task action | Quick-append a task to today's journal |
+| `SPC x a` | Quick-append a task to today's journal |
 | `SPC j j` | Open the journal picker |
 | `SPC j c` | Open the journal calendar |
 

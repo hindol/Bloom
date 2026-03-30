@@ -192,6 +192,312 @@ impl BloomEditor {
         }
     }
 
+    fn build_active_status_bar(
+        &self,
+        mode_str: &str,
+        title: &str,
+        dirty: bool,
+        pane_cursor_line: usize,
+        pane_cursor_col: usize,
+    ) -> render::StatusBarFrame {
+        let content = if matches!(self.vim_state.mode(), bloom_vim::Mode::Command) {
+            let raw_input = self.vim_state.pending_keys().to_string();
+            let (input, ghost_text) = if self.search_active {
+                let prefix = if self.search_forward { "/" } else { "?" };
+                (format!("{}{}", prefix, raw_input), None)
+            } else {
+                let ghost = command_ghost_text(&raw_input);
+                (raw_input.clone(), ghost)
+            };
+            render::StatusBarContent::CommandLine(render::CommandLineSlot {
+                input,
+                cursor_pos: self.vim_state.pending_keys().len()
+                    + if self.search_active { 1 } else { 0 },
+                ghost_text,
+                error: None,
+            })
+        } else if let Some(qc) = &self.quick_capture {
+            let prompt = match qc.kind {
+                keymap::dispatch::QuickCaptureKind::Note => "📓 Append to journal > ".to_string(),
+                keymap::dispatch::QuickCaptureKind::Task => "- [ ] Append task > ".to_string(),
+                keymap::dispatch::QuickCaptureKind::Rename => "✏️  Rename page > ".to_string(),
+            };
+            render::StatusBarContent::QuickCapture(render::QuickCaptureSlot {
+                prompt,
+                input: qc.input.clone(),
+                cursor_pos: qc.cursor_pos,
+            })
+        } else {
+            render::StatusBarContent::Normal(render::NormalStatus {
+                title: title.to_string(),
+                dirty,
+                line: pane_cursor_line,
+                column: pane_cursor_col,
+                pending_keys: if !self.leader_keys.is_empty() {
+                    self.leader_keys
+                        .iter()
+                        .map(|k| k.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                } else {
+                    self.vim_state.pending_keys().to_string()
+                },
+                recording_macro: if self.vim_state.is_recording() {
+                    Some('q')
+                } else {
+                    None
+                },
+                mcp: render::McpIndicator::Off,
+                indexing: self.indexing,
+            })
+        };
+
+        let has_active_page = self.active_page().is_some();
+        let show_jrnl = has_active_page
+            && self.in_journal_mode
+            && self.temporal_strip.is_none()
+            && matches!(content, render::StatusBarContent::Normal(_))
+            && matches!(self.vim_state.mode(), bloom_vim::Mode::Normal);
+
+        let show_hist = has_active_page && self.temporal_strip.is_some();
+
+        let mirror_hint = if !show_jrnl && !show_hist {
+            self.mirror_hint_for_cursor()
+        } else {
+            None
+        };
+
+        render::StatusBarFrame {
+            content,
+            mode: if show_hist {
+                "HIST".to_string()
+            } else if show_jrnl {
+                "JRNL".to_string()
+            } else {
+                mode_str.to_string()
+            },
+            right_hints: if show_hist {
+                Some("h/l:scrub  e:detail  r:restore  q:close".to_string())
+            } else if show_jrnl {
+                Some("↵:calendar  [d/]d".to_string())
+            } else {
+                mirror_hint
+            },
+        }
+    }
+
+    fn build_picker_frame(&self, height: u16) -> Option<render::PickerFrame> {
+        let ap = self.picker_state.as_ref()?;
+        let below_min = ap.query.len() < ap.min_query_len;
+        let picker_height = (height as usize * 70 / 100).max(5);
+        let max_visible = picker_height.saturating_sub(4);
+        let all_results = if below_min {
+            Vec::new()
+        } else {
+            ap.picker.results()
+        };
+        let total = all_results.len();
+        let selected = if total == 0 {
+            0
+        } else {
+            ap.picker.selected_index().min(total - 1)
+        };
+        let half = max_visible / 2;
+        let window_start = if total <= max_visible || selected <= half {
+            0
+        } else if selected + half >= total {
+            total.saturating_sub(max_visible)
+        } else {
+            selected - half
+        };
+        let window_end = (window_start + max_visible).min(total);
+
+        let results: Vec<render::PickerRow> = all_results[window_start..window_end]
+            .iter()
+            .map(|item| render::PickerRow {
+                label: item.label.clone(),
+                middle: item.middle.clone(),
+                right: item.right.clone(),
+            })
+            .collect();
+
+        let preview = if below_min {
+            None
+        } else {
+            ap.picker.selected().and_then(|item| {
+                if item.preview_text.is_some() {
+                    return item.preview_text.clone();
+                }
+                if let Some(page_id) = types::PageId::from_hex(&item.id) {
+                    if let Some(buf) = self.writer.buffers().get(&page_id) {
+                        let text = buf.text();
+                        let lines: Vec<_> = text.lines().take(20).map(|l| l.to_string()).collect();
+                        if !lines.is_empty() {
+                            return Some(lines.join("\n"));
+                        }
+                    }
+                    if let Some(idx) = &self.index {
+                        if let Some(meta) = idx.find_page_by_id(&page_id) {
+                            let full = self.vault_root.as_ref().map(|r| r.join(&meta.path));
+                            if let Some(path) = full {
+                                if let Ok(content) = std::fs::read_to_string(&path) {
+                                    return Some(
+                                        content.lines().take(20).collect::<Vec<_>>().join("\n"),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                None
+            })
+        };
+
+        Some(render::PickerFrame {
+            title: ap.title.clone(),
+            query: ap.query.clone(),
+            results,
+            selected_index: selected.saturating_sub(window_start),
+            filters: Vec::new(),
+            preview,
+            total_count: ap.picker.total_count(),
+            filtered_count: if below_min {
+                0
+            } else {
+                ap.picker.filtered_count()
+            },
+            status_noun: ap.status_noun.clone(),
+            min_query_len: ap.min_query_len,
+            query_selected: ap.query_selected,
+            wide: matches!(
+                ap.kind,
+                keymap::dispatch::PickerKind::Search
+                    | keymap::dispatch::PickerKind::Backlinks(_)
+                    | keymap::dispatch::PickerKind::UnlinkedMentions(_)
+            ),
+        })
+    }
+
+    fn build_inline_menu_frame(&self) -> Option<render::InlineMenuFrame> {
+        if let Some(ic) = &self.inline_completion {
+            let items = self.collect_inline_items(ic);
+            let (cursor_line, cursor_col) = self.cursor_position();
+            if !items.is_empty() {
+                let selected = ic.selected.min(items.len().saturating_sub(1));
+                Some(render::InlineMenuFrame {
+                    items,
+                    selected,
+                    anchor: render::InlineMenuAnchor::Cursor {
+                        line: cursor_line.saturating_sub(self.viewport().first_visible_line),
+                        col: cursor_col + 5,
+                    },
+                    hint: None,
+                })
+            } else {
+                None
+            }
+        } else if matches!(self.vim_state.mode(), bloom_vim::Mode::Command) {
+            let input = self.vim_state.pending_keys();
+            let (items, selected) = if let Some(arg_prefix) = input.strip_prefix("theme ") {
+                let items: Vec<render::InlineMenuItem> = bloom_md::theme::THEME_NAMES
+                    .iter()
+                    .filter(|name| arg_prefix.is_empty() || name.starts_with(arg_prefix))
+                    .map(|name| render::InlineMenuItem {
+                        id: None,
+                        label: name.to_string(),
+                        right: None,
+                    })
+                    .collect();
+                (items, 0)
+            } else {
+                let items: Vec<render::InlineMenuItem> = EX_COMMANDS
+                    .iter()
+                    .filter(|(cmd, _)| input.is_empty() || cmd.starts_with(input))
+                    .map(|(cmd, desc)| render::InlineMenuItem {
+                        id: None,
+                        label: cmd.to_string(),
+                        right: Some(desc.to_string()),
+                    })
+                    .collect();
+                (items, 0)
+            };
+
+            if !items.is_empty() {
+                Some(render::InlineMenuFrame {
+                    items,
+                    selected,
+                    anchor: render::InlineMenuAnchor::CommandLine,
+                    hint: None,
+                })
+            } else {
+                None
+            }
+        } else if let Some(mm) = &self.mirror_menu {
+            let items: Vec<render::InlineMenuItem> = mm
+                .items
+                .iter()
+                .map(|item| render::InlineMenuItem {
+                    id: Some(item.page_id.to_hex()),
+                    label: item.title.clone(),
+                    right: Some(format!("L{}", item.line + 1)),
+                })
+                .collect();
+            Some(render::InlineMenuFrame {
+                items,
+                selected: mm.selected,
+                anchor: render::InlineMenuAnchor::Cursor {
+                    line: mm
+                        .cursor_line
+                        .saturating_sub(self.viewport().first_visible_line),
+                    col: mm.cursor_col + 5,
+                },
+                hint: Some("🪞 mirrors".to_string()),
+            })
+        } else {
+            None
+        }
+    }
+
+    fn build_dialog_frame(&self) -> Option<render::DialogFrame> {
+        match &self.active_dialog {
+            Some(ActiveDialog::FileChanged { path, selected, .. }) => {
+                let filename = path
+                    .file_name()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "file".to_string());
+                Some(render::DialogFrame {
+                    message: format!("{} changed on disk. Reload?", filename),
+                    choices: vec!["Reload".to_string(), "Keep buffer".to_string()],
+                    selected: *selected,
+                })
+            }
+            Some(ActiveDialog::DeletePage { page_id, selected }) => {
+                let title = self
+                    .writer
+                    .buffers()
+                    .info(page_id)
+                    .map(|i| i.title.clone())
+                    .unwrap_or_else(|| "this page".to_string());
+                Some(render::DialogFrame {
+                    message: format!("Delete \"{}\"? This cannot be undone.", title),
+                    choices: vec!["Cancel".to_string(), "Delete".to_string()],
+                    selected: *selected,
+                })
+            }
+            None => None,
+        }
+    }
+
+    fn visible_notifications(&self) -> Vec<render::Notification> {
+        self.notifications
+            .iter()
+            .rev()
+            .take(3)
+            .rev()
+            .cloned()
+            .collect()
+    }
+
     /// Produce the render frame. `width` and `height` are the actual terminal
     /// dimensions — used directly for layout computation so pane rects always
     /// tile the exact screen area.
@@ -284,28 +590,7 @@ impl BloomEditor {
                     is_active: true,
                     title: String::from("Dashboard"),
                     dirty: false,
-                    status_bar: render::StatusBarFrame {
-                        content: render::StatusBarContent::Normal(render::NormalStatus {
-                            title: String::from("Dashboard"),
-                            dirty: false,
-                            line: 0,
-                            column: 0,
-                            pending_keys: if !self.leader_keys.is_empty() {
-                                self.leader_keys
-                                    .iter()
-                                    .map(|k| k.to_string())
-                                    .collect::<Vec<_>>()
-                                    .join(" ")
-                            } else {
-                                String::new()
-                            },
-                            recording_macro: None,
-                            mcp: render::McpIndicator::Off,
-                            indexing: self.indexing,
-                        }),
-                        mode: mode_str.to_string(),
-                        right_hints: None,
-                    },
+                    status_bar: self.build_active_status_bar(mode_str, "Dashboard", false, 0, 0),
                     rect: first_rect
                         .map(|r| render::PaneRectFrame {
                             x: r.x,
@@ -318,28 +603,21 @@ impl BloomEditor {
                 }],
                 maximized: false,
                 hidden_pane_count: 0,
-                picker: None,
-                inline_menu: None,
+                picker: self.build_picker_frame(height),
+                inline_menu: self.build_inline_menu_frame(),
                 which_key,
-                date_picker: None,
-                context_strip: None,
-                temporal_strip: None,
-                dialog: None,
+                date_picker: self.build_date_picker_frame(),
+                context_strip: self.build_context_strip(),
+                temporal_strip: self.build_temporal_strip_frame(),
+                dialog: self.build_dialog_frame(),
                 view: None,
-                notifications: self
-                    .notifications
-                    .iter()
-                    .rev()
-                    .take(3)
-                    .rev()
-                    .cloned()
-                    .collect(),
+                notifications: self.visible_notifications(),
                 scrolloff: self.config.scrolloff,
                 theme_name: self.active_theme.name.to_string(),
                 layout_tree: render::LayoutTree::Leaf(
                     first_rect.map(|r| r.pane_id).unwrap_or(types::PaneId(0)),
                 ),
-                clipboard_text: None,
+                clipboard_text: self.pending_clipboard.take(),
             };
         }
 
@@ -412,96 +690,13 @@ impl BloomEditor {
 
             // Build per-pane status bar
             let status_bar = if is_active {
-                // Active pane: priority CommandLine > QuickCapture > Normal
-                let content = if matches!(self.vim_state.mode(), bloom_vim::Mode::Command) {
-                    let raw_input = self.vim_state.pending_keys().to_string();
-                    let (input, ghost_text) = if self.search_active {
-                        let prefix = if self.search_forward { "/" } else { "?" };
-                        (format!("{}{}", prefix, raw_input), None)
-                    } else {
-                        let ghost = command_ghost_text(&raw_input);
-                        (raw_input.clone(), ghost)
-                    };
-                    render::StatusBarContent::CommandLine(render::CommandLineSlot {
-                        input,
-                        cursor_pos: self.vim_state.pending_keys().len()
-                            + if self.search_active { 1 } else { 0 },
-                        ghost_text,
-                        error: None,
-                    })
-                } else if let Some(qc) = &self.quick_capture {
-                    let prompt = match qc.kind {
-                        keymap::dispatch::QuickCaptureKind::Note => {
-                            "📓 Append to journal > ".to_string()
-                        }
-                        keymap::dispatch::QuickCaptureKind::Task => {
-                            "- [ ] Append task > ".to_string()
-                        }
-                        keymap::dispatch::QuickCaptureKind::Rename => {
-                            "✏️  Rename page > ".to_string()
-                        }
-                    };
-                    render::StatusBarContent::QuickCapture(render::QuickCaptureSlot {
-                        prompt,
-                        input: qc.input.clone(),
-                        cursor_pos: qc.cursor_pos,
-                    })
-                } else {
-                    render::StatusBarContent::Normal(render::NormalStatus {
-                        title: title.clone(),
-                        dirty,
-                        line: pane_cursor_line,
-                        column: pane_cursor_col,
-                        pending_keys: if !self.leader_keys.is_empty() {
-                            self.leader_keys
-                                .iter()
-                                .map(|k| k.to_string())
-                                .collect::<Vec<_>>()
-                                .join(" ")
-                        } else {
-                            self.vim_state.pending_keys().to_string()
-                        },
-                        recording_macro: if self.vim_state.is_recording() {
-                            Some('q')
-                        } else {
-                            None
-                        },
-                        mcp: render::McpIndicator::Off,
-                        indexing: self.indexing,
-                    })
-                };
-                let show_jrnl = is_active
-                    && self.in_journal_mode
-                    && self.temporal_strip.is_none()
-                    && matches!(content, render::StatusBarContent::Normal(_))
-                    && matches!(self.vim_state.mode(), bloom_vim::Mode::Normal);
-
-                let show_hist = is_active && self.temporal_strip.is_some();
-
-                // Mirror hint: when cursor is on a ^= line
-                let mirror_hint = if is_active && !show_jrnl && !show_hist {
-                    self.mirror_hint_for_cursor()
-                } else {
-                    None
-                };
-
-                render::StatusBarFrame {
-                    content,
-                    mode: if show_hist {
-                        "HIST".to_string()
-                    } else if show_jrnl {
-                        "JRNL".to_string()
-                    } else {
-                        mode_str.to_string()
-                    },
-                    right_hints: if show_hist {
-                        Some("h/l:scrub  e:detail  r:restore  q:close".to_string())
-                    } else if show_jrnl {
-                        Some("↵:calendar  [d/]d".to_string())
-                    } else {
-                        mirror_hint
-                    },
-                }
+                self.build_active_status_bar(
+                    mode_str,
+                    &title,
+                    dirty,
+                    pane_cursor_line,
+                    pane_cursor_col,
+                )
             } else {
                 // Inactive pane: just title
                 render::StatusBarFrame {
@@ -554,185 +749,8 @@ impl BloomEditor {
             panes,
             maximized: self.window_mgr.is_maximized(),
             hidden_pane_count: self.window_mgr.hidden_pane_count(),
-            picker: if let Some(ap) = &self.picker_state {
-                let below_min = ap.query.len() < ap.min_query_len;
-
-                // Compute windowed view of results around selected index.
-                let picker_height = (height as usize * 70 / 100).max(5);
-                let max_visible = picker_height.saturating_sub(4);
-                let all_results = if below_min {
-                    Vec::new()
-                } else {
-                    ap.picker.results()
-                };
-                let total = all_results.len();
-                let selected = if total == 0 {
-                    0
-                } else {
-                    ap.picker.selected_index().min(total - 1)
-                };
-                let half = max_visible / 2;
-                let window_start = if total <= max_visible || selected <= half {
-                    0
-                } else if selected + half >= total {
-                    total.saturating_sub(max_visible)
-                } else {
-                    selected - half
-                };
-                let window_end = (window_start + max_visible).min(total);
-
-                let results: Vec<render::PickerRow> = all_results[window_start..window_end]
-                    .iter()
-                    .map(|item| render::PickerRow {
-                        label: item.label.clone(),
-                        middle: item.middle.clone(),
-                        right: item.right.clone(),
-                    })
-                    .collect();
-                let preview = if below_min {
-                    None
-                } else {
-                    ap.picker.selected().and_then(|item| {
-                        // 1. Pre-set preview (e.g., search context, theme sample)
-                        if item.preview_text.is_some() {
-                            return item.preview_text.clone();
-                        }
-                        // 2. Try in-memory buffer (already open pages — free)
-                        if let Some(page_id) = types::PageId::from_hex(&item.id) {
-                            if let Some(buf) = self.writer.buffers().get(&page_id) {
-                                let text = buf.text();
-                                let lines: Vec<_> =
-                                    text.lines().take(20).map(|l| l.to_string()).collect();
-                                if !lines.is_empty() {
-                                    return Some(lines.join("\n"));
-                                }
-                            }
-                            // 3. Read from disk via vault path + index metadata
-                            if let Some(idx) = &self.index {
-                                if let Some(meta) = idx.find_page_by_id(&page_id) {
-                                    let full = self.vault_root.as_ref().map(|r| r.join(&meta.path));
-                                    if let Some(path) = full {
-                                        if let Ok(content) = std::fs::read_to_string(&path) {
-                                            let preview: String = content
-                                                .lines()
-                                                .take(20)
-                                                .collect::<Vec<_>>()
-                                                .join("\n");
-                                            return Some(preview);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        None
-                    })
-                };
-                Some(render::PickerFrame {
-                    title: ap.title.clone(),
-                    query: ap.query.clone(),
-                    results,
-                    selected_index: selected.saturating_sub(window_start),
-                    filters: Vec::new(),
-                    preview,
-                    total_count: ap.picker.total_count(),
-                    filtered_count: if below_min {
-                        0
-                    } else {
-                        ap.picker.filtered_count()
-                    },
-                    status_noun: ap.status_noun.clone(),
-                    min_query_len: ap.min_query_len,
-                    query_selected: ap.query_selected,
-                    wide: matches!(
-                        ap.kind,
-                        keymap::dispatch::PickerKind::Search
-                            | keymap::dispatch::PickerKind::Backlinks(_)
-                            | keymap::dispatch::PickerKind::UnlinkedMentions(_)
-                    ),
-                })
-            } else {
-                None
-            },
-            inline_menu: if let Some(ic) = &self.inline_completion {
-                let items = self.collect_inline_items(ic);
-                let (cursor_line, cursor_col) = self.cursor_position();
-                if !items.is_empty() {
-                    let selected = ic.selected.min(items.len().saturating_sub(1));
-                    Some(render::InlineMenuFrame {
-                        items,
-                        selected,
-                        anchor: render::InlineMenuAnchor::Cursor {
-                            line: cursor_line.saturating_sub(self.viewport().first_visible_line),
-                            col: cursor_col + 5, // 5 = gutter width
-                        },
-                        hint: None,
-                    })
-                } else {
-                    None
-                }
-            } else if matches!(self.vim_state.mode(), bloom_vim::Mode::Command) {
-                let input = self.vim_state.pending_keys();
-
-                // Detect argument completion: "theme <partial>"
-                let (items, selected) = if let Some(arg_prefix) = input.strip_prefix("theme ") {
-                    let theme_names = bloom_md::theme::THEME_NAMES;
-                    let items: Vec<render::InlineMenuItem> = theme_names
-                        .iter()
-                        .filter(|name| arg_prefix.is_empty() || name.starts_with(arg_prefix))
-                        .map(|name| render::InlineMenuItem {
-                            id: None,
-                            label: name.to_string(),
-                            right: None,
-                        })
-                        .collect();
-                    (items, 0)
-                } else {
-                    let items: Vec<render::InlineMenuItem> = EX_COMMANDS
-                        .iter()
-                        .filter(|(cmd, _)| input.is_empty() || cmd.starts_with(input))
-                        .map(|(cmd, desc)| render::InlineMenuItem {
-                            id: None,
-                            label: cmd.to_string(),
-                            right: Some(desc.to_string()),
-                        })
-                        .collect();
-                    (items, 0)
-                };
-
-                if !items.is_empty() {
-                    Some(render::InlineMenuFrame {
-                        items,
-                        selected,
-                        anchor: render::InlineMenuAnchor::CommandLine,
-                        hint: None,
-                    })
-                } else {
-                    None
-                }
-            } else if let Some(mm) = &self.mirror_menu {
-                let items: Vec<render::InlineMenuItem> = mm
-                    .items
-                    .iter()
-                    .map(|item| render::InlineMenuItem {
-                        id: Some(item.page_id.to_hex()),
-                        label: item.title.clone(),
-                        right: Some(format!("L{}", item.line + 1)),
-                    })
-                    .collect();
-                Some(render::InlineMenuFrame {
-                    items,
-                    selected: mm.selected,
-                    anchor: render::InlineMenuAnchor::Cursor {
-                        line: mm
-                            .cursor_line
-                            .saturating_sub(self.viewport().first_visible_line),
-                        col: mm.cursor_col + 5,
-                    },
-                    hint: Some("🪞 mirrors".to_string()),
-                })
-            } else {
-                None
-            },
+            picker: self.build_picker_frame(height),
+            inline_menu: self.build_inline_menu_frame(),
             which_key: {
                 if !show_wk {
                     None
@@ -940,42 +958,9 @@ impl BloomEditor {
             date_picker: self.build_date_picker_frame(),
             context_strip: self.build_context_strip(),
             temporal_strip: self.build_temporal_strip_frame(),
-            dialog: match &self.active_dialog {
-                Some(ActiveDialog::FileChanged { path, selected, .. }) => {
-                    let filename = path
-                        .file_name()
-                        .map(|f| f.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "file".to_string());
-                    Some(render::DialogFrame {
-                        message: format!("{} changed on disk. Reload?", filename),
-                        choices: vec!["Reload".to_string(), "Keep buffer".to_string()],
-                        selected: *selected,
-                    })
-                }
-                Some(ActiveDialog::DeletePage { page_id, selected }) => {
-                    let title = self
-                        .writer
-                        .buffers()
-                        .info(page_id)
-                        .map(|i| i.title.clone())
-                        .unwrap_or_else(|| "this page".to_string());
-                    Some(render::DialogFrame {
-                        message: format!("Delete \"{}\"? This cannot be undone.", title),
-                        choices: vec!["Cancel".to_string(), "Delete".to_string()],
-                        selected: *selected,
-                    })
-                }
-                None => None,
-            },
+            dialog: self.build_dialog_frame(),
             view: None,
-            notifications: self
-                .notifications
-                .iter()
-                .rev()
-                .take(3)
-                .rev()
-                .cloned()
-                .collect(),
+            notifications: self.visible_notifications(),
             scrolloff: self.config.scrolloff,
             theme_name: self.active_theme.name.to_string(),
             layout_tree: wm_tree_to_render(self.window_mgr.layout()),

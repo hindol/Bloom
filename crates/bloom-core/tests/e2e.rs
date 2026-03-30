@@ -3,6 +3,7 @@
 //! Each test drives BloomEditor through key sequences and asserts on the
 //! visual output. No terminal, no GUI — runs in CI.
 
+use bloom_core::types::PaneId;
 use bloom_test_harness::{linked_vault, tagged_vault, task_vault, SimInput, TestVault};
 
 // -----------------------------------------------------------------------
@@ -569,12 +570,98 @@ fn uc02_quick_capture_journal_append() {
     // SPC j a opens quick capture
     sim.keys("SPC j a");
     let screen = sim.screen(80, 24);
-    // Quick capture shows in the status bar content area
     assert!(
-        screen.mode() == "NORMAL" || screen.mode() == "JRNL",
-        "expected NORMAL or JRNL, got {}",
-        screen.mode()
-    ); // mode stays normal, capture is an overlay
+        screen.has_quick_capture(),
+        "quick capture should open in status bar"
+    );
+    assert_eq!(
+        screen.quick_capture_prompt(),
+        Some("📓 Append to journal > ")
+    );
+}
+
+#[test]
+fn dashboard_page_picker_is_visible() {
+    let vault = TestVault::new()
+        .page("Rust Notes")
+        .with_content("# Rust\n\nMemory safety is key.\n")
+        .page("Text Editor Theory")
+        .with_content("# Editors\n\nEditor architecture.\n")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.editor.close_buffer(PaneId(0)).unwrap();
+    assert_eq!(sim.screen(80, 24).title(), "Dashboard");
+
+    sim.keys("SPC p p");
+    let screen = sim.screen(80, 24);
+    assert!(
+        screen.has_picker(),
+        "page picker should be visible on the dashboard"
+    );
+    assert_eq!(screen.title(), "Dashboard");
+}
+
+#[test]
+fn dashboard_search_picker_is_visible() {
+    let vault = TestVault::new()
+        .page("Rust Notes")
+        .with_content("# Rust\n\nMemory safety is key.\n")
+        .build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.editor.close_buffer(PaneId(0)).unwrap();
+    assert_eq!(sim.screen(80, 24).title(), "Dashboard");
+
+    sim.keys("SPC s s");
+    let screen = sim.screen(80, 24);
+    assert!(
+        screen.has_picker(),
+        "search picker should be visible on the dashboard"
+    );
+    assert_eq!(screen.title(), "Dashboard");
+}
+
+#[test]
+fn dashboard_quick_capture_prompt_is_visible() {
+    let vault = TestVault::new().page("Test").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.editor.close_buffer(PaneId(0)).unwrap();
+    assert_eq!(sim.screen(80, 24).title(), "Dashboard");
+
+    sim.keys("SPC j a");
+    let screen = sim.screen(80, 24);
+    assert!(
+        screen.has_quick_capture(),
+        "dashboard quick capture prompt should be visible"
+    );
+    assert_eq!(
+        screen.quick_capture_prompt(),
+        Some("📓 Append to journal > ")
+    );
+}
+
+#[test]
+fn dashboard_journal_today_opens_page() {
+    let vault = TestVault::new().page("Existing Page").build();
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.editor.close_buffer(PaneId(0)).unwrap();
+    assert_eq!(sim.screen(80, 24).title(), "Dashboard");
+
+    sim.keys("SPC j t");
+    let screen = sim.screen(80, 24);
+    assert_ne!(
+        screen.title(),
+        "Dashboard",
+        "journal today should leave the dashboard"
+    );
+    assert!(
+        screen.title().contains("202") || !screen.title().is_empty(),
+        "journal should be open, got title: '{}'",
+        screen.title()
+    );
 }
 
 // -----------------------------------------------------------------------

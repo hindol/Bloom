@@ -668,7 +668,7 @@ pub(crate) fn draw_setup_wizard(
             );
             wizard_line(frame, left, top + 8.0 * LINE_HEIGHT, "Tips:", salient);
             let tips = [
-                ("SPC j j", "open today's journal"),
+                ("SPC j t", "open today's journal"),
                 ("SPC f f", "find a page"),
                 ("SPC n", "create a new page"),
                 ("SPC ?", "all commands"),

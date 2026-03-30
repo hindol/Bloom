@@ -84,7 +84,7 @@ On first launch, Bloom opens a setup wizard to create or import a vault.
 | `i` | Enter Insert mode |
 | `Esc` | Back to Normal mode / dismiss notifications |
 | `SPC f f` | Find page |
-| `SPC j j` | Open today's journal |
+| `SPC j t` | Open today's journal |
 | `SPC j a` | Quick-capture a note |
 | `SPC s s` | Full-text search |
 | `SPC s l` | Backlinks to current page |
