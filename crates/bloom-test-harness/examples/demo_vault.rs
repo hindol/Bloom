@@ -261,5 +261,5 @@ fn main() {
         journals.len(),
         timeline.len()
     );
-    println!("\n  Launch: cargo run -r -p bloom-tui");
+    println!("\n  Launch: cargo run -r -p bloom-gui");
 }

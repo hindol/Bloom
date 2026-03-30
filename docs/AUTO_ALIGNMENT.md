@@ -209,4 +209,4 @@ Contiguous lines that end with `^block-id` (preceded by a space).
 
 - [KEYBINDINGS.md](KEYBINDINGS.md) — Esc triggers alignment
 - [THEMING.md](THEMING.md) — TimestampKeyword, Tag styles for aligned elements
-- [USE_CASES.md](test/USE_CASES.md) — UC-41 (create task), UC-42 (toggle task)
+- [USE_CASES.md](USE_CASES.md) — UC-41 (create task), UC-42 (toggle task)

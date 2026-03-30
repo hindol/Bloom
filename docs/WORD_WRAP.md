@@ -254,4 +254,4 @@ No `wrap_column` setting — wrapping always uses the pane width. A fixed-column
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Render pipeline — core produces RenderFrame, frontends consume |
 | [THEMING.md](THEMING.md) | `faded` color for gutter, `current_line` highlight |
 | [GOALS.md](GOALS.md) | G7 — Vim motions (j/k vs gj/gk) |
-| [DEBUGGABILITY.md](test/DEBUGGABILITY.md) | Wrap map computation timing at `trace` level |
+| [DEBUGGABILITY.md](DEBUGGABILITY.md) | Wrap map computation timing at `trace` level |

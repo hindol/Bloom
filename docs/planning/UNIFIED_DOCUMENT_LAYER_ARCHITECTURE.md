@@ -19,7 +19,7 @@ It does **not** choose the final design yet. It establishes:
 See also:
 
 - `UNIFIED_DOCUMENT_LAYER.md`
-- `BLOCK_ID_METADATA.md`
+- the superseded block-ID-metadata branch
 - `../PARSE_TREE.md`
 - `../UNIFIED_BUFFER.md`
 - `../BLOCK_IDENTITY.md`
@@ -196,7 +196,7 @@ This is workable, but it spreads document semantics across timing hooks instead 
 
 ### 2. Block metadata is not bundled where parse state already is
 
-`BLOCK_ID_METADATA.md` imagines block metadata living alongside edits, but the current code path does not show a single runtime owner that holds:
+The superseded block-ID-metadata branch imagines block metadata living alongside edits, but the current code path does not show a single runtime owner that holds:
 
 - rope text
 - parse state
@@ -314,7 +314,7 @@ The system already names semantic messages, but not all of them can be handled b
 
 ### Inconsistency C: source-of-truth requirement is stronger than the current metadata note
 
-`BLOCK_ID_METADATA.md` emphasizes metadata tracking logic, but Bloom's larger architecture emphasizes file truth and rebuildability.
+The superseded block-ID-metadata branch emphasizes metadata tracking logic, but Bloom's larger architecture emphasizes file truth and rebuildability.
 
 That means the final design must not merely compute correct metadata in memory. It must ensure the right metadata is recoverable from file content.
 

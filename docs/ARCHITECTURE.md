@@ -1,420 +1,188 @@
-# Bloom 🌱 — Architecture
+<h1><img src="../crates/bloom-gui/icons/icon_cutout.svg" alt="Bloom icon" width="26" valign="middle" /> Bloom Architecture</h1>
 
-> Technical architecture for Bloom. See [GOALS.md](GOALS.md) for goals and non-goals.
+> How Bloom stays local-first, responsive, and predictable. For product intent, see [GOALS.md](GOALS.md).
 
----
+Bloom is organized around a simple question: who owns what? One layer owns text and cursors. One owns Markdown meaning. One orchestrates editor behavior. Frontends render snapshots. Background workers handle slow side effects. The architecture is less about "tiers" than about authority.
 
-## Tech Stack
+That choice buys Bloom something valuable: fewer mystery bugs. If the buffer owns cursors, the save path should not quietly "fix" them. If the document layer owns semantic edits, the frontend should not guess what an align or reload means. Bloom tries to keep those boundaries crisp.
 
-| Component | Choice | Rationale |
-|-----------|--------|-----------|
-| Language | Rust | Memory safety, performance, cross-platform, zero-cost abstractions |
-| UI framework | Iced (GUI) | Built over a shared `RenderFrame` abstraction. The GUI is a thin render target. |
-| Text buffer | Rope (`ropey` crate) | O(log n) operations, natural undo tree support via persistent snapshots, composable for transclusion |
-| Storage | Markdown files on disk + SQLite index | Files for portability, SQLite for fast search/backlinks/metadata queries |
-| Channels | `crossbeam` | Inter-thread communication, no async runtime dependency in core |
+## The System in One Picture
 
----
-
-## Layered Architecture
-
-```text
-┌─────────────────────────────────────────────────────┐
-│                  Frontend Layer                       │
-│  (Iced GUI / MCP Server — all swappable)              │
-│  Responsibility: consume RenderFrame, capture input   │
-└──────────────────────┬──────────────────────────────┘
-                       │ RenderFrame (UI-agnostic snapshot)
-┌──────────────────────▼──────────────────────────────┐
-│               bloom-core (orchestrator)               │
-│                                                      │
-│  • Editor engine (key dispatch, save, session)       │
-│  • RenderFrame producer (visible lines, cursor,      │
-│    status bar, picker state, diagnostics)             │
-│  • Which-key discoverability                         │
-│  • Link resolver + backlink tracker                  │
-│  • Search / query engine (BQL)                       │
-│  • Index (SQLite FTS5, backlinks, tags)              │
-│  • Unlinked mentions scanner                         │
-│  • Window manager (splits, panes)                    │
-└──────────────────────┬──────────────────────────────┘
-                       │ depends on
-  ┌────────────────────┼──────────────────────┐
-  │                    │                      │
-┌─▼──────────┐ ┌──────▼──────┐ ┌─────────────▼──┐
-│ bloom-vim   │ │  bloom-md   │ │  bloom-store   │
-│             │ │             │ │                │
-│ Vim state   │ │ Parser,     │ │ LocalFileStore,│
-│ machine,    │ │ highlighter,│ │ DiskWriter,    │
-│ motions,    │ │ frontmatter,│ │ FileWatcher    │
-│ operators,  │ │ 12 themes,  │ │                │
-│ text objects│ │ Markdown    │ │                │
-│ input types │ │ types       │ │                │
-└─────┬───────┘ └─────────────┘ └────────┬───────┘
-      │                                  │
-┌─────▼───────┐                 ┌────────▼───────┐
-│ bloom-buffer │                 │  bloom-error   │
-│              │                 │                │
-│ Rope,        │                 │ BloomError     │
-│ cursors,     │                 │ (shared across │
-│ undo tree,   │                 │  all crates)   │
-│ block IDs    │                 └────────────────┘
-└──────────────┘
+```mermaid
+flowchart TD
+    F["Frontends and integrations<br/>bloom-gui, bloom-mcp"] --> C["bloom-core<br/>editor orchestration, panes, rendering,<br/>save/reload, index integration"]
+    C --> V["bloom-vim<br/>modal grammar, motions,<br/>operators, edit intent"]
+    C --> D["bloom-core::document<br/>parse tree, block IDs,<br/>canonical text, cursor policy"]
+    D --> B["bloom-buffer<br/>rope, cursors, undo tree"]
+    D --> M["bloom-md<br/>Markdown parser, highlighter,<br/>Bloom syntax types"]
+    C --> S["bloom-store<br/>disk writer, file watcher"]
+    C --> H["bloom-history<br/>git-backed history"]
 ```
 
-### Crate Responsibilities
+The important seams are these:
 
-| Crate | Owns | Key invariant |
-|-------|------|---------------|
-| **bloom-error** | `BloomError` enum | Single error type shared across all crates |
-| **bloom-buffer** | Rope + cursors + undo tree + block ID generation | **Buffer owns cursors.** All mutations (insert/delete/replace) auto-adjust every tracked cursor. No manual cursor shifts. |
-| **bloom-md** | Markdown parser, highlighter, frontmatter, themes, `PageId`/`BlockId`/`TagName`/`Timestamp` | Pure parsing — no state, no I/O. Leaf crate. |
-| **bloom-vim** | Vim state machine, grammar, motions, operators, text objects, `KeyEvent`/`KeyCode` | Produces `EditOp` descriptors. Never mutates buffers — read-only access. |
-| **bloom-store** | `LocalFileStore`, `DiskWriter` (atomic writes), `FileWatcher` | File I/O abstraction. No editor knowledge. |
-| **bloom-core** | Editor orchestrator: key dispatch, save, session, pickers, notifications, window manager, index, BQL | Composes all other crates. Thin — delegates to specialized crates. |
+- `bloom-buffer` owns mutable text and live cursor state.
+- `bloom-md` understands Markdown, but does not own editor state.
+- `bloom-core::document` turns rope text into a document model Bloom can reason about.
+- `bloom-core` is the conductor. It composes the system, but it does not need to own every detail itself.
 
-### Why This Structure
+## The Three Bets That Shape Bloom
 
-The crate boundaries enforce three architectural invariants that prevent bugs:
+### 1. The Buffer Owns Text and Cursors
 
-1. **Buffer-owned cursors** (bloom-buffer): `buf.insert()` adjusts all cursors atomically. Since bloom-buffer is a separate crate, no external code can reach into the rope and mutate it without going through the cursor-adjusting API.
+`bloom-buffer` is the lowest mutable layer that matters. It owns the rope, tracked cursors, selection state, and undo history.
 
-2. **Vim produces, editor applies** (bloom-vim): The Vim state machine produces `EditOp` descriptors but never mutates buffers. The editor applies them. This separation means Vim logic can't create buffer/cursor inconsistencies.
+That sounds mundane until you compare it to how cursor bugs usually happen. In many editors, every subsystem is allowed to patch cursor position after an edit. Bloom tries to avoid that trap. The buffer owns live cursor storage, and low-level text mutation updates tracked cursors as part of the operation.
 
-3. **Save is read-only** (bloom-core): The save path reads buffer content and writes to disk. It never mutates the buffer. Block ID assignment happens on edit-group close (leaving Insert mode), not during save.
+The result is a sturdier contract:
 
-### RenderFrame Abstraction
+- text changes happen in one place
+- cursor adjustments are part of mutation, not an afterthought
+- undo/redo restore cursor state as part of history, not as UI cleanup
 
-The core library produces a `RenderFrame` — a UI-agnostic snapshot of everything to draw. Frontends never query editor state directly; they consume frames. Layout is computed in `update_layout()` (state mutation); rendering in `render()` (read-only snapshot).
+### 2. Markdown Semantics Live Above the Rope
 
-```rust,ignore
-terminal.draw(|f| {
-    let (w, h) = f.area();
-    editor.update_layout(w, h);          // state: viewport dims, cursor scroll
-    let frame = editor.render(w, h);     // read-only: produces the snapshot
-    gui::draw(f, &frame, &theme);        // GUI reads rects, renders widgets
-});
+A rope knows about characters. Bloom needs to know about headings, hidden block IDs, mirrored structure, canonical on-disk text, and non-local edits such as reload or alignment.
+
+That is why `bloom-core::document` exists. It owns:
+
+- the parse tree for an open document
+- hidden block-ID metadata
+- canonical disk serialization
+- semantic mutation entry points
+- cursor policy for operations that are larger than a local text edit
+
+This is one of Bloom's most important architectural seams. The buffer still owns the cursor, but the document layer gets to say what kind of landing an operation wants: preserve, collapse to edit start, collapse to edit end, or reanchor by line and column after a reshape. That is a cleaner model than passing around raw offsets and hoping somebody repairs them later.
+
+### 3. Frontends Render Frames, Not Editor Internals
+
+Bloom's frontends do not interrogate the editor during paint. `bloom-core` produces a `RenderFrame`: a read-only snapshot of everything needed for one frame.
+
+That frame carries:
+
+- pane content and active pane state
+- cursor and scroll position
+- overlays such as pickers, inline menus, dialogs, and history UI
+- layout information
+- transient UI state such as notifications and clipboard output
+
+This makes the frontend boundary pleasantly boring. The frontend draws. The editor decides.
+
+## The Edit Path
+
+The path from keypress to new frame is narrow on purpose:
+
+```mermaid
+sequenceDiagram
+    participant FE as Frontend
+    participant CORE as bloom-core
+    participant VIM as bloom-vim
+    participant DOC as document.rs
+    participant BUF as bloom-buffer
+
+    FE->>CORE: key / resize / command
+    CORE->>VIM: interpret modal grammar
+    VIM-->>CORE: edit intent / action
+    CORE->>DOC: semantic mutation + cursor policy
+    DOC->>BUF: apply text edit
+    BUF-->>DOC: updated text + cursor state
+    CORE->>CORE: update_layout() + render()
+    CORE-->>FE: RenderFrame
 ```
 
-A `RenderFrame` contains:
+The subtle step is the handoff from `bloom-core` to `document.rs`. Bloom does not want every mutation to look like "replace bytes and pick a number for the cursor." Local inserts, delete operators, reloads, alignment passes, and history restores have different semantics. The document layer exists to make those semantics explicit.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `panes` | `Vec<PaneFrame>` | Pane content, cursor, status bar, and **layout rect** |
-| `maximized` | `bool` | Whether a pane is maximized (hides others) |
-| `hidden_pane_count` | `usize` | Number of hidden panes when maximized |
-| `picker` | `Option<PickerFrame>` | Active picker: query, results, selected index, preview |
-| `inline_menu` | `Option<InlineMenuFrame>` | Cursor-anchored inline suggestions and completions |
-| `which_key` | `Option<WhichKeyFrame>` | Popup: available key bindings in current prefix |
-| `date_picker` | `Option<DatePickerFrame>` | Date picker overlay |
-| `dialog` | `Option<DialogFrame>` | Confirmation dialog |
-| `notifications` | `Vec<Notification>` | Active transient notifications |
-| `scrolloff` | `usize` | Scroll margin forwarded to the frontend renderer |
+This split also helps Bloom keep user-visible Markdown separate from hidden structural metadata. The editor can present clean text while still preserving canonical on-disk structure.
 
-Each `PaneFrame` includes a `PaneRectFrame` with `x, y, width, content_height, total_height` — concrete cell positions computed by the core's `WindowManager::compute_pane_rects()`. The GUI reads these directly instead of computing its own layout.
+## Workspace Roles
 
-This means:
-- **Tests assert on `RenderFrame`** — no browser needed.
-- **GUI is thin** — it maps `RenderFrame` fields to Iced Canvas primitives.
-- **Layout lives in one place** — the core computes pane dimensions; the GUI never splits areas.
+The workspace makes more sense when grouped by responsibility than by file tree:
 
----
+| Crate | What it owns |
+| --- | --- |
+| `bloom-error` | Shared error vocabulary |
+| `bloom-buffer` | Rope, cursors, undo tree, low-level edit behavior |
+| `bloom-md` | Markdown parsing, highlighting, Bloom syntax types |
+| `bloom-vim` | Modal grammar and edit intent |
+| `bloom-store` | File-system-facing I/O |
+| `bloom-history` | Git-backed history operations |
+| `bloom-core` | Editor orchestration, panes, rendering, session state |
+| `bloom-gui` | Graphical frontend |
+| `bloom-mcp` | Optional local MCP integration |
+| `bloom-import` | Import pipeline |
+| `bloom-test-harness` | Higher-level editor tests |
 
-## Rendering Model
+The point is not to memorize the table. The point is to notice the pattern: semantic editor state stays near the editor, and side effects are pushed outward.
 
-### Render Loop
+## The Event Loop and Background Workers
 
-The GUI render loop runs on the UI thread at ~60fps (or on input):
+Bloom keeps the main editing state on one thread and pushes slow work out to specialized workers. Channels are the boundary.
 
-```rust,ignore
-loop {
-    let (w, h) = window_size();                         // actual window dimensions
-    editor.update_layout(w, h);                         // state: viewport + scroll
-    let frame = editor.render(w, h);                    // read-only: snapshot
-    gui::draw(canvas, &frame, &theme);                  // GUI: primitives onto Iced Canvas
-    wait_for_input_or_tick();
-}
+```mermaid
+flowchart LR
+    E["Editor loop<br/>crossbeam::select!"] -->|WriteRequest| DW["Disk writer thread<br/>debounced atomic writes"]
+    DW -->|WriteResult| E
+
+    FW["File watcher thread<br/>disk changes"] -->|FileEvent| E
+
+    E -->|IndexRequest| IX["Indexer thread<br/>sole write owner of SQLite"]
+    IX -->|IndexComplete| E
+
+    E -->|History request| HY["History worker<br/>git-backed snapshots"]
+    HY -->|History result| E
+
+    MCP["Optional MCP server"] -->|edit request| E
 ```
 
-**Key property:** The window dimensions flow into `update_layout()` which sets viewport dimensions, then into `render()` which uses them to compute pane rects. The same dimensions are used by the GUI to draw. No stored state to drift.
+The editor loop wakes for a small set of reasons:
 
-### Cell Painting Strategy
+- frontend input
+- write acknowledgements
+- file watcher events
+- indexer completion
+- history completion
+- timer deadlines such as autosave debounce or popup delays
 
-The Iced Canvas GUI uses **GPU-accelerated rendering** — it redraws the visible frame each tick using the `RenderFrame` snapshot. The Canvas API batches draw calls efficiently so full-frame repaints are cheap.
+After any wake, Bloom flushes pending timer work, applies the resulting state changes, and renders only if something actually changed.
 
-Each frame follows a three-layer painting strategy:
+This design avoids a lot of fake concurrency. The main editing state has one owner. Disk, indexing, and history do their work elsewhere and report back explicitly.
 
-```text
-Layer 1: Clear + Background    ← fills the canvas with the background colour (clean slate)
-Layer 2: Pane content          ← editor lines, status bars, drawn into pane rects
-Layer 3: Overlays              ← picker, inline menu, date picker, dialog, notifications
-```
+## Safety Rules
 
-**Layer 1** ensures no stale content from previous frames bleeds through. The canvas is cleared and filled with the background colour.
+Several rules appear again and again in the codebase because they keep the architecture honest.
 
-**Layer 2** renders each pane into its core-computed rect. The pane content (editor lines, syntax-highlighted spans) overwrites the background layer. Each pane includes its own status bar at the bottom of its rect.
+### Save Should Not Secretly Edit the Buffer
 
-**Layer 3** renders overlays on top of panes. Overlays draw last, so their cursor-positioning calls override the pane cursor — each overlay owns its cursor (picker query input, inline selection, date picker choice, dialog choice).
+Saving reads from the buffer and writes to disk. If Bloom needs to normalize content or attach metadata, that should happen as an editor operation with normal undo and cursor semantics, not as a surprise in the save path.
 
-### Viewport and Scrolling
+### Disk Changes Should Come Back Through One Gate
 
-The viewport tracks which lines of the buffer are visible. On each render cycle:
+Self-writes, external edits, sync tools, and branch switches all show up as file events. Bloom prefers that shared path to a pile of one-off "also update this because save just happened" code.
 
-1. `update_layout(w, h)` computes pane rects from the real terminal/window size.
-2. Each pane viewport is refreshed from its `content_height` and `width`.
-3. The active pane's `viewport.ensure_visible(cursor_line)` updates buffer-line scroll state.
-4. `render()` consumes that state and `render_buffer_lines()` produces `RenderedLine`s for the visible range.
-5. Frontends may add display-specific refinement (for example `ScreenScroll` for wrapped screen rows) without mutating the core viewport.
+### One Mutation Should Imply One Cursor Story
 
-The viewport height is never guessed or stored separately — it's refreshed from layout computation using the actual window dimensions before `render()` consumes it.
+Undo, redo, reload, align, and local edits should each have an intentional cursor landing. That is why the buffer owns cursor state while the document layer owns higher-level cursor policy.
 
-### Semantic Highlighting Pipeline
+### Hidden Structure Should Not Leak Into Editing
 
-All content — editor text, picker preview, and other highlighted text surfaces — uses the same highlighting path:
+On disk, Bloom needs canonical structure. In the editor, users should not have to fight implementation detail. The document layer exists to preserve both at once.
 
-```text
-                        ┌─────────────────────┐
-                        │     text line        │
-                        └──────────┬──────────┘
-                                   │
-                                   ▼
-                    ┌──────────────────────────────┐
-                    │  parser.highlight_line(line)  │
-                    └──────────────┬───────────────┘
-                                   │
-                                   ▼
-                          Vec<StyledSpan>
-                                   │
-                    ┌──────────────┴───────────────┐
-                    │                              │
-                    ▼                              ▼
-         ┌──────────────────┐           ┌──────────────────────┐
-         │ theme.style_for()│           │ search_highlight::   │
-         │ (syntax styles)  │           │ highlight_matches()  │
-         └────────┬─────────┘           │ (SearchMatch spans)  │
-                  │                     └──────────┬───────────┘
-                  │                                │
-                  └──────────┬─────────────────────┘
-                             │  overlay / merge
-                             ▼
-                    ┌──────────────────┐
-                    │  Span::styled()  │
-                    │  → rendered cell │
-                    └──────────────────┘
-```
+## Why It Feels Fast
 
-Search match highlighting overlays on top via `render::search_highlight::highlight_matches()`, which produces `SearchMatch` spans that split or override base syntax spans.
+Bloom is fast mostly because the common path stays short:
 
----
+- rope edits are cheap
+- the editor loop does not block on disk or network
+- background work is event-driven
+- indexing is incremental
+- rendering is snapshot-based
 
-## Threading Model
+Good editor architecture is often just disciplined subtraction. Keep the hot path small. Keep ownership clear. Make slow work explicit.
 
-```text
-┌──────────────────────────────────────────────────────┐
-│                    UI Thread                          │
-│                                                      │
-│  ┌─ Event Loop ─────────────────────────────────┐    │
-│  │  1. Poll for input (Iced/winit)               │    │
-│  │  2. Poll indexer completion channel           │    │
-│  │  3. Poll file watcher, debounce, forward      │    │
-│  │  4. Poll MCP edit channel (if enabled)        │    │
-│  │  5. Dispatch key → BloomEditor::handle_key() │    │
-│  │  6. Process Vim grammar, apply edits to rope  │    │
-│  │  7. Call editor.update_layout(w, h)           │    │
-│  │  8. Call editor.render(w, h) → RenderFrame    │    │
-│  │  9. GUI draws RenderFrame onto Iced Canvas    │    │
-│  │ 10. Iced presents the frame to the window     │    │
-│  └──────────────────────────────────────────────┘    │
-│                                                      │
-│  Rule: NEVER blocks. All I/O dispatched via channels.│
-│  Rope edits are O(log n) ≈ microseconds.             │
-│  Render produces a snapshot — no locks held.         │
-│  Index queries are read-only — no write contention.  │
-└──────┬──────────┬──────────────┬──────────┬──────────┘
-  channel     channel        channel    channel
-       │          │              │          │
-       ▼          ▼              ▼          ▼
-┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐
-│Disk Writer│ │ Indexer  │ │  File    │ │ MCP Server   │
-│(OS thread)│ │(OS thread)│ │ Watcher │ │ (OS thread)  │
-│           │ │          │ │(OS thread)│ │              │
-│ Debounced │ │ Scan →   │ │          │ │ Listens on   │
-│ atomic    │ │ Read →   │ │ Watches  │ │ localhost.   │
-│ write→    │ │ Write    │ │ vault,   │ │ Translates   │
-│ fsync→    │ │ pipeline.│ │ sends    │ │ MCP tool     │
-│ rename    │ │ See      │ │ events   │ │ calls into   │
-│           │ │ below.   │ │ to UI.   │ │ edit requests│
-│           │ │          │ │          │ │ via channel  │
-│           │ │          │ │          │ │ to UI thread.│
-│           │ │          │ │          │ │ Opt-in only. │
-└──────────┘ └──────────┘ └──────────┘ └──────────────┘
-```
+## What This Architecture Is Trying to Buy
 
-### Thread Responsibilities
+At its best, Bloom should feel calm. You type, move, search, split panes, follow links, and jump through history without wondering which subsystem is improvising underneath you.
 
-| Thread | Input | Output | Blocking? |
-|--------|-------|--------|-----------|
-| **UI** | Terminal key events, file watcher events, indexer completion, MCP edits | Rope edits, RenderFrame, index requests | Never — all I/O via channels |
-| **Disk Writer** | `WriteRequest` via channel | Atomic file writes (write→fsync→rename) | Blocks on disk I/O (own thread) |
-| **Indexer** | `IndexRequest` via channel (startup scan, file change batches, full rebuild) | Updated SQLite FTS5 index, `IndexComplete` notification | Blocks on file I/O + SQLite (own thread) |
-| **File Watcher** | Filesystem notifications (notify crate) | `FileEvent` via channel to UI thread | Blocks waiting for OS events (own thread) |
-| **MCP Server** | HTTP/stdio MCP tool calls on localhost | Edit requests via channel to UI thread, responses back to client | Blocks on network I/O (own thread, opt-in) |
+That calm feeling comes from architecture more than from features: buffer truth in one place, document semantics in one place, rendering through frames, side effects through workers, and cursor behavior expressed as policy instead of folklore.
 
-### Indexer Architecture
-
-The indexer is a **long-lived background thread** that keeps the SQLite index in sync with the vault. It processes two kinds of requests from the UI thread:
-
-```text
-UI Thread                              Indexer Thread
-    │                                       │
-    │  FullRebuild ────────────────────────▶ │  Invalidate all fingerprints,
-    │  (user: :rebuild-index)               │  scan + read + parse + write
-    │                                       │
-    │  IncrementalBatch(paths) ────────────▶ │  Read + parse + write just
-    │  (file watcher events,                │  the listed paths
-    │   debounced 300ms)                    │
-    │                                       │
-    │  ◀──────────────── IndexComplete ──── │  Stats + timing
-    │                                       │
-    │  Shutdown ───────────────────────────▶ │  break
-    └───────────────────────────────────────┘
-```
-
-**Long-lived loop:** The indexer thread starts on `init_vault()` and runs until the editor exits. On startup it performs the initial incremental scan (same as before). Then it blocks on the request channel, waking only when the UI forwards file changes or a full rebuild.
-
-```text
-Indexer Thread
-    │
-    ├── Startup: run_incremental() — scan all files, compare fingerprints
-    │   └── Send IndexComplete to UI
-    │
-    └── Loop:
-        ├── recv(IndexRequest::IncrementalBatch(paths))
-        │   For each path:
-        │     Read file, parse, extract IndexEntry
-        │     remove_page_data + insert_page_data in one transaction
-        │   Update fingerprints for changed files
-        │   └── Send IndexComplete to UI
-        │
-        ├── recv(IndexRequest::FullRebuild)
-        │   Invalidate all fingerprints → run_incremental()
-        │   Prune orphaned page_access rows
-        │   └── Send IndexComplete to UI
-        │
-        └── recv(IndexRequest::Shutdown) → break
-```
-
-**Single SQLite connection:** The indexer thread owns one read-write connection for its entire lifetime. No connection churn, no WAL checkpoint storms. The UI thread holds a separate read-only connection for queries (WAL mode allows concurrent readers).
-
-### File Watcher → Indexer Pipeline
-
-The file watcher detects changes on disk. The UI thread debounces them and forwards batches to the indexer:
-
-```text
-File Watcher (OS thread)
-    │
-    │  FileEvent::Modified("pages/rust-notes.md")
-    │  FileEvent::Modified("pages/rust-notes.md")  ← duplicate from rename
-    │  FileEvent::Created("journal/2026-03-06.md")
-    │
-    ▼
-UI Thread: poll_file_events()
-    │
-    │  Drains watcher_rx (non-blocking)
-    │  Filters: only .md files in pages/ or journal/
-    │  Deduplicates by path
-    │  Debounces: waits 300ms of quiet before sending
-    │
-    ▼
-Indexer Thread (via channel)
-    │
-    │  IncrementalBatch(["pages/rust-notes.md", "journal/2026-03-06.md"])
-    │
-    ▼
-SQLite index updated
-```
-
-**Debouncing:** File saves (especially atomic write→fsync→rename) generate 2-3 events per file. The UI thread collects events into a pending set and starts a 300ms timer. If more events arrive within 300ms, the timer resets. When 300ms of quiet passes, the batch is sent to the indexer. This matches the autosave debounce window.
-
-**Self-triggering on save:** When `save_current()` writes a file to disk, the file watcher picks it up → UI debounces → indexer re-indexes that page. No special "update index after save" code in the save path. The file watcher is the single source of truth for all disk changes.
-
-**External changes:** `git checkout`, manual edits, Syncthing sync — all produce file events that flow through the same pipeline. The editor gets a consistent, always-up-to-date index without polling.
-
-**`:rebuild-index`:** Sends `IndexRequest::FullRebuild` to the indexer thread. The UI shows `⟳` and returns immediately. The indexer invalidates all fingerprints (forcing a full re-scan), prunes orphaned `page_access` rows, and sends `IndexComplete` when done. Same UX as startup indexing, but user-triggered.
-
-### Fingerprint Cache
-
-The index stores `(path, mtime_secs, size_bytes)` for each indexed file. On startup, the indexer `stat()`s each file (fast — no content read) and compares against stored fingerprints. Only files with changed mtime or size are re-read. For the common "nothing changed" case, startup goes from reading 1050 files to 1050 `stat()` calls — typically <10ms.
-
-### Parallel Reads
-
-Changed files are read and parsed concurrently using `rayon::par_iter()`. This mitigates NTFS per-file overhead on Windows where sequential small-file reads are slow. On a 4-core machine, 4 files are read simultaneously.
-
-### Batched Writes
-
-All SQLite mutations happen in a single `BEGIN ... COMMIT` transaction. This turns N fsyncs into 1, which is the largest SQLite bulk-insert optimization (~100x for 1000+ rows).
-
-### Graceful Degradation
-
-While the indexer runs, the editor is fully usable. Features that depend on the index (backlinks, unlinked mentions, agenda, tag queries) return empty results gracefully. Features that read files directly (find page, search, buffer editing) work immediately. The status bar shows `⟳` while indexing and a brief "Index ready" notification on completion.
-
-### Communication Pattern
-
-All inter-thread communication uses `crossbeam` channels (bounded, lock-free):
-
-- **Input → UI**: Iced/winit delivers keyboard and mouse events on the UI thread via its subscription model
-- **UI → Disk Writer**: `Sender<WriteRequest>` — debounced auto-save and explicit `:w` both route here
-- **Disk Writer → UI**: `Sender<WriteComplete>` — ack with mtime/size fingerprint after each successful write
-- **UI → Indexer**: `Sender<IndexRequest>` — `FullRebuild`, `IncrementalBatch(paths)`, `Shutdown`
-- **Indexer → UI**: `Sender<IndexComplete>` — completion notification with timing
-- **File Watcher → UI**: `Receiver<FileEvent>` — debounced, forwarded to indexer
-- **MCP Server → UI**: `Sender<McpEditRequest>` — edit requests applied to the shared rope buffer; results sent back via a one-shot channel
-- **No shared mutable state** — threads communicate exclusively via channels
-- **SQLite access** — the indexer thread owns the read-write connection; the UI thread holds a separate read-only connection (SQLite WAL mode supports concurrent readers)
-
-### Event-Driven Rendering
-
-The GUI event loop uses `crossbeam::select!` to block until **any** channel fires or a timer expires — no polling, no frame-budget spinning. The loop renders only when state changes, sleeps with zero CPU cost between events, and wakes with sub-millisecond latency on any channel input. Timeouts are computed dynamically from active timers (notification expiry, which-key popup delay, file-event debounce).
-
-The core library has **zero dependency on any async runtime**. All concurrency is OS threads + channels. This keeps the dependency tree small, debugging straightforward, and latency predictable.
-
----
-
-## Data Safety
-
-- **Atomic writes**: The disk writer uses a write→fsync→rename pattern. Content is written to a temporary file, fsynced to disk, then atomically renamed over the target. A crash at any point leaves either the old or new file intact — never a half-written file.
-- **Auto-save**: Debounced at 300ms after last keystroke. Dirty-buffer indicator shown in the status bar (dot or [+] next to filename).
-- **Self-write detection**: When the file watcher reports a change to an open buffer, the editor first checks a recorded write fingerprint (mtime + size from `DiskWriter`'s ack channel) — a single `stat()` syscall with no file I/O. If the fingerprint matches, the event is from our own save and is skipped. If no fingerprint matches, the editor falls back to reading the file and comparing content. This two-tier approach (stat-first, read-only-if-needed) matches the pattern used by VS Code and Neovim.
-- **External file changes vs dirty buffer**: If the disk content *differs* from the buffer and the buffer has unsaved edits, Bloom shows a prompt: "File changed on disk. Reload (losing edits) or keep buffer version?" If the buffer is clean (no unsaved edits), Bloom silently reloads the new content. This handles `git checkout`, Syncthing sync, and manual external edits.
-
----
-
-## Keybinding Architecture
-
-1. **Platform shortcuts** (Cmd+S / Ctrl+S) — checked first, always work.
-2. **Vim grammar state machine** — checked second, handles modal editing.
-3. **Insert mode passthrough** — if in insert mode, character goes to buffer.
-4. **Which-key popup** — appears after timeout during pending key sequences.
-5. **User customization** — keymap config file (`~/bloom/keymap.toml`) for overrides.
-
----
-
-## Unicode and Filesystem Handling
-
-- **Unicode normalization**: All filenames and page title lookups use NFC normalization. This prevents macOS NFD decomposition issues with non-ASCII filenames (e.g., Japanese, accented characters).
-- **Diacritic-insensitive search**: Fuzzy matching normalizes diacritics — `cafe` matches `café`. Powered by `nucleo`'s Unicode-aware matching.
-- **Filename sanitization**: See [GOALS.md G3](GOALS.md#g3-uuid-based-stable-linking) for title→filename derivation rules.
-- **Symlinks**: Ignored in vault directories. Not followed, not indexed.
-- **Non-.md files**: Ignored outside `images/`. The file watcher and indexer only process `.md` files.
-
----
-
-## Unlinked Mentions Scaling
-
-Unlinked mentions (G5) use SQLite FTS5 full-text search — not a naive O(N×M) scan. Page titles are registered as search terms; the FTS5 index is updated by the indexer thread on file save. This scales to 10K+ pages with sub-millisecond query times.
-
----
-
-## Background Buffer Lifecycle
-
-Background buffers (created by MCP edits or background hint updates to files not open in the UI) are evicted from memory 60 seconds after their last edit, once saved to disk. This prevents unbounded memory growth from bulk operations.
+That is the core of Bloom's design.

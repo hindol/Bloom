@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>Bloom icon</title>
+  <g fill="none" stroke="#85b73a" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M7 50h24" stroke-width="5"/>
+    <path d="M33 31v18" stroke-width="5"/>
+    <path d="M39 50h18" stroke-width="5"/>
+  </g>
+  <path
+    fill="#85b73a"
+    d="M31 31c-7-13-17-16-23-15 2 10 10 16 23 16z"
+  />
+  <path
+    fill="#85b73a"
+    d="M33 31c7-13 17-16 23-15-2 10-10 16-23 16z"
+  />
+</svg>

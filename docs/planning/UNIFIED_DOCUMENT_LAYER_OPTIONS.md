@@ -21,7 +21,7 @@ See also:
 
 - `UNIFIED_DOCUMENT_LAYER.md`
 - `UNIFIED_DOCUMENT_LAYER_ARCHITECTURE.md`
-- `BLOCK_ID_METADATA.md`
+- the superseded block-ID-metadata branch
 - `../ARCHITECTURE.md`
 - `../UNIFIED_BUFFER.md`
 
@@ -260,4 +260,3 @@ Option A is the best fit.
 The strongest current recommendation is:
 
 > do **not** push Bloom Markdown semantics down into `bloom-buffer`; instead, establish a proper document-model owner above it and let that become the home for parser-aware structural editing.
-

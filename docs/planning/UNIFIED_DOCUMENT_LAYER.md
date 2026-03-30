@@ -9,8 +9,8 @@
 
 Current recommendation:
 
-- keep this work in `docs/lab/` for now
-- treat `BLOCK_ID_METADATA.md` as superseded as the primary direction
+- keep this work in `docs/planning/` for now
+- treat the older block-ID-metadata branch as superseded as the primary direction
 - do not promote this topic into `docs/` until there is a tighter implementation-facing spec for ownership, undo, parser invalidation, and cross-document boundaries
 
 Why:
@@ -48,7 +48,7 @@ Example:
 
 ### Why it may matter
 
-The current direction in `BLOCK_ID_METADATA.md` feels too metadata-centric.
+The current direction in the older block-ID-metadata branch feels too metadata-centric.
 
 It appears to separate:
 
@@ -180,7 +180,7 @@ However, the scope is large enough that it should only advance after architect r
 Initial open questions:
 
 - Is the real need a new document layer, or just better coordination between existing layers?
-- Is `BLOCK_ID_METADATA.md` wrong in principle, or just too narrow?
+- Is the older block-ID-metadata branch wrong in principle, or just too narrow?
 - Should this be framed as a block-ID redesign, or as a larger document-model redesign?
 - How much writable external-editor support is truly worth preserving if it complicates the source-of-truth model?
 - Can file-serialized metadata stay understandable enough for humans while still supporting strong structural semantics?
@@ -200,7 +200,7 @@ If this idea moves forward, the next artifact should likely be:
 
 This idea should be evaluated against:
 
-- `docs/lab/BLOCK_ID_METADATA.md`
+- the older block-ID-metadata branch
 - `docs/BLOCK_IDENTITY.md`
 - `docs/PARSE_TREE.md`
 - `docs/UNIFIED_BUFFER.md`
@@ -209,5 +209,5 @@ This idea should be evaluated against:
 
 Current observation:
 
-- the repo already has a stronger "document owner" direction than `BLOCK_ID_METADATA.md` alone suggests
+- the repo already has a stronger "document owner" direction than the older block-ID-metadata branch alone suggests
 - the main unresolved question is boundary placement, not whether parser-backed structure matters

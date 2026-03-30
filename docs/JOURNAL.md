@@ -1,251 +1,137 @@
-# Journal 📓
+<h1><img src="../crates/bloom-gui/icons/icon_cutout.svg" alt="Bloom icon" width="26" valign="middle" /> Bloom Journal</h1>
 
-> Daily journal files in `journal/`, navigated by time with a rich scrubber panel.
-> Status: **Implemented** — core features shipped, calendar and scrubber live.
-> See also: [HISTORY.md](HISTORY.md) for git-backed history.
+> The journal is Bloom's default capture surface: one file per day, quick to open, quick to append to, and navigated by time rather than topic.
 
----
+Bloom treats the journal as the place you write before you know exactly where something belongs. That matters. A lot of notes are born as scraps, tasks, half-decided thoughts, or references you do not want to file correctly on first contact. The journal absorbs that friction.
 
-## The Problem
+## The Journal Loop
 
-Today Bloom creates one file per day in `journal/`: `2026-03-08.md`, `2026-03-09.md`, etc. This has two problems:
-
-1. **Date-named files are meaningless in a picker.** `SPC f f` shows "2026-03-08" alongside "Text Editor Theory" — one evokes an idea, the other evokes nothing. Journal files pollute the page namespace with noise.
-
-2. **Users think about files instead of writing.** "Which daily file was that thought in?" is the wrong question. You should be thinking about *when* or *what*, not *which file*.
-
----
-
-## The Design
-
-### One File Per Day (unchanged from G14)
-
-The journal file layout stays the same as [GOALS.md G14](../GOALS.md):
-
+```mermaid
+flowchart LR
+    T["Open Today<br/>SPC j t"] --> A["Append Fast<br/>SPC j a / journal task"]
+    A --> N["Navigate by Date<br/>previous / next journal day"]
+    N --> C["Jump with Calendar<br/>SPC j c"]
 ```
+
+The journal should feel lighter than page management. Capture first. Sort it out later with links, page extraction, and refactoring.
+
+## What the Journal Is
+
+- one Markdown file per day in `journal/`
+- regular Bloom content with links, tags, tasks, and IDs
+- navigated primarily by date, not by page title
+- available from anywhere through quick capture
+
+That combination is the point. The journal is not a separate mode with a separate file format. It is just the friendliest place to start writing.
+
+## File Shape
+
+Bloom keeps the journal physically simple:
+
+```text
 ~/bloom/
 ├── journal/
-│   ├── 2026-03-09.md       ← today
+│   ├── 2026-03-09.md
 │   ├── 2026-03-08.md
-│   ├── 2026-03-06.md       ← March 7 had no entries, no file
+│   ├── 2026-03-06.md
 │   └── ...
 ├── pages/
 └── ...
 ```
 
-- `SPC j t` opens today's journal. Created lazily — the file appears only after the first edit triggers auto-save.
-- After midnight, `SPC j t` targets the new date.
-- Journal pages are regular Bloom pages with frontmatter, UUID, and full link/tag/task support.
+Files are created lazily. Opening today's journal can create the buffer in memory before anything is written to disk. The file appears once normal save or autosave conditions are met.
 
-### Picker Hierarchy
+## Entry Points
 
-Three entry points into one picker component, differing only in scope:
+| Action | What It Does |
+| --- | --- |
+| `SPC j t` | Open today's journal |
+| `SPC j a` | Quick-append a note to today's journal |
+| journal task action | Quick-append a task to today's journal |
+| `SPC j j` | Open the journal picker |
+| `SPC j c` | Open the journal calendar |
 
-| Keybinding | Scope | Shows |
-|-----------|-------|-------|
-| `SPC f f` | All files | Pages + journal entries |
-| `SPC p p` | Pages only | Named pages in `pages/` |
-| `SPC j j` | Journal only | Journal entries in `journal/`, newest first |
+Those commands are deliberately redundant in a good way. Sometimes you want today's page. Sometimes you want a quick append without leaving context. Sometimes you want to browse the journal as a time surface.
 
-`SPC p p` and `SPC j j` are pre-filtered views of the same picker that powers `SPC f f`.
+## Navigation by Time
 
-### Quick Capture and Direct Access
+The journal is one of the clearest places where Bloom chooses *time* over *filename* as the main organizing principle.
 
-| Keybinding | Action |
-|-----------|--------|
-| `SPC j t` | Open today's journal (t = today) |
-| `SPC j a` | Quick-append a line to today's journal (without leaving current buffer) |
-| `SPC x a` | Quick-append a task to today's journal |
-| `SPC j c` | Open journal calendar |
+### Today
 
----
+`SPC j t` opens today's journal and puts Bloom into journal mode for that surface.
 
-## Navigation
+### Journal Picker
 
-The journal is navigated by **time**, not by filename. Two mechanisms:
+`SPC j j` opens the journal picker: the same general picker machinery, but scoped to journal entries.
 
-### Flow
+### Calendar Jump
 
-```
-SPC j t → journal/2026-03-09.md (today, editable, JRNL mode)
-           │
-           [d / ]d  →  prev / next journal day (skip empty days)
-           │
-           scrubber panel appears (3-line, auto-hides after 3s)
-           │
-           SPC j c  →  journal calendar (month grid overlay)
-           │
-           h/l/j/k navigate calendar, [d/]d skip to journal days
-           Enter    →  open that day, Esc → restore original page
+`SPC j c` opens a date picker for jumping directly to a journal day. This is not just a static calendar image in the docs - Bloom really wires the command through `OpenDatePicker(JumpToJournal)`.
 
-SPC j j → journal picker (search/browse all journal entries)
-```
+### Day-to-Day Navigation
 
-### Day-Hopping (`[d` / `]d`)
+Once you are in journal mode, Bloom tracks the most recently viewed journal date and supports quick temporal navigation from there. The point is to move through writing sessions as sessions, not as filenames in a directory listing.
 
-Vim-style bracket motions hop to the previous/next day **that has a journal file** — empty days are skipped. The scrubber panel appears showing adjacent days with stats:
+## Journal Mode
 
-<div style="font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.5; background: #141414; color: #EBE9E7; border-radius: 6px; overflow: hidden; max-width: 680px; margin: 16px 0;">
-  <!-- Journal content -->
-  <div style="padding: 8px 16px;">
-    <div><span style="color: #EBE9E7;">- </span>Explored ropey crate for buffer model</div>
-    <div><span style="color: #EBE9E7;">- </span>Read about Xi Editor architecture</div>
-    <div><span style="color: #EBE9E7;">- </span><span style="color: #F2DA61;">[ ]</span> Review gap buffer tradeoffs <span style="color: #A3A3A3;">@due</span><span style="color: #A3A3A3; opacity: 0.5;">(</span>03-10<span style="color: #A3A3A3; opacity: 0.5;">)</span></div>
-    <div><span style="color: #EBE9E7;">- </span><span style="color: #62C554; text-decoration: line-through;">[x]</span><span style="color: #A3A3A3; text-decoration: line-through;"> Compare with PieceTable</span></div>
-    <div><span style="color: #A3A3A3;">#rust #editors #data-structures</span></div>
-    <div>&nbsp;</div>
-  </div>
-  <!-- Separator -->
-  <div style="padding: 0 16px; color: #37373E; letter-spacing: 2px; font-size: 10px;">┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄</div>
-  <!-- Scrubber (3 lines, buffer background) -->
-  <div style="padding: 4px 16px;">
-    <div style="display: flex;">
-      <div style="flex: 1; color: #A3A3A3;"><span style="opacity: 0.7;">◄</span> Mar 6 Thu</div>
-      <div style="flex: 1;"><span style="color: #F4BF4F;">▸</span> <span style="color: #EBE9E7; font-weight: bold;">Mar 8 Sat</span></div>
-      <div style="flex: 1; color: #A3A3A3;">Mar 12 Wed <span style="opacity: 0.7;">►</span></div>
-    </div>
-    <div style="display: flex;">
-      <div style="flex: 1; color: #A3A3A3;">2 items · #rust</div>
-      <div style="flex: 1; color: #EBE9E7;">5 items · #rust #editors</div>
-      <div style="flex: 1; color: #A3A3A3;">2 items</div>
-    </div>
-    <div style="display: flex;">
-      <div style="flex: 1; color: #A3A3A3;"><span style="color: #A3A3A3;">[ ]</span> Read DDIA chapter</div>
-      <div style="flex: 1; color: #EBE9E7;"><span style="color: #F2DA61;">[ ]</span> Review gap buffer</div>
-      <div style="flex: 1; color: #A3A3A3;"><span style="color: #A3A3A3;">[x]</span> Write blog post</div>
-    </div>
-  </div>
-  <!-- Separator -->
-  <div style="padding: 0 16px; color: #37373E; letter-spacing: 2px; font-size: 10px;">┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄</div>
-  <!-- Status bar -->
-  <div style="background: #212228; padding: 3px 16px; display: flex; justify-content: space-between; font-size: 12px;">
-    <div>
-      <span style="background: #F2DA61; color: #141414; font-weight: bold; padding: 0 4px;">JRNL</span>
-      <span style="color: #37373E;"> │ </span>
-      <span style="color: #EBE9E7;">2026-03-08</span>
-    </div>
-    <div style="color: #A3A3A3;">↵:calendar  [d/]d</div>
-  </div>
-</div>
+Bloom keeps a lightweight notion of "journal mode" while you are moving through journal time.
 
-**Scrubber panel** (3 lines + separator lines):
-- **Line 1:** Date labels — prev ◄, current ▸ (bold), next ►
-- **Line 2:** Stats — item count + up to 3 unique tags
-- **Line 3:** First unchecked task (or first body line)
-- Uses buffer background with faded `┄` separator lines
-- **Auto-hides after 3 seconds** of no journal navigation
+That buys two useful behaviors:
 
-| Key | Action |
-|-----|--------|
-| `]d` | Jump to next day with a journal |
-| `[d` | Jump to previous day with a journal |
-| `j` / `k` | Scroll within the current day |
-| `SPC j c` | Open journal calendar |
+- a `JRNL` badge in the status area
+- a context strip that appears after journal navigation and auto-hides after a short pause
 
-`[d` / `]d` work from any buffer — they open the journal for the day before/after the **most recently viewed journal day** (defaulting to today if no journal has been viewed this session).
+The strip is a good example of Bloom's preferred UI style. It gives you orientation when you are moving quickly, then gets out of the way.
 
-### Journal Calendar (`SPC j c`)
+## Quick Capture
 
-The calendar grid allows spatial date navigation. Opens as a centered overlay. Navigating the calendar loads journal files into the buffer as a live preview — the editor content behind the calendar updates as you move.
+Quick capture is what makes the journal feel like an inbox instead of a special page you have to visit ceremonially.
 
-<div style="font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.5; background: #141414; color: #EBE9E7; border-radius: 6px; overflow: hidden; max-width: 680px; margin: 16px 0;">
-  <!-- Editor content (live preview of selected day) -->
-  <div style="padding: 12px 16px;">
-    <div><span style="color: #EBE9E7;">- </span>Explored ropey crate for buffer model</div>
-    <div><span style="color: #EBE9E7;">- </span><span style="color: #F2DA61;">[ ]</span> Review gap buffer tradeoffs</div>
-    <div><span style="color: #A3A3A3;">#rust #editors</span></div>
-    <div>&nbsp;</div>
-  </div>
-  <!-- Calendar grid overlay -->
-  <div style="border: 1px solid #37373E; margin: 0 auto; max-width: 280px; padding: 8px 12px; background: #141414;">
-    <div style="text-align: center; margin-bottom: 6px;">
-      <span style="color: #EBE9E7; font-weight: bold;">March 2026</span>
-    </div>
-    <div style="color: #A3A3A3; text-align: center; font-size: 12px;">
-      <div style="margin-bottom: 2px;">Mo Tu We Th Fr Sa Su</div>
-      <div>                              <span style="color: #EBE9E7;">1</span></div>
-      <div> 2  3  4  5 <span style="color: #F4BF4F;">◆</span><span style="color: #EBE9E7;">6</span>  7 <span style="background: #F4BF4F; color: #141414; font-weight: bold; padding: 0 2px;">◆ 8</span></div>
-      <div> 9 10 11 <span style="color: #F4BF4F;">◆</span><span style="color: #EBE9E7;">12</span> 13 14 15</div>
-      <div>16 17 18 19 20 21 22</div>
-      <div>23 24 25 <span style="color: #F4BF4F;">◆</span><span style="color: #EBE9E7;">26</span> 27 28 29</div>
-      <div>30 31</div>
-    </div>
-    <div style="text-align: center; margin-top: 6px; color: #A3A3A3; font-size: 11px;">3 entries  [d/]d:skip  ↵:open</div>
-  </div>
-  <!-- Status bar -->
-  <div style="background: #212228; padding: 3px 16px; display: flex; justify-content: space-between; font-size: 12px; margin-top: 8px;">
-    <div>
-      <span style="background: #F2DA61; color: #141414; font-weight: bold; padding: 0 4px;">JRNL</span>
-      <span style="color: #37373E;"> │ </span>
-      <span style="color: #EBE9E7;">2026-03-08</span>
-    </div>
-    <div style="color: #A3A3A3;">h/l j/k H/L  ↵:open  Esc:close</div>
-  </div>
-</div>
+The important property is not just that you *can* append to today's journal. It is that you can do so without dismantling your current working context first. A thought, task, or link can be dropped into today's page and you can keep going.
 
-- Selected day shown with `salient` background (inverse highlight)
-- `◆` = days with a journal file
-- Navigating the calendar **loads journal files as live preview** in the editor behind the overlay
-- `Enter` confirms — keeps the buffer open, enters JRNL mode. Preview buffers for other days are silently closed.
-- `Esc` cancels — closes all preview buffers, restores the original page.
+That is a small interaction with big consequences. It lowers the cost of capture, and low capture cost is what keeps the journal useful.
 
-| Key | Action |
-|-----|--------|
-| `h` / `l` | Previous / next day |
-| `j` / `k` | Next / previous week |
-| `H` / `L` | Previous / next month |
-| `[d` / `]d` | Skip to previous / next day with a journal |
-| `Enter` | Open journal for selected day (confirms preview) |
-| `q` / `Esc` | Close calendar (reverts to original page) |
+## Journal vs Pages
 
----
+Bloom wants the distinction to be intuitive:
 
-## JRNL Mode
+| Surface | Navigate By | Best For |
+| --- | --- | --- |
+| `pages/` | name and topic | durable ideas, reference pages, structured notes |
+| `journal/` | date and sequence | capture, daily work, rough thoughts, task flow |
 
-When the user enters journal navigation via `SPC j t`, `[d`/`]d`, or calendar Enter:
+This is why the journal belongs in the same vault but not in the same mental bucket.
 
-- Status bar shows `JRNL` mode badge with `accent_yellow` background (badge only, not full bar)
-- Right-aligned hints: `↵:calendar  [d/]d`
-- Mode is cleared when navigating to a non-journal page
-- Scrubber panel appears on navigation, auto-hides after 3 seconds
+## How It Connects to the Rest of Bloom
 
----
+The journal is not a cul-de-sac. It connects directly to the rest of the editor:
 
-## Journal + Pages: Separate Namespaces
+- links created in journal entries participate in timelines and backlinks
+- tasks written in journal pages show up in agenda-style views
+- journal pages can be navigated through the picker like the rest of the vault
+- journal notes can later be split, linked, or promoted into named pages
 
-| Namespace | Contents | Picker | Navigation | Index |
-|-----------|----------|--------|------------|-------|
-| **All files** | Everything | `SPC f f` | — | Full |
-| **Pages** (`pages/`) | Named ideas with identity | `SPC p p` | — | Full |
-| **Journal** (`journal/`) | Daily stream, temporal | `SPC j j` | `SPC j c` (calendar), `[d`/`]d` | Full |
+The journal is therefore not "temporary writing." It is often the front door to more permanent structure.
 
-Pages are things you navigate by *name*. The journal is something you navigate by *time*. The "all files" picker is for when you don't care which namespace — search everything.
+## What This Doc Does Not Pretend
 
----
+The older version tried to freeze every wireframe and every possible interaction in one place. That made the doc longer, but not more trustworthy.
 
-## BQL Integration
+The useful current truth is simpler:
 
-The `journal` source in BQL targets the journal namespace:
+- daily journal files are real
+- quick capture is real
+- journal picker and calendar jump are real
+- journal mode and the auto-hiding context strip are real
 
-```
-journal | where date = today                          -- today's journal
-journal | where date this week                        -- this week's entries
-blocks  | where page in $journal | where tags has "rust"  -- all journal blocks tagged #rust
-tasks   | where page in $journal | where not done     -- open tasks from any journal day
-```
+That is enough to explain why the journal matters without turning the document into a UX archaeology dig.
 
-`$journal` is a context variable representing the journal namespace (all files in `journal/`).
+## Related Documents
 
----
-
-## Open Questions
-
-1. **Linking to journal entries.** If a page wants to reference "what I wrote on March 8", how? The journal file has a UUID — you can link by UUID as with any page. But the user doesn't know the UUID. Maybe: `[[journal:2026-03-08]]` as a special link syntax that resolves to the UUID? Or rely on the existing `[[` picker with a journal filter?
-
----
-
-## References
-
-- Current design: [GOALS.md G14](GOALS.md) (Daily Journal)
-- [HISTORY.md](HISTORY.md) — git-backed history, context strip component, calendar
-- [BLOCK_IDENTITY.md](BLOCK_IDENTITY.md) — stable IDs for task actions
+| Document | Why It Matters Here |
+| --- | --- |
+| [GOALS.md](GOALS.md) | The journal's role in Bloom's product shape |
+| [HISTORY.md](HISTORY.md) | Time-based navigation beyond the current day |
+| [WINDOW_LAYOUTS.md](WINDOW_LAYOUTS.md) | Where journal-adjacent surfaces sit in the layout model |
+| [USE_CASES.md](USE_CASES.md) | Acceptance criteria for journal behavior |

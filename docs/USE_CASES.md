@@ -1,7 +1,7 @@
 # Bloom 🌱 — Use Cases
 
 > Every user-facing scenario in Bloom, written as testable acceptance criteria.
-> See [GOALS.md](../GOALS.md) for goals, [KEYBINDINGS.md](../KEYBINDINGS.md) for keybinding reference.
+> See [GOALS.md](GOALS.md) for goals, [KEYBINDINGS.md](KEYBINDINGS.md) for keybinding reference.
 >
 > **Development approach:** Code is built to satisfy these use cases. Each UC maps to one or more automated tests via `SimInput` + `TestScreen` in `crates/bloom-core/tests/e2e.rs`. The `Verifies:` line traces each UC back to a goal or architectural property.
 >
@@ -1153,6 +1153,6 @@ Verifies: ARCHITECTURE
 
 | Document | Contents |
 |----------|----------|
-| [GOALS.md](../GOALS.md) | Goals and non-goals that these use cases verify |
-| [KEYBINDINGS.md](../KEYBINDINGS.md) | Keybinding reference |
-| [PICKER_SURFACES.md](../PICKER_SURFACES.md) | Picker wireframes |
+| [GOALS.md](GOALS.md) | Goals and non-goals that these use cases verify |
+| [KEYBINDINGS.md](KEYBINDINGS.md) | Keybinding reference |
+| [PICKER_SURFACES.md](PICKER_SURFACES.md) | Picker wireframes |
