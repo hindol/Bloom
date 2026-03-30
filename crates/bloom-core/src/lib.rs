@@ -435,13 +435,18 @@ pub enum BufferMessage {
     Reload {
         page_id: types::PageId,
         content: String,
+        cursor_policy: document::CursorPolicy,
     },
     /// Run auto-alignment on entire page.
-    AlignPage { page_id: types::PageId },
+    AlignPage {
+        page_id: types::PageId,
+        cursor_policy: document::CursorPolicy,
+    },
     /// Run auto-alignment on specific block.
     AlignBlock {
         page_id: types::PageId,
         cursor_line: usize,
+        cursor_policy: document::CursorPolicy,
     },
     /// Ensure block IDs are assigned.
     EnsureBlockIds { page_id: types::PageId },
@@ -589,7 +594,11 @@ impl BufferWriter {
                 self.buffer_mgr.open_read_only(&page_id, &title, &content);
                 true
             }
-            BufferMessage::Reload { page_id, content } => {
+            BufferMessage::Reload {
+                page_id,
+                content,
+                cursor_policy,
+            } => {
                 let is_markdown = self
                     .buffer_mgr
                     .info(&page_id)
@@ -598,26 +607,30 @@ impl BufferWriter {
                     return false;
                 };
                 if is_markdown {
-                    doc.reload_from_disk_markdown(&content);
+                    doc.reload_from_disk_markdown(&content, cursor_policy);
                 } else {
-                    doc.reload(&content);
+                    doc.reload(&content, cursor_policy);
                 }
                 true
             }
-            BufferMessage::AlignPage { page_id } => {
-                let Some(mut doc) = self.buffer_mgr.document_mut(&page_id) else {
-                    return false;
-                };
-                doc.align_page()
-            }
-            BufferMessage::AlignBlock {
+            BufferMessage::AlignPage {
                 page_id,
-                cursor_line,
+                cursor_policy,
             } => {
                 let Some(mut doc) = self.buffer_mgr.document_mut(&page_id) else {
                     return false;
                 };
-                doc.align_block(cursor_line)
+                doc.align_page(cursor_policy)
+            }
+            BufferMessage::AlignBlock {
+                page_id,
+                cursor_line,
+                cursor_policy,
+            } => {
+                let Some(mut doc) = self.buffer_mgr.document_mut(&page_id) else {
+                    return false;
+                };
+                doc.align_block(cursor_line, cursor_policy)
             }
             BufferMessage::EnsureBlockIds { page_id: _ } => {
                 // Block ID assignment needs the index — return false, handled by BloomEditor
@@ -1371,23 +1384,17 @@ impl BloomEditor {
                     .get(&page_id)
                     .is_some_and(|b| b.is_dirty());
                 if !is_dirty {
-                    let cursor_pos = self
+                    let cursor_policy = self
                         .writer
                         .buffers()
                         .get(&page_id)
-                        .map(|b| b.cursor(0))
-                        .unwrap_or(0);
+                        .map(|b| document::CursorPolicy::reanchor_to_cursor(b, 0))
+                        .unwrap_or(document::CursorPolicy::Explicit { idx: 0, pos: 0 });
                     self.writer.apply(crate::BufferMessage::Reload {
                         page_id: page_id.clone(),
                         content: pw.content.clone(),
+                        cursor_policy,
                     });
-                    let max_pos = self
-                        .writer
-                        .buffers()
-                        .get(&page_id)
-                        .map(|b| b.len_chars())
-                        .unwrap_or(0);
-                    self.set_cursor(cursor_pos.min(max_pos));
                     // Save via DiskWriter so the file matches the buffer
                     self.save_page(&page_id);
                 }
@@ -2001,6 +2008,56 @@ mod tests {
         editor.handle_key(KeyEvent::backspace());
         let buf = editor.writer.buffers().get(&id).unwrap();
         assert_eq!(buf.text().to_string(), "a");
+    }
+
+    #[test]
+    fn align_page_reanchors_cursor_by_line_and_column() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(
+            &id,
+            "Test",
+            std::path::Path::new("[scratch]"),
+            "- [ ] short @due(2026-03-05)\n- [ ] this task name is much longer @due(2026-03-10)\nthird line\n",
+        );
+
+        let line_start = editor
+            .writer
+            .buffers()
+            .get(&id)
+            .unwrap()
+            .text()
+            .line_to_char(2);
+        editor.set_cursor(line_start);
+        assert_eq!(editor.cursor_position(), (2, 0));
+
+        let cursor_policy = editor
+            .writer
+            .buffers()
+            .get(&id)
+            .map(|buf| document::CursorPolicy::reanchor_to_cursor(buf, 0))
+            .unwrap();
+        editor.writer.apply(BufferMessage::AlignPage {
+            page_id: id.clone(),
+            cursor_policy,
+        });
+
+        assert_eq!(
+            editor.cursor_position(),
+            (2, 0),
+            "align page should keep the cursor on the same logical line/column",
+        );
+        assert_eq!(
+            editor
+                .writer
+                .buffers()
+                .get(&id)
+                .unwrap()
+                .line(2)
+                .to_string(),
+            "third line\n",
+        );
     }
 
     // Insert mode arrow keys navigate without leaving insert

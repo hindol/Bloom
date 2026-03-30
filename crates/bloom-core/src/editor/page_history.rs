@@ -331,9 +331,21 @@ impl BloomEditor {
                         doc.restore_state(node_id, cursor_idx);
                     }
                 } else if let Some(content) = content {
+                    let cursor_policy = self
+                        .writer
+                        .buffers()
+                        .get(&page_id)
+                        .map(|buf| {
+                            crate::document::CursorPolicy::reanchor_to_cursor(
+                                buf,
+                                self.active_cursor_idx(),
+                            )
+                        })
+                        .unwrap_or(crate::document::CursorPolicy::Explicit { idx: 0, pos: 0 });
                     self.writer.apply(crate::BufferMessage::Reload {
                         page_id: page_id.clone(),
                         content,
+                        cursor_policy,
                     });
                 } else {
                     return;
@@ -415,5 +427,76 @@ fn canonical_block_line(line: &str, block_id: &str, is_mirror: bool) -> String {
         line.to_string()
     } else {
         format!("{line}{suffix}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn git_history_restore_reanchors_cursor_by_line_and_column() {
+        let config = crate::config::Config::defaults();
+        let mut editor = crate::BloomEditor::new(config).unwrap();
+        let page_id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(
+            &page_id,
+            "Test",
+            std::path::Path::new("[scratch]"),
+            "short\nkeep me here\n",
+        );
+
+        let line_start = editor
+            .writer
+            .buffers()
+            .get(&page_id)
+            .unwrap()
+            .text()
+            .line_to_char(1);
+        editor.set_cursor(line_start + 4);
+        assert_eq!(editor.cursor_position(), (1, 4));
+
+        editor.temporal_strip = Some(crate::TemporalStripState {
+            mode: crate::render::TemporalMode::PageHistory,
+            items: vec![crate::TemporalItem {
+                label: "older".into(),
+                detail: Some("git".into()),
+                kind: crate::render::StripNodeKind::GitCommit,
+                branch_count: 0,
+                content: Some("this line got much longer before restore\nkeep me here\n".into()),
+                undo_node_id: None,
+                git_oid: Some("abc123".into()),
+                skip: false,
+            }],
+            selected: 0,
+            compact: true,
+            page_id: page_id.clone(),
+            current_content: editor
+                .writer
+                .buffers()
+                .get(&page_id)
+                .unwrap()
+                .text()
+                .to_string(),
+            block_id: None,
+            block_line: None,
+        });
+
+        editor.temporal_strip_restore();
+
+        assert!(editor.temporal_strip.is_none());
+        assert_eq!(
+            editor
+                .writer
+                .buffers()
+                .get(&page_id)
+                .unwrap()
+                .text()
+                .to_string(),
+            "this line got much longer before restore\nkeep me here\n",
+        );
+        assert_eq!(
+            editor.cursor_position(),
+            (1, 4),
+            "git history restore should keep the cursor on the same logical line/column",
+        );
     }
 }

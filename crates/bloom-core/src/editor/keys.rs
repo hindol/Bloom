@@ -573,11 +573,25 @@ impl BloomEditor {
                             if selected == 0 {
                                 // Reload from disk
                                 if let Ok(content) = std::fs::read_to_string(&path) {
+                                    let cursor_policy = self
+                                        .writer
+                                        .buffers()
+                                        .get(&page_id)
+                                        .map(|buf| {
+                                            crate::document::CursorPolicy::reanchor_to_cursor(
+                                                buf,
+                                                self.active_cursor_idx(),
+                                            )
+                                        })
+                                        .unwrap_or(crate::document::CursorPolicy::Explicit {
+                                            idx: 0,
+                                            pos: 0,
+                                        });
                                     self.writer.apply(crate::BufferMessage::Reload {
                                         page_id: page_id.clone(),
                                         content,
+                                        cursor_policy,
                                     });
-                                    self.set_cursor(0);
                                 }
                             }
                             // selected == 1: keep buffer (do nothing)
@@ -1280,16 +1294,47 @@ impl BloomEditor {
                             match self.config.auto_align {
                                 config::AutoAlignMode::Page => {
                                     if let Some(page_id) = self.active_page().cloned() {
-                                        self.writer
-                                            .apply(crate::BufferMessage::AlignPage { page_id });
+                                        let cursor_policy = self
+                                            .writer
+                                            .buffers()
+                                            .get(&page_id)
+                                            .map(|buf| {
+                                                crate::document::CursorPolicy::reanchor_to_cursor(
+                                                    buf,
+                                                    self.active_cursor_idx(),
+                                                )
+                                            })
+                                            .unwrap_or(crate::document::CursorPolicy::Explicit {
+                                                idx: 0,
+                                                pos: 0,
+                                            });
+                                        self.writer.apply(crate::BufferMessage::AlignPage {
+                                            page_id,
+                                            cursor_policy,
+                                        });
                                     }
                                 }
                                 config::AutoAlignMode::Block => {
                                     let cursor_line = self.cursor_position().0;
                                     if let Some(page_id) = self.active_page().cloned() {
+                                        let cursor_policy = self
+                                            .writer
+                                            .buffers()
+                                            .get(&page_id)
+                                            .map(|buf| {
+                                                crate::document::CursorPolicy::reanchor_to_cursor(
+                                                    buf,
+                                                    self.active_cursor_idx(),
+                                                )
+                                            })
+                                            .unwrap_or(crate::document::CursorPolicy::Explicit {
+                                                idx: 0,
+                                                pos: 0,
+                                            });
                                         self.writer.apply(crate::BufferMessage::AlignBlock {
                                             page_id,
                                             cursor_line,
+                                            cursor_policy,
                                         });
                                     }
                                 }
@@ -1312,7 +1357,6 @@ impl BloomEditor {
                 if let Some(page_id) = self.active_page().cloned() {
                     if let Some(mut doc) = self.writer.buffers_mut().document_mut(&page_id) {
                         doc.restore_edit_group_checkpoint();
-                        self.set_cursor(0);
                     }
                 }
                 vec![keymap::dispatch::Action::Noop]

@@ -156,24 +156,17 @@ impl BloomEditor {
                         visual_changed = true;
                     } else {
                         // Clean buffer + disk differs → auto-reload
-                        // Preserve cursor position across reload.
-                        let cursor_pos = self
+                        let cursor_policy = self
                             .writer
                             .buffers()
                             .get(&page_id)
-                            .map(|b| b.cursor(0))
-                            .unwrap_or(0);
+                            .map(|b| crate::document::CursorPolicy::reanchor_to_cursor(b, 0))
+                            .unwrap_or(crate::document::CursorPolicy::Explicit { idx: 0, pos: 0 });
                         self.writer.apply(crate::BufferMessage::Reload {
                             page_id: page_id.clone(),
                             content: disk_content,
+                            cursor_policy,
                         });
-                        let max_pos = self
-                            .writer
-                            .buffers()
-                            .get(&page_id)
-                            .map(|b| b.len_chars())
-                            .unwrap_or(0);
-                        self.set_cursor(cursor_pos.min(max_pos));
                         visual_changed = true;
                     }
                 }

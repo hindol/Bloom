@@ -366,9 +366,14 @@ impl BloomEditor {
         if let Some(buf) = self.writer.buffers().get(&page_id) {
             let text = buf.text().to_string();
             if let Some(updated) = Self::replace_frontmatter_title(&text, &new_title) {
+                let cursor_policy = crate::document::CursorPolicy::reanchor_to_cursor(
+                    buf,
+                    self.active_cursor_idx(),
+                );
                 self.writer.apply(crate::BufferMessage::Reload {
                     page_id: page_id.clone(),
                     content: updated,
+                    cursor_policy,
                 });
             }
         }

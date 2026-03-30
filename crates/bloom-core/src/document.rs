@@ -64,9 +64,21 @@ impl DocumentState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CursorPolicy {
     Preserve,
-    Explicit { idx: usize, pos: usize },
-    CollapseToEditStart { idx: usize },
-    CollapseToEditEnd { idx: usize },
+    Explicit {
+        idx: usize,
+        pos: usize,
+    },
+    CollapseToEditStart {
+        idx: usize,
+    },
+    CollapseToEditEnd {
+        idx: usize,
+    },
+    ReanchorLineColumn {
+        idx: usize,
+        line: usize,
+        column: usize,
+    },
 }
 
 impl CursorPolicy {
@@ -84,17 +96,25 @@ impl CursorPolicy {
         }
     }
 
+    pub(crate) fn reanchor_to_cursor(buf: &bloom_buffer::Buffer, idx: usize) -> Self {
+        let cursor = buf.cursor(idx);
+        let (line, column) = line_column_for_char_pos(buf, cursor);
+        Self::ReanchorLineColumn { idx, line, column }
+    }
+
     fn undo_cursor_idx(self) -> usize {
         match self {
             Self::Preserve => 0,
             Self::Explicit { idx, .. }
             | Self::CollapseToEditStart { idx }
-            | Self::CollapseToEditEnd { idx } => idx,
+            | Self::CollapseToEditEnd { idx }
+            | Self::ReanchorLineColumn { idx, .. } => idx,
         }
     }
 
     fn resolved_position(
         self,
+        buf: &bloom_buffer::Buffer,
         range: &Range<usize>,
         replacement_len: usize,
     ) -> Option<(usize, usize)> {
@@ -103,6 +123,9 @@ impl CursorPolicy {
             Self::Explicit { idx, pos } => Some((idx, pos)),
             Self::CollapseToEditStart { idx } => Some((idx, range.start)),
             Self::CollapseToEditEnd { idx } => Some((idx, range.start + replacement_len)),
+            Self::ReanchorLineColumn { idx, line, column } => {
+                Some((idx, char_pos_for_line_column(buf, line, column)))
+            }
         }
     }
 }
@@ -203,9 +226,6 @@ impl<'a> DocumentMut<'a> {
 
     pub(crate) fn apply_edit(&mut self, request: EditRequest<'_>) -> bool {
         let replacement_len = request.replacement.chars().count();
-        let resolved_cursor = request
-            .cursor_policy
-            .resolved_position(&request.range, replacement_len);
         let shifted = {
             let buf = self.managed.slot.as_buffer();
             transform_entries(
@@ -237,7 +257,11 @@ impl<'a> DocumentMut<'a> {
                 );
             }
 
-            if let Some((idx, pos)) = resolved_cursor {
+            if let Some((idx, pos)) =
+                request
+                    .cursor_policy
+                    .resolved_position(buf, &request.range, replacement_len)
+            {
                 buf.ensure_cursors(idx + 1);
                 buf.set_cursor(idx, pos.min(buf.len_chars()));
             }
@@ -418,11 +442,12 @@ impl<'a> DocumentMut<'a> {
         true
     }
 
-    pub(crate) fn reload(&mut self, content: &str) {
+    pub(crate) fn reload(&mut self, content: &str, cursor_policy: CursorPolicy) {
         self.reload_clean_text(content);
+        self.apply_nonlocal_cursor_policy(cursor_policy);
     }
 
-    pub(crate) fn reload_from_disk_markdown(&mut self, content: &str) {
+    pub(crate) fn reload_from_disk_markdown(&mut self, content: &str, cursor_policy: CursorPolicy) {
         let (clean_text, mut state) = DocumentState::from_markdown_disk_text(content);
         replace_slot_with_text(&mut self.managed.slot, &clean_text);
         let current_node = self.managed.slot.as_buffer().current_undo_node();
@@ -430,9 +455,10 @@ impl<'a> DocumentMut<'a> {
             .block_id_history
             .insert(current_node, state.block_ids.clone());
         self.managed.document = state;
+        self.apply_nonlocal_cursor_policy(cursor_policy);
     }
 
-    pub(crate) fn align_page(&mut self) -> bool {
+    pub(crate) fn align_page(&mut self, cursor_policy: CursorPolicy) -> bool {
         let Some(before_node) = self.mutable_buffer().map(|buf| buf.current_undo_node()) else {
             return false;
         };
@@ -447,6 +473,7 @@ impl<'a> DocumentMut<'a> {
 
         let shifted = self.managed.document.block_ids.clone();
         self.reconcile_after_text_change(shifted, false, None);
+        self.apply_nonlocal_cursor_policy(cursor_policy);
         let after_node = self.managed.slot.as_buffer().current_undo_node();
         if after_node != before_node {
             self.capture_history_snapshot();
@@ -454,7 +481,7 @@ impl<'a> DocumentMut<'a> {
         true
     }
 
-    pub(crate) fn align_block(&mut self, cursor_line: usize) -> bool {
+    pub(crate) fn align_block(&mut self, cursor_line: usize, cursor_policy: CursorPolicy) -> bool {
         let Some(before_node) = self.mutable_buffer().map(|buf| buf.current_undo_node()) else {
             return false;
         };
@@ -469,6 +496,7 @@ impl<'a> DocumentMut<'a> {
 
         let shifted = self.managed.document.block_ids.clone();
         self.reconcile_after_text_change(shifted, false, None);
+        self.apply_nonlocal_cursor_policy(cursor_policy);
         let after_node = self.managed.slot.as_buffer().current_undo_node();
         if after_node != before_node {
             self.capture_history_snapshot();
@@ -576,6 +604,16 @@ impl<'a> DocumentMut<'a> {
         self.managed.document.block_ids =
             place_entries_in_blocks(shifted, &parsed.blocks, assign_missing, known_ids);
         self.managed.document.sort_block_ids();
+    }
+
+    fn apply_nonlocal_cursor_policy(&mut self, cursor_policy: CursorPolicy) {
+        let Some(buf) = self.mutable_buffer() else {
+            return;
+        };
+        if let Some((idx, pos)) = cursor_policy.resolved_position(buf, &(0..0), 0) {
+            buf.ensure_cursors(idx + 1);
+            buf.set_cursor(idx, pos.min(buf.len_chars()));
+        }
     }
 
     fn capture_history_snapshot(&mut self) {
@@ -857,33 +895,68 @@ fn char_pos_to_line(buf: &bloom_buffer::Buffer, pos: usize) -> usize {
     }
 }
 
+fn line_column_for_char_pos(buf: &bloom_buffer::Buffer, pos: usize) -> (usize, usize) {
+    if buf.len_chars() == 0 {
+        return (0, 0);
+    }
+    let clamped = pos.min(buf.len_chars().saturating_sub(1));
+    let line = buf.text().char_to_line(clamped);
+    let line_start = buf.text().line_to_char(line);
+    (line, clamped - line_start)
+}
+
+fn char_pos_for_line_column(buf: &bloom_buffer::Buffer, line: usize, column: usize) -> usize {
+    if buf.len_chars() == 0 {
+        return 0;
+    }
+    let last_line = buf.len_lines().saturating_sub(1);
+    let line_idx = line.min(last_line);
+    let line_start = buf.text().line_to_char(line_idx);
+    let line_text = buf.line(line_idx).to_string();
+    let line_len = line_text.trim_end_matches('\n').chars().count();
+    line_start + column.min(line_len)
+}
+
 #[cfg(test)]
 mod tests {
     use super::CursorPolicy;
+    use bloom_buffer::Buffer;
     use bloom_buffer::EditOp;
 
     #[test]
     fn collapse_to_edit_end_uses_replacement_length() {
-        let resolved = CursorPolicy::CollapseToEditEnd { idx: 2 }
-            .resolved_position(&(4..7), "abc".chars().count());
+        let buf = Buffer::from_text("");
+        let resolved = CursorPolicy::CollapseToEditEnd { idx: 2 }.resolved_position(
+            &buf,
+            &(4..7),
+            "abc".chars().count(),
+        );
         assert_eq!(resolved, Some((2, 7)));
     }
 
     #[test]
     fn collapse_to_edit_start_uses_range_start() {
-        let resolved = CursorPolicy::CollapseToEditStart { idx: 1 }.resolved_position(&(9..12), 5);
+        let buf = Buffer::from_text("");
+        let resolved =
+            CursorPolicy::CollapseToEditStart { idx: 1 }.resolved_position(&buf, &(9..12), 5);
         assert_eq!(resolved, Some((1, 9)));
     }
 
     #[test]
     fn explicit_policy_preserves_requested_position() {
-        let resolved = CursorPolicy::Explicit { idx: 3, pos: 14 }.resolved_position(&(2..2), 8);
+        let buf = Buffer::from_text("");
+        let resolved =
+            CursorPolicy::Explicit { idx: 3, pos: 14 }.resolved_position(&buf, &(2..2), 8);
         assert_eq!(resolved, Some((3, 14)));
     }
 
     #[test]
     fn preserve_policy_has_no_override() {
-        assert_eq!(CursorPolicy::Preserve.resolved_position(&(0..3), 1), None);
+        let buf = Buffer::from_text("");
+        assert_eq!(
+            CursorPolicy::Preserve.resolved_position(&buf, &(0..3), 1),
+            None
+        );
     }
 
     #[test]
@@ -923,5 +996,17 @@ mod tests {
             CursorPolicy::from_edit_op(&edit, 0),
             CursorPolicy::Explicit { idx: 0, pos: 12 }
         );
+    }
+
+    #[test]
+    fn reanchor_policy_clamps_to_available_column() {
+        let buf = Buffer::from_text("abc\nx\n");
+        let resolved = CursorPolicy::ReanchorLineColumn {
+            idx: 0,
+            line: 1,
+            column: 4,
+        }
+        .resolved_position(&buf, &(0..0), 0);
+        assert_eq!(resolved, Some((0, buf.text().line_to_char(1) + 1)));
     }
 }

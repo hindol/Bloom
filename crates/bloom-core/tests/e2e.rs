@@ -110,7 +110,7 @@ fn cursor_does_not_wrap_to_line_zero() {
     let mut sim = SimInput::with_content(content);
 
     // Go to last line
-    sim.keys("G");
+    sim.keys("8gg");
     let last = sim.screen(80, 24).cursor().0;
 
     // Press j 30 times — cursor must NEVER wrap to line 0
@@ -3082,6 +3082,43 @@ fn no_reload_dialog_after_self_save() {
         !all.contains("changed on disk") && !all.contains("Reload?"),
         "self-write should not trigger reload dialog, got: {}",
         all
+    );
+}
+
+#[test]
+fn clean_reload_reanchors_cursor_by_line_and_column() {
+    let vault = TestVault::new()
+        .page("Test")
+        .with_content("one\nkeep me here\nthree\n")
+        .build();
+    let page_path = vault.root().join("pages/test.md");
+    let mut sim = SimInput::with_vault(vault);
+
+    sim.keys("SPC p p");
+    sim.type_text("Test");
+    sim.keys("Enter");
+
+    sim.keys("jllll");
+    let before = sim.screen(80, 24).cursor();
+    assert_eq!(before, (1, 4), "expected to land on line 2, column 4");
+
+    let original = std::fs::read_to_string(&page_path).unwrap();
+    let (frontmatter, _) = original.split_once("\n---\n").unwrap();
+    std::fs::write(
+        &page_path,
+        format!(
+            "{frontmatter}\n---\n\nthis line got much longer before reload\nkeep me here\nthree\n"
+        ),
+    )
+    .unwrap();
+
+    sim.tick(500);
+
+    let after = sim.screen(80, 24).cursor();
+    assert_eq!(
+        after, before,
+        "clean reload should preserve logical line/column, got {:?} from {:?}",
+        after, before
     );
 }
 
