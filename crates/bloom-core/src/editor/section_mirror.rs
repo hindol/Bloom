@@ -233,7 +233,7 @@ impl BloomEditor {
         lines_to_remove.reverse();
         for line_idx in lines_to_remove {
             if let Some(mut doc) = self.writer.buffers_mut().document_mut(peer_id) {
-                if doc.delete_line(line_idx, crate::document::CursorUpdate::Preserve) {
+                if doc.delete_line(line_idx, crate::document::CursorPolicy::Preserve) {
                     self.refresh_parse_tree(peer_id);
                 }
             }
@@ -316,7 +316,7 @@ impl BloomEditor {
                 if doc.insert_at(
                     insert_char_pos,
                     &block_text,
-                    crate::document::CursorUpdate::Preserve,
+                    crate::document::CursorPolicy::Preserve,
                 ) {
                     let _ = doc.set_block_id_at_line(inserted_line, insert_bid.clone(), true);
                     self.refresh_parse_tree(peer_id);

@@ -60,15 +60,57 @@ impl DocumentState {
     }
 }
 
-pub(crate) enum CursorUpdate {
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CursorPolicy {
     Preserve,
-    Set { idx: usize, pos: usize },
+    Explicit { idx: usize, pos: usize },
+    CollapseToEditStart { idx: usize },
+    CollapseToEditEnd { idx: usize },
+}
+
+impl CursorPolicy {
+    pub(crate) fn from_edit_op(edit: &bloom_buffer::EditOp, idx: usize) -> Self {
+        let replacement_len = edit.replacement.chars().count();
+        if edit.cursor_after == edit.range.start {
+            Self::CollapseToEditStart { idx }
+        } else if edit.cursor_after == edit.range.start + replacement_len {
+            Self::CollapseToEditEnd { idx }
+        } else {
+            Self::Explicit {
+                idx,
+                pos: edit.cursor_after,
+            }
+        }
+    }
+
+    fn undo_cursor_idx(self) -> usize {
+        match self {
+            Self::Preserve => 0,
+            Self::Explicit { idx, .. }
+            | Self::CollapseToEditStart { idx }
+            | Self::CollapseToEditEnd { idx } => idx,
+        }
+    }
+
+    fn resolved_position(
+        self,
+        range: &Range<usize>,
+        replacement_len: usize,
+    ) -> Option<(usize, usize)> {
+        match self {
+            Self::Preserve => None,
+            Self::Explicit { idx, pos } => Some((idx, pos)),
+            Self::CollapseToEditStart { idx } => Some((idx, range.start)),
+            Self::CollapseToEditEnd { idx } => Some((idx, range.start + replacement_len)),
+        }
+    }
 }
 
 pub(crate) struct EditRequest<'a> {
     pub range: Range<usize>,
     pub replacement: &'a str,
-    pub cursor: CursorUpdate,
+    pub cursor_policy: CursorPolicy,
 }
 
 pub(crate) struct Document<'a> {
@@ -160,6 +202,10 @@ impl<'a> DocumentMut<'a> {
     }
 
     pub(crate) fn apply_edit(&mut self, request: EditRequest<'_>) -> bool {
+        let replacement_len = request.replacement.chars().count();
+        let resolved_cursor = request
+            .cursor_policy
+            .resolved_position(&request.range, replacement_len);
         let shifted = {
             let buf = self.managed.slot.as_buffer();
             transform_entries(
@@ -170,10 +216,7 @@ impl<'a> DocumentMut<'a> {
             )
         };
 
-        let undo_cursor_idx = match request.cursor {
-            CursorUpdate::Set { idx, .. } => idx,
-            CursorUpdate::Preserve => 0,
-        };
+        let undo_cursor_idx = request.cursor_policy.undo_cursor_idx();
 
         let changed = (|| {
             let buf = self.mutable_buffer()?;
@@ -194,7 +237,7 @@ impl<'a> DocumentMut<'a> {
                 );
             }
 
-            if let CursorUpdate::Set { idx, pos } = request.cursor {
+            if let Some((idx, pos)) = resolved_cursor {
                 buf.ensure_cursors(idx + 1);
                 buf.set_cursor(idx, pos.min(buf.len_chars()));
             }
@@ -218,7 +261,7 @@ impl<'a> DocumentMut<'a> {
         &mut self,
         line_idx: usize,
         new_text: &str,
-        cursor: CursorUpdate,
+        cursor_policy: CursorPolicy,
     ) -> bool {
         let Some((line_start, old_len)) = ({
             let buf = self.managed.slot.as_buffer();
@@ -235,28 +278,33 @@ impl<'a> DocumentMut<'a> {
         self.apply_edit(EditRequest {
             range: line_start..line_start + old_len,
             replacement: new_text,
-            cursor,
+            cursor_policy,
         })
     }
 
-    pub(crate) fn replace_all(&mut self, content: &str, cursor: CursorUpdate) -> bool {
+    pub(crate) fn replace_all(&mut self, content: &str, cursor_policy: CursorPolicy) -> bool {
         let len = self.managed.slot.as_buffer().len_chars();
         self.apply_edit(EditRequest {
             range: 0..len,
             replacement: content,
-            cursor,
+            cursor_policy,
         })
     }
 
-    pub(crate) fn insert_at(&mut self, pos: usize, text: &str, cursor: CursorUpdate) -> bool {
+    pub(crate) fn insert_at(
+        &mut self,
+        pos: usize,
+        text: &str,
+        cursor_policy: CursorPolicy,
+    ) -> bool {
         self.apply_edit(EditRequest {
             range: pos..pos,
             replacement: text,
-            cursor,
+            cursor_policy,
         })
     }
 
-    pub(crate) fn delete_line(&mut self, line_idx: usize, cursor: CursorUpdate) -> bool {
+    pub(crate) fn delete_line(&mut self, line_idx: usize, cursor_policy: CursorPolicy) -> bool {
         let Some(range) = ({
             let buf = self.managed.slot.as_buffer();
             if line_idx >= buf.len_lines() {
@@ -276,7 +324,7 @@ impl<'a> DocumentMut<'a> {
         self.apply_edit(EditRequest {
             range,
             replacement: "",
-            cursor,
+            cursor_policy,
         })
     }
 
@@ -806,5 +854,74 @@ fn char_pos_to_line(buf: &bloom_buffer::Buffer, pos: usize) -> usize {
     } else {
         buf.text()
             .char_to_line(pos.min(buf.len_chars().saturating_sub(1)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CursorPolicy;
+    use bloom_buffer::EditOp;
+
+    #[test]
+    fn collapse_to_edit_end_uses_replacement_length() {
+        let resolved = CursorPolicy::CollapseToEditEnd { idx: 2 }
+            .resolved_position(&(4..7), "abc".chars().count());
+        assert_eq!(resolved, Some((2, 7)));
+    }
+
+    #[test]
+    fn collapse_to_edit_start_uses_range_start() {
+        let resolved = CursorPolicy::CollapseToEditStart { idx: 1 }.resolved_position(&(9..12), 5);
+        assert_eq!(resolved, Some((1, 9)));
+    }
+
+    #[test]
+    fn explicit_policy_preserves_requested_position() {
+        let resolved = CursorPolicy::Explicit { idx: 3, pos: 14 }.resolved_position(&(2..2), 8);
+        assert_eq!(resolved, Some((3, 14)));
+    }
+
+    #[test]
+    fn preserve_policy_has_no_override() {
+        assert_eq!(CursorPolicy::Preserve.resolved_position(&(0..3), 1), None);
+    }
+
+    #[test]
+    fn edit_op_at_range_start_maps_to_start_policy() {
+        let edit = EditOp {
+            range: 5..8,
+            replacement: String::new(),
+            cursor_after: 5,
+        };
+        assert_eq!(
+            CursorPolicy::from_edit_op(&edit, 4),
+            CursorPolicy::CollapseToEditStart { idx: 4 }
+        );
+    }
+
+    #[test]
+    fn edit_op_at_replacement_end_maps_to_end_policy() {
+        let edit = EditOp {
+            range: 3..3,
+            replacement: "rust".into(),
+            cursor_after: 7,
+        };
+        assert_eq!(
+            CursorPolicy::from_edit_op(&edit, 1),
+            CursorPolicy::CollapseToEditEnd { idx: 1 }
+        );
+    }
+
+    #[test]
+    fn edit_op_otherwise_maps_to_explicit_policy() {
+        let edit = EditOp {
+            range: 10..14,
+            replacement: "rust".into(),
+            cursor_after: 12,
+        };
+        assert_eq!(
+            CursorPolicy::from_edit_op(&edit, 0),
+            CursorPolicy::Explicit { idx: 0, pos: 12 }
+        );
     }
 }

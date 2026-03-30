@@ -375,9 +375,8 @@ pub enum BufferMessage {
         page_id: types::PageId,
         range: std::ops::Range<usize>,
         replacement: String,
-        cursor_after: usize,
-        /// Which cursor to position after the edit (pane-specific).
-        cursor_idx: usize,
+        /// How the target cursor should land after the edit.
+        cursor_policy: document::CursorPolicy,
     },
     /// Mirror-propagated edit — same as Edit but does NOT trigger further
     /// mirror propagation or BlockChanged events. Prevents circular notifications.
@@ -485,8 +484,7 @@ impl BufferWriter {
                 page_id,
                 range,
                 replacement,
-                cursor_after,
-                cursor_idx,
+                cursor_policy,
             } => {
                 let Some(mut doc) = self.buffer_mgr.document_mut(&page_id) else {
                     return false;
@@ -494,10 +492,7 @@ impl BufferWriter {
                 doc.apply_edit(document::EditRequest {
                     range,
                     replacement: &replacement,
-                    cursor: document::CursorUpdate::Set {
-                        idx: cursor_idx,
-                        pos: cursor_after,
-                    },
+                    cursor_policy,
                 })
             }
             BufferMessage::MirrorEdit {
@@ -511,7 +506,7 @@ impl BufferWriter {
                 doc.apply_edit(document::EditRequest {
                     range,
                     replacement: &replacement,
-                    cursor: document::CursorUpdate::Preserve,
+                    cursor_policy: document::CursorPolicy::Preserve,
                 })
             }
             BufferMessage::ToggleTask { .. } => {
@@ -1507,7 +1502,7 @@ impl BloomEditor {
         if let Some(page_id) = self.active_page().cloned() {
             if let Some(mut doc) = self.writer.buffers_mut().document_mut(&page_id) {
                 let clean = crate::document::clean_text_from_canonical_markdown(&content);
-                doc.replace_all(&clean, crate::document::CursorUpdate::Preserve);
+                doc.replace_all(&clean, crate::document::CursorPolicy::Preserve);
                 self.push_notification(
                     "Restored from history (undo with u)".into(),
                     render::NotificationLevel::Info,
@@ -1559,8 +1554,9 @@ impl BloomEditor {
             page_id,
             range: cursor..cursor,
             replacement: text.to_string(),
-            cursor_after: cursor + text.chars().count(),
-            cursor_idx: self.active_cursor_idx(),
+            cursor_policy: crate::document::CursorPolicy::CollapseToEditEnd {
+                idx: self.active_cursor_idx(),
+            },
         });
     }
 

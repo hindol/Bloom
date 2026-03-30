@@ -348,7 +348,7 @@ impl BloomEditor {
                     doc.replace_trimmed_line(
                         cursor_line,
                         &clean_line,
-                        crate::document::CursorUpdate::Preserve,
+                        crate::document::CursorPolicy::Preserve,
                     );
                 }
             }

@@ -1015,8 +1015,10 @@ impl BloomEditor {
                 page_id,
                 range: bracket_start..bracket_start + 3,
                 replacement: "[x]".to_string(),
-                cursor_after: cursor,
-                cursor_idx: self.active_cursor_idx(),
+                cursor_policy: crate::document::CursorPolicy::Explicit {
+                    idx: self.active_cursor_idx(),
+                    pos: cursor,
+                },
             });
         } else if trimmed.starts_with("- [x] ") || trimmed.starts_with("- [X] ") {
             // Checked → unchecked
@@ -1025,8 +1027,10 @@ impl BloomEditor {
                 page_id,
                 range: bracket_start..bracket_start + 3,
                 replacement: "[ ]".to_string(),
-                cursor_after: cursor,
-                cursor_idx: self.active_cursor_idx(),
+                cursor_policy: crate::document::CursorPolicy::Explicit {
+                    idx: self.active_cursor_idx(),
+                    pos: cursor,
+                },
             });
         }
     }
@@ -1083,8 +1087,9 @@ impl BloomEditor {
                 page_id: page_id.clone(),
                 range: bracket_start..bracket_start + 3,
                 replacement: "[x]".to_string(),
-                cursor_after: bracket_start + 3,
-                cursor_idx: self.active_cursor_idx(),
+                cursor_policy: crate::document::CursorPolicy::CollapseToEditEnd {
+                    idx: self.active_cursor_idx(),
+                },
             });
         } else if trimmed.starts_with("- [x] ") || trimmed.starts_with("- [X] ") {
             let bracket_start = line_start + indent + 2;
@@ -1092,8 +1097,9 @@ impl BloomEditor {
                 page_id: page_id.clone(),
                 range: bracket_start..bracket_start + 3,
                 replacement: "[ ]".to_string(),
-                cursor_after: bracket_start + 3,
-                cursor_idx: self.active_cursor_idx(),
+                cursor_policy: crate::document::CursorPolicy::CollapseToEditEnd {
+                    idx: self.active_cursor_idx(),
+                },
             });
         }
     }
@@ -1174,12 +1180,14 @@ impl BloomEditor {
                 self.pending_since = None;
                 self.which_key_visible = false;
                 if let Some(page_id) = self.active_page().cloned() {
+                    let cursor_idx = self.active_cursor_idx();
                     self.writer.apply(crate::BufferMessage::Edit {
                         page_id: page_id.clone(),
                         range: edit.range.clone(),
                         replacement: edit.replacement.clone(),
-                        cursor_after: edit.cursor_after,
-                        cursor_idx: self.active_cursor_idx(),
+                        cursor_policy: crate::document::CursorPolicy::from_edit_op(
+                            &edit, cursor_idx,
+                        ),
                     });
                 }
                 // Check for inline completion triggers after an edit in Insert mode
@@ -1527,26 +1535,26 @@ impl BloomEditor {
                     item.id.as_deref().unwrap_or(&item.label),
                     item.label
                 );
-                let new_cursor = start + replacement.len();
                 self.writer.apply(crate::BufferMessage::Edit {
                     page_id,
                     range: start..cursor,
                     replacement,
-                    cursor_after: new_cursor,
-                    cursor_idx: self.active_cursor_idx(),
+                    cursor_policy: crate::document::CursorPolicy::CollapseToEditEnd {
+                        idx: self.active_cursor_idx(),
+                    },
                 });
             }
             InlineCompletionKind::Tag => {
                 // Replace from # (trigger_pos - 1) to cursor with #tagname
                 let start = ic.trigger_pos.saturating_sub(1);
                 let replacement = format!("#{}", item.label);
-                let new_cursor = start + replacement.len();
                 self.writer.apply(crate::BufferMessage::Edit {
                     page_id,
                     range: start..cursor,
                     replacement,
-                    cursor_after: new_cursor,
-                    cursor_idx: self.active_cursor_idx(),
+                    cursor_policy: crate::document::CursorPolicy::CollapseToEditEnd {
+                        idx: self.active_cursor_idx(),
+                    },
                 });
             }
         }
@@ -1739,7 +1747,7 @@ impl BloomEditor {
                 doc.replace_trimmed_line(
                     *mirror_line,
                     new_trimmed,
-                    crate::document::CursorUpdate::Preserve,
+                    crate::document::CursorPolicy::Preserve,
                 );
             }
             self.save_page(&meta.id);
@@ -1808,7 +1816,7 @@ impl BloomEditor {
                     doc.replace_trimmed_line(
                         *line,
                         new_trimmed,
-                        crate::document::CursorUpdate::Preserve,
+                        crate::document::CursorPolicy::Preserve,
                     );
                 }
                 toggled_new_text = Some(new_trimmed.to_string());
@@ -1853,7 +1861,7 @@ impl BloomEditor {
                         doc.replace_trimmed_line(
                             *mirror_line,
                             new_text,
-                            crate::document::CursorUpdate::Preserve,
+                            crate::document::CursorPolicy::Preserve,
                         );
                     }
                     self.save_page(&meta.id);
