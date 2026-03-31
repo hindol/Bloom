@@ -132,7 +132,9 @@ pub(crate) fn reconcile_viewport_state(
         } else if cursor_row > bottom_margin {
             viewport.first_wrapped_row = (cursor_row + margin + 1).saturating_sub(visible_count);
         }
-        viewport.first_wrapped_row = viewport.first_wrapped_row.min(rows.len().saturating_sub(1));
+        viewport.first_wrapped_row = viewport
+            .first_wrapped_row
+            .min(max_first_wrapped_row(&rows, content_area.height));
     }
 
     if word_wrap {
@@ -294,6 +296,24 @@ fn visible_row_indices(rows: &[ProjectedRow], first_row: usize, content_height: 
         visible.push(first_row.min(rows.len() - 1));
     }
     visible
+}
+
+fn max_first_wrapped_row(rows: &[ProjectedRow], content_height: f32) -> usize {
+    if rows.is_empty() {
+        return 0;
+    }
+
+    let mut used = 0.0;
+    let mut start = rows.len() - 1;
+    for idx in (0..rows.len()).rev() {
+        let row_height = rows[idx].row_height;
+        if idx < rows.len() - 1 && used + row_height > content_height + 0.5 {
+            break;
+        }
+        used += row_height;
+        start = idx;
+    }
+    start
 }
 
 fn build_cursor_layout(
@@ -565,5 +585,45 @@ mod tests {
         let layout = layout_pane(&pane, area, false, &viewport);
         assert_eq!(layout.rows.len(), 1);
         assert!(layout.rows[0].visible_byte_start > 0);
+    }
+
+    #[test]
+    fn wrapped_viewport_clamps_to_last_fillable_start_row() {
+        let pane = PaneFrame {
+            id: bloom_core::types::PaneId(0),
+            kind: PaneKind::Editor,
+            visible_lines: vec![
+                plain_line("one"),
+                plain_line("two"),
+                plain_line("three"),
+            ],
+            cursor: CursorState {
+                line: 2,
+                column: 0,
+                shape: CursorShape::Block,
+            },
+            scroll_offset: 0,
+            total_lines: 3,
+            is_active: true,
+            title: String::new(),
+            dirty: false,
+            status_bar: bloom_core::render::StatusBarFrame::default(),
+            rect: PaneRectFrame {
+                x: 0,
+                y: 0,
+                width: 20,
+                content_height: 3,
+                total_height: 4,
+            },
+        };
+        let area = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: GUTTER_WIDTH + CHAR_WIDTH * 6.0,
+            height: LINE_HEIGHT * 3.0,
+        };
+        let mut viewport = PaneViewportState::default();
+        reconcile_viewport_state(&mut viewport, &pane, area, true, 1);
+        assert_eq!(viewport.first_wrapped_row, 0);
     }
 }
