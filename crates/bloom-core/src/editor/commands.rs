@@ -25,6 +25,8 @@ pub(crate) const EX_COMMANDS: &[(&str, &str)] = &[
     ("bd", "close buffer"),
     ("bdelete", "close buffer"),
     ("theme", "switch theme"),
+    ("checkpoint", "create explicit checkpoint"),
+    ("cp", "create explicit checkpoint"),
     ("rebuild-index", "rebuild search index"),
     ("stats", "show vault and index stats"),
     ("messages", "show notification history"),
@@ -113,6 +115,7 @@ impl BloomEditor {
             }
             "undo_tree" => vec![keymap::dispatch::Action::OpenUndoTree],
             "page_history" => vec![keymap::dispatch::Action::OpenPageHistory],
+            "checkpoint" => vec![keymap::dispatch::Action::ExplicitCheckpoint],
             "block_history" => {
                 self.open_block_history();
                 vec![keymap::dispatch::Action::Noop]
@@ -395,6 +398,7 @@ impl BloomEditor {
             }
             "qa" | "qa!" | "quitall" => vec![keymap::dispatch::Action::Quit],
             "w" | "write" => vec![keymap::dispatch::Action::Save],
+            "checkpoint" | "cp" => vec![keymap::dispatch::Action::ExplicitCheckpoint],
             "wq" | "x" | "wq!" | "x!" => {
                 let _ = self.save_current();
                 if self.window_mgr.pane_count() <= 1 {

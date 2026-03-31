@@ -283,7 +283,7 @@ pub(crate) fn draw_temporal_strip_drawer(
 
     let hints = match strip.mode {
         TemporalMode::PageHistory | TemporalMode::BlockHistory => {
-            "h/l scrub   e detail   r restore   d diff   q close"
+            "h/l scrub   e detail   r restore   c checkpoint   d diff   q close"
         }
         TemporalMode::DayActivity => "h/l scrub   e detail   Enter open   q close",
     };

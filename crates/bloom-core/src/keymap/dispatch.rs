@@ -54,6 +54,7 @@ pub enum Action {
     OpenAgenda,
     OpenUndoTree,
     OpenPageHistory,
+    ExplicitCheckpoint,
     OpenDatePicker(DatePickerPurpose),
     DialogResponse(usize),
 

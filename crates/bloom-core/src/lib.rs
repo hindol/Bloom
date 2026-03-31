@@ -769,6 +769,7 @@ pub struct BloomEditor {
     pub(crate) history_tx: Option<crossbeam::channel::Sender<history::HistoryRequest>>,
     pub(crate) history_rx: Option<crossbeam::channel::Receiver<history::HistoryComplete>>,
     pub(crate) durable_capture: DurableCaptureState,
+    pub(crate) explicit_checkpoint: Option<ExplicitCheckpointState>,
     pub(crate) page_history_entries: Option<Vec<history::PageHistoryEntry>>,
     pub(crate) page_history_selected: usize,
     /// Text pending delivery to the system clipboard (drained by render).
@@ -1000,6 +1001,7 @@ pub enum TemporalCheckpointReason {
     IdleTimeout,
     MaxInterval,
     SessionSave,
+    Explicit,
     Unknown,
 }
 
@@ -1057,6 +1059,11 @@ impl DurableCaptureState {
         self.commit_in_flight = None;
         self.last_error = Some(message);
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ExplicitCheckpointState {
+    pub pending_writes: std::collections::HashSet<types::PageId>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1324,6 +1331,7 @@ impl BloomEditor {
             history_tx: None,
             history_rx: None,
             durable_capture: DurableCaptureState::default(),
+            explicit_checkpoint: None,
             page_history_entries: None,
             page_history_selected: 0,
             pending_clipboard: None,
@@ -1620,16 +1628,45 @@ impl BloomEditor {
                     history::HistoryFlushReason::MaxInterval => {
                         "safety-net max interval".to_string()
                     }
+                    history::HistoryFlushReason::ExplicitCheckpoint => {
+                        "explicit checkpoint".to_string()
+                    }
                 };
                 let _ = tx.send(history::HistoryRequest::CommitNow { files, message });
             }
             history::HistoryComplete::CommitFinished { oid: id } => {
+                let explicit =
+                    self.durable_capture
+                        .commit_in_flight
+                        .as_ref()
+                        .is_some_and(|commit| {
+                            commit.reason == history::HistoryFlushReason::ExplicitCheckpoint
+                        });
                 self.durable_capture.finish_commit(Some(id.clone()));
                 tracing::debug!(oid = %id, "history commit acknowledged");
+                if explicit {
+                    self.push_notification(
+                        "Checkpoint created".into(),
+                        render::NotificationLevel::Info,
+                    );
+                }
             }
             history::HistoryComplete::CommitSkipped => {
+                let explicit =
+                    self.durable_capture
+                        .commit_in_flight
+                        .as_ref()
+                        .is_some_and(|commit| {
+                            commit.reason == history::HistoryFlushReason::ExplicitCheckpoint
+                        });
                 self.durable_capture.finish_commit(None);
                 tracing::debug!("history commit skipped (no changes)");
+                if explicit {
+                    self.push_notification(
+                        "Checkpoint already current".into(),
+                        render::NotificationLevel::Info,
+                    );
+                }
             }
             history::HistoryComplete::PageHistory { entries } => {
                 self.receive_page_history(entries);
@@ -1638,6 +1675,13 @@ impl BloomEditor {
                 self.receive_blob_at(&oid, &uuid, content);
             }
             history::HistoryComplete::Error { message } => {
+                let explicit =
+                    self.durable_capture
+                        .commit_in_flight
+                        .as_ref()
+                        .is_some_and(|commit| {
+                            commit.reason == history::HistoryFlushReason::ExplicitCheckpoint
+                        });
                 if self.durable_capture.commit_in_flight.is_some() {
                     self.durable_capture.fail_commit(message.clone());
                 }
@@ -1646,6 +1690,12 @@ impl BloomEditor {
                     format!("History error: {message}"),
                     render::NotificationLevel::Error,
                 );
+                if explicit {
+                    self.push_notification(
+                        format!("Checkpoint failed: {message}"),
+                        render::NotificationLevel::Error,
+                    );
+                }
             }
             history::HistoryComplete::ShutDown => {
                 tracing::info!("history thread shut down");
@@ -3580,6 +3630,99 @@ mod tests {
             }
             _ => panic!("expected CommitNow request"),
         }
+    }
+
+    #[test]
+    fn explicit_checkpoint_commits_pending_saved_pages() {
+        let (mut editor, _dir) = editor_with_vault(&[(
+            "test-page.md",
+            "---\nid: aabbccdd\ntitle: \"Test Page\"\ncreated: 2026-01-01\ntags: []\n---\n\nhello\n",
+        )]);
+        let page_id = types::PageId::from_hex("aabbccdd").unwrap();
+        let (tx, rx) = crossbeam::channel::unbounded();
+        editor.history_tx = Some(tx);
+        editor.durable_capture.mark_page_saved(&page_id);
+
+        editor.create_explicit_checkpoint();
+
+        let request = rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("expected CommitNow request");
+        match request {
+            history::HistoryRequest::CommitNow { message, .. } => {
+                assert_eq!(message, "explicit checkpoint");
+            }
+            _ => panic!("expected CommitNow request"),
+        }
+        assert_eq!(
+            editor
+                .durable_capture
+                .commit_in_flight
+                .as_ref()
+                .map(|commit| commit.reason),
+            Some(history::HistoryFlushReason::ExplicitCheckpoint)
+        );
+    }
+
+    #[test]
+    fn explicit_checkpoint_waits_for_dirty_page_write_completion() {
+        let (mut editor, dir) = editor_with_vault(&[(
+            "test-page.md",
+            "---\nid: aabbccdd\ntitle: \"Test Page\"\ncreated: 2026-01-01\ntags: []\n---\n\nhello\n",
+        )]);
+        let page_id = types::PageId::from_hex("aabbccdd").unwrap();
+        let path = dir.path().join("pages/test-page.md");
+        let content = std::fs::read_to_string(&path).unwrap();
+        editor.open_page_with_content(&page_id, "Test Page", &path, &content);
+        let (write_tx, write_rx) = crossbeam::channel::unbounded();
+        editor.autosave_tx = Some(write_tx);
+        let (history_tx, history_rx) = crossbeam::channel::unbounded();
+        editor.history_tx = Some(history_tx);
+
+        editor.handle_key(KeyEvent::char('i'));
+        editor.handle_key(KeyEvent::char('!'));
+        editor.handle_key(KeyEvent::esc());
+        assert!(
+            editor
+                .writer
+                .buffers()
+                .get(&page_id)
+                .is_some_and(|buf| buf.is_dirty()),
+            "page should be dirty before checkpoint"
+        );
+
+        editor.create_explicit_checkpoint();
+        assert!(editor.explicit_checkpoint.is_some());
+        assert!(
+            history_rx.try_recv().is_err(),
+            "checkpoint should wait for writes"
+        );
+
+        let write = write_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("expected checkpoint save request");
+        editor.handle_write_result(bloom_store::disk_writer::WriteResult::Complete {
+            path: write.path.clone(),
+            write_id: write.write_id,
+            buffer_version: write.buffer_version,
+        });
+
+        let mut saw_commit = false;
+        for _ in 0..2 {
+            let request = history_rx
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .expect("expected history request");
+            if let history::HistoryRequest::CommitNow { message, files } = request {
+                assert_eq!(message, "explicit checkpoint");
+                assert_eq!(files.len(), 1);
+                saw_commit = true;
+                break;
+            }
+        }
+        assert!(
+            saw_commit,
+            "expected explicit checkpoint commit after write completion"
+        );
     }
 
     #[test]

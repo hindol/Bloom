@@ -279,6 +279,9 @@ impl BloomEditor {
                 keymap::dispatch::Action::OpenPageHistory => {
                     self.open_page_history();
                 }
+                keymap::dispatch::Action::ExplicitCheckpoint => {
+                    self.create_explicit_checkpoint();
+                }
                 keymap::dispatch::Action::OpenPicker(ref kind) => {
                     if matches!(kind, keymap::dispatch::PickerKind::Theme) {
                         self.open_theme_picker();

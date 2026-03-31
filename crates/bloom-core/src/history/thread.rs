@@ -15,6 +15,7 @@ use bloom_history::HistoryRepo;
 pub enum HistoryFlushReason {
     IdleTimeout,
     MaxInterval,
+    ExplicitCheckpoint,
 }
 
 /// Requests sent from the UI thread to the history thread.

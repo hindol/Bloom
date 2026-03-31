@@ -53,6 +53,7 @@ impl BloomEditor {
                                 format!("Saved {filename}"),
                                 render::NotificationLevel::Info,
                             );
+                            let _ = self.explicit_checkpoint_write_completed(&page_id);
                             return true;
                         }
                     }
@@ -62,6 +63,7 @@ impl BloomEditor {
                             buf.clear_pending_write_id();
                         }
                     }
+                    return self.explicit_checkpoint_write_completed(&page_id);
                 }
                 false
             }
@@ -78,6 +80,7 @@ impl BloomEditor {
                             buf.clear_pending_write_id();
                         }
                     }
+                    self.cancel_explicit_checkpoint_due_to_write_failure(&page_id, &error);
                 }
                 self.push_notification(
                     format!("Write failed: {error}"),
@@ -288,6 +291,131 @@ impl BloomEditor {
             self.save_page(&page_id);
         }
         Ok(())
+    }
+
+    pub(crate) fn create_explicit_checkpoint(&mut self) {
+        if self.history_tx.is_none() {
+            self.push_notification(
+                "History is unavailable; cannot create checkpoint".into(),
+                render::NotificationLevel::Error,
+            );
+            return;
+        }
+        if self.explicit_checkpoint.is_some() || self.durable_capture.commit_in_flight.is_some() {
+            self.push_notification(
+                "A checkpoint is already in progress".into(),
+                render::NotificationLevel::Info,
+            );
+            return;
+        }
+
+        let dirty_pages = self.collect_dirty_pages_for_explicit_checkpoint();
+        if dirty_pages.is_empty() {
+            let _ = self.commit_explicit_checkpoint_now();
+            return;
+        }
+
+        self.explicit_checkpoint = Some(crate::ExplicitCheckpointState {
+            pending_writes: dirty_pages.clone(),
+        });
+        for page_id in dirty_pages {
+            self.save_page(&page_id);
+        }
+        if self.autosave_tx.is_none() {
+            let _ = self.commit_explicit_checkpoint_now();
+        } else {
+            self.push_notification(
+                "Saving changes before checkpoint…".into(),
+                render::NotificationLevel::Info,
+            );
+        }
+    }
+
+    fn collect_dirty_pages_for_explicit_checkpoint(
+        &self,
+    ) -> std::collections::HashSet<types::PageId> {
+        self.writer
+            .buffers()
+            .open_buffers()
+            .iter()
+            .filter(|info| !info.path.to_string_lossy().starts_with('['))
+            .filter(|info| !self.writer.buffers().is_read_only(&info.page_id))
+            .filter_map(|info| {
+                self.writer
+                    .buffers()
+                    .get(&info.page_id)
+                    .is_some_and(|buf| buf.is_dirty())
+                    .then(|| info.page_id.clone())
+            })
+            .collect()
+    }
+
+    fn explicit_checkpoint_write_completed(&mut self, page_id: &types::PageId) -> bool {
+        let should_commit = if let Some(state) = &mut self.explicit_checkpoint {
+            state.pending_writes.remove(page_id);
+            state.pending_writes.is_empty()
+        } else {
+            false
+        };
+        if should_commit {
+            return self.commit_explicit_checkpoint_now();
+        }
+        false
+    }
+
+    fn cancel_explicit_checkpoint_due_to_write_failure(
+        &mut self,
+        page_id: &types::PageId,
+        error: &str,
+    ) {
+        let should_cancel = self
+            .explicit_checkpoint
+            .as_ref()
+            .is_some_and(|state| state.pending_writes.contains(page_id));
+        if should_cancel {
+            self.explicit_checkpoint = None;
+            self.push_notification(
+                format!("Checkpoint failed: {error}"),
+                render::NotificationLevel::Error,
+            );
+        }
+    }
+
+    fn commit_explicit_checkpoint_now(&mut self) -> bool {
+        let Some(tx) = &self.history_tx else {
+            return false;
+        };
+        let pending_pages = self.durable_capture.pending_pages.clone();
+        if pending_pages.is_empty() {
+            self.explicit_checkpoint = None;
+            self.push_notification(
+                "No saved changes pending checkpoint".into(),
+                render::NotificationLevel::Info,
+            );
+            return true;
+        }
+        let files = self.collect_history_files_for_pages(&pending_pages);
+        if files.is_empty() {
+            self.explicit_checkpoint = None;
+            self.push_notification(
+                "No checkpointable files found".into(),
+                render::NotificationLevel::Error,
+            );
+            return true;
+        }
+
+        self.explicit_checkpoint = None;
+        self.durable_capture
+            .begin_commit(history::HistoryFlushReason::ExplicitCheckpoint);
+        let _ = tx.send(history::HistoryRequest::CommitNow {
+            files,
+            message: "explicit checkpoint".into(),
+        });
+        self.push_notification(
+            "Creating checkpoint…".into(),
+            render::NotificationLevel::Info,
+        );
+        true
     }
 
     /// Assign block IDs to the buffer if any blocks are missing them.

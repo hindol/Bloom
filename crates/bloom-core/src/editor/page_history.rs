@@ -59,6 +59,7 @@ fn checkpoint_reason(message: &str) -> TemporalCheckpointReason {
         "idle timeout" => TemporalCheckpointReason::IdleTimeout,
         "safety-net max interval" => TemporalCheckpointReason::MaxInterval,
         "session save" => TemporalCheckpointReason::SessionSave,
+        "explicit checkpoint" => TemporalCheckpointReason::Explicit,
         _ => TemporalCheckpointReason::Unknown,
     }
 }
@@ -369,6 +370,9 @@ impl BloomEditor {
             }
             types::KeyCode::Char('r') => {
                 self.temporal_strip_restore();
+            }
+            types::KeyCode::Char('c') => {
+                self.create_explicit_checkpoint();
             }
             types::KeyCode::Char('q') | types::KeyCode::Esc => {
                 self.temporal_strip = None;

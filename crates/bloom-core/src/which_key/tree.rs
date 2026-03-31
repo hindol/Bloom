@@ -306,6 +306,7 @@ fn build_static_tree(tree: &mut WhichKeyTree) {
     // History (time travel)
     tree.register("H h", "Page history", "page_history".into());
     tree.register("H b", "Block history", "block_history".into());
+    tree.register("H c", "Checkpoint now", "checkpoint".into());
     tree.register("H d", "Day activity", "day_activity".into());
 
     // New from template (single key, no sub-key)

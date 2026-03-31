@@ -278,7 +278,7 @@ impl BloomEditor {
             },
             right_hints: if show_hist {
                 Some(format!(
-                    "h/l:scrub  e:detail  r:restore  q:close  ·  {}",
+                    "h/l:scrub  e:detail  r:restore  c:checkpoint  q:close  ·  {}",
                     self.history_durable_health()
                 ))
             } else if show_jrnl {
@@ -1626,6 +1626,7 @@ fn temporal_context_label(item: &TemporalItem) -> Option<String> {
             TemporalCheckpointReason::IdleTimeout => "idle timeout",
             TemporalCheckpointReason::MaxInterval => "max interval",
             TemporalCheckpointReason::SessionSave => "session save",
+            TemporalCheckpointReason::Explicit => "explicit checkpoint",
             TemporalCheckpointReason::Unknown => "checkpoint",
         };
         parts.push(format!(
