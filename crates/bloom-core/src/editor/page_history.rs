@@ -7,6 +7,62 @@
 use crate::history::HistoryRequest;
 use crate::*;
 
+fn undo_stop_time(elapsed: std::time::Duration) -> TemporalStopTime {
+    let relative_label = if elapsed.as_secs() < 60 {
+        format!("{}s", elapsed.as_secs())
+    } else if elapsed.as_secs() < 3600 {
+        format!("{}m", elapsed.as_secs() / 60)
+    } else {
+        format!("{}h", elapsed.as_secs() / 3600)
+    };
+    TemporalStopTime {
+        timestamp: None,
+        absolute_label: None,
+        relative_label: relative_label.clone(),
+    }
+}
+
+fn git_stop_time(timestamp: i64) -> TemporalStopTime {
+    let absolute = chrono::DateTime::from_timestamp(timestamp, 0)
+        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string());
+    let relative_label = chrono::DateTime::from_timestamp(timestamp, 0)
+        .map(|dt| dt.format("%b %-d").to_string())
+        .unwrap_or_else(|| "?".to_string());
+    TemporalStopTime {
+        timestamp: Some(timestamp),
+        relative_label: relative_label.clone(),
+        absolute_label: absolute,
+    }
+}
+
+fn branch_context(branch_count: usize) -> Option<TemporalBranchContext> {
+    if branch_count == 0 {
+        return None;
+    }
+    Some(TemporalBranchContext {
+        status: if branch_count > 1 {
+            TemporalBranchStatus::ForkNode
+        } else {
+            TemporalBranchStatus::CurrentPath
+        },
+        branch_count,
+        summary: if branch_count > 1 {
+            format!("fork with {branch_count} branches")
+        } else {
+            "single branch".into()
+        },
+    })
+}
+
+fn checkpoint_reason(message: &str) -> TemporalCheckpointReason {
+    match message {
+        "idle timeout" => TemporalCheckpointReason::IdleTimeout,
+        "safety-net max interval" => TemporalCheckpointReason::MaxInterval,
+        "session save" => TemporalCheckpointReason::SessionSave,
+        _ => TemporalCheckpointReason::Unknown,
+    }
+}
+
 impl BloomEditor {
     /// Open page history as a temporal strip.
     pub(crate) fn open_page_history(&mut self) {
@@ -28,20 +84,19 @@ impl BloomEditor {
             let mut visited = std::collections::HashSet::new();
             while visited.insert(node_id) {
                 let info = tree.node_info(node_id);
-                let elapsed = info.timestamp.elapsed();
-                let label = if elapsed.as_secs() < 60 {
-                    format!("{}s", elapsed.as_secs())
-                } else if elapsed.as_secs() < 3600 {
-                    format!("{}m", elapsed.as_secs() / 60)
-                } else {
-                    format!("{}h", elapsed.as_secs() / 3600)
-                };
                 let branch_count = tree.children(node_id).len();
+                let time = undo_stop_time(info.timestamp.elapsed());
                 items.push(TemporalItem {
-                    label,
+                    label: time.relative_label.clone(),
                     detail: Some(info.description.clone()),
+                    summary: info.description.clone(),
                     kind: render::StripNodeKind::UndoNode,
                     branch_count,
+                    time,
+                    scope_summary: TemporalScopeSummary::CurrentPage,
+                    restore_effect: TemporalRestoreEffect::RestoreUndoNode,
+                    branch: branch_context(branch_count),
+                    checkpoint: None,
                     content: Some(tree.node_snapshot_string(node_id)),
                     undo_node_id: Some(node_id),
                     git_oid: None,
@@ -138,19 +193,19 @@ impl BloomEditor {
                     // Only add if content changed from the next (newer) version
                     let changed = last_line_content.as_ref() != Some(line);
                     if changed {
-                        let elapsed = info.timestamp.elapsed();
-                        let label = if elapsed.as_secs() < 60 {
-                            format!("{}s", elapsed.as_secs())
-                        } else if elapsed.as_secs() < 3600 {
-                            format!("{}m", elapsed.as_secs() / 60)
-                        } else {
-                            format!("{}h", elapsed.as_secs() / 3600)
-                        };
+                        let time = undo_stop_time(info.timestamp.elapsed());
+                        let branch_count = tree.children(node_id).len();
                         items.push(TemporalItem {
-                            label,
+                            label: time.relative_label.clone(),
                             detail: Some(info.description.clone()),
+                            summary: info.description.clone(),
                             kind: render::StripNodeKind::UndoNode,
-                            branch_count: tree.children(node_id).len(),
+                            branch_count,
+                            time,
+                            scope_summary: TemporalScopeSummary::CurrentBlock,
+                            restore_effect: TemporalRestoreEffect::ReplaceBlockLineCreatesUndoNode,
+                            branch: branch_context(branch_count),
+                            checkpoint: None,
                             content: Some(line.clone()),
                             undo_node_id: Some(node_id),
                             git_oid: None,
@@ -208,14 +263,29 @@ impl BloomEditor {
             .iter()
             .rev()
             .map(|entry| {
-                let date = chrono::DateTime::from_timestamp(entry.timestamp, 0)
-                    .map(|dt| dt.format("%b %-d").to_string())
-                    .unwrap_or_else(|| "?".to_string());
+                let time = git_stop_time(entry.timestamp);
+                let changed_pages = entry.changed_files.len();
                 TemporalItem {
-                    label: date,
+                    label: time.relative_label.clone(),
                     detail: Some(entry.message.clone()),
+                    summary: entry.message.clone(),
                     kind: render::StripNodeKind::GitCommit,
                     branch_count: 0,
+                    time,
+                    scope_summary: TemporalScopeSummary::PageSet {
+                        count: changed_pages,
+                        includes_mirrors: false,
+                    },
+                    restore_effect: if matches!(ts.mode, render::TemporalMode::BlockHistory) {
+                        TemporalRestoreEffect::ReplaceBlockLineCreatesUndoNode
+                    } else {
+                        TemporalRestoreEffect::ReplaceBufferCreatesUndoNode
+                    },
+                    branch: None,
+                    checkpoint: Some(TemporalCheckpointContext {
+                        reason: checkpoint_reason(&entry.message),
+                        changed_pages,
+                    }),
                     content: None, // Loaded on-demand via BlobAt
                     undo_node_id: None,
                     git_oid: Some(entry.oid.clone()),
@@ -432,6 +502,51 @@ fn canonical_block_line(line: &str, block_id: &str, is_mirror: bool) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::{TemporalCheckpointReason, TemporalRestoreEffect, TemporalScopeSummary};
+
+    #[test]
+    fn append_git_history_populates_structured_metadata() {
+        let config = crate::config::Config::defaults();
+        let mut editor = crate::BloomEditor::new(config).unwrap();
+        let page_id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(
+            &page_id,
+            "Test",
+            std::path::Path::new("[scratch]"),
+            "hello\n",
+        );
+        editor.open_page_history();
+
+        editor.append_git_history(&[crate::history::PageHistoryEntry {
+            oid: "abc123".into(),
+            message: "idle timeout".into(),
+            timestamp: 1_710_000_000,
+            changed_files: vec!["abc12345.md".into(), "def67890.md".into()],
+        }]);
+
+        let ts = editor
+            .temporal_strip
+            .as_ref()
+            .expect("temporal strip should open");
+        let item = ts.items.first().expect("git item should be inserted");
+        assert_eq!(item.summary, "idle timeout");
+        assert_eq!(
+            item.scope_summary,
+            TemporalScopeSummary::PageSet {
+                count: 2,
+                includes_mirrors: false,
+            }
+        );
+        assert_eq!(
+            item.restore_effect,
+            TemporalRestoreEffect::ReplaceBufferCreatesUndoNode
+        );
+        assert_eq!(
+            item.checkpoint.as_ref().map(|ctx| &ctx.reason),
+            Some(&TemporalCheckpointReason::IdleTimeout)
+        );
+    }
+
     #[test]
     fn git_history_restore_reanchors_cursor_by_line_and_column() {
         let config = crate::config::Config::defaults();
@@ -459,8 +574,18 @@ mod tests {
             items: vec![crate::TemporalItem {
                 label: "older".into(),
                 detail: Some("git".into()),
+                summary: "git".into(),
                 kind: crate::render::StripNodeKind::GitCommit,
                 branch_count: 0,
+                time: crate::TemporalStopTime {
+                    timestamp: None,
+                    relative_label: "older".into(),
+                    absolute_label: None,
+                },
+                scope_summary: crate::TemporalScopeSummary::CurrentPage,
+                restore_effect: crate::TemporalRestoreEffect::ReplaceBufferCreatesUndoNode,
+                branch: None,
+                checkpoint: None,
                 content: Some("this line got much longer before restore\nkeep me here\n".into()),
                 undo_node_id: None,
                 git_oid: Some("abc123".into()),

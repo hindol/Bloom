@@ -874,8 +874,20 @@ impl TemporalStripState {
 pub(crate) struct TemporalItem {
     pub label: String,
     pub detail: Option<String>,
+    #[allow(dead_code)]
+    pub summary: String,
     pub kind: render::StripNodeKind,
     pub branch_count: usize,
+    #[allow(dead_code)]
+    pub time: TemporalStopTime,
+    #[allow(dead_code)]
+    pub scope_summary: TemporalScopeSummary,
+    #[allow(dead_code)]
+    pub restore_effect: TemporalRestoreEffect,
+    #[allow(dead_code)]
+    pub branch: Option<TemporalBranchContext>,
+    #[allow(dead_code)]
+    pub checkpoint: Option<TemporalCheckpointContext>,
     /// Full content at this point (for preview/diff/restore).
     pub content: Option<String>,
     /// Undo node ID (if from undo tree).
@@ -885,6 +897,65 @@ pub(crate) struct TemporalItem {
     /// True if this item has same block content as its older neighbor.
     /// Navigation skips over these. Set during background blob loading.
     pub skip: bool,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TemporalStopTime {
+    pub timestamp: Option<i64>,
+    pub relative_label: String,
+    pub absolute_label: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TemporalScopeSummary {
+    CurrentPage,
+    CurrentBlock,
+    PageSet {
+        count: usize,
+        includes_mirrors: bool,
+    },
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TemporalRestoreEffect {
+    RestoreUndoNode,
+    ReplaceBufferCreatesUndoNode,
+    ReplaceBlockLineCreatesUndoNode,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemporalBranchContext {
+    pub status: TemporalBranchStatus,
+    pub branch_count: usize,
+    pub summary: String,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TemporalBranchStatus {
+    CurrentPath,
+    AlternatePath,
+    ForkNode,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemporalCheckpointContext {
+    pub reason: TemporalCheckpointReason,
+    pub changed_pages: usize,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TemporalCheckpointReason {
+    IdleTimeout,
+    MaxInterval,
+    SessionSave,
+    Unknown,
 }
 
 #[allow(dead_code)]
