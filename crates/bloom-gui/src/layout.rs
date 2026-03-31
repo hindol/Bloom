@@ -116,6 +116,7 @@ mod tests {
             scrolloff: 3,
             word_wrap: true,
             wrap_indicator: "↪".into(),
+            block_id_gutter: false,
             theme_name: "bloom-dark".into(),
             layout_tree: bloom_core::render::LayoutTree::Leaf(bloom_core::types::PaneId(0)),
             clipboard_text: None,

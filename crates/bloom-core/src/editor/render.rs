@@ -535,6 +535,7 @@ impl BloomEditor {
                 scrolloff: self.config.scrolloff,
                 word_wrap: self.config.word_wrap,
                 wrap_indicator: self.config.wrap_indicator.clone(),
+                block_id_gutter: self.config.block_id_gutter,
                 theme_name: self.active_theme.name.to_string(),
                 layout_tree: render::LayoutTree::Leaf(types::PaneId(0)),
                 clipboard_text: None,
@@ -620,6 +621,7 @@ impl BloomEditor {
                 scrolloff: self.config.scrolloff,
                 word_wrap: self.config.word_wrap,
                 wrap_indicator: self.config.wrap_indicator.clone(),
+                block_id_gutter: self.config.block_id_gutter,
                 theme_name: self.active_theme.name.to_string(),
                 layout_tree: render::LayoutTree::Leaf(
                     first_rect.map(|r| r.pane_id).unwrap_or(types::PaneId(0)),
@@ -971,6 +973,7 @@ impl BloomEditor {
             scrolloff: self.config.scrolloff,
             word_wrap: self.config.word_wrap,
             wrap_indicator: self.config.wrap_indicator.clone(),
+            block_id_gutter: self.config.block_id_gutter,
             theme_name: self.active_theme.name.to_string(),
             layout_tree: wm_tree_to_render(self.window_mgr.layout()),
             clipboard_text: self.pending_clipboard.take(),
@@ -1231,6 +1234,7 @@ impl BloomEditor {
 
         // Use ParseTree for O(1) context lookup when available.
         let parse_tree = self.writer.buffers().parse_tree(page_id);
+        let document = self.writer.buffers().document(page_id);
 
         let mut line_idx = range.start;
         while line_idx < line_count && lines.len() < screen_height {
@@ -1272,6 +1276,11 @@ impl BloomEditor {
                         );
                     }
                 }
+                let block_id_label = document
+                    .as_ref()
+                    .and_then(|doc| doc.block_id_at_line(line_idx))
+                    .filter(|entry| entry.first_line == line_idx)
+                    .map(|entry| format!("^{}", entry.id.0));
                 // Block history inline diff: replace spans on the block line
                 if let Some(ts) = &self.temporal_strip {
                     if matches!(ts.mode, render::TemporalMode::BlockHistory)
@@ -1311,6 +1320,7 @@ impl BloomEditor {
                                     is_mirror: diff_text.contains(" ^="),
                                     text: diff_text,
                                     spans: diff_spans,
+                                    block_id_label: block_id_label.clone(),
                                 });
                                 line_idx += 1;
                                 continue;
@@ -1324,6 +1334,7 @@ impl BloomEditor {
                     is_mirror: line_text.contains(" ^="),
                     text: line_text,
                     spans,
+                    block_id_label,
                 });
             }
             line_idx += 1;

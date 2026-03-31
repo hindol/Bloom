@@ -36,6 +36,8 @@ pub(crate) const STATUS_BAR_HEIGHT: f32 = LINE_HEIGHT;
 pub(crate) const CHAR_WIDTH: f32 = FONT_SIZE * 0.6;
 pub(crate) const GUTTER_CHARS: usize = 5;
 pub(crate) const GUTTER_WIDTH: f32 = GUTTER_CHARS as f32 * CHAR_WIDTH;
+pub(crate) const BLOCK_ID_GUTTER_CHARS: usize = 8;
+pub(crate) const BLOCK_ID_GUTTER_WIDTH: f32 = BLOCK_ID_GUTTER_CHARS as f32 * CHAR_WIDTH;
 /// Horizontal padding inside the modeline to clear macOS rounded window corners.
 pub(crate) const MODELINE_H_PAD: f32 = 8.0;
 pub(crate) const EDITOR_FONT: Font = Font::with_name("JetBrains Mono");
@@ -251,8 +253,13 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
                         .get(&pane.id)
                         .copied()
                         .unwrap_or_default();
-                    let layout =
-                        crate::wrap::layout_pane(pane, content_area, frame.word_wrap, &viewport);
+                    let layout = crate::wrap::layout_pane(
+                        pane,
+                        content_area,
+                        frame.word_wrap,
+                        frame.block_id_gutter,
+                        &viewport,
+                    );
                     let target_cursor_y = layout.cursor.map(|cursor| cursor.y).unwrap_or(pane_y);
                     let target_scroll_y = pane.scroll_offset as f32 * LINE_HEIGHT;
                     if state.remote.skip_animation() {
@@ -645,6 +652,7 @@ impl BloomApp {
                 pane,
                 content_area,
                 frame.word_wrap,
+                frame.block_id_gutter,
                 frame.scrolloff,
             );
         }

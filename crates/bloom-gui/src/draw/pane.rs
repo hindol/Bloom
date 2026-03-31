@@ -12,11 +12,12 @@ use crate::draw::{
 };
 use crate::theme::{rgb_to_color, style_to_bg, style_to_color};
 use crate::wrap::{
-    display_width, layout_pane, line_font_size, line_row_height, line_text, PaneViewportState,
+    block_id_gutter_width, display_width, layout_pane, line_font_size, line_row_height, line_text,
+    total_gutter_width, PaneViewportState,
 };
 use crate::{
-    CHAR_WIDTH, FONT_SIZE, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, MODELINE_H_PAD, SPACING_MD,
-    SPACING_SM, STATUS_BAR_HEIGHT,
+    CHAR_WIDTH, FONT_SIZE, GUTTER_CHARS, LINE_HEIGHT, MODELINE_H_PAD, SPACING_MD, SPACING_SM,
+    STATUS_BAR_HEIGHT,
 };
 
 #[cfg(test)]
@@ -71,6 +72,7 @@ pub(crate) fn draw_pane(
     pane: &PaneFrame,
     word_wrap: bool,
     wrap_indicator: &str,
+    show_block_id_gutter: bool,
     viewport_state: Option<&PaneViewportState>,
     _scrolloff: usize,
     theme: &ThemePalette,
@@ -98,6 +100,7 @@ pub(crate) fn draw_pane(
             pane,
             word_wrap,
             wrap_indicator,
+            show_block_id_gutter,
             viewport_state,
             theme,
             anim,
@@ -125,6 +128,7 @@ fn draw_editor_content(
     pane: &PaneFrame,
     word_wrap: bool,
     wrap_indicator: &str,
+    show_block_id_gutter: bool,
     viewport_state: Option<&PaneViewportState>,
     theme: &ThemePalette,
     anim: Option<(f32, f32)>,
@@ -134,7 +138,16 @@ fn draw_editor_content(
     let pane_x = content_area.x;
     let pane_w = content_area.width;
     let viewport = viewport_state.copied().unwrap_or_default();
-    let layout = layout_pane(pane, content_area, word_wrap, &viewport);
+    let layout = layout_pane(
+        pane,
+        content_area,
+        word_wrap,
+        show_block_id_gutter,
+        &viewport,
+    );
+    let block_id_lane_width = block_id_gutter_width(show_block_id_gutter);
+    let line_number_x = pane_x + block_id_lane_width;
+    let text_x = pane_x + total_gutter_width(show_block_id_gutter);
 
     // Line highlight is drawn on CursorCanvas (alpha-blended overlay) so it
     // animates smoothly with the cursor without re-rendering text content.
@@ -145,7 +158,7 @@ fn draw_editor_content(
                 if row.is_continuation {
                     draw_text_sized(
                         frame,
-                        pane_x + CHAR_WIDTH,
+                        line_number_x + CHAR_WIDTH,
                         row.y,
                         wrap_indicator,
                         rgb_to_color(&theme.faded.blend(theme.background, 0.4)),
@@ -153,6 +166,23 @@ fn draw_editor_content(
                         row.row_height,
                     );
                 } else {
+                    if show_block_id_gutter {
+                        if let Some(label) = pane
+                            .visible_lines
+                            .get(row.line_idx)
+                            .and_then(|line| line.block_id_label.as_deref())
+                        {
+                            draw_text_sized(
+                                frame,
+                                pane_x,
+                                row.y,
+                                label,
+                                rgb_to_color(&theme.faded.blend(theme.background, 0.35)),
+                                FONT_SIZE,
+                                row.row_height,
+                            );
+                        }
+                    }
                     let num_str = format!("{:>width$}", buf_line + 1, width = GUTTER_CHARS - 1);
                     let is_mirror = pane
                         .visible_lines
@@ -169,7 +199,7 @@ fn draw_editor_content(
                     };
                     draw_text_sized(
                         frame,
-                        pane_x,
+                        line_number_x,
                         row.y,
                         num_str,
                         gutter_color,
@@ -181,7 +211,7 @@ fn draw_editor_content(
             LineSource::BeyondEof => {
                 draw_text_sized(
                     frame,
-                    pane_x + CHAR_WIDTH,
+                    line_number_x + CHAR_WIDTH,
                     row.y,
                     "~",
                     rgb_to_color(&theme.faded.blend(theme.background, 0.4)),
@@ -191,7 +221,6 @@ fn draw_editor_content(
             }
         }
 
-        let text_x = pane_x + GUTTER_WIDTH;
         let Some(line) = pane.visible_lines.get(row.line_idx) else {
             continue;
         };
@@ -280,7 +309,7 @@ fn draw_editor_content(
         if !row.is_continuation && full_text.starts_with("![") && row.visible_byte_start == 0 {
             if let Some(alt_end) = full_text.find("](") {
                 let alt = &full_text[2..alt_end];
-                let box_w = pane_w - GUTTER_WIDTH;
+                let box_w = pane_w - total_gutter_width(show_block_id_gutter);
                 fill_rect(
                     frame,
                     rect(text_x, row.y, box_w, LINE_HEIGHT),
@@ -354,6 +383,7 @@ pub(crate) fn draw_pane_cursor(
     frame: &mut iced::widget::canvas::Frame,
     pane: &PaneFrame,
     word_wrap: bool,
+    show_block_id_gutter: bool,
     viewport_state: Option<&PaneViewportState>,
     theme: &ThemePalette,
     anim: Option<(f32, f32)>,
@@ -363,7 +393,13 @@ pub(crate) fn draw_pane_cursor(
     let pane_x = content_area.x;
     let pane_w = content_area.width;
     let viewport = viewport_state.copied().unwrap_or_default();
-    let layout = layout_pane(pane, content_area, word_wrap, &viewport);
+    let layout = layout_pane(
+        pane,
+        content_area,
+        word_wrap,
+        show_block_id_gutter,
+        &viewport,
+    );
     let Some(cursor) = layout.cursor else {
         return;
     };
@@ -1099,6 +1135,7 @@ mod tests {
     fn make_normal_line(text: &str) -> bloom_core::render::RenderedLine {
         bloom_core::render::RenderedLine {
             source: bloom_core::render::LineSource::Buffer(0),
+            block_id_label: None,
             is_mirror: false,
             text: text.to_string(),
             spans: vec![bloom_md::parser::traits::StyledSpan {

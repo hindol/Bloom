@@ -32,6 +32,7 @@ pub struct RenderFrame {
     pub scrolloff: usize,
     pub word_wrap: bool,
     pub wrap_indicator: String,
+    pub block_id_gutter: bool,
     /// Active theme name — frontends resolve to a palette each frame for live preview.
     pub theme_name: String,
     /// Split tree snapshot — the GUI computes pixel rects from ratios + font
@@ -397,6 +398,7 @@ pub struct RenderedLine {
     pub source: LineSource,
     pub text: String,
     pub spans: Vec<StyledSpan>,
+    pub block_id_label: Option<String>,
     /// True if this line contains a `^=` mirror marker.
     pub is_mirror: bool,
 }

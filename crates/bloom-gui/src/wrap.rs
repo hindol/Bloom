@@ -3,7 +3,7 @@ use iced::Rectangle;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::{CHAR_WIDTH, FONT_SIZE, GUTTER_WIDTH};
+use crate::{BLOCK_ID_GUTTER_WIDTH, CHAR_WIDTH, FONT_SIZE, GUTTER_WIDTH};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct PaneViewportState {
@@ -58,6 +58,18 @@ pub(crate) struct PaneLayout {
     pub(crate) cursor: Option<CursorLayout>,
 }
 
+pub(crate) fn block_id_gutter_width(show_block_id_gutter: bool) -> f32 {
+    if show_block_id_gutter {
+        BLOCK_ID_GUTTER_WIDTH
+    } else {
+        0.0
+    }
+}
+
+pub(crate) fn total_gutter_width(show_block_id_gutter: bool) -> f32 {
+    block_id_gutter_width(show_block_id_gutter) + GUTTER_WIDTH
+}
+
 pub(crate) fn heading_font_size(level: u8) -> f32 {
     match level {
         1 => FONT_SIZE * 1.5,
@@ -105,9 +117,10 @@ pub(crate) fn reconcile_viewport_state(
     pane: &PaneFrame,
     content_area: Rectangle,
     word_wrap: bool,
+    show_block_id_gutter: bool,
     scrolloff: usize,
 ) {
-    let rows = project_rows(pane, content_area.width, word_wrap);
+    let rows = project_rows(pane, content_area.width, word_wrap, show_block_id_gutter);
     if rows.is_empty() {
         *viewport = PaneViewportState::default();
         return;
@@ -150,7 +163,7 @@ pub(crate) fn reconcile_viewport_state(
     let line_text = line_text(line);
     let cursor_byte = char_col_to_byte_offset(line_text, pane.cursor.column);
     let cursor_col = display_width(&line_text[..cursor_byte]);
-    let visible_cols = visible_cols_for_line(line, content_area.width);
+    let visible_cols = visible_cols_for_line(line, content_area.width, show_block_id_gutter);
     let margin = scrolloff.min(visible_cols.saturating_sub(1));
 
     if cursor_col < viewport.horizontal_offset.saturating_add(margin) {
@@ -176,9 +189,10 @@ pub(crate) fn layout_pane(
     pane: &PaneFrame,
     content_area: Rectangle,
     word_wrap: bool,
+    show_block_id_gutter: bool,
     viewport: &PaneViewportState,
 ) -> PaneLayout {
-    let rows = project_rows(pane, content_area.width, word_wrap);
+    let rows = project_rows(pane, content_area.width, word_wrap, show_block_id_gutter);
     if rows.is_empty() {
         return PaneLayout {
             rows: Vec::new(),
@@ -207,6 +221,7 @@ pub(crate) fn layout_pane(
                 word_wrap,
                 viewport.horizontal_offset,
                 content_area.width,
+                show_block_id_gutter,
             );
         visible_rows.push(VisibleRow {
             line_idx: row.line_idx,
@@ -226,7 +241,13 @@ pub(crate) fn layout_pane(
         y += row.row_height;
     }
 
-    let cursor = build_cursor_layout(pane, &rows, &visible_rows, viewport.horizontal_offset);
+    let cursor = build_cursor_layout(
+        pane,
+        &rows,
+        &visible_rows,
+        viewport.horizontal_offset,
+        show_block_id_gutter,
+    );
 
     PaneLayout {
         rows: visible_rows,
@@ -234,14 +255,19 @@ pub(crate) fn layout_pane(
     }
 }
 
-fn project_rows(pane: &PaneFrame, content_width: f32, word_wrap: bool) -> Vec<ProjectedRow> {
+fn project_rows(
+    pane: &PaneFrame,
+    content_width: f32,
+    word_wrap: bool,
+    show_block_id_gutter: bool,
+) -> Vec<ProjectedRow> {
     let mut rows = Vec::new();
     for (line_idx, line) in pane.visible_lines.iter().enumerate() {
         let text = line_text(line);
         let row_height = line_row_height(line);
         let font_size = line_font_size(line);
         let char_width = line_char_width(line);
-        let visible_cols = visible_cols_for_line(line, content_width);
+        let visible_cols = visible_cols_for_line(line, content_width, show_block_id_gutter);
 
         if !word_wrap || matches!(line.source, LineSource::BeyondEof) || text.is_empty() {
             rows.push(ProjectedRow {
@@ -321,6 +347,7 @@ fn build_cursor_layout(
     rows: &[ProjectedRow],
     visible_rows: &[VisibleRow],
     horizontal_offset: usize,
+    show_block_id_gutter: bool,
 ) -> Option<CursorLayout> {
     let cursor_line_idx = pane.cursor.line.saturating_sub(pane.scroll_offset);
     let line = pane.visible_lines.get(cursor_line_idx)?;
@@ -342,7 +369,7 @@ fn build_cursor_layout(
     let cell_cols = grapheme_width_at(text, cursor_byte).max(1) as f32;
 
     Some(CursorLayout {
-        x: GUTTER_WIDTH + x_cols as f32 * visible_row.char_width,
+        x: total_gutter_width(show_block_id_gutter) + x_cols as f32 * visible_row.char_width,
         y: visible_row.y,
         row_height: visible_row.row_height,
         char_width: visible_row.char_width,
@@ -379,12 +406,15 @@ fn visible_window(
     word_wrap: bool,
     horizontal_offset: usize,
     content_width: f32,
+    show_block_id_gutter: bool,
 ) -> (usize, usize, usize, usize) {
     if word_wrap {
         return (row.byte_start, row.byte_end, row.col_start, row.col_end);
     }
 
-    let visible_cols = ((text_area_width(content_width) / row.char_width).floor() as usize).max(1);
+    let visible_cols = ((text_area_width(content_width, show_block_id_gutter) / row.char_width)
+        .floor() as usize)
+        .max(1);
     let window_start = horizontal_offset.max(row.col_start).min(row.col_end);
     let window_end = window_start.saturating_add(visible_cols).min(row.col_end);
     let visible_byte_start = advance_display_cols(
@@ -407,13 +437,17 @@ fn visible_window(
     )
 }
 
-fn visible_cols_for_line(line: &RenderedLine, content_width: f32) -> usize {
+fn visible_cols_for_line(
+    line: &RenderedLine,
+    content_width: f32,
+    show_block_id_gutter: bool,
+) -> usize {
     let char_width = line_char_width(line);
-    ((text_area_width(content_width) / char_width).floor() as usize).max(1)
+    ((text_area_width(content_width, show_block_id_gutter) / char_width).floor() as usize).max(1)
 }
 
-fn text_area_width(content_width: f32) -> f32 {
-    (content_width - GUTTER_WIDTH).max(CHAR_WIDTH)
+fn text_area_width(content_width: f32, show_block_id_gutter: bool) -> f32 {
+    (content_width - total_gutter_width(show_block_id_gutter)).max(CHAR_WIDTH)
 }
 
 fn wrap_line(text: &str, max_cols: usize) -> Vec<(usize, usize, usize, usize)> {
@@ -513,6 +547,7 @@ mod tests {
             source: LineSource::Buffer(0),
             text: text.to_string(),
             spans: vec![],
+            block_id_label: None,
             is_mirror: false,
         }
     }
@@ -567,7 +602,7 @@ mod tests {
             width: GUTTER_WIDTH + CHAR_WIDTH * 8.0,
             height: LINE_HEIGHT * 4.0,
         };
-        reconcile_viewport_state(&mut viewport, &pane, area, false, 2);
+        reconcile_viewport_state(&mut viewport, &pane, area, false, false, 2);
         assert!(viewport.horizontal_offset > 0);
     }
 
@@ -581,8 +616,8 @@ mod tests {
             height: LINE_HEIGHT * 4.0,
         };
         let mut viewport = PaneViewportState::default();
-        reconcile_viewport_state(&mut viewport, &pane, area, false, 1);
-        let layout = layout_pane(&pane, area, false, &viewport);
+        reconcile_viewport_state(&mut viewport, &pane, area, false, false, 1);
+        let layout = layout_pane(&pane, area, false, false, &viewport);
         assert_eq!(layout.rows.len(), 1);
         assert!(layout.rows[0].visible_byte_start > 0);
     }
@@ -592,11 +627,7 @@ mod tests {
         let pane = PaneFrame {
             id: bloom_core::types::PaneId(0),
             kind: PaneKind::Editor,
-            visible_lines: vec![
-                plain_line("one"),
-                plain_line("two"),
-                plain_line("three"),
-            ],
+            visible_lines: vec![plain_line("one"), plain_line("two"), plain_line("three")],
             cursor: CursorState {
                 line: 2,
                 column: 0,
@@ -623,7 +654,31 @@ mod tests {
             height: LINE_HEIGHT * 3.0,
         };
         let mut viewport = PaneViewportState::default();
-        reconcile_viewport_state(&mut viewport, &pane, area, true, 1);
+        reconcile_viewport_state(&mut viewport, &pane, area, true, false, 1);
         assert_eq!(viewport.first_wrapped_row, 0);
+    }
+
+    #[test]
+    fn block_id_gutter_reduces_text_viewport_width() {
+        let pane = pane_with_line("abcdefghij", 0);
+        let area = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: total_gutter_width(false) + CHAR_WIDTH * 5.0,
+            height: LINE_HEIGHT * 3.0,
+        };
+        let without_gutter = layout_pane(&pane, area, false, false, &PaneViewportState::default());
+        let with_gutter = layout_pane(&pane, area, false, true, &PaneViewportState::default());
+
+        assert_eq!(
+            &pane.visible_lines[0].text[without_gutter.rows[0].visible_byte_start
+                ..without_gutter.rows[0].visible_byte_end],
+            "abcde"
+        );
+        assert_eq!(
+            &pane.visible_lines[0].text
+                [with_gutter.rows[0].visible_byte_start..with_gutter.rows[0].visible_byte_end],
+            "a"
+        );
     }
 }

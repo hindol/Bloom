@@ -3912,6 +3912,49 @@ mod tests {
         assert!(strip.selected_context.contains("^parent"));
     }
 
+    #[test]
+    fn render_frame_exposes_block_id_gutter_labels() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let page_id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(
+            &page_id,
+            "Test",
+            std::path::Path::new("test-page.md"),
+            "Review ropey API\nSome supporting paragraph ^k7m2x\n\nNew split child block ^d3e4f\n",
+        );
+        editor.config.block_id_gutter = true;
+
+        let frame = editor.render(100, 30);
+        assert!(frame.block_id_gutter);
+        let editor_pane = frame
+            .panes
+            .iter()
+            .find(|pane| matches!(pane.kind, render::PaneKind::Editor))
+            .expect("editor pane should exist");
+
+        let review_line = editor_pane
+            .visible_lines
+            .iter()
+            .find(|line| line.text.trim_end() == "Review ropey API")
+            .expect("first block line should render");
+        assert_eq!(review_line.block_id_label.as_deref(), Some("^k7m2x"));
+
+        let continuation_line = editor_pane
+            .visible_lines
+            .iter()
+            .find(|line| line.text.trim_end() == "Some supporting paragraph")
+            .expect("continuation line should render");
+        assert_eq!(continuation_line.block_id_label, None);
+
+        let child_line = editor_pane
+            .visible_lines
+            .iter()
+            .find(|line| line.text.trim_end() == "New split child block")
+            .expect("child block should render");
+        assert_eq!(child_line.block_id_label.as_deref(), Some("^d3e4f"));
+    }
+
     // UC-01: Open today's journal via SPC j t
     #[test]
     fn test_uc01_open_journal() {

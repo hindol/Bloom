@@ -5,14 +5,14 @@ use std::path::Path;
 
 // ── Config template & version ────────────────────────────────────────────
 
-pub const CURRENT_CONFIG_VERSION: u32 = 1;
+pub const CURRENT_CONFIG_VERSION: u32 = 2;
 
 pub const CONFIG_TEMPLATE: &str = r#"# ──────────────────────────────────────────────────────────────
 # Bloom Configuration
 # ──────────────────────────────────────────────────────────────
 # Every setting is listed with its default. Uncomment to customize.
 # Config version — used for automatic migration. Do not edit.
-config_version = 1
+config_version = 2
 
 # ──── Startup ─────────────────────────────────────────────────
 
@@ -26,6 +26,7 @@ config_version = 1
 # autosave_debounce_ms = 300
 # word_wrap = true
 # wrap_indicator = "↪"
+# block_id_gutter = false
 # auto_align = "page"
 # max_results = 100
 
@@ -88,6 +89,9 @@ fn default_word_wrap() -> bool {
 fn default_wrap_indicator() -> String {
     "↪".into()
 }
+fn default_block_id_gutter() -> bool {
+    false
+}
 fn default_max_results() -> u64 {
     100
 }
@@ -118,6 +122,8 @@ pub struct Config {
     pub word_wrap: bool,
     #[serde(default = "default_wrap_indicator")]
     pub wrap_indicator: String,
+    #[serde(default = "default_block_id_gutter")]
+    pub block_id_gutter: bool,
     #[serde(default = "default_max_results")]
     pub max_results: u64,
     #[serde(default = "default_views")]
@@ -273,6 +279,7 @@ impl Config {
             scrolloff: default_scrolloff(),
             word_wrap: default_word_wrap(),
             wrap_indicator: default_wrap_indicator(),
+            block_id_gutter: default_block_id_gutter(),
             max_results: default_max_results(),
             views: default_views(),
         }
@@ -329,6 +336,12 @@ pub fn migrate_config(config: &Config) -> String {
         result = result.replace(
             "# wrap_indicator = \"↪\"",
             &format!("wrap_indicator = \"{}\"", config.wrap_indicator),
+        );
+    }
+    if config.block_id_gutter != defaults.block_id_gutter {
+        result = result.replace(
+            "# block_id_gutter = false",
+            &format!("block_id_gutter = {}", config.block_id_gutter),
         );
     }
     if config.auto_align != defaults.auto_align {
@@ -498,6 +511,7 @@ mod tests {
         assert_eq!(config.which_key_timeout_ms, 500);
         assert_eq!(config.font.family, "JetBrains Mono");
         assert_eq!(config.font.size, 14);
+        assert!(!config.block_id_gutter);
     }
 
     #[test]
@@ -546,9 +560,9 @@ mod tests {
 
     #[test]
     fn test_config_version_parsed() {
-        let toml_str = "config_version = 1\n";
+        let toml_str = "config_version = 2\n";
         let config: Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.config_version, 1);
+        assert_eq!(config.config_version, 2);
     }
 
     #[test]
@@ -583,7 +597,17 @@ mod tests {
         assert!(!migrated.contains("# scrolloff = 3"));
         assert!(migrated.contains("which_key_timeout_ms = 1000"));
         assert!(migrated.contains("theme.name = \"aurora\""));
-        assert!(migrated.contains("config_version = 1"));
+        assert!(migrated.contains("config_version = 2"));
+    }
+
+    #[test]
+    fn test_migrate_preserves_block_id_gutter() {
+        let mut config = Config::defaults();
+        config.block_id_gutter = true;
+
+        let migrated = migrate_config(&config);
+        assert!(migrated.contains("block_id_gutter = true"));
+        assert!(!migrated.contains("# block_id_gutter = false"));
     }
 
     #[test]
@@ -664,7 +688,7 @@ mod tests {
 
         // File on disk should now be the migrated template.
         let on_disk = std::fs::read_to_string(&config_path).unwrap();
-        assert!(on_disk.contains("config_version = 1"));
+        assert!(on_disk.contains("config_version = 2"));
         assert!(on_disk.contains("startup.mode = \"restore\""));
         assert!(on_disk.contains("theme.name = \"frost\""));
     }
