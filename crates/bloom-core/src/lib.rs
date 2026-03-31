@@ -3570,6 +3570,26 @@ mod tests {
         assert!(editor.durable_capture.pending_pages.contains(&page_b));
     }
 
+    #[test]
+    fn undo_tree_entry_opens_page_history_surface() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let page_id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(
+            &page_id,
+            "Test",
+            std::path::Path::new("[scratch]"),
+            "hello\n",
+        );
+
+        editor.handle_key(KeyEvent::char(' '));
+        editor.handle_key(KeyEvent::char('u'));
+        editor.handle_key(KeyEvent::char('u'));
+
+        let temporal_strip = editor.temporal_strip.as_ref().expect("history should open");
+        assert_eq!(temporal_strip.mode, render::TemporalMode::PageHistory);
+    }
+
     // UC-01: Open today's journal via SPC j t
     #[test]
     fn test_uc01_open_journal() {

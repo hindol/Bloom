@@ -110,7 +110,7 @@ impl BloomEditor {
                     ("split_vertical", "Split vertical", "SPC w v"),
                     ("split_horizontal", "Split horizontal", "SPC w s"),
                     ("agenda", "Agenda", "SPC a a"),
-                    ("undo_tree", "Undo tree", "SPC u u"),
+                    ("undo_tree", "Page history", "SPC u u"),
                     ("theme_selector", "Theme selector", "SPC T t"),
                     ("new_from_template", "New from template", "SPC n"),
                     ("rebuild_index", "Rebuild index", "SPC h r"),

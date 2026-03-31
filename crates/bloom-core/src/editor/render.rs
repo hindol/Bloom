@@ -38,7 +38,7 @@ const DASHBOARD_TIPS: &[&str] = &[
     "[[ in Insert mode triggers the link picker \u{2014} type to search pages.",
     "SPC s t lets you browse all tags and filter by one.",
     "SPC w v splits the window \u{2014} edit two pages side by side.",
-    "SPC u u opens the undo tree \u{2014} navigate branching history visually.",
+    "SPC u u opens page history \u{2014} recent undo and older checkpoints live together.",
     "#tag anywhere in text creates an inline tag \u{2014} searchable immediately.",
     "@due(2026-03-25) on a task makes it appear in the agenda (SPC a a).",
     "SPC H h shows the full history of the current page \u{2014} every version.",

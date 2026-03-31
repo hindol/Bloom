@@ -301,7 +301,7 @@ fn build_static_tree(tree: &mut WhichKeyTree) {
     tree.register("r b", "Move block", "move_block".into());
 
     // Undo
-    tree.register("u u", "Undo tree", "undo_tree".into());
+    tree.register("u u", "Page history", "undo_tree".into());
 
     // History (time travel)
     tree.register("H h", "Page history", "page_history".into());

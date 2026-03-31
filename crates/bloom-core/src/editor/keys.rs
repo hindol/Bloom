@@ -274,8 +274,7 @@ impl BloomEditor {
                     self.open_agenda();
                 }
                 keymap::dispatch::Action::OpenUndoTree => {
-                    // TODO: open undo tree in split pane
-                    result.push(action);
+                    self.open_page_history();
                 }
                 keymap::dispatch::Action::OpenPageHistory => {
                     self.open_page_history();
