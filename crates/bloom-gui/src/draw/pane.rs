@@ -7,40 +7,27 @@ use bloom_md::theme::ThemePalette;
 use iced::{Color, Rectangle};
 
 use crate::draw::{
-    byte_offset_to_char_col, chars_that_fit, draw_bar_cursor, draw_text, draw_text_center,
-    draw_text_right, draw_text_sized, fill_rect, rect, text_width, truncate_text,
+    chars_that_fit, draw_bar_cursor, draw_text, draw_text_center, draw_text_right, draw_text_sized,
+    fill_rect, rect, text_width, truncate_text,
 };
 use crate::theme::{rgb_to_color, style_to_bg, style_to_color};
+use crate::wrap::{
+    display_width, layout_pane, line_font_size, line_row_height, line_text, PaneViewportState,
+};
 use crate::{
     CHAR_WIDTH, FONT_SIZE, GUTTER_CHARS, GUTTER_WIDTH, LINE_HEIGHT, MODELINE_H_PAD, SPACING_MD,
     SPACING_SM, STATUS_BAR_HEIGHT,
 };
 
+#[cfg(test)]
+use crate::wrap::heading_font_size;
+
 /// Extra pixels the GUI status bar adds beyond what core allocates (1 cell row).
 const STATUS_BAR_EXTRA: f32 = STATUS_BAR_HEIGHT - LINE_HEIGHT;
 
-pub(crate) fn heading_font_size(level: u8) -> f32 {
-    match level {
-        1 => FONT_SIZE * 1.5,
-        2 => FONT_SIZE * 1.3,
-        3 => FONT_SIZE * 1.1,
-        _ => FONT_SIZE,
-    }
-}
-
-/// Row height for a line — taller for headings.
-pub(crate) fn line_row_height(line: &bloom_core::render::RenderedLine) -> f32 {
-    line.spans
-        .iter()
-        .find_map(|s| match s.style {
-            Style::Heading { level } => Some(heading_font_size(level) * 1.4),
-            _ => None,
-        })
-        .unwrap_or(LINE_HEIGHT)
-}
-
 /// Compute the Y offset of a given visible line index, accounting for
 /// variable row heights (headings are taller).
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn cursor_y_in_pane(
     visible_lines: &[bloom_core::render::RenderedLine],
     target_row: usize,
@@ -82,6 +69,10 @@ pub(crate) fn pane_pixel_rect(
 pub(crate) fn draw_pane(
     frame: &mut iced::widget::canvas::Frame,
     pane: &PaneFrame,
+    word_wrap: bool,
+    wrap_indicator: &str,
+    viewport_state: Option<&PaneViewportState>,
+    _scrolloff: usize,
     theme: &ThemePalette,
     anim: Option<(f32, f32)>,
     cursor_visible: bool,
@@ -102,9 +93,17 @@ pub(crate) fn draw_pane(
     }
 
     match &pane.kind {
-        PaneKind::Editor => {
-            draw_editor_content(frame, pane, theme, anim, cursor_visible, content_area)
-        }
+        PaneKind::Editor => draw_editor_content(
+            frame,
+            pane,
+            word_wrap,
+            wrap_indicator,
+            viewport_state,
+            theme,
+            anim,
+            cursor_visible,
+            content_area,
+        ),
         PaneKind::UndoTree(undo_tree) => draw_undo_tree(frame, content_area, undo_tree, theme),
         PaneKind::Timeline(timeline) => draw_timeline(frame, content_area, timeline, theme),
         PaneKind::PageHistory(page_history) => {
@@ -124,136 +123,128 @@ pub(crate) fn draw_pane(
 fn draw_editor_content(
     frame: &mut iced::widget::canvas::Frame,
     pane: &PaneFrame,
+    word_wrap: bool,
+    wrap_indicator: &str,
+    viewport_state: Option<&PaneViewportState>,
     theme: &ThemePalette,
     anim: Option<(f32, f32)>,
     cursor_visible: bool,
     content_area: Rectangle,
 ) {
     let pane_x = content_area.x;
-    let pane_y = content_area.y;
     let pane_w = content_area.width;
-    let content_chars = pane.rect.width as usize;
-    let text_chars = content_chars.saturating_sub(GUTTER_CHARS);
-
-    // Pre-compute per-line Y offsets and heights (headings get taller rows).
-    let mut line_ys: Vec<f32> = Vec::with_capacity(pane.visible_lines.len());
-    let mut line_heights: Vec<f32> = Vec::with_capacity(pane.visible_lines.len());
-    let mut y_acc = pane_y;
-    for line in &pane.visible_lines {
-        let h_level = line.spans.iter().find_map(|s| match s.style {
-            Style::Heading { level } => Some(level),
-            _ => None,
-        });
-        let row_h = match h_level {
-            Some(level) => heading_font_size(level) * 1.4,
-            None => LINE_HEIGHT,
-        };
-        line_ys.push(y_acc);
-        line_heights.push(row_h);
-        y_acc += row_h;
-    }
+    let viewport = viewport_state.copied().unwrap_or_default();
+    let layout = layout_pane(pane, content_area, word_wrap, &viewport);
 
     // Line highlight is drawn on CursorCanvas (alpha-blended overlay) so it
     // animates smoothly with the cursor without re-rendering text content.
 
-    for (i, line) in pane.visible_lines.iter().enumerate() {
-        let y = line_ys[i];
-        let row_h = line_heights[i];
-
-        match line.source {
+    for row in &layout.rows {
+        match row.source {
             LineSource::Buffer(buf_line) => {
-                let num_str = format!("{:>width$}", buf_line + 1, width = GUTTER_CHARS - 1);
-                let gutter_color = if pane.is_active
-                    && line.is_mirror
-                    && i == pane.cursor.line.saturating_sub(pane.scroll_offset)
-                {
-                    rgb_to_color(&theme.salient)
+                if row.is_continuation {
+                    draw_text_sized(
+                        frame,
+                        pane_x + CHAR_WIDTH,
+                        row.y,
+                        wrap_indicator,
+                        rgb_to_color(&theme.faded.blend(theme.background, 0.4)),
+                        FONT_SIZE,
+                        row.row_height,
+                    );
                 } else {
-                    // Blend faded toward background — softer than full faded,
-                    // stays within the semantic theme system.
-                    rgb_to_color(&theme.faded.blend(theme.background, 0.4))
-                };
-                draw_text_sized(frame, pane_x, y, num_str, gutter_color, FONT_SIZE, row_h);
+                    let num_str = format!("{:>width$}", buf_line + 1, width = GUTTER_CHARS - 1);
+                    let is_mirror = pane
+                        .visible_lines
+                        .get(row.line_idx)
+                        .map(|line| line.is_mirror)
+                        .unwrap_or(false);
+                    let gutter_color = if pane.is_active
+                        && is_mirror
+                        && row.line_idx == pane.cursor.line.saturating_sub(pane.scroll_offset)
+                    {
+                        rgb_to_color(&theme.salient)
+                    } else {
+                        rgb_to_color(&theme.faded.blend(theme.background, 0.4))
+                    };
+                    draw_text_sized(
+                        frame,
+                        pane_x,
+                        row.y,
+                        num_str,
+                        gutter_color,
+                        FONT_SIZE,
+                        row.row_height,
+                    );
+                }
             }
             LineSource::BeyondEof => {
                 draw_text_sized(
                     frame,
                     pane_x + CHAR_WIDTH,
-                    y,
+                    row.y,
                     "~",
                     rgb_to_color(&theme.faded.blend(theme.background, 0.4)),
                     FONT_SIZE,
-                    row_h,
+                    row.row_height,
                 );
             }
         }
 
         let text_x = pane_x + GUTTER_WIDTH;
-        let line_text = line.text.trim_end_matches(['\n', '\r']);
-        let visible_text = truncate_text(line_text, text_chars);
+        let Some(line) = pane.visible_lines.get(row.line_idx) else {
+            continue;
+        };
+        let full_text = line_text(line);
+        let visible_text = &full_text[row.visible_byte_start..row.visible_byte_end];
 
         if line.spans.is_empty() {
             draw_text(
                 frame,
                 text_x,
-                y,
+                row.y,
                 visible_text,
                 rgb_to_color(&theme.foreground),
             );
         } else {
-            let heading_level = line.spans.iter().find_map(|s| match s.style {
-                Style::Heading { level } => Some(level),
-                _ => None,
-            });
-            let line_font_size = heading_level.map(heading_font_size).unwrap_or(FONT_SIZE);
-            // Uniform char width and font size for the entire line.
-            // Heading lines use the scaled size for ALL spans (including block IDs).
-            // This keeps width calculations simple and cursor positioning correct.
-            let line_cw = CHAR_WIDTH * (line_font_size / FONT_SIZE);
-
             for span in &line.spans {
-                let start = span.byte_range.start.min(line_text.len());
-                let end = span.byte_range.end.min(line_text.len());
+                let start = span
+                    .byte_range
+                    .start
+                    .max(row.visible_byte_start)
+                    .min(full_text.len());
+                let end = span
+                    .byte_range
+                    .end
+                    .min(row.visible_byte_end)
+                    .min(full_text.len());
                 if start >= end {
                     continue;
                 }
 
-                // Convert byte offsets to char column positions for rendering.
-                let col_start = byte_offset_to_char_col(line_text, start);
-                let col_end = byte_offset_to_char_col(line_text, end);
-
-                // Skip spans entirely beyond the visible area.
-                if col_start >= text_chars {
-                    continue;
-                }
-
-                let slice = &line_text[start..end];
-
-                // Truncate the slice if it extends past the visible column limit.
-                let visible_col_end = col_end.min(text_chars);
-                let visible_slice: String = if col_end > text_chars {
-                    slice.chars().take(visible_col_end - col_start).collect()
-                } else {
-                    slice.to_string()
-                };
-                let span_chars = visible_col_end - col_start;
-
-                let span_x = col_start as f32 * line_cw;
-                let span_w = span_chars as f32 * line_cw;
+                let visible_slice = &full_text[start..end];
+                let span_cols = display_width(visible_slice);
+                let span_x_cols = display_width(&full_text[row.visible_byte_start..start]);
+                let span_x = span_x_cols as f32 * row.char_width;
+                let span_w = span_cols as f32 * row.char_width;
 
                 // Background wash for styles that need it.
                 if let Some(bg) = style_to_bg(&span.style, theme) {
-                    fill_rect(frame, rect(text_x + span_x, y, span_w, row_h), bg);
+                    fill_rect(
+                        frame,
+                        rect(text_x + span_x, row.y, span_w, row.row_height),
+                        bg,
+                    );
                 }
 
                 draw_text_sized(
                     frame,
                     text_x + span_x,
-                    y,
-                    visible_slice.clone(),
+                    row.y,
+                    visible_slice.to_string(),
                     style_to_color(&span.style, theme),
-                    line_font_size,
-                    row_h,
+                    row.font_size,
+                    row.row_height,
                 );
 
                 // Strikethrough for checked task text (not the checkbox or block ID).
@@ -270,9 +261,9 @@ fn draw_editor_content(
                     let vis_chars = visible_slice.chars().count();
                     let content_chars = vis_chars.saturating_sub(leading).saturating_sub(trailing);
                     if content_chars > 0 {
-                        let strike_start = text_x + span_x + leading as f32 * line_cw;
-                        let strike_end = strike_start + content_chars as f32 * line_cw;
-                        let strike_y = y + row_h / 2.0;
+                        let strike_start = text_x + span_x + leading as f32 * row.char_width;
+                        let strike_end = strike_start + content_chars as f32 * row.char_width;
+                        let strike_y = row.y + row.row_height / 2.0;
                         crate::draw::draw_hline(
                             frame,
                             strike_start,
@@ -286,19 +277,19 @@ fn draw_editor_content(
         }
 
         // Image placeholder: render a box with alt text for `![alt](path)` lines.
-        if line_text.starts_with("![") {
-            if let Some(alt_end) = line_text.find("](") {
-                let alt = &line_text[2..alt_end];
+        if !row.is_continuation && full_text.starts_with("![") && row.visible_byte_start == 0 {
+            if let Some(alt_end) = full_text.find("](") {
+                let alt = &full_text[2..alt_end];
                 let box_w = pane_w - GUTTER_WIDTH;
                 fill_rect(
                     frame,
-                    rect(text_x, y, box_w, LINE_HEIGHT),
+                    rect(text_x, row.y, box_w, LINE_HEIGHT),
                     rgb_to_color(&theme.subtle),
                 );
                 draw_text(
                     frame,
                     text_x + CHAR_WIDTH,
-                    y,
+                    row.y,
                     format!("\u{1F5BC} {alt}"),
                     rgb_to_color(&theme.faded),
                 );
@@ -307,31 +298,12 @@ fn draw_editor_content(
     }
 
     if pane.is_active && cursor_visible {
-        let cursor_row_idx = pane.cursor.line.saturating_sub(pane.scroll_offset);
-        let cursor_row_h = line_heights
-            .get(cursor_row_idx)
-            .copied()
-            .unwrap_or(LINE_HEIGHT);
-
-        // Simple cursor positioning — uniform font size per line.
-        let (cx, cursor_cw) = if let Some(line) = pane.visible_lines.get(cursor_row_idx) {
-            let h_level = line.spans.iter().find_map(|s| match s.style {
-                Style::Heading { level } => Some(level),
-                _ => None,
-            });
-            let cw = h_level
-                .map(|l| CHAR_WIDTH * (heading_font_size(l) / FONT_SIZE))
-                .unwrap_or(CHAR_WIDTH);
-            (pane_x + GUTTER_WIDTH + pane.cursor.column as f32 * cw, cw)
-        } else {
-            (
-                pane_x + GUTTER_WIDTH + pane.cursor.column as f32 * CHAR_WIDTH,
-                CHAR_WIDTH,
-            )
+        let Some(cursor) = layout.cursor else {
+            return;
         };
-        let cy = anim
-            .map(|(c, _)| c)
-            .unwrap_or(line_ys.get(cursor_row_idx).copied().unwrap_or(pane_y));
+        let cx = pane_x + cursor.x;
+        let cursor_cw = cursor.cell_width.max(cursor.char_width);
+        let cy = anim.map(|(c, _)| c).unwrap_or(cursor.y);
 
         match pane.cursor.shape {
             CursorShape::Block => {
@@ -339,41 +311,35 @@ fn draw_editor_content(
                 // colour so it's always readable (terminal-style inverse).
                 fill_rect(
                     frame,
-                    rect(cx, cy, cursor_cw, cursor_row_h),
+                    rect(cx, cy, cursor_cw, cursor.row_height),
                     rgb_to_color(&theme.foreground),
                 );
                 // Extract the character under the cursor and redraw it inverted.
-                if let Some(line) = pane.visible_lines.get(cursor_row_idx) {
-                    let line_text = line.text.trim_end_matches(['\n', '\r']);
-                    if let Some(ch) = line_text.chars().nth(pane.cursor.column) {
-                        let font_size = pane
-                            .visible_lines
-                            .get(cursor_row_idx)
-                            .and_then(|l| {
-                                l.spans.iter().find_map(|s| match s.style {
-                                    Style::Heading { level } => Some(heading_font_size(level)),
-                                    _ => None,
-                                })
-                            })
-                            .unwrap_or(FONT_SIZE);
+                if let Some(line) = pane.visible_lines.get(cursor.line_idx) {
+                    let full_text = line_text(line);
+                    if let Some(ch) = full_text.chars().nth(pane.cursor.column) {
                         draw_text_sized(
                             frame,
                             cx,
                             cy,
                             ch.to_string(),
                             rgb_to_color(&theme.background),
-                            font_size,
-                            cursor_row_h,
+                            line_font_size(line),
+                            cursor.row_height,
                         );
                     }
                 }
             }
-            CursorShape::Bar => {
-                draw_bar_cursor(frame, cx, cy, cursor_row_h, rgb_to_color(&theme.foreground))
-            }
+            CursorShape::Bar => draw_bar_cursor(
+                frame,
+                cx,
+                cy,
+                cursor.row_height,
+                rgb_to_color(&theme.foreground),
+            ),
             CursorShape::Underline => fill_rect(
                 frame,
-                rect(cx, cy + cursor_row_h - 2.0, cursor_cw, 2.0),
+                rect(cx, cy + cursor.row_height - 2.0, cursor_cw, 2.0),
                 rgb_to_color(&theme.foreground),
             ),
         }
@@ -387,100 +353,72 @@ fn draw_editor_content(
 pub(crate) fn draw_pane_cursor(
     frame: &mut iced::widget::canvas::Frame,
     pane: &PaneFrame,
+    word_wrap: bool,
+    viewport_state: Option<&PaneViewportState>,
     theme: &ThemePalette,
     anim: Option<(f32, f32)>,
     cursor_visible: bool,
     content_area: Rectangle,
 ) {
     let pane_x = content_area.x;
-    let pane_y = content_area.y;
     let pane_w = content_area.width;
-
-    // Recompute per-line Y offsets (same logic as draw_editor_content).
-    let mut line_ys: Vec<f32> = Vec::with_capacity(pane.visible_lines.len());
-    let mut line_heights: Vec<f32> = Vec::with_capacity(pane.visible_lines.len());
-    let mut y_acc = pane_y;
-    for line in &pane.visible_lines {
-        let row_h = line_row_height(line);
-        line_ys.push(y_acc);
-        line_heights.push(row_h);
-        y_acc += row_h;
-    }
-
-    let logical_cursor_row = pane.cursor.line.saturating_sub(pane.scroll_offset);
-    let cursor_row_h = line_heights
-        .get(logical_cursor_row)
-        .copied()
-        .unwrap_or(LINE_HEIGHT);
+    let viewport = viewport_state.copied().unwrap_or_default();
+    let layout = layout_pane(pane, content_area, word_wrap, &viewport);
+    let Some(cursor) = layout.cursor else {
+        return;
+    };
 
     // Current-line highlight — semi-transparent overlay so text shows through.
     let hl_y = if let Some((_, hl)) = anim {
         hl
     } else {
-        line_ys.get(logical_cursor_row).copied().unwrap_or(pane_y)
+        cursor.y
     };
     let hl_color = crate::theme::highlight_overlay_color(theme);
-    fill_rect(frame, rect(pane_x, hl_y, pane_w, cursor_row_h), hl_color);
+    fill_rect(
+        frame,
+        rect(pane_x, hl_y, pane_w, cursor.row_height),
+        hl_color,
+    );
 
     // Cursor glyph.
     if cursor_visible {
-        let (cx, cursor_cw) = if let Some(line) = pane.visible_lines.get(logical_cursor_row) {
-            let h_level = line.spans.iter().find_map(|s| match s.style {
-                Style::Heading { level } => Some(level),
-                _ => None,
-            });
-            let cw = h_level
-                .map(|l| CHAR_WIDTH * (heading_font_size(l) / FONT_SIZE))
-                .unwrap_or(CHAR_WIDTH);
-            (pane_x + GUTTER_WIDTH + pane.cursor.column as f32 * cw, cw)
-        } else {
-            (
-                pane_x + GUTTER_WIDTH + pane.cursor.column as f32 * CHAR_WIDTH,
-                CHAR_WIDTH,
-            )
-        };
-        let cy = anim
-            .map(|(c, _)| c)
-            .unwrap_or(line_ys.get(logical_cursor_row).copied().unwrap_or(pane_y));
+        let cx = pane_x + cursor.x;
+        let cursor_cw = cursor.cell_width.max(cursor.char_width);
+        let cy = anim.map(|(c, _)| c).unwrap_or(cursor.y);
 
         match pane.cursor.shape {
             CursorShape::Block => {
                 fill_rect(
                     frame,
-                    rect(cx, cy, cursor_cw, cursor_row_h),
+                    rect(cx, cy, cursor_cw, cursor.row_height),
                     rgb_to_color(&theme.foreground),
                 );
-                if let Some(line) = pane.visible_lines.get(logical_cursor_row) {
-                    let line_text = line.text.trim_end_matches(['\n', '\r']);
-                    if let Some(ch) = line_text.chars().nth(pane.cursor.column) {
-                        let font_size = pane
-                            .visible_lines
-                            .get(logical_cursor_row)
-                            .and_then(|l| {
-                                l.spans.iter().find_map(|s| match s.style {
-                                    Style::Heading { level } => Some(heading_font_size(level)),
-                                    _ => None,
-                                })
-                            })
-                            .unwrap_or(FONT_SIZE);
+                if let Some(line) = pane.visible_lines.get(cursor.line_idx) {
+                    let full_text = line_text(line);
+                    if let Some(ch) = full_text.chars().nth(pane.cursor.column) {
                         draw_text_sized(
                             frame,
                             cx,
                             cy,
                             ch.to_string(),
                             rgb_to_color(&theme.background),
-                            font_size,
-                            cursor_row_h,
+                            line_font_size(line),
+                            cursor.row_height,
                         );
                     }
                 }
             }
-            CursorShape::Bar => {
-                draw_bar_cursor(frame, cx, cy, cursor_row_h, rgb_to_color(&theme.foreground))
-            }
+            CursorShape::Bar => draw_bar_cursor(
+                frame,
+                cx,
+                cy,
+                cursor.row_height,
+                rgb_to_color(&theme.foreground),
+            ),
             CursorShape::Underline => fill_rect(
                 frame,
-                rect(cx, cy + cursor_row_h - 2.0, cursor_cw, 2.0),
+                rect(cx, cy + cursor.row_height - 2.0, cursor_cw, 2.0),
                 rgb_to_color(&theme.foreground),
             ),
         }

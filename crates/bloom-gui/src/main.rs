@@ -6,6 +6,7 @@ mod keys;
 mod layout;
 mod remote;
 mod theme;
+mod wrap;
 
 use bloom_core::config::Config;
 use bloom_core::default_vault_path;
@@ -118,6 +119,7 @@ struct BloomApp {
     prev_active_pane: Option<PaneId>,
     /// Set on window resize — forces all pane caches to clear on next frame.
     full_invalidation_pending: bool,
+    pane_viewports: HashMap<PaneId, wrap::PaneViewportState>,
 }
 
 #[derive(Debug, Clone)]
@@ -210,6 +212,7 @@ fn boot() -> (BloomApp, Task<Message>) {
             font_metrics: FontMetrics::default(),
             prev_active_pane: None,
             full_invalidation_pending: false,
+            pane_viewports: HashMap::new(),
         },
         Task::none(),
     )
@@ -237,12 +240,20 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
                         .count();
                     let pane_y = pane.rect.y as f32 * LINE_HEIGHT
                         + status_bars_above as f32 * (STATUS_BAR_HEIGHT - LINE_HEIGHT);
-                    let cursor_row = pane.cursor.line.saturating_sub(pane.scroll_offset);
-                    let target_cursor_y = crate::draw::pane::cursor_y_in_pane(
-                        &pane.visible_lines,
-                        cursor_row,
-                        pane_y,
-                    );
+                    let content_area = iced::Rectangle {
+                        x: 0.0,
+                        y: pane_y,
+                        width: pane.rect.width as f32 * CHAR_WIDTH,
+                        height: pane.rect.content_height as f32 * LINE_HEIGHT,
+                    };
+                    let viewport = state
+                        .pane_viewports
+                        .get(&pane.id)
+                        .copied()
+                        .unwrap_or_default();
+                    let layout =
+                        crate::wrap::layout_pane(pane, content_area, frame.word_wrap, &viewport);
+                    let target_cursor_y = layout.cursor.map(|cursor| cursor.y).unwrap_or(pane_y);
                     let target_scroll_y = pane.scroll_offset as f32 * LINE_HEIGHT;
                     if state.remote.skip_animation() {
                         state.anim.snap(target_cursor_y, target_scroll_y);
@@ -326,6 +337,7 @@ fn view(state: &BloomApp) -> Element<'_, Message> {
         theme: state.theme,
         pane_caches: &state.pane_caches,
         chrome_cache: &state.chrome_cache,
+        pane_viewports: &state.pane_viewports,
     })
     .width(Length::Fill)
     .height(Length::Fill);
@@ -337,6 +349,7 @@ fn view(state: &BloomApp) -> Element<'_, Message> {
         anim: &state.anim,
         remote: state.remote,
         cursor_visible: !state.is_insert_mode() || state.cursor_visible,
+        pane_viewports: &state.pane_viewports,
     })
     .width(Length::Fill)
     .height(Length::Fill);
@@ -446,6 +459,7 @@ impl BloomApp {
         if let Some(ref frame) = self.frame {
             let current_ids: Vec<PaneId> = frame.panes.iter().map(|p| p.id).collect();
             self.pane_caches.retain(|id, _| current_ids.contains(id));
+            self.pane_viewports.retain(|id, _| current_ids.contains(id));
             for id in current_ids {
                 self.pane_caches.entry(id).or_insert_with(Cache::default);
             }
@@ -600,6 +614,7 @@ impl BloomApp {
             got_frame = true;
         }
         if got_frame {
+            self.reconcile_pane_viewports();
             self.animating = true;
             if self.full_invalidation_pending {
                 self.full_invalidation_pending = false;
@@ -608,6 +623,30 @@ impl BloomApp {
                 self.clear_content_caches();
                 self.clear_cursor_cache();
             }
+        }
+    }
+
+    fn reconcile_pane_viewports(&mut self) {
+        let Some(frame) = self.frame.as_ref() else {
+            self.pane_viewports.clear();
+            return;
+        };
+
+        for pane in &frame.panes {
+            let viewport = self.pane_viewports.entry(pane.id).or_default();
+            let content_area = iced::Rectangle {
+                x: 0.0,
+                y: 0.0,
+                width: pane.rect.width as f32 * CHAR_WIDTH,
+                height: pane.rect.content_height as f32 * LINE_HEIGHT,
+            };
+            crate::wrap::reconcile_viewport_state(
+                viewport,
+                pane,
+                content_area,
+                frame.word_wrap,
+                frame.scrolloff,
+            );
         }
     }
 }

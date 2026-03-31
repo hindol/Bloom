@@ -30,6 +30,8 @@ pub struct RenderFrame {
     pub view: Option<ViewFrame>,
     pub notifications: Vec<Notification>,
     pub scrolloff: usize,
+    pub word_wrap: bool,
+    pub wrap_indicator: String,
     /// Active theme name — frontends resolve to a palette each frame for live preview.
     pub theme_name: String,
     /// Split tree snapshot — the GUI computes pixel rects from ratios + font

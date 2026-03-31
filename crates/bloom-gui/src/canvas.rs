@@ -11,6 +11,7 @@ use crate::draw::{draw_text_right, drawer, inline, notification, overlay, pane};
 use crate::layout::FrameLayout;
 use crate::remote::RemoteHints;
 use crate::theme::rgb_to_color;
+use crate::wrap::PaneViewportState;
 use crate::{Message, CHAR_WIDTH};
 
 /// Animation speed: fraction of remaining distance covered per frame.
@@ -86,6 +87,7 @@ pub(crate) struct BaseCanvas<'a> {
     pub(crate) theme: &'a ThemePalette,
     pub(crate) pane_caches: &'a HashMap<PaneId, Cache>,
     pub(crate) chrome_cache: &'a Cache,
+    pub(crate) pane_viewports: &'a HashMap<PaneId, PaneViewportState>,
 }
 
 impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
@@ -236,6 +238,10 @@ impl<'a> canvas::Program<Message> for BaseCanvas<'a> {
                 pane::draw_pane(
                     frame,
                     pf,
+                    rf.word_wrap,
+                    &rf.wrap_indicator,
+                    self.pane_viewports.get(&pf.id),
+                    rf.scrolloff,
                     theme,
                     anim,
                     false, // cursor_visible — drawn by CursorCanvas
@@ -262,6 +268,7 @@ pub(crate) struct CursorCanvas<'a> {
     pub(crate) anim: &'a AnimationState,
     pub(crate) remote: RemoteHints,
     pub(crate) cursor_visible: bool,
+    pub(crate) pane_viewports: &'a HashMap<PaneId, PaneViewportState>,
 }
 
 impl<'a> canvas::Program<Message> for CursorCanvas<'a> {
@@ -308,6 +315,8 @@ impl<'a> canvas::Program<Message> for CursorCanvas<'a> {
             pane::draw_pane_cursor(
                 frame,
                 pf,
+                rf.word_wrap,
+                self.pane_viewports.get(&pf.id),
                 self.theme,
                 anim,
                 self.cursor_visible,

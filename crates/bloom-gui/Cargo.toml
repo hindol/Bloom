@@ -11,6 +11,8 @@ arboard = "3"
 crossbeam = "0.8.4"
 iced = { version = "0.14", features = ["canvas", "advanced", "tokio"] }
 tracing = "0.1"
+unicode-segmentation = "1"
+unicode-width = "0.2"
 
 # Packaging prep for cargo-bundle / CI-based .dmg/.msi builds.
 [package.metadata.bundle]
