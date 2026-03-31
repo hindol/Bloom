@@ -97,7 +97,9 @@ impl BloomEditor {
                     restore_effect: TemporalRestoreEffect::RestoreUndoNode,
                     branch: branch_context(branch_count),
                     checkpoint: None,
+                    lineage: None,
                     content: Some(tree.node_snapshot_string(node_id)),
+                    lineage_snapshot: None,
                     undo_node_id: Some(node_id),
                     git_oid: None,
                     skip: false,
@@ -202,7 +204,9 @@ impl BloomEditor {
                             restore_effect: TemporalRestoreEffect::ReplaceBlockLineCreatesUndoNode,
                             branch: branch_context(branch_count),
                             checkpoint: None,
+                            lineage: None,
                             content: Some(line.clone()),
+                            lineage_snapshot: None,
                             undo_node_id: Some(node_id),
                             git_oid: None,
                             skip: false,
@@ -282,7 +286,9 @@ impl BloomEditor {
                         reason: checkpoint_reason(&entry.message),
                         changed_pages,
                     }),
+                    lineage: None,
                     content: None, // Loaded on-demand via BlobAt
+                    lineage_snapshot: None,
                     undo_node_id: None,
                     git_oid: Some(entry.oid.clone()),
                     skip: false,
@@ -463,6 +469,330 @@ impl BloomEditor {
     }
 }
 
+pub(crate) fn temporal_item_identity(item: &TemporalItem) -> String {
+    if let Some(oid) = &item.git_oid {
+        format!("git:{oid}")
+    } else if let Some(node_id) = item.undo_node_id {
+        format!("undo:{node_id:?}")
+    } else {
+        format!("item:{}:{}", item.label, item.summary)
+    }
+}
+
+pub(crate) fn parse_temporal_block_snapshot(content: &str) -> TemporalBlockSnapshot {
+    let (clean, entries) = crate::document::deserialize_canonical_markdown(content);
+    let lines: Vec<&str> = clean.lines().collect();
+    let blocks = entries
+        .into_iter()
+        .map(|entry| TemporalSnapshotBlock {
+            id: entry.id.0,
+            is_mirror: entry.is_mirror,
+            first_line: entry.first_line,
+            last_line: entry.last_line,
+            text: lines
+                .get(entry.first_line..entry.last_line.saturating_add(1))
+                .unwrap_or(&[])
+                .join("\n"),
+        })
+        .collect();
+    TemporalBlockSnapshot { blocks }
+}
+
+pub(crate) fn rebuild_block_history_projection(ts: &mut TemporalStripState) {
+    if !matches!(ts.mode, render::TemporalMode::BlockHistory) {
+        return;
+    }
+    let Some(block_id) = ts.block_id.clone() else {
+        return;
+    };
+    let selected_key = ts.items.get(ts.selected).map(temporal_item_identity);
+    let mut real_items: Vec<TemporalItem> = ts
+        .items
+        .iter()
+        .filter(|item| !matches!(item.kind, render::StripNodeKind::LineageEvent))
+        .cloned()
+        .collect();
+
+    for item in &mut real_items {
+        if matches!(item.kind, render::StripNodeKind::GitCommit) {
+            item.skip = false;
+        }
+    }
+
+    for idx in 0..real_items.len().saturating_sub(1) {
+        if matches!(real_items[idx].kind, render::StripNodeKind::GitCommit)
+            && matches!(real_items[idx + 1].kind, render::StripNodeKind::GitCommit)
+            && real_items[idx].content.is_some()
+            && real_items[idx + 1].content == real_items[idx].content
+        {
+            real_items[idx + 1].skip = true;
+        }
+    }
+
+    let lineage_items: Vec<Option<TemporalItem>> = (0..real_items.len().saturating_sub(1))
+        .map(|idx| synthetic_lineage_item(&real_items[idx], &real_items[idx + 1], &block_id))
+        .collect();
+
+    for (idx, lineage_item) in lineage_items.iter().enumerate() {
+        if lineage_item.is_some()
+            && matches!(real_items[idx + 1].kind, render::StripNodeKind::GitCommit)
+        {
+            real_items[idx + 1].skip = true;
+        }
+    }
+
+    let mut rebuilt = Vec::with_capacity(real_items.len() + lineage_items.len());
+    for idx in 0..real_items.len() {
+        rebuilt.push(real_items[idx].clone());
+        if let Some(lineage_item) = lineage_items.get(idx).cloned().flatten() {
+            rebuilt.push(lineage_item);
+        }
+    }
+
+    ts.items = rebuilt;
+    if let Some(key) = selected_key {
+        if let Some(new_idx) = ts
+            .items
+            .iter()
+            .position(|item| temporal_item_identity(item) == key)
+        {
+            ts.selected = new_idx;
+        } else {
+            ts.selected = ts.selected.min(ts.items.len().saturating_sub(1));
+        }
+    }
+}
+
+fn synthetic_lineage_item(
+    older: &TemporalItem,
+    newer: &TemporalItem,
+    tracked_block_id: &str,
+) -> Option<TemporalItem> {
+    if !matches!(older.kind, render::StripNodeKind::GitCommit)
+        || !matches!(newer.kind, render::StripNodeKind::GitCommit)
+    {
+        return None;
+    }
+    let older_snapshot = older.lineage_snapshot.as_ref()?;
+    let newer_snapshot = newer.lineage_snapshot.as_ref()?;
+
+    let (event, related_ids, summary) = if let Some(child_id) =
+        detect_split_spawned_child(older_snapshot, newer_snapshot, tracked_block_id)
+    {
+        (
+            TemporalLineageEventKind::SplitSpawnedChild,
+            vec![child_id.clone()],
+            format!("Split; spawned ^{child_id}"),
+        )
+    } else if let Some(parent_id) =
+        detect_split_from_parent(older_snapshot, newer_snapshot, tracked_block_id)
+    {
+        (
+            TemporalLineageEventKind::SplitFromParent,
+            vec![parent_id.clone()],
+            format!("Split from ^{parent_id}"),
+        )
+    } else if let Some(retired_id) =
+        detect_merged_from(older_snapshot, newer_snapshot, tracked_block_id)
+    {
+        (
+            TemporalLineageEventKind::MergedFrom,
+            vec![retired_id.clone()],
+            format!("Merged from ^{retired_id}"),
+        )
+    } else if let Some(survivor_id) =
+        detect_merged_into(older_snapshot, newer_snapshot, tracked_block_id)
+    {
+        (
+            TemporalLineageEventKind::MergedInto,
+            vec![survivor_id.clone()],
+            format!("Merged into ^{survivor_id}"),
+        )
+    } else if detect_moved(older_snapshot, newer_snapshot, tracked_block_id) {
+        (
+            TemporalLineageEventKind::Moved,
+            Vec::new(),
+            "Moved within page".to_string(),
+        )
+    } else {
+        return None;
+    };
+
+    let older_oid = older.git_oid.as_deref().unwrap_or("older");
+    let newer_oid = newer.git_oid.as_deref().unwrap_or("newer");
+    let synthetic_id = format!(
+        "lineage:{older_oid}:{newer_oid}:{tracked_block_id}:{:?}",
+        event
+    );
+
+    Some(TemporalItem {
+        label: newer.label.clone(),
+        detail: Some(summary.clone()),
+        summary,
+        kind: render::StripNodeKind::LineageEvent,
+        branch_count: 0,
+        time: newer.time.clone(),
+        scope_summary: TemporalScopeSummary::CurrentBlock,
+        restore_effect: TemporalRestoreEffect::ReplaceBlockLineCreatesUndoNode,
+        branch: None,
+        checkpoint: None,
+        lineage: Some(TemporalLineageContext {
+            event,
+            primary_id: tracked_block_id.to_string(),
+            related_ids,
+            page_context: None,
+        }),
+        content: newer.content.clone(),
+        lineage_snapshot: newer.lineage_snapshot.clone(),
+        undo_node_id: None,
+        git_oid: Some(synthetic_id),
+        skip: false,
+    })
+}
+
+fn detect_split_spawned_child(
+    older: &TemporalBlockSnapshot,
+    newer: &TemporalBlockSnapshot,
+    tracked_block_id: &str,
+) -> Option<String> {
+    let (_, older_block) = find_block(older, tracked_block_id)?;
+    let (newer_idx, newer_block) = find_block(newer, tracked_block_id)?;
+    let older_ids = block_id_set(older);
+    adjacent_block_candidates(newer, newer_idx)
+        .into_iter()
+        .find(|block| !older_ids.contains(block.id.as_str()))
+        .and_then(|child| {
+            block_text_matches_join(&older_block.text, &newer_block.text, &child.text)
+                .then(|| child.id.clone())
+        })
+}
+
+fn detect_split_from_parent(
+    older: &TemporalBlockSnapshot,
+    newer: &TemporalBlockSnapshot,
+    tracked_block_id: &str,
+) -> Option<String> {
+    if find_block(older, tracked_block_id).is_some() {
+        return None;
+    }
+    let (tracked_idx, tracked_block) = find_block(newer, tracked_block_id)?;
+    adjacent_block_candidates(newer, tracked_idx)
+        .into_iter()
+        .filter_map(|candidate| {
+            let (_, older_parent) = find_block(older, &candidate.id)?;
+            block_text_matches_join(&older_parent.text, &candidate.text, &tracked_block.text)
+                .then(|| candidate.id.clone())
+        })
+        .next()
+}
+
+fn detect_merged_from(
+    older: &TemporalBlockSnapshot,
+    newer: &TemporalBlockSnapshot,
+    tracked_block_id: &str,
+) -> Option<String> {
+    let (older_idx, older_block) = find_block(older, tracked_block_id)?;
+    let (_, newer_block) = find_block(newer, tracked_block_id)?;
+    let newer_ids = block_id_set(newer);
+    adjacent_block_candidates(older, older_idx)
+        .into_iter()
+        .find(|block| !newer_ids.contains(block.id.as_str()))
+        .and_then(|retired| {
+            block_text_matches_join(&newer_block.text, &older_block.text, &retired.text)
+                .then(|| retired.id.clone())
+        })
+}
+
+fn detect_merged_into(
+    older: &TemporalBlockSnapshot,
+    newer: &TemporalBlockSnapshot,
+    tracked_block_id: &str,
+) -> Option<String> {
+    let (older_idx, older_block) = find_block(older, tracked_block_id)?;
+    if find_block(newer, tracked_block_id).is_some() {
+        return None;
+    }
+    adjacent_block_candidates(older, older_idx)
+        .into_iter()
+        .filter_map(|candidate| {
+            let (_, newer_survivor) = find_block(newer, &candidate.id)?;
+            block_text_matches_join(&newer_survivor.text, &older_block.text, &candidate.text)
+                .then(|| candidate.id.clone())
+        })
+        .next()
+}
+
+fn detect_moved(
+    older: &TemporalBlockSnapshot,
+    newer: &TemporalBlockSnapshot,
+    tracked_block_id: &str,
+) -> bool {
+    let (older_idx, older_block) = match find_block(older, tracked_block_id) {
+        Some(result) => result,
+        None => return false,
+    };
+    let (newer_idx, newer_block) = match find_block(newer, tracked_block_id) {
+        Some(result) => result,
+        None => return false,
+    };
+    older_idx != newer_idx
+        && normalize_block_text(&older_block.text) == normalize_block_text(&newer_block.text)
+        && block_id_set(older) == block_id_set(newer)
+}
+
+fn find_block<'a>(
+    snapshot: &'a TemporalBlockSnapshot,
+    block_id: &str,
+) -> Option<(usize, &'a TemporalSnapshotBlock)> {
+    snapshot
+        .blocks
+        .iter()
+        .enumerate()
+        .find(|(_, block)| block.id == block_id)
+}
+
+fn adjacent_block_candidates(
+    snapshot: &TemporalBlockSnapshot,
+    idx: usize,
+) -> Vec<&TemporalSnapshotBlock> {
+    let mut candidates = Vec::new();
+    if idx > 0 {
+        candidates.push(&snapshot.blocks[idx - 1]);
+    }
+    if idx + 1 < snapshot.blocks.len() {
+        candidates.push(&snapshot.blocks[idx + 1]);
+    }
+    candidates
+}
+
+fn block_id_set(snapshot: &TemporalBlockSnapshot) -> std::collections::HashSet<&str> {
+    snapshot
+        .blocks
+        .iter()
+        .map(|block| block.id.as_str())
+        .collect()
+}
+
+fn block_text_matches_join(target: &str, left: &str, right: &str) -> bool {
+    let target = normalize_block_text(target);
+    let left = normalize_block_text(left);
+    let right = normalize_block_text(right);
+    join_normalized_parts([left.as_str(), right.as_str()]) == target
+        || join_normalized_parts([right.as_str(), left.as_str()]) == target
+}
+
+fn join_normalized_parts(parts: [&str; 2]) -> String {
+    parts
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn normalize_block_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// Extract the block line from a full-page snapshot.
 /// First tries to find the line by block ID pattern match.
 /// Falls back to the same line number if the ID didn't exist yet.
@@ -491,6 +821,38 @@ pub(crate) fn extract_block_line(
 #[cfg(test)]
 mod tests {
     use crate::{TemporalCheckpointReason, TemporalRestoreEffect, TemporalScopeSummary};
+
+    fn git_block_item(
+        oid: &str,
+        label: &str,
+        raw_snapshot: &str,
+        tracked_block_id: &str,
+    ) -> crate::TemporalItem {
+        let block_pattern = format!("^{tracked_block_id}");
+        let mirror_pattern = format!("^={tracked_block_id}");
+        crate::TemporalItem {
+            label: label.into(),
+            detail: Some("git".into()),
+            summary: "git".into(),
+            kind: crate::render::StripNodeKind::GitCommit,
+            branch_count: 0,
+            time: crate::TemporalStopTime {
+                timestamp: None,
+                relative_label: label.into(),
+                absolute_label: None,
+            },
+            scope_summary: crate::TemporalScopeSummary::CurrentBlock,
+            restore_effect: crate::TemporalRestoreEffect::ReplaceBlockLineCreatesUndoNode,
+            branch: None,
+            checkpoint: None,
+            lineage: None,
+            content: super::extract_block_line(raw_snapshot, &block_pattern, &mirror_pattern, 0),
+            lineage_snapshot: Some(super::parse_temporal_block_snapshot(raw_snapshot)),
+            undo_node_id: None,
+            git_oid: Some(oid.into()),
+            skip: false,
+        }
+    }
 
     #[test]
     fn append_git_history_populates_structured_metadata() {
@@ -548,6 +910,61 @@ mod tests {
     }
 
     #[test]
+    fn synthetic_lineage_item_detects_split_from_parent() {
+        let older = git_block_item("old", "older", "Hello world ^parent\n", "child");
+        let newer = git_block_item("new", "newer", "Hello ^parent\n\nworld ^child\n", "child");
+
+        let lineage =
+            super::synthetic_lineage_item(&older, &newer, "child").expect("lineage stop expected");
+
+        assert_eq!(lineage.kind, crate::render::StripNodeKind::LineageEvent);
+        assert_eq!(
+            lineage.lineage.as_ref().map(|ctx| &ctx.event),
+            Some(&crate::TemporalLineageEventKind::SplitFromParent)
+        );
+        assert_eq!(
+            lineage.lineage.as_ref().map(|ctx| ctx.related_ids.clone()),
+            Some(vec!["parent".into()])
+        );
+        assert_eq!(lineage.summary, "Split from ^parent");
+    }
+
+    #[test]
+    fn rebuild_block_history_projection_inserts_merge_lineage_stop() {
+        let mut ts = crate::TemporalStripState {
+            mode: crate::render::TemporalMode::BlockHistory,
+            items: vec![
+                git_block_item("old", "older", "alpha ^keep\n\nbeta ^retired\n", "keep"),
+                git_block_item("new", "newer", "alpha beta ^keep\n", "keep"),
+            ],
+            selected: 1,
+            compact: true,
+            page_id: crate::uuid::generate_hex_id(),
+            current_content: "alpha beta".into(),
+            block_id: Some("keep".into()),
+            block_line: Some(0),
+        };
+
+        super::rebuild_block_history_projection(&mut ts);
+
+        assert_eq!(ts.items.len(), 3);
+        assert_eq!(ts.items[1].kind, crate::render::StripNodeKind::LineageEvent);
+        assert_eq!(
+            ts.items[1].lineage.as_ref().map(|ctx| &ctx.event),
+            Some(&crate::TemporalLineageEventKind::MergedFrom)
+        );
+        assert_eq!(ts.items[1].summary, "Merged from ^retired");
+        assert!(
+            ts.items[2].skip,
+            "raw git stop should be dimmed behind lineage stop"
+        );
+        assert_eq!(
+            ts.selected, 2,
+            "selection should stay on the same real git item"
+        );
+    }
+
+    #[test]
     fn git_history_restore_reanchors_cursor_by_line_and_column() {
         let config = crate::config::Config::defaults();
         let mut editor = crate::BloomEditor::new(config).unwrap();
@@ -586,7 +1003,9 @@ mod tests {
                 restore_effect: crate::TemporalRestoreEffect::ReplaceBufferCreatesUndoNode,
                 branch: None,
                 checkpoint: None,
+                lineage: None,
                 content: Some("this line got much longer before restore\nkeep me here\n".into()),
+                lineage_snapshot: None,
                 undo_node_id: None,
                 git_oid: Some("abc123".into()),
                 skip: false,

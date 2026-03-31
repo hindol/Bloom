@@ -341,6 +341,8 @@ pub enum StripNodeKind {
     UndoNode,
     /// Git commit (○).
     GitCommit,
+    /// Synthetic lineage event (◇).
+    LineageEvent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

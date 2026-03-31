@@ -1568,6 +1568,7 @@ fn temporal_kind_label(kind: render::StripNodeKind) -> &'static str {
     match kind {
         render::StripNodeKind::UndoNode => "Undo node",
         render::StripNodeKind::GitCommit => "Checkpoint",
+        render::StripNodeKind::LineageEvent => "Lineage event",
     }
 }
 
@@ -1637,6 +1638,34 @@ fn temporal_context_label(item: &TemporalItem) -> Option<String> {
                 "s"
             }
         ));
+    }
+    if let Some(lineage) = &item.lineage {
+        let event = match lineage.event {
+            TemporalLineageEventKind::Moved => "moved",
+            TemporalLineageEventKind::SplitSpawnedChild => "split; spawned child",
+            TemporalLineageEventKind::SplitFromParent => "split from parent",
+            TemporalLineageEventKind::MergedInto => "merged into survivor",
+            TemporalLineageEventKind::MergedFrom => "merged from retired block",
+        };
+        let related = if lineage.related_ids.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " · {}",
+                lineage
+                    .related_ids
+                    .iter()
+                    .map(|id| format!("^{id}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        parts.push(format!("Lineage: {event}{related}"));
+        if let Some(page_context) = &lineage.page_context {
+            let from = page_context.from_page.as_deref().unwrap_or("?");
+            let to = page_context.to_page.as_deref().unwrap_or("?");
+            parts.push(format!("Pages: {from} → {to}"));
+        }
     }
     if parts.is_empty() {
         None

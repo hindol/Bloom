@@ -871,6 +871,7 @@ impl TemporalStripState {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct TemporalItem {
     pub label: String,
     pub detail: Option<String>,
@@ -888,8 +889,12 @@ pub(crate) struct TemporalItem {
     pub branch: Option<TemporalBranchContext>,
     #[allow(dead_code)]
     pub checkpoint: Option<TemporalCheckpointContext>,
+    #[allow(dead_code)]
+    pub lineage: Option<TemporalLineageContext>,
     /// Full content at this point (for preview/diff/restore).
     pub content: Option<String>,
+    /// Parsed block snapshot for block-lineage projection.
+    pub lineage_snapshot: Option<TemporalBlockSnapshot>,
     /// Undo node ID (if from undo tree).
     pub undo_node_id: Option<bloom_buffer::UndoNodeId>,
     /// Git commit OID (if from git).
@@ -947,6 +952,46 @@ pub enum TemporalBranchStatus {
 pub struct TemporalCheckpointContext {
     pub reason: TemporalCheckpointReason,
     pub changed_pages: usize,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TemporalLineageContext {
+    pub event: TemporalLineageEventKind,
+    pub primary_id: String,
+    pub related_ids: Vec<String>,
+    pub page_context: Option<TemporalLineagePageContext>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TemporalLineageEventKind {
+    Moved,
+    SplitSpawnedChild,
+    SplitFromParent,
+    MergedInto,
+    MergedFrom,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TemporalLineagePageContext {
+    pub from_page: Option<String>,
+    pub to_page: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TemporalBlockSnapshot {
+    pub blocks: Vec<TemporalSnapshotBlock>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TemporalSnapshotBlock {
+    pub id: String,
+    pub is_mirror: bool,
+    pub first_line: usize,
+    pub last_line: usize,
+    pub text: String,
 }
 
 #[allow(dead_code)]
@@ -1645,6 +1690,9 @@ impl BloomEditor {
                         let block_pat = format!("^{}", bid);
                         let mirror_pat = format!("^={}", bid);
                         let fallback = ts.block_line.unwrap_or(0);
+                        ts.items[idx].lineage_snapshot = Some(
+                            crate::editor::page_history::parse_temporal_block_snapshot(&content),
+                        );
                         ts.items[idx].content = crate::editor::page_history::extract_block_line(
                             &content,
                             &block_pat,
@@ -1658,19 +1706,8 @@ impl BloomEditor {
                     );
                 }
 
-                // For block history: mark the RIGHT neighbor as skip if its
-                // content matches this item (it didn't introduce a change).
-                // Never skip undo items (already deduped by undo walk).
                 if matches!(ts.mode, render::TemporalMode::BlockHistory) {
-                    if let Some(ref loaded) = ts.items[idx].content {
-                        if let Some(right) = ts.items.get(idx + 1) {
-                            if matches!(right.kind, render::StripNodeKind::GitCommit)
-                                && right.content.as_ref() == Some(loaded)
-                            {
-                                ts.items[idx + 1].skip = true;
-                            }
-                        }
-                    }
+                    crate::editor::page_history::rebuild_block_history_projection(ts);
                 }
 
                 return;
@@ -3631,7 +3668,9 @@ mod tests {
                     reason: TemporalCheckpointReason::IdleTimeout,
                     changed_pages: 2,
                 }),
+                lineage: None,
                 content: Some("older\n".into()),
+                lineage_snapshot: None,
                 undo_node_id: None,
                 git_oid: Some("abcdef1234567890".into()),
                 skip: false,
@@ -3668,6 +3707,66 @@ mod tests {
             .as_deref()
             .expect("history status hints should exist");
         assert!(right_hints.contains("Durability: current"));
+    }
+
+    #[test]
+    fn history_render_frame_exposes_lineage_context() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let page_id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(
+            &page_id,
+            "Test",
+            std::path::Path::new("[scratch]"),
+            "current block\n",
+        );
+        editor.temporal_strip = Some(TemporalStripState {
+            mode: render::TemporalMode::BlockHistory,
+            items: vec![TemporalItem {
+                label: "Mar 31".into(),
+                detail: Some("Split from ^parent".into()),
+                summary: "Split from ^parent".into(),
+                kind: render::StripNodeKind::LineageEvent,
+                branch_count: 0,
+                time: TemporalStopTime {
+                    timestamp: Some(chrono::Utc::now().timestamp()),
+                    relative_label: "Mar 31".into(),
+                    absolute_label: Some("2026-03-31 12:00".into()),
+                },
+                scope_summary: TemporalScopeSummary::CurrentBlock,
+                restore_effect: TemporalRestoreEffect::ReplaceBlockLineCreatesUndoNode,
+                branch: None,
+                checkpoint: None,
+                lineage: Some(TemporalLineageContext {
+                    event: TemporalLineageEventKind::SplitFromParent,
+                    primary_id: "child".into(),
+                    related_ids: vec!["parent".into()],
+                    page_context: None,
+                }),
+                content: Some("current block".into()),
+                lineage_snapshot: None,
+                undo_node_id: None,
+                git_oid: Some("lineage:test".into()),
+                skip: false,
+            }],
+            selected: 0,
+            compact: false,
+            page_id,
+            current_content: "current block".into(),
+            block_id: Some("child".into()),
+            block_line: Some(0),
+        });
+
+        let frame = editor.render(100, 30);
+        let strip = frame
+            .temporal_strip
+            .as_ref()
+            .expect("temporal strip frame should exist");
+        assert!(strip.selected_summary.contains("Lineage event"));
+        assert!(strip
+            .selected_context
+            .contains("Lineage: split from parent"));
+        assert!(strip.selected_context.contains("^parent"));
     }
 
     // UC-01: Open today's journal via SPC j t

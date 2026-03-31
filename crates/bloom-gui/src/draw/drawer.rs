@@ -212,6 +212,7 @@ pub(crate) fn draw_temporal_strip_drawer(
             match node.kind {
                 StripNodeKind::UndoNode => "●",
                 StripNodeKind::GitCommit => "○",
+                StripNodeKind::LineageEvent => "◇",
             }
         };
         let cell = format!(
@@ -224,6 +225,8 @@ pub(crate) fn draw_temporal_strip_drawer(
             rgb_to_color(&theme.faded)
         } else if matches!(node.kind, StripNodeKind::UndoNode) {
             rgb_to_color(&theme.foreground)
+        } else if matches!(node.kind, StripNodeKind::LineageEvent) {
+            rgb_to_color(&theme.accent_yellow)
         } else {
             rgb_to_color(&theme.faded)
         };
