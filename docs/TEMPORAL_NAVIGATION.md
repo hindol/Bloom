@@ -1,7 +1,8 @@
 # Temporal Navigation 🕰️
 
-> One component, four contexts. Every time-based view is a horizontal timeline
-> strip + a preview pane. Left = older, right = newer.
+> One component, four contexts. Every time-based view uses the same temporal
+> rail + selected-stop inspector, with the editor pane above showing the live
+> preview or diff. Left = older, right = newer.
 
 ---
 
@@ -20,15 +21,15 @@
 └─────────────────────────────────────────────────────┘
 ```
 
-The status bar stays at its normal position. The strip opens as a bottom drawer below it (same pattern as the which-key drawer). The content area shrinks to make room. Moving `h`/`l` (or `←`/`→`) selects a point in time. The preview pane updates to show what that moment looks like.
+The status bar stays at its normal position. The history rail opens as a bottom drawer below it (same pattern as the which-key drawer), and the selected-stop inspector lives beside that rail. The content area above updates to show what that moment looks like.
 
 Same component, different data sources:
 
 | Context | Trigger | Strip items | Preview pane | Mode |
 |---------|---------|-------------|-------------|------|
 | **Journal** | `SPC j t`, `[d`/`]d` | Calendar days with journal files | Journal page content | JRNL |
-| **Page history** | `SPC H h` | Undo nodes (●) + git commits (○) | Page diff vs current | HIST |
-| **Block history** | `SPC H b` | Same, filtered to one block ID | Line diff vs current | HIST |
+| **Page history** | `SPC H h` / `SPC u u` | Undo nodes (●) + git commits (○) | Page diff vs current | HIST |
+| **Block history** | `SPC H b` | Same, filtered to one block ID, plus lineage events (◇) | Line diff vs current | HIST |
 | **Day activity** | `SPC H d` | Days with vault activity (◆) | Activity summary | DAY |
 
 ---
@@ -43,6 +44,7 @@ Same component, different data sources:
 | `e` | Toggle compact ↔ rich (show descriptions) |
 | `d` | Toggle diff highlights (history contexts) |
 | `r` | Restore to selected version (history contexts) |
+| `c` | Create explicit checkpoint (history contexts) |
 | `Enter` | Context action (open page / jump to source) |
 | `Esc` / `q` | Dismiss, return to normal editing |
 
@@ -206,9 +208,9 @@ Navigate daily journal files. Already implemented.
 
 ---
 
-## Page History — `SPC H h`
+## Page History — `SPC H h` / `SPC u u`
 
-Browse all versions of the current page. Undo tree for recent (branching), git commits for older (linear). One seamless timeline.
+Browse all versions of the current page. Undo nodes for recent branching edits, git commits for older durable checkpoints, one seamless timeline.
 
 ```
 ┌─ Rust Project (diff vs current) ───────────────────┐
@@ -233,9 +235,13 @@ Browse all versions of the current page. Undo tree for recent (branching), git c
 - `○` = git commit (older, per-save, linear)
 - Transition is seamless — no visual break
 
+`SPC u u` opens this same page-history surface, centered on the recent undo region. Bloom no longer asks the user to choose between a separate undo-tree visualizer and page history.
+
 **Branching:** When the undo tree has branches (undo → edit creates a fork), the strip can show branch points. `j`/`k` switch between branches at a fork point.
 
 **Restore:** `r` replaces the buffer with the selected version. Creates one undo step — undoable. For git versions, creates a new undo branch ("restored from Mar 12").
+
+**Explicit checkpoint:** `c` creates a durable checkpoint immediately. Bloom first flushes dirty pages, then captures the full pending durable changed set as one checkpoint.
 
 ---
 
@@ -262,7 +268,7 @@ Same as page history, filtered to the block under the cursor (identified by bloc
 
 **Preview:** Inline diff of the block's line at the selected point vs current.
 
-**Strip items:** Only versions where this block changed. Undo nodes that didn't touch this block are skipped.
+**Strip items:** Only versions where this block changed. Undo nodes that didn't touch this block are skipped. Bloom can also insert synthetic lineage events (`◇`) to explain split / merge continuity on top of linear durable history.
 
 **Cross-page moves:** If the block ID moved between pages between two versions, shown as a "moved" separator in the preview.
 

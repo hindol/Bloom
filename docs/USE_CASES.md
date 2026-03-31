@@ -218,7 +218,7 @@ Verifies: G7
 
 ### UC-18: Undo and redo
 
-Verifies: G9 (Undo Tree)
+Verifies: G9 (Unified History)
 
 1. User types "alpha". Then types "beta". Then types "gamma".
 2. User presses `u` — "gamma" is undone. Buffer shows "alpha beta".
@@ -226,20 +226,31 @@ Verifies: G9 (Undo Tree)
 4. User presses `Ctrl+R` — redo. Buffer shows "alpha beta".
 5. User types "delta" instead — a new branch is created in the undo tree.
 6. Buffer shows "alpha delta".
-7. User presses `SPC u u` — the undo tree visualizer opens, showing the branch point.
-8. User navigates to the "gamma" node and presses Enter — buffer is restored to "alpha beta gamma".
+7. User presses `SPC u u` — the unified history surface opens, showing the branch point in page history.
+8. User navigates to the "gamma" stop and restores it — buffer is restored to "alpha beta gamma".
 
-### UC-19: Undo tree visualization
+### UC-19: Unified history surface for branching undo
 
-Verifies: G9 (Undo Tree)
+Verifies: G9 (Unified History)
 
 1. User has made several edits with branches (see UC-18).
 2. User presses `SPC u u`.
-3. A panel opens showing the tree structure with nodes and branches.
-4. `j`/`k` navigates between nodes. `h`/`l` switches between branches.
-5. `p` previews a state without restoring it.
-6. `Enter` restores the selected state.
-7. `q` closes the visualizer.
+3. The page-history surface opens rather than a separate undo-only visualizer.
+4. The rail shows recent undo stops and older durable checkpoints in one flow.
+5. `j`/`k` switches branches at a fork. `h`/`l` moves older/newer across stops.
+6. The preview updates to the selected stop, and `r` or the context action restores it.
+7. `q` closes history.
+
+### UC-19a: Explicit checkpoint
+
+Verifies: G9 (Unified History)
+
+1. User edits one or more pages.
+2. User presses `SPC H c`.
+3. Bloom flushes any dirty writable pages first.
+4. Bloom creates one durable explicit checkpoint from the pending changed set.
+5. A success notification confirms the checkpoint was created.
+6. Opening `SPC H h` shows a new durable stop for that checkpoint.
 
 ### UC-20: Command mode
 
@@ -1080,7 +1091,7 @@ Verifies: G9 (Undo Tree)
 3. User types "delta" — branch B created.
 4. User quits Bloom.
 5. User relaunches Bloom.
-6. The undo tree is fully restored: both branches visible in `SPC u u`.
+6. The recent undo branches are fully restored and visible in the unified history surface opened by `SPC u u`.
 7. `u` undoes "delta", `Ctrl+R` redoes it. Branch navigation works.
 
 ### UC-93: External file change + undo tree preservation

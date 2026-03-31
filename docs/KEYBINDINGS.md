@@ -52,8 +52,12 @@
 | `SPC r s` | Split page (extract section to new page) | G18 |
 | `SPC r m` | Merge pages | G18 |
 | `SPC r b` | Move block to another page | G18 |
+| **History** | | |
+| `SPC H h` | Open page history surface | G9 |
+| `SPC H b` | Open block history surface | G9 |
+| `SPC H c` | Create explicit checkpoint | G9 |
 | **Undo** | | |
-| `SPC u u` | Open undo tree visualizer | G9 |
+| `SPC u u` | Open unified history surface (same as `SPC H h`) | G9 |
 | **Windows** | | |
 | `SPC w v` | Vertical split | G11 |
 | `SPC w s` | Horizontal split | G11 |
@@ -135,15 +139,18 @@ See [PICKER_SURFACES.md](PICKER_SURFACES.md) for detailed wireframes of each pic
 
 ---
 
-## Undo Tree Visualizer (inside visualizer)
+## History Surface (inside page/block history)
 
 | Binding | Action |
 |---------|--------|
-| `j` / `k` | Navigate nodes |
-| `h` / `l` | Switch between branches |
-| `Enter` | Restore selected state |
-| `p` | Preview state (without restoring) |
-| `q` | Close visualizer |
+| `h` / `l` | Select older / newer stop |
+| `j` / `k` | Switch undo branches when the selected stop is a fork |
+| `d` | Toggle diff/raw preview |
+| `r` | Restore selected stop into the current buffer |
+| `c` | Create explicit checkpoint |
+| `e` | Toggle compact / detail strip mode |
+| `Enter` | Context action |
+| `q` / `Esc` | Close history |
 
 ---
 

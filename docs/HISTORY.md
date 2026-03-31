@@ -28,10 +28,12 @@ The user should not need to think in those terms most of the time. They should m
 
 Current Bloom history surfaces are:
 
-- undo tree support
-- page history via the temporal strip
+- unified page history via `SPC H h` or `SPC u u`
 - block history via the temporal strip
+- synthetic block-lineage stops for merge / split explanation inside block history
+- explicit checkpoints via `SPC H c`, `:checkpoint`, `:cp`, or `c` inside history
 - restore from historical entries back into the current buffer
+- optional advanced block-ID gutter for live identity observability
 
 ## Page History
 
@@ -43,6 +45,8 @@ Bloom gathers:
 - older git-backed page history from the history thread
 
 Those entries meet in the temporal strip, with older states to the left and newer ones to the right. That gives Bloom a single editor-native browsing surface instead of making the user jump between an undo UI and an external log.
+
+`SPC u u` opens this same surface. The user does not need to choose between a separate undo-tree visualizer and page history anymore; Bloom merges recent undo states and older durable checkpoints into one history flow.
 
 ## Block History
 
@@ -65,6 +69,23 @@ The key design choice is that restore becomes a normal edit in the current buffe
 - it fits the same editing model as everything else
 
 The history system is therefore not a sidecar. It flows back into normal text editing.
+
+## Explicit Checkpoints
+
+Bloom can also create a durable history stop on demand.
+
+- `SPC H c`
+- `:checkpoint`
+- `:cp`
+- `c` while the history surface is open
+
+An explicit checkpoint first flushes dirty writable pages, then creates one durable checkpoint from the full pending changed set. If nothing new needs to be captured, Bloom says the checkpoint is already current instead of inventing a redundant stop.
+
+## Advanced Live Observability
+
+Bloom also has an optional advanced block-ID gutter.
+
+When enabled in config (`block_id_gutter = true`), Bloom draws a faded read-only block-ID lane to the left of line numbers. Its job is to expose current live identity while you edit so you can see which block kept an ID after a split or which block survived a merge. It does not replace block history; it only helps make current identity visible.
 
 ## Why Git Lives Under the Hood
 

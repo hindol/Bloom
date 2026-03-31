@@ -3703,8 +3703,8 @@ Another paragraph.\n";
             "should contain 'task' from the target line"
         );
         assert!(
-            all_text.contains("target1"),
-            "should contain block ID 'target1'"
+            !all_text.contains("target1"),
+            "serialized block ID should not leak into diff preview"
         );
     } else {
         panic!("temporal strip should be open");
@@ -3793,7 +3793,10 @@ fn block_history_git_blob_extracts_block_line_only() {
             all_text.contains("Overview"),
             "should contain 'Overview' from the block line"
         );
-        assert!(all_text.contains("blk01"), "should contain block ID");
+        assert!(
+            !all_text.contains("blk01"),
+            "serialized block ID should not leak into diff preview"
+        );
     } else {
         panic!("temporal strip should be open after block history");
     }
@@ -3863,18 +3866,9 @@ fn block_history_git_blob_falls_back_to_line_number() {
             all_text
         );
 
-        // The diff should show ^blk01 as added (present in current, absent in old)
-        let added: String = ts
-            .block_diff_segments
-            .iter()
-            .filter(|s| s.kind == bloom_core::render::DiffLineKind::Added)
-            .map(|s| s.text.as_str())
-            .collect();
-        eprintln!("ADDED: '{}'", added);
         assert!(
-            added.contains("blk01"),
-            "block ID should appear as added, got: {}",
-            added
+            !all_text.contains("blk01"),
+            "serialized block ID should not leak into diff preview"
         );
     } else {
         panic!("temporal strip should be open");
@@ -4266,14 +4260,15 @@ fn uc13_create_blank_page() {
 }
 
 #[test]
-#[ignore = "OpenUndoTree is dispatched but not rendered into a pane yet"]
-fn uc19_undo_tree_visualization_opens_pane() {
+fn uc19_history_surface_opens_from_spc_u_u() {
     let mut sim = SimInput::with_content("hello");
     sim.keys("A");
     sim.type_text(" world");
     sim.keys("<Esc>");
     sim.keys("SPC u u");
-    assert!(sim.screen(80, 24).pane_count() > 1);
+    let screen = sim.screen(80, 24);
+    assert_eq!(screen.mode(), "HIST");
+    assert!(screen.has_temporal_strip());
 }
 
 // -----------------------------------------------------------------------

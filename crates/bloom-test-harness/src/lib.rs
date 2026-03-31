@@ -226,6 +226,12 @@ impl SimInput {
                     progressed = true;
                 }
             }
+            if let Some(rx) = &ch.history_rx {
+                while let Ok(complete) = rx.try_recv() {
+                    editor.handle_history_complete(complete);
+                    progressed = true;
+                }
+            }
             if let Some(rx) = &ch.indexer_rx {
                 if let Ok(complete) = rx.recv_timeout(std::time::Duration::from_millis(50)) {
                     editor.handle_index_complete(complete);
@@ -299,6 +305,13 @@ impl SimInput {
             if let Some(rx) = &channels.write_result_rx {
                 while let Ok(result) = rx.try_recv() {
                     self.editor.handle_write_result(result);
+                    progressed = true;
+                }
+            }
+
+            if let Some(rx) = &channels.history_rx {
+                while let Ok(complete) = rx.try_recv() {
+                    self.editor.handle_history_complete(complete);
                     progressed = true;
                 }
             }
