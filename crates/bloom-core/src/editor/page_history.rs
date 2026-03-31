@@ -154,11 +154,7 @@ impl BloomEditor {
             match doc.block_id_at_line(cursor_line) {
                 Some(entry) => (
                     entry.id.0.clone(),
-                    canonical_block_line(
-                        line_text.trim_end_matches('\n'),
-                        &entry.id.0,
-                        entry.is_mirror,
-                    ),
+                    line_text.trim_end_matches('\n').to_string(),
                 ),
                 None => {
                     self.push_notification(
@@ -476,28 +472,20 @@ pub(crate) fn extract_block_line(
     mirror_pattern: &str,
     fallback_line: usize,
 ) -> Option<String> {
+    let clean_line = |line: &str| {
+        crate::document::clean_text_from_canonical_markdown(&format!("{line}\n"))
+            .trim_end_matches('\n')
+            .to_string()
+    };
     // Primary: find by block ID
     if let Some(line) = content
         .lines()
         .find(|l| l.contains(block_pattern) || l.contains(mirror_pattern))
     {
-        return Some(line.to_string());
+        return Some(clean_line(line));
     }
     // Fallback: same line number (block ID may not have existed in this version)
-    content.lines().nth(fallback_line).map(ToString::to_string)
-}
-
-fn canonical_block_line(line: &str, block_id: &str, is_mirror: bool) -> String {
-    let suffix = if is_mirror {
-        format!(" ^={block_id}")
-    } else {
-        format!(" ^{block_id}")
-    };
-    if line.ends_with(&suffix) {
-        line.to_string()
-    } else {
-        format!("{line}{suffix}")
-    }
+    content.lines().nth(fallback_line).map(clean_line)
 }
 
 #[cfg(test)]
@@ -545,6 +533,18 @@ mod tests {
             item.checkpoint.as_ref().map(|ctx| &ctx.reason),
             Some(&TemporalCheckpointReason::IdleTimeout)
         );
+    }
+
+    #[test]
+    fn extract_block_line_strips_serialized_block_ids() {
+        let line =
+            super::extract_block_line("keep me ^abc123\nother line\n", "^abc123", "^=abc123", 0)
+                .expect("line should be found");
+        assert_eq!(line, "keep me");
+
+        let mirror = super::extract_block_line("mirror text ^=abc123\n", "^abc123", "^=abc123", 0)
+            .expect("mirror line should be found");
+        assert_eq!(mirror, "mirror text");
     }
 
     #[test]

@@ -277,7 +277,10 @@ impl BloomEditor {
                 mode_str.to_string()
             },
             right_hints: if show_hist {
-                Some("h/l:scrub  e:detail  r:restore  q:close".to_string())
+                Some(format!(
+                    "h/l:scrub  e:detail  r:restore  q:close  ·  {}",
+                    self.history_durable_health()
+                ))
             } else if show_jrnl {
                 Some("↵:calendar  [d/]d".to_string())
             } else {
@@ -1426,6 +1429,7 @@ impl BloomEditor {
 
     fn build_temporal_strip_frame(&self) -> Option<render::TemporalStripFrame> {
         let ts = self.temporal_strip.as_ref()?;
+        let selected_item = ts.items.get(ts.selected);
         let items: Vec<render::StripNode> = ts
             .items
             .iter()
@@ -1485,6 +1489,26 @@ impl BloomEditor {
             render::TemporalMode::DayActivity => "Day Activity".to_string(),
         };
 
+        let selected_summary = selected_item
+            .map(|item| format!("{} · {}", temporal_kind_label(item.kind), item.summary))
+            .unwrap_or_default();
+        let selected_scope = selected_item
+            .map(|item| {
+                [
+                    temporal_time_label(&item.time),
+                    temporal_scope_label(&item.scope_summary),
+                ]
+                .join(" · ")
+            })
+            .unwrap_or_default();
+        let selected_restore = selected_item
+            .map(|item| format!("Restore: {}", temporal_restore_label(&item.restore_effect)))
+            .unwrap_or_default();
+        let selected_context = selected_item
+            .and_then(temporal_context_label)
+            .unwrap_or_default();
+        let durable_health = self.history_durable_health();
+
         Some(render::TemporalStripFrame {
             items,
             selected: ts.selected,
@@ -1492,9 +1516,132 @@ impl BloomEditor {
             compact: ts.compact,
             preview_lines,
             title,
+            selected_summary,
+            selected_scope,
+            selected_restore,
+            selected_context,
+            durable_health,
             block_line,
             block_diff_segments,
         })
+    }
+
+    fn history_durable_health(&self) -> String {
+        match self.durable_capture_status() {
+            DurableCaptureStatus::Unsaved => "Durability: unsaved changes".to_string(),
+            DurableCaptureStatus::SavedPendingDurable => {
+                format!("Durability: saved, checkpoint pending{}", {
+                    let count = self.durable_capture.pending_pages.len();
+                    format!(" ({count} page{})", if count == 1 { "" } else { "s" })
+                })
+            }
+            DurableCaptureStatus::Committing => "Durability: writing checkpoint".to_string(),
+            DurableCaptureStatus::DurableCurrent => {
+                let commit = self
+                    .durable_capture
+                    .last_successful_commit_oid
+                    .as_deref()
+                    .map(|oid| oid.chars().take(7).collect::<String>());
+                let ago = self
+                    .durable_capture
+                    .last_successful_commit_at
+                    .map(|timestamp_s| format_time_ago(timestamp_s * 1000));
+                match (commit, ago) {
+                    (Some(commit), Some(ago)) => {
+                        format!("Durability: current · {commit} · {ago}")
+                    }
+                    (Some(commit), None) => format!("Durability: current · {commit}"),
+                    _ => "Durability: current".to_string(),
+                }
+            }
+            DurableCaptureStatus::DurableError => self
+                .durable_capture
+                .last_error
+                .as_ref()
+                .map(|err| format!("Durability: error · {err}"))
+                .unwrap_or_else(|| "Durability: error".to_string()),
+        }
+    }
+}
+
+fn temporal_kind_label(kind: render::StripNodeKind) -> &'static str {
+    match kind {
+        render::StripNodeKind::UndoNode => "Undo node",
+        render::StripNodeKind::GitCommit => "Checkpoint",
+    }
+}
+
+fn temporal_time_label(time: &TemporalStopTime) -> String {
+    match &time.absolute_label {
+        Some(absolute) => format!("When: {} ({})", time.relative_label, absolute),
+        None => format!("When: {}", time.relative_label),
+    }
+}
+
+fn temporal_scope_label(scope: &TemporalScopeSummary) -> String {
+    match scope {
+        TemporalScopeSummary::CurrentPage => "Scope: current page".to_string(),
+        TemporalScopeSummary::CurrentBlock => "Scope: current block".to_string(),
+        TemporalScopeSummary::PageSet {
+            count,
+            includes_mirrors,
+        } => format!(
+            "Scope: {} page{}{}",
+            count,
+            if *count == 1 { "" } else { "s" },
+            if *includes_mirrors {
+                " incl. mirrors"
+            } else {
+                ""
+            }
+        ),
+    }
+}
+
+fn temporal_restore_label(effect: &TemporalRestoreEffect) -> &'static str {
+    match effect {
+        TemporalRestoreEffect::RestoreUndoNode => "jump to this undo node",
+        TemporalRestoreEffect::ReplaceBufferCreatesUndoNode => {
+            "replace the current buffer and record an undo node"
+        }
+        TemporalRestoreEffect::ReplaceBlockLineCreatesUndoNode => {
+            "replace this block line and record an undo node"
+        }
+    }
+}
+
+fn temporal_context_label(item: &TemporalItem) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(branch) = &item.branch {
+        let status = match branch.status {
+            TemporalBranchStatus::CurrentPath => "current path",
+            TemporalBranchStatus::AlternatePath => "alternate path",
+            TemporalBranchStatus::ForkNode => "fork point",
+        };
+        parts.push(format!("Branch: {} ({})", branch.summary, status));
+    }
+    if let Some(checkpoint) = &item.checkpoint {
+        let reason = match checkpoint.reason {
+            TemporalCheckpointReason::IdleTimeout => "idle timeout",
+            TemporalCheckpointReason::MaxInterval => "max interval",
+            TemporalCheckpointReason::SessionSave => "session save",
+            TemporalCheckpointReason::Unknown => "checkpoint",
+        };
+        parts.push(format!(
+            "Checkpoint: {} · {} page{}",
+            reason,
+            checkpoint.changed_pages,
+            if checkpoint.changed_pages == 1 {
+                ""
+            } else {
+                "s"
+            }
+        ));
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" · "))
     }
 }
 

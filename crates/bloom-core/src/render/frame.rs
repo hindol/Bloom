@@ -302,6 +302,11 @@ pub struct TemporalStripFrame {
     /// Preview content: diff lines for page history, empty for block history.
     pub preview_lines: Vec<DiffLine>,
     pub title: String,
+    pub selected_summary: String,
+    pub selected_scope: String,
+    pub selected_restore: String,
+    pub selected_context: String,
+    pub durable_health: String,
     /// For BlockHistory: the buffer line to replace with inline diff.
     pub block_line: Option<usize>,
     /// For BlockHistory: word-diff segments for the inline preview.

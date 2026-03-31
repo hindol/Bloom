@@ -240,39 +240,26 @@ pub(crate) fn draw_temporal_strip_drawer(
         .get(strip.selected)
         .and_then(|node| node.detail.as_deref())
         .unwrap_or("");
+    let detail_width = total_chars.saturating_sub(selected_visual * node_chars + 2);
+    let summary_line = if strip.compact {
+        detail.to_string()
+    } else {
+        strip.selected_summary.clone()
+    };
     draw_text(
         frame,
         detail_x,
         area.y + 2.0 * LINE_HEIGHT + 2.0,
-        truncate_text(
-            detail,
-            total_chars.saturating_sub(selected_visual * node_chars + 2),
-        ),
+        truncate_text(&summary_line, detail_width),
         rgb_to_color(&theme.accent_yellow),
     );
 
     if !strip.compact && lines >= 6 {
-        let mode = match strip.mode {
-            TemporalMode::PageHistory => "Page history",
-            TemporalMode::BlockHistory => "Block history",
-            TemporalMode::DayActivity => "Day activity",
-        };
-        let kinds = strip
-            .items
-            .get(strip.selected)
-            .map(|node| match node.kind {
-                StripNodeKind::UndoNode => "Undo node",
-                StripNodeKind::GitCommit => "Git commit",
-            })
-            .unwrap_or("");
         draw_text(
             frame,
             area.x + CHAR_WIDTH,
             area.y + 3.0 * LINE_HEIGHT + 2.0,
-            truncate_text(
-                &format!("{} · {}", mode, kinds),
-                total_chars.saturating_sub(2),
-            ),
+            truncate_text(&strip.selected_scope, total_chars.saturating_sub(2)),
             rgb_to_color(&theme.faded),
         );
         draw_text(
@@ -280,19 +267,11 @@ pub(crate) fn draw_temporal_strip_drawer(
             area.x + CHAR_WIDTH,
             area.y + 4.0 * LINE_HEIGHT + 2.0,
             truncate_text(
-                &strip
-                    .items
-                    .iter()
-                    .skip(start)
-                    .take(end.saturating_sub(start))
-                    .map(|node| {
-                        truncate_text(
-                            node.detail.as_deref().unwrap_or(""),
-                            node_chars.saturating_sub(2),
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("  "),
+                &if strip.selected_context.is_empty() {
+                    strip.selected_restore.clone()
+                } else {
+                    format!("{} · {}", strip.selected_context, strip.selected_restore)
+                },
                 total_chars.saturating_sub(2),
             ),
             rgb_to_color(&theme.faded),
@@ -309,7 +288,10 @@ pub(crate) fn draw_temporal_strip_drawer(
         frame,
         area.x + CHAR_WIDTH,
         area.y + (lines - 1).max(1) as f32 * LINE_HEIGHT + 2.0,
-        truncate_text(hints, total_chars.saturating_sub(2)),
+        truncate_text(
+            &format!("{hints}   {}", strip.durable_health),
+            total_chars.saturating_sub(2),
+        ),
         rgb_to_color(&theme.faded),
     );
 }

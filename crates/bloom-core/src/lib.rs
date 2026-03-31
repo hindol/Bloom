@@ -3590,6 +3590,86 @@ mod tests {
         assert_eq!(temporal_strip.mode, render::TemporalMode::PageHistory);
     }
 
+    #[test]
+    fn history_render_frame_exposes_inspector_metadata_and_durable_health() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let page_id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(
+            &page_id,
+            "Test",
+            std::path::Path::new("[scratch]"),
+            "hello\n",
+        );
+        editor.durable_capture.last_successful_commit_oid = Some("abcdef1234567890".into());
+        editor.durable_capture.last_successful_commit_at =
+            Some(chrono::Utc::now().timestamp().saturating_sub(60));
+        editor.temporal_strip = Some(TemporalStripState {
+            mode: render::TemporalMode::PageHistory,
+            items: vec![TemporalItem {
+                label: "1m ago".into(),
+                detail: Some("idle timeout".into()),
+                summary: "History checkpoint".into(),
+                kind: render::StripNodeKind::GitCommit,
+                branch_count: 2,
+                time: TemporalStopTime {
+                    timestamp: Some(chrono::Utc::now().timestamp()),
+                    relative_label: "1m ago".into(),
+                    absolute_label: Some("2026-03-31 12:00".into()),
+                },
+                scope_summary: TemporalScopeSummary::PageSet {
+                    count: 2,
+                    includes_mirrors: true,
+                },
+                restore_effect: TemporalRestoreEffect::ReplaceBufferCreatesUndoNode,
+                branch: Some(TemporalBranchContext {
+                    status: TemporalBranchStatus::ForkNode,
+                    branch_count: 2,
+                    summary: "2 branches".into(),
+                }),
+                checkpoint: Some(TemporalCheckpointContext {
+                    reason: TemporalCheckpointReason::IdleTimeout,
+                    changed_pages: 2,
+                }),
+                content: Some("older\n".into()),
+                undo_node_id: None,
+                git_oid: Some("abcdef1234567890".into()),
+                skip: false,
+            }],
+            selected: 0,
+            compact: false,
+            page_id,
+            current_content: "current\n".into(),
+            block_id: None,
+            block_line: None,
+        });
+
+        let frame = editor.render(100, 30);
+        let strip = frame
+            .temporal_strip
+            .as_ref()
+            .expect("temporal strip frame should exist");
+
+        assert!(strip.selected_summary.contains("History checkpoint"));
+        assert!(strip
+            .selected_scope
+            .contains("Scope: 2 pages incl. mirrors"));
+        assert!(strip.selected_scope.contains("When: 1m ago"));
+        assert!(strip.selected_context.contains("Branch: 2 branches"));
+        assert!(strip.selected_context.contains("Checkpoint: idle timeout"));
+        assert!(strip
+            .selected_restore
+            .contains("replace the current buffer"));
+        assert!(strip.durable_health.contains("Durability: current"));
+        assert!(strip.durable_health.contains("abcdef1"));
+        let right_hints = frame.panes[0]
+            .status_bar
+            .right_hints
+            .as_deref()
+            .expect("history status hints should exist");
+        assert!(right_hints.contains("Durability: current"));
+    }
+
     // UC-01: Open today's journal via SPC j t
     #[test]
     fn test_uc01_open_journal() {
