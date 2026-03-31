@@ -78,8 +78,19 @@ The PM is responsible for:
 
 - clarifying the user problem
 - identifying UX risks and default behaviors
+- driving lightweight UX exploration when surface design is central to the problem
 - recommending whether to pursue, defer, or reject
 - updating user-facing docs when a user-visible behavior changes
+
+When the open questions are about interaction shape rather than pure feature scope, the PM should leave behind a concrete UX artifact.
+
+Preferred order:
+
+1. checked-in low-fidelity exploration in the repo
+2. ASCII wireframes / interaction sketches in the PM doc
+3. optional Figma exploration when the interaction is too spatial or stateful to reason about well in prose alone
+
+The goal is not a heavyweight design handoff. The goal is to make the proposed UX concrete enough that the architect and coding agents are reacting to the same shape instead of freehanding it from prose.
 
 ### 3. Architect risk review
 
@@ -177,4 +188,3 @@ Non-trivial work is done only when:
 - tester-owned high-level validation passed
 - user-facing docs were updated when needed
 - docs-steward review found no drift
-

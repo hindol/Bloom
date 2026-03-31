@@ -11,6 +11,12 @@ use crossbeam::channel::{Receiver, Sender};
 
 use bloom_history::HistoryRepo;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryFlushReason {
+    IdleTimeout,
+    MaxInterval,
+}
+
 /// Requests sent from the UI thread to the history thread.
 pub enum HistoryRequest {
     /// A file was written to disk — mark the vault as dirty.
@@ -33,8 +39,12 @@ pub enum HistoryRequest {
 /// Results sent from the history thread back to the UI thread.
 #[derive(Debug, Clone)]
 pub enum HistoryComplete {
-    /// A commit was created (or skipped if no changes).
-    CommitDone { oid: Option<String> },
+    /// The history thread has decided a durable checkpoint is due.
+    FlushRequested { reason: HistoryFlushReason },
+    /// A commit was created successfully.
+    CommitFinished { oid: String },
+    /// No commit was created because the tree was unchanged.
+    CommitSkipped,
     /// Page history results.
     PageHistory { entries: Vec<PageHistoryEntry> },
     /// File content at a specific commit.
@@ -114,6 +124,7 @@ fn history_main(
     let mut dirty = false;
     let mut last_dirty_at: Option<Instant> = None;
     let mut last_commit_at = Instant::now();
+    let mut awaiting_snapshot = false;
 
     // Pending files to commit (collected from CommitNow requests).
     let mut pending_files: Vec<(String, String)> = Vec::new();
@@ -144,6 +155,7 @@ fn history_main(
             Ok(HistoryRequest::CommitNow { files, message }) => {
                 pending_files = files;
                 pending_message = Some(message);
+                awaiting_snapshot = false;
                 // Commit immediately below.
             }
             Ok(HistoryRequest::PageHistory { uuid, limit }) => {
@@ -212,11 +224,12 @@ fn history_main(
             dirty = false;
             last_dirty_at = None;
             last_commit_at = Instant::now();
+            awaiting_snapshot = false;
             continue;
         }
 
         // Auto-commit check: idle timeout or safety-net max interval.
-        if dirty {
+        if dirty && !awaiting_snapshot {
             let idle_elapsed = last_dirty_at
                 .map(|t| t.elapsed() >= idle_timeout)
                 .unwrap_or(false);
@@ -224,21 +237,13 @@ fn history_main(
 
             if idle_elapsed || max_elapsed {
                 let reason = if max_elapsed {
-                    "safety-net max interval"
+                    HistoryFlushReason::MaxInterval
                 } else {
-                    "idle timeout"
+                    HistoryFlushReason::IdleTimeout
                 };
-                tracing::debug!(reason, "auto-commit triggered");
-
-                // For auto-commits, we send an empty files list — the caller
-                // (editor) will populate CommitNow with actual file data.
-                // FileDirty-triggered auto-commits just signal; the editor
-                // responds by sending a CommitNow with current vault state.
-                let _ = completion_tx.send(HistoryComplete::CommitDone { oid: None });
-
-                dirty = false;
-                last_dirty_at = None;
-                last_commit_at = Instant::now();
+                tracing::debug!(?reason, "auto-commit triggered");
+                let _ = completion_tx.send(HistoryComplete::FlushRequested { reason });
+                awaiting_snapshot = true;
             }
         }
     }
@@ -257,10 +262,13 @@ fn do_commit(
 
     match repo.commit_all(&file_refs, message, None) {
         Ok(oid) => {
-            if let Some(ref id) = oid {
+            if let Some(id) = oid {
                 tracing::info!(oid = %id, "history commit created");
+                let _ = completion_tx.send(HistoryComplete::CommitFinished { oid: id });
+            } else {
+                tracing::debug!("history commit skipped (no changes)");
+                let _ = completion_tx.send(HistoryComplete::CommitSkipped);
             }
-            let _ = completion_tx.send(HistoryComplete::CommitDone { oid });
         }
         Err(e) => {
             tracing::error!(error = %e, "history commit failed");
@@ -268,5 +276,64 @@ fn do_commit(
                 message: e.to_string(),
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn history_thread_requests_flush_after_idle_timeout() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (completion_tx, completion_rx) = crossbeam::channel::unbounded();
+        let request_tx = spawn_history_thread(dir.path().to_path_buf(), 0, 60, completion_tx);
+
+        request_tx.send(HistoryRequest::FileDirty).unwrap();
+
+        let completion = completion_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("expected flush request");
+        assert!(matches!(
+            completion,
+            HistoryComplete::FlushRequested {
+                reason: HistoryFlushReason::IdleTimeout
+            }
+        ));
+
+        request_tx.send(HistoryRequest::Shutdown).unwrap();
+        let _ = completion_rx.recv_timeout(Duration::from_secs(2));
+    }
+
+    #[test]
+    fn history_thread_reports_commit_skipped_for_unchanged_snapshot() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (completion_tx, completion_rx) = crossbeam::channel::unbounded();
+        let request_tx = spawn_history_thread(dir.path().to_path_buf(), 1, 60, completion_tx);
+
+        request_tx
+            .send(HistoryRequest::CommitNow {
+                files: vec![("page0001".into(), "hello".into())],
+                message: "first checkpoint".into(),
+            })
+            .unwrap();
+        let first = completion_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("expected first commit result");
+        assert!(matches!(first, HistoryComplete::CommitFinished { .. }));
+
+        request_tx
+            .send(HistoryRequest::CommitNow {
+                files: vec![("page0001".into(), "hello".into())],
+                message: "duplicate checkpoint".into(),
+            })
+            .unwrap();
+        let second = completion_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("expected second commit result");
+        assert!(matches!(second, HistoryComplete::CommitSkipped));
+
+        request_tx.send(HistoryRequest::Shutdown).unwrap();
+        let _ = completion_rx.recv_timeout(Duration::from_secs(2));
     }
 }

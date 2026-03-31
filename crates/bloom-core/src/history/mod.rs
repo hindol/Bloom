@@ -1,3 +1,5 @@
 pub mod thread;
 
-pub use thread::{spawn_history_thread, HistoryComplete, HistoryRequest, PageHistoryEntry};
+pub use thread::{
+    spawn_history_thread, HistoryComplete, HistoryFlushReason, HistoryRequest, PageHistoryEntry,
+};

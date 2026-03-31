@@ -33,7 +33,7 @@ pub use editor::section_mirror;
 // BufferManager
 // ---------------------------------------------------------------------------
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Instant;
 
 use bloom_md::parser::traits::DocumentParser;
@@ -1411,10 +1411,24 @@ impl BloomEditor {
     /// Handle a single history thread completion event.
     pub fn handle_history_complete(&mut self, complete: history::HistoryComplete) {
         match complete {
-            history::HistoryComplete::CommitDone { oid: Some(id) } => {
+            history::HistoryComplete::FlushRequested { reason } => {
+                tracing::debug!(?reason, "history flush requested");
+                let Some(tx) = &self.history_tx else {
+                    return;
+                };
+                let files = self.collect_vault_files_for_history();
+                let message = match reason {
+                    history::HistoryFlushReason::IdleTimeout => "idle timeout".to_string(),
+                    history::HistoryFlushReason::MaxInterval => {
+                        "safety-net max interval".to_string()
+                    }
+                };
+                let _ = tx.send(history::HistoryRequest::CommitNow { files, message });
+            }
+            history::HistoryComplete::CommitFinished { oid: id } => {
                 tracing::debug!(oid = %id, "history commit acknowledged");
             }
-            history::HistoryComplete::CommitDone { oid: None } => {
+            history::HistoryComplete::CommitSkipped => {
                 tracing::debug!("history commit skipped (no changes)");
             }
             history::HistoryComplete::PageHistory { entries } => {
@@ -1789,23 +1803,62 @@ impl BloomEditor {
     }
 
     /// Collect all vault pages as `(uuid_hex, content)` pairs for history commits.
-    /// Reads from the index (UUID ↔ path mapping) and from disk.
+    /// Prefers the index (UUID ↔ path mapping) and falls back to scanning disk
+    /// if the index is unavailable or not ready yet.
     fn collect_vault_files_for_history(&self) -> Vec<(String, String)> {
-        let Some(index) = &self.index else {
-            return vec![];
-        };
         let Some(vault_root) = &self.vault_root else {
             return vec![];
         };
 
-        let mut files = Vec::new();
-        for page in index.list_pages(None) {
-            let path = vault_root.join(&page.path);
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                files.push((page.id.to_hex(), content));
+        let mut files = BTreeMap::new();
+
+        if let Some(index) = &self.index {
+            for page in index.list_pages(None) {
+                let path = vault_root.join(&page.path);
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    files.insert(page.id.to_hex(), content);
+                }
             }
         }
-        files
+
+        if files.is_empty() {
+            tracing::debug!("history snapshot fallback: scanning vault from disk");
+            self.collect_history_files_from_disk(&mut files, &vault_root.join("pages"));
+            self.collect_history_files_from_disk(&mut files, &vault_root.join("journal"));
+        }
+
+        files.into_iter().collect()
+    }
+
+    fn collect_history_files_from_disk(
+        &self,
+        files: &mut BTreeMap<String, String>,
+        dir: &std::path::Path,
+    ) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                self.collect_history_files_from_disk(files, &path);
+                continue;
+            }
+            if path.extension().and_then(|ext| ext.to_str()) != Some("md") {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Some(frontmatter) = self.parser.parse_frontmatter(&content) else {
+                continue;
+            };
+            let Some(id) = frontmatter.id else {
+                continue;
+            };
+            files.entry(id.to_string()).or_insert(content);
+        }
     }
 
     pub fn restore_session(&mut self) -> Result<(), error::BloomError> {
@@ -3084,6 +3137,49 @@ mod tests {
 
     fn _page_content(id: &str) -> String {
         format!("---\nid: {id}\ntitle: \"Test Page\"\ncreated: 2026-01-01\ntags: []\n---\n\n")
+    }
+
+    #[test]
+    fn flush_request_collects_snapshot_and_sends_commit_now() {
+        let (mut editor, _dir) = editor_with_vault(&[(
+            "test-page.md",
+            "---\nid: aabbccdd\ntitle: \"Test Page\"\ncreated: 2026-01-01\ntags: []\n---\n\nhello\n",
+        )]);
+        for _ in 0..200 {
+            if editor
+                .index
+                .as_ref()
+                .is_some_and(|index| index.list_pages(None).len() == 1)
+            {
+                break;
+            }
+            let ch = editor.channels();
+            if let Some(rx) = &ch.indexer_rx {
+                while let Ok(complete) = rx.try_recv() {
+                    editor.handle_index_complete(complete);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let (tx, rx) = crossbeam::channel::unbounded();
+        editor.history_tx = Some(tx);
+
+        editor.handle_history_complete(history::HistoryComplete::FlushRequested {
+            reason: history::HistoryFlushReason::IdleTimeout,
+        });
+
+        let request = rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("expected CommitNow request");
+        match request {
+            history::HistoryRequest::CommitNow { files, message } => {
+                assert_eq!(message, "idle timeout");
+                assert_eq!(files.len(), 1);
+                assert_eq!(files[0].0, "aabbccdd");
+                assert!(files[0].1.contains("hello"));
+            }
+            _ => panic!("expected CommitNow request"),
+        }
     }
 
     // UC-01: Open today's journal via SPC j t
