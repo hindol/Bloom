@@ -768,6 +768,7 @@ pub struct BloomEditor {
     // Git-backed history
     pub(crate) history_tx: Option<crossbeam::channel::Sender<history::HistoryRequest>>,
     pub(crate) history_rx: Option<crossbeam::channel::Receiver<history::HistoryComplete>>,
+    pub(crate) durable_capture: DurableCaptureState,
     pub(crate) page_history_entries: Option<Vec<history::PageHistoryEntry>>,
     pub(crate) page_history_selected: usize,
     /// Text pending delivery to the system clipboard (drained by render).
@@ -884,6 +885,62 @@ pub(crate) struct TemporalItem {
     /// True if this item has same block content as its older neighbor.
     /// Navigation skips over these. Set during background blob loading.
     pub skip: bool,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DurableCaptureStatus {
+    Unsaved,
+    SavedPendingDurable,
+    Committing,
+    DurableCurrent,
+    DurableError,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DurableCommitInFlight {
+    pub pages: std::collections::HashSet<types::PageId>,
+    #[allow(dead_code)]
+    pub reason: history::HistoryFlushReason,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DurableCaptureState {
+    pub pending_pages: std::collections::HashSet<types::PageId>,
+    pub commit_in_flight: Option<DurableCommitInFlight>,
+    pub last_successful_commit_oid: Option<String>,
+    pub last_successful_commit_at: Option<i64>,
+    pub last_error: Option<String>,
+}
+
+impl DurableCaptureState {
+    fn mark_page_saved(&mut self, page_id: &types::PageId) {
+        self.pending_pages.insert(page_id.clone());
+    }
+
+    fn begin_commit(&mut self, reason: history::HistoryFlushReason) {
+        self.commit_in_flight = Some(DurableCommitInFlight {
+            pages: self.pending_pages.clone(),
+            reason,
+        });
+        self.last_error = None;
+    }
+
+    fn finish_commit(&mut self, oid: Option<String>) {
+        if let Some(in_flight) = self.commit_in_flight.take() {
+            for page_id in in_flight.pages {
+                self.pending_pages.remove(&page_id);
+            }
+        }
+        self.last_successful_commit_oid = oid;
+        self.last_successful_commit_at = Some(chrono::Utc::now().timestamp());
+        self.last_error = None;
+    }
+
+    fn fail_commit(&mut self, message: String) {
+        self.commit_in_flight = None;
+        self.last_error = Some(message);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1150,6 +1207,7 @@ impl BloomEditor {
             vault_lock: None,
             history_tx: None,
             history_rx: None,
+            durable_capture: DurableCaptureState::default(),
             page_history_entries: None,
             page_history_selected: 0,
             pending_clipboard: None,
@@ -1303,6 +1361,28 @@ impl BloomEditor {
         self.indexing
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn durable_capture_status(&self) -> DurableCaptureStatus {
+        let has_unsaved_buffers = self.writer.buffers().open_buffers().iter().any(|info| {
+            self.writer
+                .buffers()
+                .get(&info.page_id)
+                .is_some_and(|buf| buf.is_dirty())
+        });
+
+        if has_unsaved_buffers {
+            DurableCaptureStatus::Unsaved
+        } else if self.durable_capture.last_error.is_some() {
+            DurableCaptureStatus::DurableError
+        } else if self.durable_capture.commit_in_flight.is_some() {
+            DurableCaptureStatus::Committing
+        } else if !self.durable_capture.pending_pages.is_empty() {
+            DurableCaptureStatus::SavedPendingDurable
+        } else {
+            DurableCaptureStatus::DurableCurrent
+        }
+    }
+
     /// Whether the editor currently has an open index connection.
     pub fn has_index(&self) -> bool {
         self.index.is_some()
@@ -1416,6 +1496,7 @@ impl BloomEditor {
                 let Some(tx) = &self.history_tx else {
                     return;
                 };
+                self.durable_capture.begin_commit(reason);
                 let files = self.collect_vault_files_for_history();
                 let message = match reason {
                     history::HistoryFlushReason::IdleTimeout => "idle timeout".to_string(),
@@ -1426,9 +1507,11 @@ impl BloomEditor {
                 let _ = tx.send(history::HistoryRequest::CommitNow { files, message });
             }
             history::HistoryComplete::CommitFinished { oid: id } => {
+                self.durable_capture.finish_commit(Some(id.clone()));
                 tracing::debug!(oid = %id, "history commit acknowledged");
             }
             history::HistoryComplete::CommitSkipped => {
+                self.durable_capture.finish_commit(None);
                 tracing::debug!("history commit skipped (no changes)");
             }
             history::HistoryComplete::PageHistory { entries } => {
@@ -1438,6 +1521,9 @@ impl BloomEditor {
                 self.receive_blob_at(&oid, &uuid, content);
             }
             history::HistoryComplete::Error { message } => {
+                if self.durable_capture.commit_in_flight.is_some() {
+                    self.durable_capture.fail_commit(message.clone());
+                }
                 tracing::error!(error = %message, "history thread error");
                 self.push_notification(
                     format!("History error: {message}"),
@@ -3180,6 +3266,103 @@ mod tests {
             }
             _ => panic!("expected CommitNow request"),
         }
+    }
+
+    #[test]
+    fn write_complete_marks_page_pending_durable() {
+        let (mut editor, dir) = editor_with_vault(&[(
+            "test-page.md",
+            "---\nid: aabbccdd\ntitle: \"Test Page\"\ncreated: 2026-01-01\ntags: []\n---\n\nhello\n",
+        )]);
+        let page_id = types::PageId::from_hex("aabbccdd").unwrap();
+        let path = dir.path().join("pages/test-page.md");
+        let content = std::fs::read_to_string(&path).unwrap();
+        editor.open_page_with_content(&page_id, "Test Page", &path, &content);
+        let buffer_version = editor.writer.buffers().get(&page_id).unwrap().version();
+        editor
+            .writer
+            .buffers_mut()
+            .get_mut(&page_id)
+            .unwrap()
+            .set_pending_write_id(7);
+
+        assert_eq!(
+            editor.durable_capture_status(),
+            DurableCaptureStatus::DurableCurrent
+        );
+
+        editor.handle_write_result(bloom_store::disk_writer::WriteResult::Complete {
+            path,
+            write_id: 7,
+            buffer_version,
+        });
+
+        assert!(editor.durable_capture.pending_pages.contains(&page_id));
+        assert_eq!(
+            editor.durable_capture_status(),
+            DurableCaptureStatus::SavedPendingDurable
+        );
+    }
+
+    #[test]
+    fn commit_completion_clears_pending_durable_pages() {
+        let mut editor = BloomEditor::new(config::Config::defaults()).unwrap();
+        let page_id = types::PageId::from_hex("aabbccdd").unwrap();
+        let (tx, rx) = crossbeam::channel::unbounded();
+        editor.history_tx = Some(tx);
+        editor.durable_capture.mark_page_saved(&page_id);
+
+        editor.handle_history_complete(history::HistoryComplete::FlushRequested {
+            reason: history::HistoryFlushReason::IdleTimeout,
+        });
+        let _ = rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("expected CommitNow request");
+        assert_eq!(
+            editor.durable_capture_status(),
+            DurableCaptureStatus::Committing
+        );
+
+        editor.handle_history_complete(history::HistoryComplete::CommitFinished {
+            oid: "deadbeef".into(),
+        });
+
+        assert!(editor.durable_capture.pending_pages.is_empty());
+        assert_eq!(
+            editor.durable_capture.last_successful_commit_oid.as_deref(),
+            Some("deadbeef")
+        );
+        assert_eq!(
+            editor.durable_capture_status(),
+            DurableCaptureStatus::DurableCurrent
+        );
+    }
+
+    #[test]
+    fn commit_error_keeps_pending_pages_and_records_durable_failure() {
+        let mut editor = BloomEditor::new(config::Config::defaults()).unwrap();
+        let page_id = types::PageId::from_hex("aabbccdd").unwrap();
+        let (tx, rx) = crossbeam::channel::unbounded();
+        editor.history_tx = Some(tx);
+        editor.durable_capture.mark_page_saved(&page_id);
+
+        editor.handle_history_complete(history::HistoryComplete::FlushRequested {
+            reason: history::HistoryFlushReason::IdleTimeout,
+        });
+        let _ = rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("expected CommitNow request");
+
+        editor.handle_history_complete(history::HistoryComplete::Error {
+            message: "boom".into(),
+        });
+
+        assert!(editor.durable_capture.pending_pages.contains(&page_id));
+        assert_eq!(editor.durable_capture.last_error.as_deref(), Some("boom"));
+        assert_eq!(
+            editor.durable_capture_status(),
+            DurableCaptureStatus::DurableError
+        );
     }
 
     // UC-01: Open today's journal via SPC j t

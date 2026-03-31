@@ -34,9 +34,10 @@ impl BloomEditor {
                 if let Some(tx) = &self.history_tx {
                     let _ = tx.send(history::HistoryRequest::FileDirty);
                 }
-                // Mark buffer clean only if this is the LATEST write AND buffer
-                // hasn't been edited since the save was initiated.
                 if let Some(page_id) = self.writer.buffers().find_by_path(&path).cloned() {
+                    self.durable_capture.mark_page_saved(&page_id);
+                    // Mark buffer clean only if this is the LATEST write AND buffer
+                    // hasn't been edited since the save was initiated.
                     if let Some(buf) = self.writer.buffers().get(&page_id) {
                         let is_latest = buf.pending_write_id() == Some(write_id);
                         let unchanged = buf.version() == buffer_version;
@@ -270,6 +271,10 @@ impl BloomEditor {
         } else {
             // No DiskWriter (tests, pre-init). Inline atomic write.
             if bloom_store::disk_writer::atomic_write(&path, &content).is_ok() {
+                self.durable_capture.mark_page_saved(page_id);
+                if let Some(tx) = &self.history_tx {
+                    let _ = tx.send(history::HistoryRequest::FileDirty);
+                }
                 self.writer.apply(crate::BufferMessage::MarkClean {
                     page_id: page_id.clone(),
                 });
