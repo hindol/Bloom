@@ -1496,8 +1496,9 @@ impl BloomEditor {
                 let Some(tx) = &self.history_tx else {
                     return;
                 };
+                let pending_pages = self.durable_capture.pending_pages.clone();
                 self.durable_capture.begin_commit(reason);
-                let files = self.collect_vault_files_for_history();
+                let files = self.collect_history_files_for_pages(&pending_pages);
                 let message = match reason {
                     history::HistoryFlushReason::IdleTimeout => "idle timeout".to_string(),
                     history::HistoryFlushReason::MaxInterval => {
@@ -1909,17 +1910,85 @@ impl BloomEditor {
 
         if files.is_empty() {
             tracing::debug!("history snapshot fallback: scanning vault from disk");
-            self.collect_history_files_from_disk(&mut files, &vault_root.join("pages"));
-            self.collect_history_files_from_disk(&mut files, &vault_root.join("journal"));
+            self.collect_history_files_from_disk_matching(
+                &mut files,
+                &vault_root.join("pages"),
+                None,
+            );
+            self.collect_history_files_from_disk_matching(
+                &mut files,
+                &vault_root.join("journal"),
+                None,
+            );
         }
 
         files.into_iter().collect()
     }
 
-    fn collect_history_files_from_disk(
+    fn collect_history_files_for_pages(
+        &self,
+        page_ids: &std::collections::HashSet<types::PageId>,
+    ) -> Vec<(String, String)> {
+        let Some(vault_root) = &self.vault_root else {
+            return vec![];
+        };
+        if page_ids.is_empty() {
+            return vec![];
+        }
+
+        let mut files = BTreeMap::new();
+        let mut unresolved = std::collections::HashSet::new();
+        let index_paths: HashMap<String, std::path::PathBuf> = self
+            .index
+            .as_ref()
+            .map(|index| {
+                index
+                    .list_pages(None)
+                    .into_iter()
+                    .map(|page| (page.id.to_hex(), vault_root.join(page.path)))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        for page_id in page_ids {
+            let hex = page_id.to_hex();
+            let path = self
+                .writer
+                .buffers()
+                .info(page_id)
+                .map(|info| info.path.clone())
+                .or_else(|| index_paths.get(&hex).cloned());
+            match path.and_then(|path| std::fs::read_to_string(&path).ok()) {
+                Some(content) => {
+                    files.insert(hex, content);
+                }
+                None => {
+                    unresolved.insert(hex);
+                }
+            }
+        }
+
+        if !unresolved.is_empty() {
+            self.collect_history_files_from_disk_matching(
+                &mut files,
+                &vault_root.join("pages"),
+                Some(&unresolved),
+            );
+            self.collect_history_files_from_disk_matching(
+                &mut files,
+                &vault_root.join("journal"),
+                Some(&unresolved),
+            );
+        }
+
+        files.into_iter().collect()
+    }
+
+    fn collect_history_files_from_disk_matching(
         &self,
         files: &mut BTreeMap<String, String>,
         dir: &std::path::Path,
+        target_ids: Option<&std::collections::HashSet<String>>,
     ) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
@@ -1928,7 +1997,7 @@ impl BloomEditor {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                self.collect_history_files_from_disk(files, &path);
+                self.collect_history_files_from_disk_matching(files, &path, target_ids);
                 continue;
             }
             if path.extension().and_then(|ext| ext.to_str()) != Some("md") {
@@ -1943,7 +2012,11 @@ impl BloomEditor {
             let Some(id) = frontmatter.id else {
                 continue;
             };
-            files.entry(id.to_string()).or_insert(content);
+            let id_hex = id.to_hex();
+            if target_ids.is_some_and(|ids| !ids.contains(&id_hex)) {
+                continue;
+            }
+            files.entry(id_hex).or_insert(content);
         }
     }
 
@@ -3247,6 +3320,8 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
+        let page_id = types::PageId::from_hex("aabbccdd").unwrap();
+        editor.durable_capture.mark_page_saved(&page_id);
         let (tx, rx) = crossbeam::channel::unbounded();
         editor.history_tx = Some(tx);
 
@@ -3363,6 +3438,65 @@ mod tests {
             editor.durable_capture_status(),
             DurableCaptureStatus::DurableError
         );
+    }
+
+    #[test]
+    fn flush_request_sends_only_pending_durable_pages() {
+        let (mut editor, _dir) = editor_with_vault(&[
+            (
+                "test-page-a.md",
+                "---\nid: aabbccdd\ntitle: \"Test Page A\"\ncreated: 2026-01-01\ntags: []\n---\n\nhello\n",
+            ),
+            (
+                "test-page-b.md",
+                "---\nid: eeff0011\ntitle: \"Test Page B\"\ncreated: 2026-01-01\ntags: []\n---\n\nworld\n",
+            ),
+        ]);
+        let page_a = types::PageId::from_hex("aabbccdd").unwrap();
+        let (tx, rx) = crossbeam::channel::unbounded();
+        editor.history_tx = Some(tx);
+        editor.durable_capture.mark_page_saved(&page_a);
+
+        editor.handle_history_complete(history::HistoryComplete::FlushRequested {
+            reason: history::HistoryFlushReason::IdleTimeout,
+        });
+
+        let request = rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("expected CommitNow request");
+        match request {
+            history::HistoryRequest::CommitNow { files, .. } => {
+                assert_eq!(files.len(), 1);
+                assert_eq!(files[0].0, "aabbccdd");
+                assert!(files[0].1.contains("hello"));
+            }
+            _ => panic!("expected CommitNow request"),
+        }
+    }
+
+    #[test]
+    fn commit_finish_preserves_pages_saved_during_commit() {
+        let mut editor = BloomEditor::new(config::Config::defaults()).unwrap();
+        let page_a = types::PageId::from_hex("aabbccdd").unwrap();
+        let page_b = types::PageId::from_hex("eeff0011").unwrap();
+        let (tx, rx) = crossbeam::channel::unbounded();
+        editor.history_tx = Some(tx);
+        editor.durable_capture.mark_page_saved(&page_a);
+
+        editor.handle_history_complete(history::HistoryComplete::FlushRequested {
+            reason: history::HistoryFlushReason::IdleTimeout,
+        });
+        let _ = rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("expected CommitNow request");
+
+        editor.durable_capture.mark_page_saved(&page_b);
+        editor.handle_history_complete(history::HistoryComplete::CommitFinished {
+            oid: "deadbeef".into(),
+        });
+
+        assert!(!editor.durable_capture.pending_pages.contains(&page_a));
+        assert!(editor.durable_capture.pending_pages.contains(&page_b));
     }
 
     // UC-01: Open today's journal via SPC j t
