@@ -274,9 +274,9 @@ The user should experience:
 
 That does not require branching git history. It requires better identity semantics in the block-history layer.
 
-#### F3. An optional block-ID gutter could improve observability
+#### F3. An optional tracked-block gutter could improve observability
 
-One possible supporting surface is a configurable gutter to the **left of line numbers** that shows block IDs.
+One possible supporting surface is a configurable gutter to the **left of line numbers** that signals tracked block identity.
 
 This is appealing because:
 
@@ -286,8 +286,8 @@ This is appealing because:
 
 For example, a tech-savvy user could see:
 
-- after a split, which block kept the original ID and which got a new descendant ID
-- after a merge, which block ID survived and which one disappeared into the survivor
+- after a split, which block kept identity and which one became the new child
+- after a merge, which block survived and which one disappeared into the survivor
 - when a block moved or mirrored, that the identity remained stable
 
 The important PM framing is that this should be an **advanced observability option**, not a default burden on ordinary writing.
@@ -296,9 +296,11 @@ Recommended shape:
 
 - off by default
 - read-only
-- visually faded / secondary
+- visually faded / secondary in the steady state
 - placed in a dedicated gutter lane left of line numbers
 - positioned so it never feels like part of the editable text
+- marker-first rather than raw-ID-first
+- able to briefly flash different marker states when split / merge changes happen
 
 This would help observability, but it should not replace richer history UX. A gutter can show **current live identity**; it cannot by itself explain lineage over time.
 
@@ -454,15 +456,16 @@ For block history specifically, the stop-summary model should also support seman
 - merged into `^k7m2x`
 - merged from `^old12`
 
-#### P2 — Consider an advanced block-ID gutter
+#### P2 — Consider an advanced tracked-block gutter
 
-Bloom should consider an optional advanced gutter that surfaces current block IDs in the editor chrome.
+Bloom should consider an optional advanced gutter that surfaces current tracked block identity in the editor chrome.
 
 This should be treated as:
 
 - an observability/debugging aid for advanced users
 - a way to make split/merge survivor behavior visible
 - explicitly secondary to the main history surface
+- better expressed through tracked markers than through raw ID strings
 
 Default should remain off so hidden structure does not dominate the normal editing experience.
 
@@ -891,9 +894,9 @@ That means the preview should occupy the largest area, but the inspector should 
 
 This is important because Bloom's current problem is not lack of diff; it is lack of stop meaning.
 
-#### Optional block-ID gutter placement
+#### Optional tracked-block gutter placement
 
-The optional block-ID gutter should **not** be part of the history rail itself.
+The optional tracked-block gutter should **not** be part of the history rail itself.
 
 Best placement:
 
@@ -905,12 +908,12 @@ Best placement:
 Example:
 
 ```text
-^k7m2x   42  Review ropey API
-         43  Some supporting paragraph
-^d3e4f   44  New split child block
+ o      42  Review ropey API
+        43  Some supporting paragraph
+ +      44  New split child block
 ```
 
-This helps advanced users verify live survivor / child behavior after split and merge, but the history surface still owns the explanation of lineage over time.
+The exact marker styling is frontend-owned, but the point is the same: a subtle steady-state marker can show trackedness, and a stronger transient marker can distinguish survivor/new-child behavior after split and merge. The history surface still owns the explanation of lineage over time.
 
 #### Interaction summary
 
@@ -934,7 +937,7 @@ The recommended product direction is now:
 - branch structure remains in the rail
 - stop meaning lives in the inspector
 - durable safety state lives lightly in the modeline and optionally in the inspector
-- optional block-ID gutter remains a separate advanced observability aid
+- optional tracked-block gutter remains a separate advanced observability aid
 
 #### Questions for the architect from this pass
 

@@ -678,7 +678,7 @@ mod tests {
         assert_eq!(
             &pane.visible_lines[0].text
                 [with_gutter.rows[0].visible_byte_start..with_gutter.rows[0].visible_byte_end],
-            "a"
+            "abc"
         );
     }
 }

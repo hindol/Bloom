@@ -99,6 +99,10 @@ pub(crate) fn fill_rect(frame: &mut Frame, area: Rectangle, color: Color) {
     );
 }
 
+pub(crate) fn fill_circle(frame: &mut Frame, center: Point, radius: f32, color: Color) {
+    frame.fill(&Path::circle(center, radius), color);
+}
+
 pub(crate) fn stroke_rect(frame: &mut Frame, area: Rectangle, color: Color) {
     frame.stroke(
         &Path::rectangle(

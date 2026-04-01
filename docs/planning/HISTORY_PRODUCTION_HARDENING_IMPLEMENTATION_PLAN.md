@@ -336,7 +336,7 @@ Give the user a first-class "protect this version now" action.
 
 ---
 
-## Slice 9 — Optional advanced block-ID gutter
+## Slice 9 — Optional advanced tracked-block gutter
 
 ### Goal
 
@@ -344,8 +344,8 @@ Add the optional live-observability chrome for advanced users without disturbing
 
 ### Work
 
-- add config surface for block-ID gutter
-- render read-only faded IDs in a separate lane left of line numbers
+- add config surface for the tracked-block gutter (`block_id_gutter` config key)
+- render read-only tracked-state markers in a separate lane left of line numbers
 - keep it out of cursor/motion/copy semantics
 
 ### Acceptance criteria
@@ -402,7 +402,7 @@ Recommended coding order:
 7. Slice 6 — rail + inspector surface
 8. Slice 7 — block-lineage synthetic stops
 9. Slice 8 — explicit checkpoint command
-10. Slice 9 — optional block-ID gutter
+10. Slice 9 — optional tracked-block gutter
 11. Slice 10 — docs/tester/docs-steward pass
 
 This order prioritizes correctness and data-model stability before UI polish.

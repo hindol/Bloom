@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::time::Instant;
+
 use bloom_core::render::{
     CommandLineSlot, CursorShape, DashboardFrame, LineSource, McpIndicator, NormalStatus,
     PageHistoryFrame, PaneFrame, PaneKind, PaneRectFrame, QuickCaptureSlot, StatusBarContent,
@@ -8,7 +11,7 @@ use iced::{Color, Rectangle};
 
 use crate::draw::{
     chars_that_fit, draw_bar_cursor, draw_text, draw_text_center, draw_text_right, draw_text_sized,
-    fill_rect, rect, text_width, truncate_text,
+    fill_circle, fill_rect, rect, text_width, truncate_text,
 };
 use crate::theme::{rgb_to_color, style_to_bg, style_to_color};
 use crate::wrap::{
@@ -16,8 +19,8 @@ use crate::wrap::{
     total_gutter_width, PaneViewportState,
 };
 use crate::{
-    CHAR_WIDTH, FONT_SIZE, GUTTER_CHARS, LINE_HEIGHT, MODELINE_H_PAD, SPACING_MD, SPACING_SM,
-    STATUS_BAR_HEIGHT,
+    BlockMarkerFlash, BlockMarkerFlashKind, CHAR_WIDTH, FONT_SIZE, GUTTER_CHARS, LINE_HEIGHT,
+    MODELINE_H_PAD, SPACING_MD, SPACING_SM, STATUS_BAR_HEIGHT,
 };
 
 #[cfg(test)]
@@ -25,6 +28,55 @@ use crate::wrap::heading_font_size;
 
 /// Extra pixels the GUI status bar adds beyond what core allocates (1 cell row).
 const STATUS_BAR_EXTRA: f32 = STATUS_BAR_HEIGHT - LINE_HEIGHT;
+const BLOCK_TRACKING_MARKER_RADIUS: f32 = 2.25;
+const BLOCK_TRACKING_FLASH_RADIUS: f32 = 3.25;
+
+fn neutral_block_marker_color(theme: &ThemePalette) -> Color {
+    rgb_to_color(&theme.faded.blend(theme.background, 0.5))
+}
+
+fn block_marker_center_x(pane_x: f32, block_id_lane_width: f32) -> f32 {
+    pane_x + block_id_lane_width / 2.0
+}
+
+fn draw_block_tracking_marker(
+    frame: &mut iced::widget::canvas::Frame,
+    pane_x: f32,
+    block_id_lane_width: f32,
+    row_y: f32,
+    row_height: f32,
+    color: Color,
+    radius: f32,
+) {
+    fill_circle(
+        frame,
+        iced::Point::new(
+            block_marker_center_x(pane_x, block_id_lane_width),
+            row_y + row_height / 2.0,
+        ),
+        radius,
+        color,
+    );
+}
+
+fn flash_block_marker_color(
+    theme: &ThemePalette,
+    flash: &BlockMarkerFlash,
+    now: Instant,
+) -> Option<Color> {
+    let intensity = flash.intensity(now);
+    if intensity <= 0.0 {
+        return None;
+    }
+
+    let rgb = match flash.kind {
+        BlockMarkerFlashKind::Preserved => theme.accent_blue,
+        BlockMarkerFlashKind::New => theme.accent_red,
+    };
+    let mut color = rgb_to_color(&rgb);
+    color.a = 0.25 + intensity * 0.75;
+    Some(color)
+}
 
 /// Compute the Y offset of a given visible line index, accounting for
 /// variable row heights (headings are taller).
@@ -167,19 +219,20 @@ fn draw_editor_content(
                     );
                 } else {
                     if show_block_id_gutter {
-                        if let Some(label) = pane
+                        if pane
                             .visible_lines
                             .get(row.line_idx)
-                            .and_then(|line| line.block_id_label.as_deref())
+                            .and_then(|line| line.block_id_label.as_ref())
+                            .is_some()
                         {
-                            draw_text_sized(
+                            draw_block_tracking_marker(
                                 frame,
                                 pane_x,
+                                block_id_lane_width,
                                 row.y,
-                                label,
-                                rgb_to_color(&theme.faded.blend(theme.background, 0.35)),
-                                FONT_SIZE,
                                 row.row_height,
+                                neutral_block_marker_color(theme),
+                                BLOCK_TRACKING_MARKER_RADIUS,
                             );
                         }
                     }
@@ -385,6 +438,7 @@ pub(crate) fn draw_pane_cursor(
     word_wrap: bool,
     show_block_id_gutter: bool,
     viewport_state: Option<&PaneViewportState>,
+    block_marker_flashes: &HashMap<String, BlockMarkerFlash>,
     theme: &ThemePalette,
     anim: Option<(f32, f32)>,
     cursor_visible: bool,
@@ -416,6 +470,37 @@ pub(crate) fn draw_pane_cursor(
         rect(pane_x, hl_y, pane_w, cursor.row_height),
         hl_color,
     );
+
+    if show_block_id_gutter && !block_marker_flashes.is_empty() {
+        let block_id_lane_width = block_id_gutter_width(true);
+        let now = Instant::now();
+        for row in &layout.rows {
+            if row.is_continuation {
+                continue;
+            }
+            let Some(line) = pane.visible_lines.get(row.line_idx) else {
+                continue;
+            };
+            let Some(key) = line.block_id_label.as_ref() else {
+                continue;
+            };
+            let Some(flash) = block_marker_flashes.get(key) else {
+                continue;
+            };
+            let Some(color) = flash_block_marker_color(theme, flash, now) else {
+                continue;
+            };
+            draw_block_tracking_marker(
+                frame,
+                pane_x,
+                block_id_lane_width,
+                row.y,
+                row.row_height,
+                color,
+                BLOCK_TRACKING_FLASH_RADIUS,
+            );
+        }
+    }
 
     // Cursor glyph.
     if cursor_visible {

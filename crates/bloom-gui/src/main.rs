@@ -11,14 +11,14 @@ mod wrap;
 use bloom_core::config::Config;
 use bloom_core::default_vault_path;
 use bloom_core::event_loop::{FrontendEvent, LoopAction};
-use bloom_core::render::RenderFrame;
+use bloom_core::render::{PaneFrame, PaneKind, RenderFrame};
 use bloom_core::types::{KeyEvent, PaneId};
 use bloom_core::BloomEditor;
 use bloom_md::theme::{ThemePalette, BLOOM_DARK};
 use crossbeam::channel::{Receiver, Sender};
 use iced::widget::canvas::{Cache, Canvas};
 use iced::{keyboard, window, Element, Font, Length, Size, Subscription, Task};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -36,7 +36,7 @@ pub(crate) const STATUS_BAR_HEIGHT: f32 = LINE_HEIGHT;
 pub(crate) const CHAR_WIDTH: f32 = FONT_SIZE * 0.6;
 pub(crate) const GUTTER_CHARS: usize = 5;
 pub(crate) const GUTTER_WIDTH: f32 = GUTTER_CHARS as f32 * CHAR_WIDTH;
-pub(crate) const BLOCK_ID_GUTTER_CHARS: usize = 8;
+pub(crate) const BLOCK_ID_GUTTER_CHARS: usize = 2;
 pub(crate) const BLOCK_ID_GUTTER_WIDTH: f32 = BLOCK_ID_GUTTER_CHARS as f32 * CHAR_WIDTH;
 /// Horizontal padding inside the modeline to clear macOS rounded window corners.
 pub(crate) const MODELINE_H_PAD: f32 = 8.0;
@@ -68,6 +68,113 @@ impl Default for FontMetrics {
 
 const JETBRAINS_MONO: &[u8] = include_bytes!("../fonts/JetBrainsMono-Regular.ttf");
 const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(530);
+const BLOCK_MARKER_FLASH_DURATION: Duration = Duration::from_millis(1200);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BlockMarkerFlashKind {
+    Preserved,
+    New,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct BlockMarkerFlash {
+    pub(crate) kind: BlockMarkerFlashKind,
+    pub(crate) started_at: Instant,
+}
+
+impl BlockMarkerFlash {
+    pub(crate) fn intensity(&self, now: Instant) -> f32 {
+        let elapsed = now.saturating_duration_since(self.started_at);
+        let duration = BLOCK_MARKER_FLASH_DURATION.as_secs_f32().max(0.001);
+        (1.0 - (elapsed.as_secs_f32() / duration)).clamp(0.0, 1.0)
+    }
+}
+
+fn active_editor_pane(frame: &RenderFrame) -> Option<&PaneFrame> {
+    frame
+        .panes
+        .iter()
+        .find(|pane| pane.is_active && matches!(pane.kind, PaneKind::Editor))
+}
+
+fn visible_block_tracking_keys(pane: &PaneFrame) -> Vec<String> {
+    pane.visible_lines
+        .iter()
+        .filter_map(|line| line.block_id_label.clone())
+        .collect()
+}
+
+fn persisted_neighbor_for_insert(
+    old: &[String],
+    new: &[String],
+    insert_idx: usize,
+) -> Option<String> {
+    let old_set: HashSet<&str> = old.iter().map(String::as_str).collect();
+    new[..insert_idx]
+        .iter()
+        .rev()
+        .chain(new[insert_idx + 1..].iter())
+        .find(|id| old_set.contains(id.as_str()))
+        .cloned()
+}
+
+fn persisted_neighbor_for_removal(
+    old: &[String],
+    new: &[String],
+    removed_idx: usize,
+) -> Option<String> {
+    let new_set: HashSet<&str> = new.iter().map(String::as_str).collect();
+    old[..removed_idx]
+        .iter()
+        .rev()
+        .chain(old[removed_idx + 1..].iter())
+        .find(|id| new_set.contains(id.as_str()))
+        .cloned()
+}
+
+fn classify_block_marker_flashes(
+    old: &[String],
+    new: &[String],
+) -> Vec<(String, BlockMarkerFlashKind)> {
+    let old_set: HashSet<&str> = old.iter().map(String::as_str).collect();
+    let new_set: HashSet<&str> = new.iter().map(String::as_str).collect();
+    let inserted: Vec<(usize, &String)> = new
+        .iter()
+        .enumerate()
+        .filter(|(_, id)| !old_set.contains(id.as_str()))
+        .collect();
+    let removed: Vec<(usize, &String)> = old
+        .iter()
+        .enumerate()
+        .filter(|(_, id)| !new_set.contains(id.as_str()))
+        .collect();
+
+    let mut seen = HashSet::new();
+    let mut flashes = Vec::new();
+
+    for (idx, id) in &inserted {
+        if seen.insert(id.as_str().to_string()) {
+            flashes.push(((*id).clone(), BlockMarkerFlashKind::New));
+        }
+        if let Some(preserved) = persisted_neighbor_for_insert(old, new, *idx) {
+            if seen.insert(preserved.clone()) {
+                flashes.push((preserved, BlockMarkerFlashKind::Preserved));
+            }
+        }
+    }
+
+    if inserted.is_empty() {
+        for (idx, _) in &removed {
+            if let Some(preserved) = persisted_neighbor_for_removal(old, new, *idx) {
+                if seen.insert(preserved.clone()) {
+                    flashes.push((preserved, BlockMarkerFlashKind::Preserved));
+                }
+            }
+        }
+    }
+
+    flashes
+}
 
 fn title(state: &BloomApp) -> String {
     state
@@ -122,6 +229,7 @@ struct BloomApp {
     /// Set on window resize — forces all pane caches to clear on next frame.
     full_invalidation_pending: bool,
     pane_viewports: HashMap<PaneId, wrap::PaneViewportState>,
+    block_marker_flashes: HashMap<String, BlockMarkerFlash>,
 }
 
 #[derive(Debug, Clone)]
@@ -215,6 +323,7 @@ fn boot() -> (BloomApp, Task<Message>) {
             prev_active_pane: None,
             full_invalidation_pending: false,
             pane_viewports: HashMap::new(),
+            block_marker_flashes: HashMap::new(),
         },
         Task::none(),
     )
@@ -276,15 +385,20 @@ fn update(state: &mut BloomApp, message: Message) -> Task<Message> {
             };
             let insert_mode = state.is_insert_mode();
             let blink_changed = state.tick_cursor_blink(insert_mode);
+            let flashes_active = state.prune_block_marker_flashes();
             let keep_alive = state
                 .keep_alive_until
                 .map(|deadline| Instant::now() < deadline)
                 .unwrap_or(false);
-            state.animating = still_moving || insert_mode || state.frame.is_none() || keep_alive;
+            state.animating = still_moving
+                || insert_mode
+                || state.frame.is_none()
+                || keep_alive
+                || flashes_active;
             if !state.animating {
                 state.keep_alive_until = None;
             }
-            if still_moving || blink_changed {
+            if still_moving || blink_changed || flashes_active {
                 state.clear_cursor_cache();
             }
         }
@@ -357,6 +471,7 @@ fn view(state: &BloomApp) -> Element<'_, Message> {
         remote: state.remote,
         cursor_visible: !state.is_insert_mode() || state.cursor_visible,
         pane_viewports: &state.pane_viewports,
+        block_marker_flashes: &state.block_marker_flashes,
     })
     .width(Length::Fill)
     .height(Length::Fill);
@@ -523,6 +638,52 @@ impl BloomApp {
         self.blink_timer = Some(Instant::now());
     }
 
+    fn prune_block_marker_flashes(&mut self) -> bool {
+        let now = Instant::now();
+        self.block_marker_flashes
+            .retain(|_, flash| flash.intensity(now) > 0.0);
+        !self.block_marker_flashes.is_empty()
+    }
+
+    fn update_block_marker_flashes(&mut self, next_frame: &RenderFrame) {
+        let previous = self
+            .frame
+            .as_deref()
+            .and_then(active_editor_pane)
+            .map(|pane| (pane.id, visible_block_tracking_keys(pane)));
+        let next =
+            active_editor_pane(next_frame).map(|pane| (pane.id, visible_block_tracking_keys(pane)));
+
+        let Some((next_pane_id, next_keys)) = next else {
+            self.block_marker_flashes.clear();
+            return;
+        };
+
+        let Some((previous_pane_id, previous_keys)) = previous else {
+            self.block_marker_flashes.clear();
+            return;
+        };
+
+        if previous_pane_id != next_pane_id {
+            self.block_marker_flashes.clear();
+            return;
+        }
+
+        for (key, kind) in classify_block_marker_flashes(&previous_keys, &next_keys) {
+            self.block_marker_flashes.insert(
+                key,
+                BlockMarkerFlash {
+                    kind,
+                    started_at: Instant::now(),
+                },
+            );
+        }
+
+        let visible: HashSet<&str> = next_keys.iter().map(String::as_str).collect();
+        self.block_marker_flashes
+            .retain(|key, _| visible.contains(key.as_str()));
+    }
+
     fn send_key_event(&self, key_event: KeyEvent) {
         let _ = self.frontend_tx.send(FrontendEvent::Key(key_event));
     }
@@ -617,6 +778,7 @@ impl BloomApp {
                     let _ = clip.set_text(text.clone());
                 }
             }
+            self.update_block_marker_flashes(&frame);
             self.frame = Some(frame);
             got_frame = true;
         }
@@ -656,5 +818,38 @@ impl BloomApp {
                 frame.scrolloff,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{classify_block_marker_flashes, BlockMarkerFlashKind};
+
+    #[test]
+    fn classify_block_marker_flashes_marks_preserved_and_new_on_split() {
+        let old = vec!["top".to_string(), "next".to_string()];
+        let new = vec!["top".to_string(), "child".to_string(), "next".to_string()];
+
+        let flashes = classify_block_marker_flashes(&old, &new);
+
+        assert!(flashes.contains(&("top".to_string(), BlockMarkerFlashKind::Preserved)));
+        assert!(flashes.contains(&("child".to_string(), BlockMarkerFlashKind::New)));
+    }
+
+    #[test]
+    fn classify_block_marker_flashes_marks_preserved_on_merge() {
+        let old = vec![
+            "top".to_string(),
+            "merged-away".to_string(),
+            "next".to_string(),
+        ];
+        let new = vec!["top".to_string(), "next".to_string()];
+
+        let flashes = classify_block_marker_flashes(&old, &new);
+
+        assert_eq!(
+            flashes,
+            vec![("top".to_string(), BlockMarkerFlashKind::Preserved)]
+        );
     }
 }

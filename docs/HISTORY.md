@@ -33,7 +33,7 @@ Current Bloom history surfaces are:
 - synthetic block-lineage stops for merge / split explanation inside block history
 - explicit checkpoints via `SPC H c`, `:checkpoint`, `:cp`, or `c` inside history
 - restore from historical entries back into the current buffer
-- optional advanced block-ID gutter for live identity observability
+- optional advanced tracked-block gutter for live identity observability
 
 ## Page History
 
@@ -83,9 +83,14 @@ An explicit checkpoint first flushes dirty writable pages, then creates one dura
 
 ## Advanced Live Observability
 
-Bloom also has an optional advanced block-ID gutter.
+Bloom also has an optional advanced tracked-block gutter.
 
-When enabled in config (`block_id_gutter = true`), Bloom draws a faded read-only block-ID lane to the left of line numbers. Its job is to expose current live identity while you edit so you can see which block kept an ID after a split or which block survived a merge. It does not replace block history; it only helps make current identity visible.
+When enabled in config (`block_id_gutter = true`), Bloom draws a small read-only marker lane to the left of line numbers. The marker does not try to teach the raw block ID itself. Instead, it signals that Bloom is tracking this block, then briefly flashes when identity changes matter:
+
+- after a split, the preserved block and the new block can flash differently
+- after a merge, the surviving block can flash while the retired block's marker disappears
+
+The gutter stays secondary to the main editing flow. It does not replace block history; it only makes current trackedness and recent identity change visible.
 
 ## Why Git Lives Under the Hood
 

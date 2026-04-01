@@ -12,7 +12,7 @@ use crate::layout::FrameLayout;
 use crate::remote::RemoteHints;
 use crate::theme::rgb_to_color;
 use crate::wrap::PaneViewportState;
-use crate::{Message, CHAR_WIDTH};
+use crate::{BlockMarkerFlash, Message, CHAR_WIDTH};
 
 /// Animation speed: fraction of remaining distance covered per frame.
 const LERP_FACTOR: f32 = 0.6;
@@ -270,6 +270,7 @@ pub(crate) struct CursorCanvas<'a> {
     pub(crate) remote: RemoteHints,
     pub(crate) cursor_visible: bool,
     pub(crate) pane_viewports: &'a HashMap<PaneId, PaneViewportState>,
+    pub(crate) block_marker_flashes: &'a HashMap<String, BlockMarkerFlash>,
 }
 
 impl<'a> canvas::Program<Message> for CursorCanvas<'a> {
@@ -319,6 +320,7 @@ impl<'a> canvas::Program<Message> for CursorCanvas<'a> {
                 rf.word_wrap,
                 rf.block_id_gutter,
                 self.pane_viewports.get(&pf.id),
+                self.block_marker_flashes,
                 self.theme,
                 anim,
                 self.cursor_visible,

@@ -283,7 +283,7 @@ It will need:
 
 ### Optional live-observability surface
 
-An optional block-ID gutter is compatible with this model if it is treated as editor chrome, not document content.
+An optional block-tracking gutter is compatible with this model if it is treated as editor chrome, not document content.
 
 Constraints:
 
@@ -291,14 +291,21 @@ Constraints:
 - read-only
 - rendered in a separate gutter lane, left of line numbers
 - no effect on cursor semantics, motions, selections, or copy behavior
-- styled as secondary/faded metadata
+- styled as secondary/faded metadata in the steady state
+- should prefer marker semantics over raw visible ID strings
 
 Its job would be to expose **current live identity** for advanced users, not to replace lineage history.
 
 In practice:
 
-- after split, the gutter can reveal which visible block kept the parent ID and which block received the new child ID
-- after merge, the gutter can reveal which visible block's ID survived
+- after split, the gutter can briefly distinguish the preserved block from the new child block
+- after merge, the gutter can briefly distinguish the survivor from the retired block
+
+Implementation note:
+
+- the render frame may still carry hidden block identity keys for frontend bookkeeping
+- the normal user-facing gutter should render only tracked-state markers
+- transient marker flashes can be derived at the GUI boundary from frame-to-frame visible identity changes, so the effect stays in frontend chrome instead of leaking new animation state into document ownership
 
 But merge/split explanation over time still belongs to block-history lineage events, not to the gutter itself.
 
@@ -714,7 +721,7 @@ To reduce risk, implementation can happen in stages:
 3. add unified `SPC H h` / `SPC u u` entry handling
 4. add inspector rendering based on structured stop data
 5. add block-lineage synthetic stops
-6. optionally add block-ID gutter later as separate chrome work
+6. optionally add tracked-block gutter later as separate chrome work
 
 This lets Bloom harden the data model first, then the UI, instead of entangling both in one leap.
 
