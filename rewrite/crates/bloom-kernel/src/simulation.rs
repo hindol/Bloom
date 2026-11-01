@@ -4,6 +4,8 @@ use std::fmt;
 
 use crate::ports::{Clock, Fs, Rng, Watcher};
 
+pub mod harness;
+
 pub const REPLAY_FORMAT_VERSION: u16 = 1;
 const REPLAY_HEADER: &str = "BLOOM-SIM-REPLAY 1";
 

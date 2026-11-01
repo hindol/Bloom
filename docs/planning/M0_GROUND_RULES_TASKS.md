@@ -2,7 +2,7 @@
 
 > Source of truth: [FIRST_PRINCIPLES_REDESIGN.md](FIRST_PRINCIPLES_REDESIGN.md),
 > especially sections 7, 8, 11, and 14.
-> Status: M0-01 through M0-05 implemented; remaining M0 tasks pending.
+> Status: M0-01 through M0-07 implemented; remaining M0 tasks pending.
 
 ## Scope and branch contract
 
@@ -44,7 +44,7 @@ additional standing agents.
 | M0-04 | Add invariant-checker framework and coverage map / coding agent + docs steward | M0-03 | Implemented; see [M0_INVARIANT_FRAMEWORK.md](M0_INVARIANT_FRAMEWORK.md) |
 | M0-05 | Inventory and triage the behavioral oracle / PM + tester | None | Implemented; see [M0_ORACLE_INVENTORY.md](M0_ORACLE_INVENTORY.md) |
 | M0-06 | Add minimal deterministic simulation and replay / tester + coding agent | M0-03, M0-04 | Implemented; see [M0_SIMULATION_REPLAY.md](M0_SIMULATION_REPLAY.md) |
-| M0-07 | Add SimInput-compatible e2e adapter / tester + coding agent | M0-05, M0-06 | Pending |
+| M0-07 | Add SimInput-compatible e2e adapter / tester + coding agent | M0-05, M0-06 | Implemented; see [M0_SIMINPUT_ADAPTER.md](M0_SIMINPUT_ADAPTER.md) |
 | M0-08 | Add external progress watchdog / architect + tester | M0-06 | Pending |
 | M0-09 | Add independent reference-model harness / architect + tester | M0-06 | Pending |
 | M0-10 | Add curated detector-fault corpus / tester + coding agent | M0-04, M0-08, M0-09 | Pending |
@@ -168,6 +168,15 @@ do not weaken their expectations or assert product parity at M0.
 Acceptance: the smoke journey runs through the adapter, failures propagate to
 the test runner, and unimplemented parity entries cannot count as passing.
 Geometry-inclusive user journeys remain required under L8.
+
+The adapter contract and its fail-closed parity rule are recorded in
+[M0_SIMINPUT_ADAPTER.md](M0_SIMINPUT_ADAPTER.md). The feature-gated
+`bloom-kernel::simulation::harness` module provides generic `SimInput` and
+`TestScreen` boundaries plus an empty-kernel driver. Its smoke test exercises
+input dispatch and explicit unavailable assertions only; it is infrastructure
+coverage, not a ported oracle scenario. The M0-05 inventory remains the source
+of scenario identity and disposition, and no legacy tests are counted as v2
+parity by this slice.
 
 ### M0-08 - Progress watchdog
 

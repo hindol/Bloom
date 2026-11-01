@@ -36,8 +36,9 @@ diagnostic capture format is separate and is not introduced here.
 M0 has no product model or kernel transition to drive. Its smoke replay
 therefore exercises deterministic port behavior and replay fidelity only; it
 does not claim product parity. The empty applicable-invariant set is explicit.
-M0-07 supplies the `SimInput`-compatible adapter boundary; M1 connects
-applicable invariant checkers to real `update` transitions.
+M0-07 supplies the `SimInput`-compatible adapter boundary in
+[`M0_SIMINPUT_ADAPTER.md`](M0_SIMINPUT_ADAPTER.md); M1 connects applicable
+invariant checkers to real `update` transitions.
 
 ## Limits and failure semantics
 
