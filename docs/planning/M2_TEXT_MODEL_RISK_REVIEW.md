@@ -2,6 +2,7 @@
 
 > Architect review for the ADR-3 acceptance spike.
 > Scope is the spike only; this does not approve full M2 implementation.
+> Status: projection lowering and the serialized append oracle pass; ADR-3 remains unaccepted pending the identity-rule matrix.
 
 ## Decision under test
 
@@ -13,6 +14,22 @@ moving a block preserves its identity while copying it creates a fresh one.
 The spike must test this design before ADR-3 is accepted. If hidden-token
 handling leaks into motions or edits, use fallback (c) from the redesign and
 record the failing cases. Do not silently relax the acceptance gate.
+
+## Workspace-isolated legacy test bridge
+
+The M0 crate-boundary decision forbids dependencies in either direction
+between the legacy workspace and `rewrite/`. Preserve that boundary: the
+adapter communicates through the versioned text fixture
+`testdata/adr3_vim_oracle.v1`, not a Cargo dependency. Legacy `VimState` tests
+run the real key sequence, apply its `EditOp`s to a visible `Buffer`, and
+assert that both the resulting visible text and the serialized edit stream
+match the fixture. `bloom-text` consumes the same fixture and lowers those
+visible edits through a fresh projection, asserting canonical text and token
+identity afterward.
+
+This bridge currently covers end-of-line append before ordinary and legacy
+mirror IDs only. It does not establish parity for the identity-rule matrix or
+authorize ADR-3; those remain acceptance blockers.
 
 ## Scope and ownership
 
@@ -90,8 +107,9 @@ ADR-3 can be accepted only when:
    changing their expected behavior. At baseline, `cargo test -p bloom-vim`
    passes 42 tests, and the two hidden block-ID append scenarios pass. The
    current Vim API is coupled to `bloom_buffer::Buffer` and untyped
-   `EditOp { range: Range<usize>, ... }`; the test adapter must explicitly
-   cover that seam.
+   `EditOp { range: Range<usize>, ... }`; the serialized test adapter must
+   explicitly cover that seam without introducing a cross-workspace
+   dependency. Current coverage is limited to the two append cases above.
 3. Every supported identity rule has a test or is explicitly recorded as
    uncovered; no rule is inferred from the current side-table implementation.
 4. The verdict and any remaining gaps are recorded. If the gate fails, prototype

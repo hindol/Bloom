@@ -1,6 +1,7 @@
 use ropey::Rope;
 
-use crate::coordinates::CharIdx;
+use crate::coordinates::RawCharIdx;
+use crate::projection::VisibleProjection;
 
 #[derive(Clone, Debug)]
 /// Plain rope text whose positions count Unicode scalar values.
@@ -33,15 +34,15 @@ impl Doc {
         }
     }
 
-    pub fn start(&self) -> CharIdx {
-        CharIdx::new(0)
+    pub fn raw_start(&self) -> RawCharIdx {
+        RawCharIdx::new(0)
     }
 
     pub fn len_chars(&self) -> usize {
         self.rope.len_chars()
     }
 
-    pub fn char_idx(&self, position: usize) -> Result<CharIdx, DocError> {
+    pub fn raw_char_idx(&self, position: usize) -> Result<RawCharIdx, DocError> {
         if position > self.len_chars() {
             return Err(DocError::PositionOutOfBounds {
                 position,
@@ -49,23 +50,23 @@ impl Doc {
             });
         }
 
-        Ok(CharIdx::new(position))
+        Ok(RawCharIdx::new(position))
     }
 
-    pub fn char_offset(&self, position: CharIdx) -> Result<usize, DocError> {
-        self.char_idx(position.get()).map(CharIdx::get)
+    pub fn raw_char_offset(&self, position: RawCharIdx) -> Result<usize, DocError> {
+        self.raw_char_idx(position.get()).map(RawCharIdx::get)
     }
 
-    pub fn insert(&mut self, at: CharIdx, text: &str) -> Result<CharIdx, DocError> {
+    pub fn insert(&mut self, at: RawCharIdx, text: &str) -> Result<RawCharIdx, DocError> {
         self.insert_with_delta(at, text).map(|(cursor, _)| cursor)
     }
 
     pub fn insert_with_delta(
         &mut self,
-        at: CharIdx,
+        at: RawCharIdx,
         text: &str,
-    ) -> Result<(CharIdx, Option<EditDelta>), DocError> {
-        let position = self.char_offset(at)?;
+    ) -> Result<(RawCharIdx, Option<EditDelta>), DocError> {
+        let position = self.raw_char_offset(at)?;
         if text.is_empty() {
             return Ok((at, None));
         }
@@ -74,7 +75,7 @@ impl Doc {
         let cursor = position + text.chars().count();
         let end_line = self.rope.char_to_line(cursor);
         Ok((
-            CharIdx::new(cursor),
+            RawCharIdx::new(cursor),
             Some(EditDelta {
                 start_line,
                 old_line_count: 1,
@@ -83,16 +84,16 @@ impl Doc {
         ))
     }
 
-    pub fn delete_previous_char(&mut self, at: CharIdx) -> Result<CharIdx, DocError> {
+    pub fn delete_previous_char(&mut self, at: RawCharIdx) -> Result<RawCharIdx, DocError> {
         self.delete_previous_char_with_delta(at)
             .map(|(cursor, _)| cursor)
     }
 
     pub fn delete_previous_char_with_delta(
         &mut self,
-        at: CharIdx,
-    ) -> Result<(CharIdx, Option<EditDelta>), DocError> {
-        let position = self.char_offset(at)?;
+        at: RawCharIdx,
+    ) -> Result<(RawCharIdx, Option<EditDelta>), DocError> {
+        let position = self.raw_char_offset(at)?;
         if position == 0 {
             return Ok((at, None));
         }
@@ -100,7 +101,7 @@ impl Doc {
         let start_line = self.rope.char_to_line(position - 1);
         let old_end_line = self.rope.char_to_line(position);
         self.rope.remove(position - 1..position);
-        let cursor = CharIdx::new(position - 1);
+        let cursor = RawCharIdx::new(position - 1);
         let new_end_line = self.rope.char_to_line(position - 1);
         Ok((
             cursor,
@@ -116,6 +117,10 @@ impl Doc {
         self.rope.to_string()
     }
 
+    pub fn visible_projection(&self) -> VisibleProjection {
+        VisibleProjection::parse(&self.rope.to_string())
+    }
+
     pub fn snapshot(&self) -> DocSnapshot {
         DocSnapshot {
             rope: self.rope.clone(),
@@ -128,7 +133,7 @@ impl DocSnapshot {
         self.rope.len_chars()
     }
 
-    pub fn char_idx(&self, position: usize) -> Result<CharIdx, DocError> {
+    pub fn raw_char_idx(&self, position: usize) -> Result<RawCharIdx, DocError> {
         if position > self.len_chars() {
             return Err(DocError::PositionOutOfBounds {
                 position,
@@ -136,28 +141,32 @@ impl DocSnapshot {
             });
         }
 
-        Ok(CharIdx::new(position))
+        Ok(RawCharIdx::new(position))
     }
 
-    pub fn char_offset(&self, position: CharIdx) -> Result<usize, DocError> {
-        self.char_idx(position.get()).map(CharIdx::get)
+    pub fn raw_char_offset(&self, position: RawCharIdx) -> Result<usize, DocError> {
+        self.raw_char_idx(position.get()).map(RawCharIdx::get)
     }
 
     pub fn text(&self) -> String {
         self.rope.to_string()
     }
 
+    pub fn visible_projection(&self) -> VisibleProjection {
+        VisibleProjection::parse(&self.rope.to_string())
+    }
+
     pub fn line_count(&self) -> usize {
         self.rope.len_lines()
     }
 
-    pub fn line_for_char(&self, position: CharIdx) -> Result<usize, DocError> {
-        let position = self.char_offset(position)?;
+    pub fn line_for_raw_char(&self, position: RawCharIdx) -> Result<usize, DocError> {
+        let position = self.raw_char_offset(position)?;
         Ok(self.rope.char_to_line(position))
     }
 
-    pub fn line_start(&self, line: usize) -> Option<CharIdx> {
-        (line < self.line_count()).then(|| CharIdx::new(self.rope.line_to_char(line)))
+    pub fn line_start(&self, line: usize) -> Option<RawCharIdx> {
+        (line < self.line_count()).then(|| RawCharIdx::new(self.rope.line_to_char(line)))
     }
 
     pub fn line_char_len(&self, line: usize) -> Option<usize> {
@@ -183,15 +192,15 @@ mod tests {
     #[test]
     fn edits_rope_by_unicode_scalar_coordinate() {
         let mut doc = Doc::new("aé🙂");
-        let cursor = doc.char_idx(doc.len_chars()).unwrap();
+        let cursor = doc.raw_char_idx(doc.len_chars()).unwrap();
 
         let cursor = doc.delete_previous_char(cursor).unwrap();
         assert_eq!(doc.text(), "aé");
-        assert_eq!(doc.char_offset(cursor), Ok(2));
+        assert_eq!(doc.raw_char_offset(cursor), Ok(2));
 
         let cursor = doc.insert(cursor, "中").unwrap();
         assert_eq!(doc.text(), "aé中");
-        assert_eq!(doc.char_offset(cursor), Ok(3));
+        assert_eq!(doc.raw_char_offset(cursor), Ok(3));
     }
 
     #[test]
@@ -199,7 +208,7 @@ mod tests {
         let doc = Doc::new("abc");
 
         assert_eq!(
-            doc.char_idx(4),
+            doc.raw_char_idx(4),
             Err(DocError::PositionOutOfBounds {
                 position: 4,
                 length: 3
@@ -212,14 +221,28 @@ mod tests {
         let snapshot = Doc::new("é🙂").snapshot();
 
         assert_eq!(snapshot.len_chars(), 2);
-        assert_eq!(snapshot.char_offset(snapshot.char_idx(2).unwrap()), Ok(2));
         assert_eq!(
-            snapshot.char_idx(3),
+            snapshot.raw_char_offset(snapshot.raw_char_idx(2).unwrap()),
+            Ok(2)
+        );
+        assert_eq!(
+            snapshot.raw_char_idx(3),
             Err(DocError::PositionOutOfBounds {
                 position: 3,
                 length: 2,
             })
         );
+    }
+
+    #[test]
+    fn projection_is_derived_without_changing_canonical_rope_text() {
+        let doc = Doc::new("visible ^legacy\n^=mirror\n");
+        let snapshot = doc.snapshot();
+
+        assert_eq!(doc.visible_projection().text(), "visible\n\n");
+        assert_eq!(snapshot.visible_projection().text(), "visible\n\n");
+        assert_eq!(doc.text(), "visible ^legacy\n^=mirror\n");
+        assert_eq!(snapshot.text(), "visible ^legacy\n^=mirror\n");
     }
 
     #[test]
@@ -234,15 +257,21 @@ mod tests {
             ["one", "", "last", ""]
         );
         assert_eq!(snapshot.line_char_len(0), Some(5));
-        assert_eq!(snapshot.line_start(2), Some(snapshot.char_idx(6).unwrap()));
-        assert_eq!(snapshot.line_for_char(snapshot.char_idx(6).unwrap()), Ok(2));
+        assert_eq!(
+            snapshot.line_start(2),
+            Some(snapshot.raw_char_idx(6).unwrap())
+        );
+        assert_eq!(
+            snapshot.line_for_raw_char(snapshot.raw_char_idx(6).unwrap()),
+            Ok(2)
+        );
     }
 
     #[test]
     fn edit_deltas_cover_inserted_and_merged_physical_lines() {
         let mut doc = Doc::new("ab\ncd");
         let (cursor, insert_delta) = doc
-            .insert_with_delta(doc.char_idx(1).unwrap(), "\nnew\n")
+            .insert_with_delta(doc.raw_char_idx(1).unwrap(), "\nnew\n")
             .unwrap();
         assert_eq!(
             insert_delta,
@@ -263,13 +292,13 @@ mod tests {
             })
         );
         assert_eq!(doc.text(), "a\nnewb\ncd");
-        assert_eq!(doc.char_offset(cursor), Ok(cursor.get()));
+        assert_eq!(doc.raw_char_offset(cursor), Ok(cursor.get()));
     }
 
     #[test]
     fn empty_insert_reports_no_layout_invalidation() {
         let mut doc = Doc::new("note");
-        let cursor = doc.char_idx(2).unwrap();
+        let cursor = doc.raw_char_idx(2).unwrap();
 
         assert_eq!(doc.insert_with_delta(cursor, ""), Ok((cursor, None)));
         assert_eq!(doc.text(), "note");

@@ -2,7 +2,7 @@
 
 use std::ops::Range;
 
-use bloom_text::{coordinates::CharIdx, DocError, DocSnapshot, EditDelta};
+use bloom_text::{coordinates::RawCharIdx, DocError, DocSnapshot, EditDelta};
 use unicode_segmentation::UnicodeSegmentation;
 
 /// A zero-based display column produced by layout.
@@ -132,8 +132,8 @@ impl FontMetrics for MonospaceFontMetrics {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PositionedGrapheme {
     pub byte_range: Range<usize>,
-    pub start: CharIdx,
-    pub end: CharIdx,
+    pub start: RawCharIdx,
+    pub end: RawCharIdx,
     pub origin: Point,
     pub advance: Px,
 }
@@ -141,8 +141,8 @@ pub struct PositionedGrapheme {
 #[derive(Clone, Debug, PartialEq)]
 pub struct LayoutLine {
     pub text: String,
-    pub start: CharIdx,
-    pub end: CharIdx,
+    pub start: RawCharIdx,
+    pub end: RawCharIdx,
     pub origin: Point,
     pub width: Px,
     pub graphemes: Vec<PositionedGrapheme>,
@@ -170,16 +170,16 @@ pub enum LayoutError {
 impl Layout {
     pub fn compute(
         document: &DocSnapshot,
-        cursor: CharIdx,
+        cursor: RawCharIdx,
         viewport: Size,
         metrics: &dyn FontMetrics,
     ) -> Result<Self, LayoutError> {
         let text = document.text();
         document
-            .char_offset(cursor)
+            .raw_char_offset(cursor)
             .map_err(LayoutError::Document)?;
         let line_height = metrics.line_height();
-        let zero = document.char_idx(0).map_err(LayoutError::Document)?;
+        let zero = document.raw_char_idx(0).map_err(LayoutError::Document)?;
         let mut lines = vec![LayoutLine {
             text: String::new(),
             start: zero,
@@ -191,22 +191,22 @@ impl Layout {
             width: Px::ZERO,
             graphemes: Vec::new(),
         }];
-        let mut char_offset = 0;
+        let mut raw_char_offset = 0;
 
         for grapheme in text.graphemes(true) {
             let char_count = grapheme.chars().count();
             if grapheme == "\n" || grapheme == "\r\n" {
                 let end = document
-                    .char_idx(char_offset)
+                    .raw_char_idx(raw_char_offset)
                     .map_err(LayoutError::Document)?;
-                let next_offset = char_offset + char_count;
+                let next_offset = raw_char_offset + char_count;
                 let start = document
-                    .char_idx(next_offset)
+                    .raw_char_idx(next_offset)
                     .map_err(LayoutError::Document)?;
                 let line_index = lines.len();
                 let current = lines.last_mut().expect("layout always has one line");
                 current.end = end;
-                char_offset = next_offset;
+                raw_char_offset = next_offset;
                 lines.push(LayoutLine {
                     text: String::new(),
                     start,
@@ -226,7 +226,7 @@ impl Layout {
             let next_width = current.width.saturating_add(advance);
             if !current.graphemes.is_empty() && next_width > viewport.width {
                 let wrap_start = document
-                    .char_idx(char_offset)
+                    .raw_char_idx(raw_char_offset)
                     .map_err(LayoutError::Document)?;
                 current.end = wrap_start;
                 let line_index = lines.len();
@@ -245,10 +245,10 @@ impl Layout {
 
             let current = lines.last_mut().expect("layout always has one line");
             let start_offset = document
-                .char_idx(char_offset)
+                .raw_char_idx(raw_char_offset)
                 .map_err(LayoutError::Document)?;
             let end_offset = document
-                .char_idx(char_offset + char_count)
+                .raw_char_idx(raw_char_offset + char_count)
                 .map_err(LayoutError::Document)?;
             let origin = Point {
                 x: current.width,
@@ -265,7 +265,7 @@ impl Layout {
             });
             current.width = current.width.saturating_add(advance);
             current.end = end_offset;
-            char_offset += char_count;
+            raw_char_offset += char_count;
         }
 
         let cursor = lines
@@ -426,24 +426,24 @@ impl LayoutCache {
     pub(crate) fn frame(
         &mut self,
         document: &DocSnapshot,
-        cursor: CharIdx,
+        cursor: RawCharIdx,
         viewport: Size,
     ) -> Result<Layout, LayoutError> {
         if self.physical_lines.len() != document.line_count() {
             return Err(LayoutError::CacheInconsistent);
         }
         let cursor_line = document
-            .line_for_char(cursor)
+            .line_for_raw_char(cursor)
             .map_err(LayoutError::Document)?;
         let cursor_offset = document
-            .char_offset(cursor)
+            .raw_char_offset(cursor)
             .map_err(LayoutError::Document)?;
         let cursor_line_start = document
             .line_start(cursor_line)
             .ok_or(LayoutError::CacheInconsistent)?;
         let cursor_local = cursor_offset
             - document
-                .char_offset(cursor_line_start)
+                .raw_char_offset(cursor_line_start)
                 .map_err(LayoutError::Document)?;
         let cached_cursor_line = self
             .physical_lines
@@ -497,10 +497,10 @@ impl LayoutCache {
             lines.push(LayoutLine {
                 text: row.text.clone(),
                 start: document
-                    .char_idx(char_start + row.start)
+                    .raw_char_idx(char_start + row.start)
                     .map_err(LayoutError::Document)?,
                 end: document
-                    .char_idx(char_start + row.end)
+                    .raw_char_idx(char_start + row.end)
                     .map_err(LayoutError::Document)?,
                 origin: Point { x: Px::ZERO, y },
                 width: row.width,
@@ -511,10 +511,10 @@ impl LayoutCache {
                         Ok(PositionedGrapheme {
                             byte_range: grapheme.byte_range.clone(),
                             start: document
-                                .char_idx(char_start + grapheme.start)
+                                .raw_char_idx(char_start + grapheme.start)
                                 .map_err(LayoutError::Document)?,
                             end: document
-                                .char_idx(char_start + grapheme.end)
+                                .raw_char_idx(char_start + grapheme.end)
                                 .map_err(LayoutError::Document)?,
                             origin: Point {
                                 x: grapheme.origin.x,
@@ -684,7 +684,7 @@ fn shape_physical_line(
         width: Px::ZERO,
         graphemes: Vec::new(),
     }];
-    let mut char_offset = 0usize;
+    let mut raw_char_offset = 0usize;
     for grapheme in text.graphemes(true) {
         let char_count = grapheme.chars().count();
         let advance = metrics.grapheme_advance(grapheme);
@@ -693,11 +693,11 @@ fn shape_physical_line(
             .expect("a physical line has a visual row");
         let next_width = current.width.saturating_add(advance);
         if !current.graphemes.is_empty() && next_width > viewport_width {
-            current.end = char_offset;
+            current.end = raw_char_offset;
             visual_lines.push(CachedVisualLine {
                 text: String::new(),
-                start: char_offset,
-                end: char_offset,
+                start: raw_char_offset,
+                end: raw_char_offset,
                 width: Px::ZERO,
                 graphemes: Vec::new(),
             });
@@ -713,14 +713,14 @@ fn shape_physical_line(
         };
         current.graphemes.push(CachedGrapheme {
             byte_range: byte_start..current.text.len(),
-            start: char_offset,
-            end: char_offset + char_count,
+            start: raw_char_offset,
+            end: raw_char_offset + char_count,
             origin,
             advance,
         });
         current.width = current.width.saturating_add(advance);
-        current.end = char_offset + char_count;
-        char_offset += char_count;
+        current.end = raw_char_offset + char_count;
+        raw_char_offset += char_count;
     }
     CachedPhysicalLine {
         char_len,
@@ -747,7 +747,7 @@ mod tests {
         let snapshot = doc.snapshot();
         Layout::compute(
             &snapshot,
-            doc.char_idx(cursor).unwrap(),
+            doc.raw_char_idx(cursor).unwrap(),
             Size::new(Px::new(width).unwrap(), Px::new(100.0).unwrap()),
             &test_metrics(2.0, 10.0),
         )
@@ -801,7 +801,7 @@ mod tests {
         let snapshot = doc.snapshot();
         let result = Layout::compute(
             &snapshot,
-            doc.char_idx(1).unwrap(),
+            doc.raw_char_idx(1).unwrap(),
             Size::new(Px::new(2.0).unwrap(), Px::new(100.0).unwrap()),
             &test_metrics(2.0, 10.0),
         )
@@ -811,8 +811,14 @@ mod tests {
             result.lines[0].grapheme_text(&result.lines[0].graphemes[0]),
             "e\u{301}"
         );
-        assert_eq!(result.lines[0].graphemes[0].start, doc.char_idx(0).unwrap());
-        assert_eq!(result.lines[0].graphemes[0].end, doc.char_idx(2).unwrap());
+        assert_eq!(
+            result.lines[0].graphemes[0].start,
+            doc.raw_char_idx(0).unwrap()
+        );
+        assert_eq!(
+            result.lines[0].graphemes[0].end,
+            doc.raw_char_idx(2).unwrap()
+        );
         assert_eq!(result.lines[0].graphemes.len(), 1);
     }
 
@@ -835,7 +841,7 @@ mod tests {
         cache.reset_reshaped_lines();
 
         let (cursor, delta) = doc
-            .insert_with_delta(doc.char_idx(1).unwrap(), "\nX\n")
+            .insert_with_delta(doc.raw_char_idx(1).unwrap(), "\nX\n")
             .unwrap();
         cache
             .apply_edit(&doc.snapshot(), delta.unwrap(), &metrics)
@@ -888,7 +894,7 @@ mod tests {
     fn cursor_inside_crlf_is_placed_at_the_physical_line_end() {
         let doc = Doc::new("a\r\nb");
         let snapshot = doc.snapshot();
-        let cursor = snapshot.char_idx(2).unwrap();
+        let cursor = snapshot.raw_char_idx(2).unwrap();
         let viewport = Size::new(Px::new(20.0).unwrap(), Px::new(100.0).unwrap());
         let metrics = test_metrics(2.0, 10.0);
         let mut cache = LayoutCache::new(&snapshot, viewport, &metrics).unwrap();
@@ -903,7 +909,7 @@ mod tests {
     fn cached_layout_preserves_unicode_grapheme_boundaries_and_byte_ranges() {
         let doc = Doc::new("e\u{301}🙂\n中");
         let snapshot = doc.snapshot();
-        let cursor = doc.char_idx(1).unwrap();
+        let cursor = doc.raw_char_idx(1).unwrap();
         let viewport = Size::new(Px::new(2.0).unwrap(), Px::new(100.0).unwrap());
         let metrics = test_metrics(2.0, 10.0);
         let mut cache = LayoutCache::new(&snapshot, viewport, &metrics).unwrap();
@@ -916,7 +922,10 @@ mod tests {
             cached.lines[0].grapheme_text(&cached.lines[0].graphemes[0]),
             "e\u{301}"
         );
-        assert_eq!(cached.lines[0].graphemes[0].end, doc.char_idx(2).unwrap());
+        assert_eq!(
+            cached.lines[0].graphemes[0].end,
+            doc.raw_char_idx(2).unwrap()
+        );
     }
 
     #[test]
@@ -951,7 +960,7 @@ mod tests {
         let frame = cache
             .frame(
                 &snapshot,
-                doc.char_idx(0).unwrap(),
+                doc.raw_char_idx(0).unwrap(),
                 Size::new(Px::new(4.0).unwrap(), Px::new(10.0).unwrap()),
             )
             .unwrap();

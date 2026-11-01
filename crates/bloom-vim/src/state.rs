@@ -1046,6 +1046,112 @@ mod tests {
     use crate::input::KeyEvent;
     use bloom_buffer::Buffer;
 
+    const ADR3_VIM_ORACLE: &str = include_str!("../../../testdata/adr3_vim_oracle.v1");
+
+    fn oracle_fixture(name: &str) -> (String, String, Vec<(usize, usize, char, usize)>) {
+        let line = ADR3_VIM_ORACLE
+            .lines()
+            .find(|line| line.starts_with(&format!("{name}|")))
+            .unwrap_or_else(|| panic!("missing ADR-3 oracle case {name}"));
+        let fields = line.split('|').collect::<Vec<_>>();
+        assert_eq!(fields.len(), 6, "invalid ADR-3 fixture record");
+        let decode_text = |text: &str| text.replace("\\n", "\n").replace("\\r", "\r");
+        let edits = fields[5]
+            .split(';')
+            .map(|edit| {
+                let values = edit
+                    .split(',')
+                    .map(|value| value.parse::<usize>().unwrap())
+                    .collect::<Vec<_>>();
+                assert_eq!(values.len(), 4);
+                (
+                    values[0],
+                    values[1],
+                    char::from_u32(values[2] as u32).unwrap(),
+                    values[3],
+                )
+            })
+            .collect();
+        (decode_text(fields[1]), decode_text(fields[3]), edits)
+    }
+
+    fn apply_vim_action(
+        action: VimAction,
+        buffer: &mut Buffer,
+        cursor: usize,
+        edits: &mut Vec<(usize, usize, char, usize)>,
+    ) -> usize {
+        match action {
+            VimAction::Edit(edit) => {
+                let mut replacement = edit.replacement.chars();
+                let character = replacement
+                    .next()
+                    .expect("oracle edit must insert one char");
+                assert!(replacement.next().is_none());
+                edits.push((
+                    edit.range.start,
+                    edit.range.end,
+                    character,
+                    edit.cursor_after,
+                ));
+                buffer.replace(edit.range, &character.to_string());
+                edit.cursor_after
+            }
+            VimAction::Motion(motion) => motion.new_position,
+            VimAction::Composite(actions) => {
+                actions.into_iter().fold(cursor, |position, action| {
+                    apply_vim_action(action, buffer, position, edits)
+                })
+            }
+            VimAction::ModeChange(_)
+            | VimAction::Pending
+            | VimAction::Unhandled
+            | VimAction::Command(_)
+            | VimAction::RestoreCheckpoint => cursor,
+        }
+    }
+
+    fn run_append_oracle_case(name: &str) {
+        let (visible_before, expected_visible_after, expected_edits) = {
+            let (raw, expected_raw, edits) = oracle_fixture(name);
+            let fields = ADR3_VIM_ORACLE
+                .lines()
+                .find(|line| line.starts_with(&format!("{name}|")))
+                .unwrap();
+            let visible_before = fields.split('|').nth(2).unwrap().replace("\\n", "\n");
+            let expected_visible_after = fields.split('|').nth(4).unwrap().replace("\\n", "\n");
+            assert!(!raw.is_empty());
+            assert!(expected_raw.contains("^"));
+            (visible_before, expected_visible_after, edits)
+        };
+        assert_eq!(ADR3_VIM_ORACLE.lines().next(), Some("BLOOM_VIM_ORACLE_V1"));
+        let mut buffer = Buffer::from_text(&visible_before);
+        let mut vim = VimState::new();
+        let mut cursor = 0;
+        let mut actual_edits = Vec::new();
+        for key in std::iter::once(KeyEvent::char('A'))
+            .chain(" updated".chars().map(KeyEvent::char))
+            .chain(std::iter::once(KeyEvent::esc()))
+        {
+            let action = vim.process_key(key, &buffer, cursor);
+            cursor = apply_vim_action(action, &mut buffer, cursor, &mut actual_edits);
+            buffer.set_cursor(0, cursor);
+        }
+
+        assert_eq!(buffer.text().to_string(), expected_visible_after);
+        assert_eq!(actual_edits, expected_edits);
+    }
+
+    #[test]
+    fn adr3_oracle_records_actual_vim_edits_before_hidden_block_ids() {
+        run_append_oracle_case("append-block");
+    }
+
+    #[test]
+    fn adr3_oracle_records_actual_vim_edits_before_hidden_mirror_ids() {
+        run_append_oracle_case("append-mirror");
+    }
+
     fn key(c: char) -> KeyEvent {
         KeyEvent::char(c)
     }

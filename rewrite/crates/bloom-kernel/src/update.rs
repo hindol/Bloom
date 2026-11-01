@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use bloom_text::{coordinates::CharIdx, Doc, DocError, DocSnapshot, EditDelta};
+use bloom_text::{coordinates::RawCharIdx, Doc, DocError, DocSnapshot, EditDelta};
 
 use crate::{
     geometry::{FontMetrics, Layout, LayoutCache, LayoutError, MonospaceFontMetrics, Size},
@@ -41,7 +41,7 @@ impl Ui {
 #[derive(Clone, Debug)]
 pub struct Model {
     document: Doc,
-    cursor: CharIdx,
+    cursor: RawCharIdx,
     ui: Ui,
     timers: TimerWheel,
     viewport: Size,
@@ -65,7 +65,7 @@ impl Model {
         font_metrics: Arc<dyn FontMetrics>,
     ) -> Self {
         let document = Doc::new(text);
-        let cursor = document.start();
+        let cursor = document.raw_start();
         let snapshot = document.snapshot();
         let mut layout_cache = LayoutCache::new(&snapshot, viewport, font_metrics.as_ref())
             .expect("document start must always have valid geometry");
@@ -90,7 +90,7 @@ impl Model {
         self.document.text()
     }
 
-    pub fn cursor(&self) -> CharIdx {
+    pub fn cursor(&self) -> RawCharIdx {
         self.cursor
     }
 
@@ -138,7 +138,7 @@ pub fn update(model: &mut Model, event: Event, now: Duration) -> Result<Vec<Effe
         Event::Backspace => {
             model
                 .document
-                .char_offset(model.cursor)
+                .raw_char_offset(model.cursor)
                 .map_err(UpdateError::Document)?
                 > 0
         }
@@ -220,7 +220,7 @@ pub fn view(model: &Model) -> Frame {
 #[derive(Clone, Debug)]
 pub struct Frame {
     pub document: DocSnapshot,
-    pub cursor: CharIdx,
+    pub cursor: RawCharIdx,
     pub focus: Option<FocusOwner>,
     pub layout: Arc<Layout>,
 }
@@ -250,7 +250,7 @@ pub fn check_view_purity(model: &Model) -> Result<(), String> {
 fn settle(model: &mut Model, edit_delta: Option<EditDelta>) -> Result<(), UpdateError> {
     model
         .document
-        .char_offset(model.cursor)
+        .raw_char_offset(model.cursor)
         .map_err(UpdateError::Document)?;
     let snapshot = model.document.snapshot();
     if let Some(delta) = edit_delta {
@@ -312,7 +312,7 @@ mod tests {
         update(&mut model, Event::Backspace, Duration::ZERO).unwrap();
 
         assert_eq!(view(&model).document.text(), "note");
-        assert_eq!(model.cursor, model.document.start());
+        assert_eq!(model.cursor, model.document.raw_start());
     }
 
     #[test]
