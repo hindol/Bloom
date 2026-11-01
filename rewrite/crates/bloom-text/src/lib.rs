@@ -1,4 +1,4 @@
 pub mod coordinates;
 mod doc;
 
-pub use doc::{Doc, DocError, DocSnapshot};
+pub use doc::{Doc, DocError, DocSnapshot, EditDelta};

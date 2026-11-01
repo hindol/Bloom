@@ -11,4 +11,4 @@ bloom-vault = { path = "../bloom-vault" }
 bloom-index = { path = "../bloom-index" }
 bloom-text = { path = "../bloom-text" }
 cosmic-text = "0.15"
-iced = { version = "0.14", default-features = false, features = ["advanced", "canvas", "tiny-skia", "tokio"] }
+iced = { version = "0.14", default-features = false, features = ["advanced", "canvas", "tiny-skia", "tokio", "x11", "wayland"] }

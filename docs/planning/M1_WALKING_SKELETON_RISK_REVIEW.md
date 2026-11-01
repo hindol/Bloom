@@ -108,8 +108,8 @@ the table shows no dependency.
 | M1-02 | Minimal `state.db` schema (`WAL`, `user_version`), version records, group-commit worker and startup recovery | M1-01 | Rewrite hosted gate passed; legacy root Clippy and two baseline e2e failures remain | Fresh and migrated schema tests; commit/ack ordering; crash injection demonstrates I2 and no corrupted database |
 | M1-03 | Minimal Vault Store load and single-page CAS save, with `PageSync` and typed conflict result | M1-02 | Rewrite hosted gate passed; legacy root Clippy and two baseline e2e failures remain | Simulated stale-writer and write-failure tests preserve disk bytes; real filesystem tests verify replace/readback behavior |
 | M1-04 | Synthetic open/edit/save/crash/recover/replay journey with the external watchdog | M1-01, M1-02, M1-03 | Rewrite hosted gate passed; legacy root Clippy and two root e2e tests failed | Crash matrix validates I2; each page observation checks I5, each save checks I9, and every update checks I10/I11; watchdog outcomes remain distinct |
-| M1-05 | GUI adapter paints kernel-provided layout using injected `FontMetrics`; bounded metadata recorder | M1-01, M1-04 | Implemented; local workspace tests and strict Clippy passed; hosted gate pending | Headless snapshots and geometry agreement checks; recorder tests prove content exclusion and size bounds |
-| M1-06 | CI, platform filesystem checks, and docs-steward closure | M1-01 through M1-05 | Pending | Rewrite gates pass on the supported OS matrix; M1 acceptance and pending parity/performance scope agree with code |
+| M1-05 | GUI adapter paints kernel-provided layout using injected `FontMetrics`; bounded metadata recorder | M1-01, M1-04 | Implemented; local workspace tests and strict Clippy passed; first hosted Rewrite foundation failed because Linux Iced had no X11/Wayland backend enabled; corrected in M1-06 | Headless snapshots and geometry agreement checks; recorder tests prove content exclusion and size bounds |
+| M1-06 | CI, platform filesystem checks, and docs-steward closure | M1-01 through M1-05 | Implemented locally; Windows tests, strict Clippy, release check, and 10k-line latency sample pass; supported-OS hosted matrix pending | Rewrite gates pass on the supported OS matrix; M1 acceptance and pending parity/performance scope agree with code |
 
 ## Risks to retire before M1 exit
 
@@ -217,7 +217,40 @@ parity or as a product performance measurement.
   network I/O. It retains at most 512 fixed-size records and 16 KiB, evicts
   oldest records first, and exposes the eviction count so truncation is
   visible. It is not an exact replay log and must never be described as one.
-- The initial layout pass is eager over the document. It does not yet satisfy
-  the 10k-line keypress budget or the accepted per-line cache strategy; M1-06
-  must measure and close that gap before M1 exit. M1-05 geometry tests make no
-  performance claim.
+- Initial model construction still shapes every physical line. Subsequent
+  edits reuse line-relative wrap geometry, reshape only the affected line
+  range, and materialize only viewport rows. The deterministic 10k-line test
+  verifies one-line invalidation. The Windows release harness measures
+  alternating line splits/merges at the start of the 10k-line document; it
+  reported single-editor p50 of 83.7 us and p99 of 119.7 us against the
+  necessary 8 ms ceiling. The supported-host CI run is still required; this
+  is not a three-pane product-budget claim.
+
+## M1-06 performance and platform closure
+
+- The layout cache remains kernel-owned and single-writer. Each physical line
+  stores reusable grapheme measurements and wrap geometry keyed by its content
+  and viewport width. Text edits report the affected physical-line range so
+  ordinary insert/backspace transitions invalidate only those entries; a
+  split or merge may reindex line metadata, but must not reshape unchanged
+  lines. A width change invalidates geometry because wrapping can change.
+- Cached glyph positions are line-relative. Absolute character offsets and
+  viewport coordinates are derived only for the visible frame, avoiding a
+  whole-document copy or per-grapheme position rewrite after an edit. The
+  kernel owns scroll positioning and keeps the cursor visible; the GUI still
+  paints only the frame it receives.
+- Add a deterministic work-count test proving a one-line edit in a 10k-line
+  document reshapes only the affected line, plus a release-mode sampled
+  event-to-frame measurement using the accepted fixture size. Report the
+  single-editor result separately from the original three-pane product budget:
+  panes do not exist in M1, so this milestone cannot claim the full product
+  budget is met. Do not invent a cross-runner regression baseline.
+- Run the rewrite workspace checks and the real `bloom-vault` filesystem tests
+  on Windows, macOS, and Linux. The existing vault tests exercise the platform
+  replacement path; unsupported or failed durability operations remain
+  explicit failures. CI must not turn a platform-specific failure into a
+  skipped success.
+- The docs-steward closeout must distinguish the measured single-editor
+  skeleton from deferred three-pane geometry, parser/index/search, and full
+  oracle parity. It must keep M1 acceptance and the remaining M2-M7 scope in
+  agreement with the code and the redesign proposal.

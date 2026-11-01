@@ -1,9 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
-use bloom_text::{coordinates::CharIdx, Doc, DocError, DocSnapshot};
+use bloom_text::{coordinates::CharIdx, Doc, DocError, DocSnapshot, EditDelta};
 
 use crate::{
-    geometry::{FontMetrics, Layout, LayoutError, MonospaceFontMetrics, Size},
+    geometry::{FontMetrics, Layout, LayoutCache, LayoutError, MonospaceFontMetrics, Size},
     invariants::{RegistryError, Violation},
     timer::{TimerId, TimerWheel},
 };
@@ -46,6 +46,7 @@ pub struct Model {
     timers: TimerWheel,
     viewport: Size,
     font_metrics: Arc<dyn FontMetrics>,
+    layout_cache: LayoutCache,
     layout: Arc<Layout>,
 }
 
@@ -65,14 +66,13 @@ impl Model {
     ) -> Self {
         let document = Doc::new(text);
         let cursor = document.start();
+        let snapshot = document.snapshot();
+        let mut layout_cache = LayoutCache::new(&snapshot, viewport, font_metrics.as_ref())
+            .expect("document start must always have valid geometry");
         let layout = Arc::new(
-            Layout::compute(
-                &document.snapshot(),
-                cursor,
-                viewport,
-                font_metrics.as_ref(),
-            )
-            .expect("document start must always have valid geometry"),
+            layout_cache
+                .frame(&snapshot, cursor, viewport)
+                .expect("document start must always have valid geometry"),
         );
         Self {
             document,
@@ -81,6 +81,7 @@ impl Model {
             timers: TimerWheel::default(),
             viewport,
             font_metrics,
+            layout_cache,
             layout,
         }
     }
@@ -158,24 +159,37 @@ pub fn update(model: &mut Model, event: Event, now: Duration) -> Result<Vec<Effe
         .into_iter()
         .map(Effect::TimerFired)
         .collect::<Vec<_>>();
+    let mut edit_delta = None;
 
     match event {
         Event::InsertText(text) => {
             if !text.is_empty() {
-                model.cursor = model
+                let (cursor, delta) = model
                     .document
-                    .insert(model.cursor, &text)
+                    .insert_with_delta(model.cursor, &text)
                     .map_err(UpdateError::Document)?;
+                model.cursor = cursor;
+                edit_delta = delta;
             }
         }
         Event::Backspace => {
-            model.cursor = model
+            let (cursor, delta) = model
                 .document
-                .delete_previous_char(model.cursor)
+                .delete_previous_char_with_delta(model.cursor)
                 .map_err(UpdateError::Document)?;
+            model.cursor = cursor;
+            edit_delta = delta;
         }
         Event::Resize(size) => {
             model.viewport = size;
+            model
+                .layout_cache
+                .resize(
+                    &model.document.snapshot(),
+                    size,
+                    model.font_metrics.as_ref(),
+                )
+                .map_err(UpdateError::Layout)?;
         }
         Event::TimerWake => {}
     }
@@ -188,7 +202,7 @@ pub fn update(model: &mut Model, event: Event, now: Duration) -> Result<Vec<Effe
         });
     }
 
-    settle(model)?;
+    settle(model, edit_delta)?;
     #[cfg(any(debug_assertions, feature = "simulation"))]
     check_update_invariants(model, now)?;
     Ok(effects)
@@ -233,19 +247,23 @@ pub fn check_view_purity(model: &Model) -> Result<(), String> {
     }
 }
 
-fn settle(model: &mut Model) -> Result<(), UpdateError> {
+fn settle(model: &mut Model, edit_delta: Option<EditDelta>) -> Result<(), UpdateError> {
     model
         .document
         .char_offset(model.cursor)
         .map_err(UpdateError::Document)?;
+    let snapshot = model.document.snapshot();
+    if let Some(delta) = edit_delta {
+        model
+            .layout_cache
+            .apply_edit(&snapshot, delta, model.font_metrics.as_ref())
+            .map_err(UpdateError::Layout)?;
+    }
     model.layout = Arc::new(
-        Layout::compute(
-            &model.document.snapshot(),
-            model.cursor,
-            model.viewport,
-            model.font_metrics.as_ref(),
-        )
-        .map_err(UpdateError::Layout)?,
+        model
+            .layout_cache
+            .frame(&snapshot, model.cursor, model.viewport)
+            .map_err(UpdateError::Layout)?,
     );
     Ok(())
 }

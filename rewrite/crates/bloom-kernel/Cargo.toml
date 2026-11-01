@@ -18,3 +18,7 @@ criterion = "0.5"
 name = "simulation_smoke"
 harness = false
 required-features = ["simulation"]
+
+[[bench]]
+name = "layout_latency"
+harness = false

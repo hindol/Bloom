@@ -29,7 +29,7 @@ budgets need their own synthetic vault sizes and warm/cold state definitions.
 | Operation | Fixture / method | Status |
 |---|---|---|
 | Empty-kernel replay smoke | Checked-in replay, Criterion repeated sample | Active measurement; no regression baseline yet |
-| Keypress to frame p99 | 10k-line page, three panes, sampled event-to-frame latency | Pending product model/UI |
+| Keypress to frame p99 | 10k-line single-editor split/merge sample is active in M1; three-pane product fixture remains pending | M1 single-editor harness; full product budget pending |
 | Open page | 10k-line page, cold/warm state specified per run | Pending M1/M2 |
 | Search | 10k-page synthetic vault, sampled query latency | Pending index milestone |
 | Cold start to first frame | 10k-page vault with explicitly warm cache | Pending product startup |
@@ -41,8 +41,9 @@ budgets need their own synthetic vault sizes and warm/cold state definitions.
    fixture with explicit warmup, sample count, and measurement duration.
 2. The regression comparator accepts a 10% delta and rejects a delta greater
    than 10%; invalid zero baselines fail explicitly.
-3. Product p99 budgets remain pending and are never represented by fabricated
-   zero-duration measurements.
+3. The full three-pane product p99 and other unimplemented budgets remain
+   pending; the M1 single-editor measurement is not represented as a full
+   product result or as a fabricated cross-runner baseline.
 
 The Criterion benchmark is `rewrite/crates/bloom-kernel/benches/simulation_smoke.rs`;
 the deterministic >10% gate checks are in

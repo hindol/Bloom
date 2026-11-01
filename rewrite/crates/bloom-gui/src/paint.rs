@@ -29,11 +29,12 @@ pub fn paint(frame: &Frame, font: FontSpec, sink: &mut impl PaintSink) -> PaintS
         .layout
         .lines
         .iter()
-        .flat_map(|line| &line.graphemes)
-        .map(|grapheme| PaintedGrapheme {
-            text: grapheme.text.clone(),
-            origin: grapheme.origin,
-            font,
+        .flat_map(|line| {
+            line.graphemes.iter().map(move |grapheme| PaintedGrapheme {
+                text: line.grapheme_text(grapheme).to_owned(),
+                origin: grapheme.origin,
+                font,
+            })
         })
         .collect::<Vec<_>>();
     let cursor = frame.layout.cursor;
@@ -112,8 +113,10 @@ mod tests {
                 .layout
                 .lines
                 .iter()
-                .flat_map(|line| &line.graphemes)
-                .map(|grapheme| (grapheme.text.as_str(), grapheme.origin))
+                .flat_map(|line| line
+                    .graphemes
+                    .iter()
+                    .map(move |grapheme| { (line.grapheme_text(grapheme), grapheme.origin) }))
                 .collect::<Vec<_>>()
         );
         assert_eq!(sink.graphemes, snapshot.graphemes);
