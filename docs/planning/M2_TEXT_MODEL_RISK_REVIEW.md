@@ -34,7 +34,7 @@ record the failing cases. Do not silently relax the acceptance gate.
 
 | Risk | Failure mode | Required control |
 |---|---|---|
-| Projection drift | Cursor, selection, or edit lands inside a hidden token or splits a grapheme | Distinct visible/raw coordinate types; one checked lowering function; round-trip and boundary properties |
+| Projection drift | Cursor, selection, or edit lands inside a hidden token or splits a grapheme; one visible range crosses several raw token gaps | Distinct visible/raw coordinate types; one checked lowering API that returns segmented raw edits plus explicit token effects; round-trip and boundary properties |
 | Parser disagreement | A token is hidden by rendering but still editable, or a literal/code sample is hidden as structure | Token spans come from one parser with context; test code fences, inline code, malformed markers, links, trailing spaces, and end-of-file cases |
 | Legacy grammar narrowing | Existing IDs stop parsing after the generator changes to seven characters | Preserve the current read grammar during the spike. The legacy parser accepts alphanumeric, `-`, and `_` IDs and recognizes `^=` markers; the new generator's seven-character base36 format must not narrow reads |
 | Mirror transition | Existing `^=id` content is treated as a second live identity or rewritten before the migration | Parse and preserve legacy mirror markers as legacy tokens; do not create or propagate mirrors in the new model; defer their conversion to the approved M7 migration |
@@ -64,6 +64,9 @@ Each rule in ADR-3's identity table needs a direct test, including:
 - Splitting a block keeps the original ID on the left and allocates one fresh
   ID for the right, with undo/redo restoring the exact token.
 - `x`, `X`, and `D` at both token boundaries affect visible text only.
+- A visible range crossing one or more hidden tokens cannot become a single
+  destructive raw range by accident. The lowering result must preserve token
+  spans unless the operation's identity rule explicitly moves or retires them.
 - Visual-block ranges, substitutions, and `.` repeat lower through the same
   projection and re-apply the identity rules. If the legacy Vim engine does not
   expose one of these operations, mark that rule uncovered rather than passing
