@@ -1,4 +1,5 @@
 /target
+/rewrite/target/
 *.lock
 .DS_Store
 screenshots/*.txt
