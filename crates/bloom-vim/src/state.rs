@@ -1047,6 +1047,119 @@ mod tests {
     use bloom_buffer::Buffer;
 
     const ADR3_VIM_ORACLE: &str = include_str!("../../../testdata/adr3_vim_oracle.v1");
+    const ADR3_IDENTITY_ORACLE: &str =
+        include_str!("../../../testdata/adr3_vim_identity_oracle.v1");
+
+    #[derive(Debug, Eq, PartialEq)]
+    struct OracleEdit {
+        start: usize,
+        end: usize,
+        replacement: String,
+        cursor_after: usize,
+    }
+
+    fn decode_oracle_text(text: &str) -> String {
+        text.replace("\\n", "\n").replace("\\r", "\r")
+    }
+
+    fn parse_identity_oracle_edits(encoded: &str) -> Vec<OracleEdit> {
+        if encoded.is_empty() {
+            return Vec::new();
+        }
+        encoded
+            .split(';')
+            .map(|edit| {
+                let fields = edit.splitn(4, ',').collect::<Vec<_>>();
+                assert_eq!(fields.len(), 4, "invalid serialized edit");
+                OracleEdit {
+                    start: fields[0].parse().unwrap(),
+                    end: fields[1].parse().unwrap(),
+                    replacement: decode_oracle_text(fields[2]),
+                    cursor_after: fields[3].parse().unwrap(),
+                }
+            })
+            .collect()
+    }
+
+    fn apply_identity_oracle_action(
+        action: VimAction,
+        buffer: &mut Buffer,
+        cursor: usize,
+        edits: &mut Vec<OracleEdit>,
+    ) -> usize {
+        match action {
+            VimAction::Edit(edit) => {
+                edits.push(OracleEdit {
+                    start: edit.range.start,
+                    end: edit.range.end,
+                    replacement: edit.replacement.clone(),
+                    cursor_after: edit.cursor_after,
+                });
+                buffer.replace(edit.range, &edit.replacement);
+                edit.cursor_after
+            }
+            VimAction::Motion(motion) => motion.new_position,
+            VimAction::Composite(actions) => {
+                actions.into_iter().fold(cursor, |position, action| {
+                    apply_identity_oracle_action(action, buffer, position, edits)
+                })
+            }
+            VimAction::ModeChange(_)
+            | VimAction::Pending
+            | VimAction::Unhandled
+            | VimAction::Command(_)
+            | VimAction::RestoreCheckpoint => cursor,
+        }
+    }
+
+    fn identity_oracle_key(name: &str) -> KeyEvent {
+        match name {
+            "ENTER" => KeyEvent::enter(),
+            "ESC" => KeyEvent::esc(),
+            character => {
+                let mut chars = character.chars();
+                let key = chars.next().expect("empty oracle key");
+                assert!(chars.next().is_none(), "oracle character keys are one char");
+                KeyEvent::char(key)
+            }
+        }
+    }
+
+    fn run_identity_oracle_case(line: &str) {
+        let fields = line.split('|').collect::<Vec<_>>();
+        assert_eq!(fields.len(), 7, "invalid identity oracle record");
+        let raw_before = decode_oracle_text(fields[1]);
+        let visible_before = decode_oracle_text(fields[2]);
+        assert!(raw_before.contains('^'), "fixture must include hidden IDs");
+        let mut cursor = fields[3].parse::<usize>().unwrap();
+        let expected_visible = decode_oracle_text(fields[5]);
+        let expected_edits = parse_identity_oracle_edits(fields[6]);
+        let mut buffer = Buffer::from_text(&visible_before);
+        let mut vim = VimState::new();
+        let mut actual_edits = Vec::new();
+
+        for key in fields[4].split(',') {
+            let action = vim.process_key(identity_oracle_key(key), &buffer, cursor);
+            cursor = apply_identity_oracle_action(action, &mut buffer, cursor, &mut actual_edits);
+        }
+
+        assert_eq!(buffer.text().to_string(), expected_visible, "{}", fields[0]);
+        assert_eq!(actual_edits, expected_edits, "{}", fields[0]);
+    }
+
+    #[test]
+    fn adr3_identity_oracle_records_actual_vim_edit_streams() {
+        assert_eq!(
+            ADR3_IDENTITY_ORACLE.lines().next(),
+            Some("BLOOM_VIM_IDENTITY_ORACLE_V1")
+        );
+        for line in ADR3_IDENTITY_ORACLE.lines().skip(1) {
+            if line.is_empty() {
+                continue;
+            }
+            run_identity_oracle_case(line);
+        }
+    }
 
     fn oracle_fixture(name: &str) -> (String, String, Vec<(usize, usize, char, usize)>) {
         let line = ADR3_VIM_ORACLE

@@ -1,0 +1,8 @@
+BLOOM_VIM_IDENTITY_ORACLE_V1
+dd-p|one ^blk01\nnext ^blk02\n|one\nnext\n|0|d,d,p|none\next\n|0,4,,0;1,1,one\n,4
+yy-p|one ^blk01\nnext ^blk02\n|one\nnext\n|0|y,y,p|oone\nne\nnext\n|1,1,one\n,4
+join|left ^left01\nright ^right1\n|left\nright\n|0|J|left right\n|4,5, ,4
+split|alpha beta ^split1\n|alpha beta\n|5|i,ENTER,ESC|alpha\n beta\n|5,5,\n,6
+x|hello ^edge01|hello|4|x|hell|4,5,,3
+X|hello ^edge01|hello|5|X|hell|4,5,,3
+D|hello ^edge01|hello|1|D|h|1,5,,0

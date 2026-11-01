@@ -27,9 +27,21 @@ match the fixture. `bloom-text` consumes the same fixture and lowers those
 visible edits through a fresh projection, asserting canonical text and token
 identity afterward.
 
-This bridge currently covers end-of-line append before ordinary and legacy
-mirror IDs only. It does not establish parity for the identity-rule matrix or
-authorize ADR-3; those remain acceptance blockers.
+The append fixture covers ordinary and legacy mirror IDs. A second versioned
+fixture, `testdata/adr3_vim_identity_oracle.v1`, now records the real `dd`+`p`,
+`yy`+`p`, `J`, insert-newline split, and `x`/`X`/`D` edit streams against
+ID-bearing input. The legacy Vim tests
+execute those key sequences; rewrite tests consume the `x`/`X`/`D` cases and
+lower their actual ranges while checking that IDs survive. The identity-policy
+tests separately exercise registry decisions for move, copy, join, and split.
+
+The fixture exposed an existing legacy behavior mismatch: `p` pastes the
+linewise register at a character position (for example, `yy`+`p` yields
+`oone\nne\nnext\n`), rather than inserting a line. Treat this as observed
+legacy behavior, not as evidence that the ADR-3 move/copy rules are
+implemented. The structural `dd`/`p`, `yy`/`p`, `J`, and split streams are not
+yet connected to a canonical-text transaction; the bridge does not authorize
+ADR-3.
 
 ## Scope and ownership
 
@@ -114,8 +126,10 @@ This is policy-level evidence only. It does not yet execute the identity matrix
 through real Vim key streams or apply edits to a canonical document; fresh ID
 candidates are supplied by the caller, durable registry behavior and cleanup
 when a detached register is overwritten are not implemented, and byte-identical
-undo/redo is not tested. The serialized legacy bridge still covers
-append-before-ID only. ADR-3 remains unaccepted.
+undo/redo is not tested. Although real structural Vim streams are now recorded,
+they are not yet replayed through canonical-text transactions; only
+append-before-ID and visible-only `x`/`X`/`D` edits cross the full bridge.
+ADR-3 remains unaccepted.
 
 ## Acceptance gate
 
@@ -125,12 +139,13 @@ ADR-3 can be accepted only when:
    property tests for visible-to-raw range lowering and canonical round trips.
 2. The existing Vim unit suite and ID-bearing e2e scenarios pass without
    changing their expected behavior. Before the new oracle checks,
-   `cargo test -p bloom-vim` passed 42 tests; it now passes 44, including the
-   two append-oracle cases. The current Vim API is coupled to
+   `cargo test -p bloom-vim` passed 42 tests; it now passes 45, including both
+   append cases and the identity-stream case. The current Vim API is coupled to
    `bloom_buffer::Buffer` and untyped `EditOp { range: Range<usize>, ... }`;
    the serialized test adapter must explicitly cover that seam without
-   introducing a cross-workspace dependency. Current bridge coverage remains
-   limited to the two append cases above.
+   introducing a cross-workspace dependency. The serialized bridge now covers
+   append, structural command streams, and visible-only boundary deletions, but
+   not structural canonical-text replay.
 3. Every supported identity rule has a test or is explicitly recorded as
    uncovered; no rule is inferred from the current side-table implementation.
 4. The verdict and any remaining gaps are recorded. If the gate fails, prototype

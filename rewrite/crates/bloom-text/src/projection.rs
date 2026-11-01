@@ -434,9 +434,20 @@ mod tests {
     use crate::Doc;
 
     const ADR3_VIM_ORACLE: &str = include_str!("../../../../testdata/adr3_vim_oracle.v1");
+    const ADR3_IDENTITY_ORACLE: &str =
+        include_str!("../../../../testdata/adr3_vim_identity_oracle.v1");
 
     fn decode_text(text: &str) -> String {
         text.replace("\\n", "\n").replace("\\r", "\r")
+    }
+
+    fn identity_oracle_case(name: &str) -> Vec<&str> {
+        ADR3_IDENTITY_ORACLE
+            .lines()
+            .find(|line| line.starts_with(&format!("{name}|")))
+            .unwrap_or_else(|| panic!("missing identity oracle case {name}"))
+            .split('|')
+            .collect()
     }
 
     fn parse_edits(encoded: &str) -> Vec<(usize, usize, char, usize)> {
@@ -597,6 +608,62 @@ mod tests {
                 .token_effects
                 .iter()
                 .all(|effect| effect.disposition == TokenDisposition::Preserve));
+        }
+    }
+
+    #[test]
+    fn serialized_legacy_boundary_edits_lower_without_touching_block_ids() {
+        assert_eq!(
+            ADR3_IDENTITY_ORACLE.lines().next(),
+            Some("BLOOM_VIM_IDENTITY_ORACLE_V1")
+        );
+
+        for name in ["x", "X", "D"] {
+            let fields = identity_oracle_case(name);
+            assert_eq!(fields.len(), 7);
+            let raw = decode_text(fields[1]);
+            let visible = decode_text(fields[2]);
+            let expected_visible = decode_text(fields[5]);
+            let projection = Doc::new(&raw).visible_projection();
+            assert_eq!(projection.text(), visible, "{name} fixture projection");
+            let token_ids = projection
+                .tokens()
+                .iter()
+                .map(|token| token.id().to_owned())
+                .collect::<Vec<_>>();
+            let edits = fields[6].split(';').collect::<Vec<_>>();
+            assert_eq!(edits.len(), 1, "{name} should be one visible edit");
+            let edit = edits[0].splitn(4, ',').collect::<Vec<_>>();
+            assert_eq!(edit.len(), 4);
+            let start = edit[0].parse::<usize>().unwrap();
+            let end = edit[1].parse::<usize>().unwrap();
+            let replacement = decode_text(edit[2]);
+            assert!(replacement.is_empty(), "{name} oracle is a deletion");
+
+            let lowered = projection
+                .lower(projection.range(start, end).unwrap())
+                .unwrap();
+            assert!(lowered
+                .token_effects
+                .iter()
+                .all(|effect| effect.disposition == TokenDisposition::Preserve));
+            let mut raw_chars = raw.chars().collect::<Vec<_>>();
+            for segment in lowered.raw_segments.iter().rev() {
+                raw_chars.drain(segment.start().get()..segment.end().get());
+            }
+            let edited = raw_chars.into_iter().collect::<String>();
+            let edited_projection = Doc::new(&edited).visible_projection();
+
+            assert_eq!(edited_projection.text(), expected_visible, "{name}");
+            assert_eq!(
+                edited_projection
+                    .tokens()
+                    .iter()
+                    .map(|token| token.id().to_owned())
+                    .collect::<Vec<_>>(),
+                token_ids,
+                "{name} changed canonical token identity"
+            );
         }
     }
 
