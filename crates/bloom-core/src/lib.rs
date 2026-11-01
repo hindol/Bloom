@@ -737,6 +737,7 @@ pub struct BloomEditor {
     pub(crate) indexer_rx: Option<crossbeam::channel::Receiver<index::indexer::IndexComplete>>,
     pub(crate) indexer_tx: Option<crossbeam::channel::Sender<index::indexer::IndexRequest>>,
     pub(crate) indexing: bool,
+    pub(crate) indexer_requests_in_flight: usize,
     pub(crate) initial_index_done: bool,
     pub(crate) last_index_timing: Option<index::indexer::IndexTiming>,
     pub(crate) last_picker_queries: std::collections::HashMap<String, String>,
@@ -777,6 +778,10 @@ pub struct BloomEditor {
     /// Cached vault-wide known block IDs (live + retired). Refreshed on
     /// IndexComplete. Used by `ensure_block_ids()` for collision avoidance.
     pub(crate) known_block_ids: std::collections::HashSet<String>,
+    /// Whether `known_block_ids` reflects a completed index pass.
+    pub(crate) block_ids_ready: bool,
+    /// Pages that requested block-ID assignment before the index was ready.
+    pub(crate) pending_block_id_assignments: std::collections::HashSet<types::PageId>,
 }
 
 pub(crate) struct ViewState {
@@ -1313,6 +1318,7 @@ impl BloomEditor {
             indexer_rx: None,
             indexer_tx: None,
             indexing: false,
+            indexer_requests_in_flight: 0,
             initial_index_done: false,
             last_index_timing: None,
             last_picker_queries: std::collections::HashMap::new(),
@@ -1336,6 +1342,8 @@ impl BloomEditor {
             page_history_selected: 0,
             pending_clipboard: None,
             known_block_ids: std::collections::HashSet::new(),
+            block_ids_ready: false,
+            pending_block_id_assignments: std::collections::HashSet::new(),
             config,
         })
     }
@@ -1530,7 +1538,8 @@ impl BloomEditor {
 
     /// Handle a single indexer completion event.
     pub fn handle_index_complete(&mut self, complete: index::indexer::IndexComplete) {
-        self.indexing = false;
+        self.indexer_requests_in_flight = self.indexer_requests_in_flight.saturating_sub(1);
+        self.indexing = self.indexer_requests_in_flight > 0;
         tracing::info!(
             files_scanned = complete.timing.files_scanned,
             files_changed = complete.timing.files_changed,
@@ -1539,6 +1548,7 @@ impl BloomEditor {
         );
 
         if let Some(error) = &complete.error {
+            self.block_ids_ready = false;
             self.push_notification(
                 format!("Index error: {error}"),
                 render::NotificationLevel::Error,
@@ -1564,16 +1574,49 @@ impl BloomEditor {
             self.push_notification(message, render::NotificationLevel::Info);
         }
         // Reload the index connection to pick up changes from the indexer thread
-        if let Some(vault_root) = &self.vault_root {
+        let index_reloaded = if let Some(vault_root) = &self.vault_root {
             let index_path = vault::paths::index_db(vault_root);
-            if let Ok(idx) = index::Index::open_readonly(&index_path) {
-                self.index = Some(idx);
+            match index::Index::open_readonly(&index_path) {
+                Ok(idx) => {
+                    self.index = Some(idx);
+                    true
+                }
+                Err(error) => {
+                    tracing::error!(%error, "failed to reload index after indexing");
+                    self.push_notification(
+                        format!("Index refresh failed; block ID assignment is paused: {error}"),
+                        render::NotificationLevel::Error,
+                    );
+                    false
+                }
             }
-        }
+        } else {
+            false
+        };
 
         // Refresh vault-wide known block IDs cache for collision avoidance.
-        if let Some(idx) = &self.index {
-            self.known_block_ids = block_id_gen::load_all_known_ids(idx.connection());
+        let known_block_ids = if index_reloaded {
+            self.index.as_ref().map(|idx| {
+                block_id_gen::load_all_known_ids(idx.connection())
+                    .map_err(|error| error.to_string())
+            })
+        } else {
+            None
+        };
+        match known_block_ids {
+            Some(Ok(known_block_ids)) => {
+                self.known_block_ids = known_block_ids;
+                self.block_ids_ready = self.indexer_requests_in_flight == 0;
+            }
+            Some(Err(error)) => {
+                self.block_ids_ready = false;
+                tracing::error!(%error, "failed to load vault-wide block IDs");
+                self.push_notification(
+                    format!("Block ID assignment is paused: {error}"),
+                    render::NotificationLevel::Error,
+                );
+            }
+            None => self.block_ids_ready = false,
         }
 
         // Apply pending mirror marker writes from the indexer.
@@ -1605,6 +1648,15 @@ impl BloomEditor {
             } else {
                 // Not open — write directly to disk
                 let _ = bloom_store::disk_writer::atomic_write(&pw.path, &pw.content);
+            }
+        }
+
+        if self.block_ids_ready {
+            let pending_pages: Vec<_> = self.pending_block_id_assignments.drain().collect();
+            for page_id in pending_pages {
+                if self.ensure_block_ids(&page_id) {
+                    self.save_page(&page_id);
+                }
             }
         }
 
@@ -1848,12 +1900,13 @@ impl BloomEditor {
         };
 
         // Check if journal scrubber should auto-hide (3s after last nav)
-        let scrubber_changed = if self.in_journal_mode {
-            self.journal_nav_at
-                .is_some_and(|t| now.duration_since(t) >= std::time::Duration::from_secs(3))
-        } else {
-            false
-        };
+        let scrubber_changed = self.in_journal_mode
+            && self
+                .journal_nav_at
+                .is_some_and(|t| now >= t + std::time::Duration::from_secs(3));
+        if scrubber_changed {
+            self.journal_nav_at = None;
+        }
 
         notif_changed || wk_changed || scrubber_changed
     }
@@ -2621,6 +2674,87 @@ mod tests {
         // Should not crash
     }
 
+    #[test]
+    fn test_journal_scrubber_deadline_is_consumed_once() {
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let nav_at = std::time::Instant::now();
+        let expires_at = nav_at + std::time::Duration::from_secs(3);
+        editor.in_journal_mode = true;
+        editor.journal_nav_at = Some(nav_at);
+
+        assert_eq!(editor.next_deadline(), Some(expires_at));
+        assert!(editor.tick(expires_at));
+        assert_eq!(editor.journal_nav_at, None);
+        assert_eq!(editor.next_deadline(), None);
+        assert!(!editor.tick(expires_at + std::time::Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn test_block_id_assignment_waits_for_index_and_updates_known_ids() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let index_dir = dir.path().join(".index");
+        std::fs::create_dir_all(&index_dir).unwrap();
+        let index_path = crate::vault::paths::index_db(dir.path());
+        drop(crate::index::Index::open(&index_path).unwrap());
+
+        let config = config::Config::defaults();
+        let mut editor = BloomEditor::new(config).unwrap();
+        let page_id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(
+            &page_id,
+            "Test",
+            &dir.path().join("test.md"),
+            "# Heading\n\nA paragraph.\n",
+        );
+        editor.vault_root = Some(dir.path().to_path_buf());
+        editor.indexing = true;
+        editor.indexer_requests_in_flight = 2;
+        editor.block_ids_ready = false;
+
+        assert!(!editor.ensure_block_ids(&page_id));
+        assert!(editor.pending_block_id_assignments.contains(&page_id));
+        assert!(editor.known_block_ids.is_empty());
+
+        let complete = || index::indexer::IndexComplete {
+            stats: index::RebuildStats {
+                pages: 0,
+                links: 0,
+                tags: 0,
+            },
+            timing: index::indexer::IndexTiming {
+                scan_ms: 0,
+                read_parse_ms: 0,
+                write_ms: 0,
+                total_ms: 0,
+                files_scanned: 0,
+                files_changed: 0,
+            },
+            error: None,
+            pending_writes: Vec::new(),
+        };
+        editor.handle_index_complete(complete());
+
+        assert!(!editor.block_ids_ready);
+        assert!(!editor.pending_block_id_assignments.is_empty());
+
+        editor.handle_index_complete(complete());
+
+        assert!(editor.block_ids_ready);
+        assert!(editor.pending_block_id_assignments.is_empty());
+        assert_eq!(editor.known_block_ids.len(), 2);
+
+        let second_page_id = crate::uuid::generate_hex_id();
+        editor.open_page_with_content(
+            &second_page_id,
+            "Second",
+            &dir.path().join("second.md"),
+            "# Another heading\n",
+        );
+        assert!(editor.ensure_block_ids(&second_page_id));
+        assert_eq!(editor.known_block_ids.len(), 3);
+    }
+
     // UC-13: Create page
     #[test]
     fn test_create_page_returns_id() {
@@ -2659,6 +2793,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         editor.vault_root = Some(dir.path().to_path_buf());
+        editor.block_ids_ready = true;
         let id = crate::uuid::generate_hex_id();
         editor.open_page_with_content(&id, "Test", &file_path, "hello");
 
@@ -2681,6 +2816,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         editor.vault_root = Some(dir.path().to_path_buf());
+        editor.block_ids_ready = true;
         let id = crate::uuid::generate_hex_id();
         editor.open_page_with_content(&id, "Test", &file_path, "hello");
 
@@ -2716,6 +2852,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         editor.vault_root = Some(dir.path().to_path_buf());
+        editor.block_ids_ready = true;
         let id = crate::uuid::generate_hex_id();
         editor.open_page_with_content(&id, "Test", &file_path, content);
 
@@ -2761,6 +2898,7 @@ mod tests {
         let config = config::Config::defaults();
         let mut editor = BloomEditor::new(config).unwrap();
         editor.vault_root = Some(dir.path().to_path_buf());
+        editor.block_ids_ready = true;
         let id = crate::uuid::generate_hex_id();
         editor.open_page_with_content(&id, "Test", &file_path, content);
 

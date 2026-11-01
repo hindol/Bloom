@@ -524,6 +524,15 @@ impl<'a> DocumentMut<'a> {
         let before = self.managed.document.block_ids.clone();
         self.reconcile_after_text_change(before.clone(), true, known_ids.as_deref());
         let changed = self.managed.document.block_ids != before;
+        if let Some(known_ids) = known_ids {
+            known_ids.extend(
+                self.managed
+                    .document
+                    .block_ids
+                    .iter()
+                    .map(|entry| entry.id.0.clone()),
+            );
+        }
         if changed {
             self.capture_history_snapshot();
         }

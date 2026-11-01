@@ -661,9 +661,23 @@ impl BloomEditor {
         };
 
         // Generate a new unique ID
-        let existing = crate::block_id_gen::load_all_known_ids(
-            self.index.as_ref().map(|i| i.connection()).unwrap(),
-        );
+        let Some(index) = self.index.as_ref() else {
+            self.push_notification(
+                "Cannot sever mirror: the vault index is unavailable".into(),
+                crate::render::NotificationLevel::Error,
+            );
+            return;
+        };
+        let existing = match crate::block_id_gen::load_all_known_ids(index.connection()) {
+            Ok(existing) => existing,
+            Err(error) => {
+                self.push_notification(
+                    format!("Cannot sever mirror: failed to load block IDs: {error}"),
+                    crate::render::NotificationLevel::Error,
+                );
+                return;
+            }
+        };
         let new_id = bloom_buffer::block_id::next_block_id(&existing);
         if let Some(mut doc) = self.writer.buffers_mut().document_mut(&page_id) {
             let _ =

@@ -10,18 +10,16 @@ const ID_LEN: usize = 5;
 const ALPHABET: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
 
 /// Load all known block IDs (live + retired) from the index for collision avoidance.
-pub fn load_all_known_ids(conn: &rusqlite::Connection) -> HashSet<String> {
+pub fn load_all_known_ids(conn: &rusqlite::Connection) -> rusqlite::Result<HashSet<String>> {
     let mut ids = HashSet::new();
     for table in &["block_ids", "retired_block_ids"] {
-        if let Ok(mut stmt) = conn.prepare(&format!("SELECT block_id FROM {table}")) {
-            if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
-                for id in rows.flatten() {
-                    ids.insert(id);
-                }
-            }
+        let mut stmt = conn.prepare(&format!("SELECT block_id FROM {table}"))?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        for id in rows {
+            ids.insert(id?);
         }
     }
-    ids
+    Ok(ids)
 }
 
 /// Generate a random 5-char base36 block ID not in `existing`.
@@ -172,5 +170,32 @@ mod tests {
     #[test]
     fn apply_empty_insertions_returns_none() {
         assert!(apply_insertions("text", &[]).is_none());
+    }
+
+    #[test]
+    fn loads_live_and_retired_ids() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE block_ids (block_id TEXT NOT NULL);
+             CREATE TABLE retired_block_ids (block_id TEXT NOT NULL);
+             INSERT INTO block_ids VALUES ('live1');
+             INSERT INTO retired_block_ids VALUES ('old01');",
+        )
+        .unwrap();
+
+        let ids = load_all_known_ids(&conn).unwrap();
+        assert_eq!(
+            ids,
+            HashSet::from(["live1".to_string(), "old01".to_string()])
+        );
+    }
+
+    #[test]
+    fn known_id_load_fails_if_a_table_is_unavailable() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE block_ids (block_id TEXT NOT NULL);")
+            .unwrap();
+
+        assert!(load_all_known_ids(&conn).is_err());
     }
 }
