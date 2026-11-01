@@ -2,7 +2,8 @@
 
 > Source of truth: [FIRST_PRINCIPLES_REDESIGN.md](FIRST_PRINCIPLES_REDESIGN.md),
 > especially sections 7, 8, 11, and 14.
-> Status: M0-01 through M0-12 implemented; final hosted gate run pending.
+> Status: M0-01 through M0-12 implemented; Rewrite foundation passed at
+> `9939e38` (CI run `41344363775`).
 
 ## Scope and branch contract
 
