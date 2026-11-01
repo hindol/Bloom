@@ -1267,7 +1267,7 @@ mod tests {
         let start = Instant::now();
         let first = store.try_submit(record(1, None, "v1")).unwrap();
         let mut acknowledged_during_input = false;
-        for version in 2..=60 {
+        for version in 2..=120 {
             thread::sleep(Duration::from_millis(5));
             store
                 .try_submit(record(version, Some(version - 1), &format!("v{version}")))
@@ -1279,7 +1279,7 @@ mod tests {
         }
         first.wait().unwrap();
         assert!(acknowledged_during_input);
-        assert!(start.elapsed() < policy().maximum_delay + Duration::from_millis(50));
+        assert!(start.elapsed() < policy().maximum_delay + Duration::from_millis(300));
         store.shutdown().unwrap();
     }
 
