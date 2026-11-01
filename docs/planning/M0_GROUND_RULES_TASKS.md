@@ -2,7 +2,7 @@
 
 > Source of truth: [FIRST_PRINCIPLES_REDESIGN.md](FIRST_PRINCIPLES_REDESIGN.md),
 > especially sections 7, 8, 11, and 14.
-> Status: M0-01 through M0-07 implemented; remaining M0 tasks pending.
+> Status: M0-01 through M0-08 implemented; remaining M0 tasks pending.
 
 ## Scope and branch contract
 
@@ -45,7 +45,7 @@ additional standing agents.
 | M0-05 | Inventory and triage the behavioral oracle / PM + tester | None | Implemented; see [M0_ORACLE_INVENTORY.md](M0_ORACLE_INVENTORY.md) |
 | M0-06 | Add minimal deterministic simulation and replay / tester + coding agent | M0-03, M0-04 | Implemented; see [M0_SIMULATION_REPLAY.md](M0_SIMULATION_REPLAY.md) |
 | M0-07 | Add SimInput-compatible e2e adapter / tester + coding agent | M0-05, M0-06 | Implemented; see [M0_SIMINPUT_ADAPTER.md](M0_SIMINPUT_ADAPTER.md) |
-| M0-08 | Add external progress watchdog / architect + tester | M0-06 | Pending |
+| M0-08 | Add external progress watchdog / architect + tester | M0-06 | Implemented; see [M0_PROGRESS_WATCHDOG.md](M0_PROGRESS_WATCHDOG.md) |
 | M0-09 | Add independent reference-model harness / architect + tester | M0-06 | Pending |
 | M0-10 | Add curated detector-fault corpus / tester + coding agent | M0-04, M0-08, M0-09 | Pending |
 | M0-11 | Add performance harness and budget gates / tester + coding agent | M0-06, M0-08 | Pending |
@@ -188,6 +188,14 @@ own clock or progress report.
 
 Acceptance: a deliberately stalled synthetic operation fails within the bound;
 an explicitly blocked operation is distinguishable from completion and a hang.
+
+The process-isolated watchdog contract and failure model are recorded in
+[M0_PROGRESS_WATCHDOG.md](M0_PROGRESS_WATCHDOG.md). The integration-test support
+launches watched scenarios as child processes, applies a parent-owned deadline,
+and bounds externally observed steps, queue depth, retained documents, and due
+timers. A synthetic stalled child is killed and reaped. The implementation is
+test-only and does not claim that M0's empty kernel opens, edits, closes, or
+consumes product timers.
 
 ### M0-09 - Independent reference models
 
