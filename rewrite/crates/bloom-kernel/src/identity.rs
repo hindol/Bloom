@@ -1,4 +1,4 @@
-use bloom_text::{BlockIdMarker, Doc};
+use bloom_text::{BlockIdMarker, Doc, ProjectionError};
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PageId(String);
@@ -125,6 +125,15 @@ pub enum IdentityPlanError<E> {
     JoinedIdsMustDiffer,
     JoinedIdNotLive(BlockId),
     SplitSourceNotLive(BlockId),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum IdentityTextPlanError {
+    Projection(ProjectionError),
+    UnsupportedTokenSet,
+    IdentityMismatch,
+    InvalidJoinEdit,
+    LineOutOfBounds(usize),
 }
 
 pub fn plan_delete<R: BlockIdRegistry>(
@@ -299,6 +308,146 @@ pub fn commit_identity_edit<R: BlockIdRegistry>(
     Ok(())
 }
 
+pub fn plan_join_text(
+    canonical_text: &str,
+    visible_range: std::ops::Range<usize>,
+    replacement: &str,
+    retained_id: &BlockId,
+    retired_id: &BlockId,
+) -> Result<String, IdentityTextPlanError> {
+    let projection = Doc::new(canonical_text).visible_projection();
+    if projection.tokens().len() != 2
+        || projection.tokens()[0].marker() != BlockIdMarker::Block
+        || projection.tokens()[1].marker() != BlockIdMarker::Block
+    {
+        return Err(IdentityTextPlanError::UnsupportedTokenSet);
+    }
+    if projection.tokens()[0].id() != retained_id.as_str()
+        || projection.tokens()[1].id() != retired_id.as_str()
+        || retained_id == retired_id
+    {
+        return Err(IdentityTextPlanError::IdentityMismatch);
+    }
+
+    projection
+        .lower(
+            projection
+                .range(visible_range.start, visible_range.end)
+                .map_err(IdentityTextPlanError::Projection)?,
+        )
+        .map_err(IdentityTextPlanError::Projection)?;
+    let visible = projection.text();
+    let start = char_to_byte(visible, visible_range.start).expect("validated visible start");
+    let end = char_to_byte(visible, visible_range.end).expect("validated visible end");
+    if !matches!(&visible[start..end], "\n" | "\r\n") || replacement != " " {
+        return Err(IdentityTextPlanError::InvalidJoinEdit);
+    }
+    let joined_line = visible[..start].chars().filter(|ch| *ch == '\n').count();
+    let edited = replace_chars(visible, visible_range, replacement);
+    append_block_id(&edited, joined_line, retained_id)
+}
+
+pub fn plan_split_text(
+    canonical_text: &str,
+    split_at: usize,
+    left_id: &BlockId,
+    right_id: &BlockId,
+) -> Result<String, IdentityTextPlanError> {
+    let projection = Doc::new(canonical_text).visible_projection();
+    if projection.tokens().len() != 1 || projection.tokens()[0].marker() != BlockIdMarker::Block {
+        return Err(IdentityTextPlanError::UnsupportedTokenSet);
+    }
+    if projection.tokens()[0].id() != left_id.as_str() || left_id == right_id {
+        return Err(IdentityTextPlanError::IdentityMismatch);
+    }
+
+    projection
+        .lower(
+            projection
+                .range(split_at, split_at)
+                .map_err(IdentityTextPlanError::Projection)?,
+        )
+        .map_err(IdentityTextPlanError::Projection)?;
+    let visible = projection.text();
+    let split_byte = char_to_byte(visible, split_at).expect("validated visible split");
+    let left_line = visible[..split_byte]
+        .chars()
+        .filter(|ch| *ch == '\n')
+        .count();
+    let line_ending = line_ending_at(visible, split_at);
+    let edited = replace_chars(visible, split_at..split_at, line_ending);
+    let with_left_id = append_block_id(&edited, left_line, left_id)?;
+    append_block_id(&with_left_id, left_line + 1, right_id)
+}
+
+fn replace_chars(text: &str, range: std::ops::Range<usize>, replacement: &str) -> String {
+    let start = char_to_byte(text, range.start).expect("validated visible start");
+    let end = char_to_byte(text, range.end).expect("validated visible end");
+    let mut result = text.to_owned();
+    result.replace_range(start..end, replacement);
+    result
+}
+
+fn append_block_id(
+    text: &str,
+    line_index: usize,
+    id: &BlockId,
+) -> Result<String, IdentityTextPlanError> {
+    let line_start = if line_index == 0 {
+        0
+    } else {
+        text.char_indices()
+            .filter(|(_, ch)| *ch == '\n')
+            .nth(line_index - 1)
+            .map_or(text.len(), |(byte, _)| byte + 1)
+    };
+    let line_end = text[line_start..]
+        .find('\n')
+        .map_or(text.len(), |offset| line_start + offset);
+    if line_index > text.chars().filter(|ch| *ch == '\n').count() {
+        return Err(IdentityTextPlanError::LineOutOfBounds(line_index));
+    }
+    let content_end = if line_end > line_start && text.as_bytes()[line_end - 1] == b'\r' {
+        line_end - 1
+    } else {
+        line_end
+    };
+    let prefix = if content_end == line_start { "" } else { " " };
+    let insertion = format!("{prefix}^{}", id.as_str());
+    let mut result = text.to_owned();
+    result.insert_str(content_end, &insertion);
+    Ok(result)
+}
+
+fn char_to_byte(text: &str, char_offset: usize) -> Option<usize> {
+    if char_offset == text.chars().count() {
+        Some(text.len())
+    } else {
+        text.char_indices().nth(char_offset).map(|(byte, _)| byte)
+    }
+}
+
+fn line_ending_at(text: &str, char_offset: usize) -> &'static str {
+    let chars = text.chars().collect::<Vec<_>>();
+    if let Some(offset) = chars[char_offset..].iter().position(|ch| *ch == '\n') {
+        return if offset > 0 && chars[char_offset + offset - 1] == '\r' {
+            "\r\n"
+        } else {
+            "\n"
+        };
+    }
+
+    if let Some(offset) = chars[..char_offset].iter().rposition(|ch| *ch == '\n') {
+        return if offset > 0 && chars[offset - 1] == '\r' {
+            "\r\n"
+        } else {
+            "\n"
+        };
+    }
+
+    "\n"
+}
+
 /// Returns only ordinary block IDs; legacy mirror tokens are preserved by the
 /// projection but do not participate in the new identity registry.
 pub fn block_ids_in_text(text: &str) -> Vec<BlockId> {
@@ -316,10 +465,15 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
     use super::{
-        block_ids_in_text, commit_identity_edit, plan_delete, plan_join, plan_paste, plan_split,
-        BlockId, BlockIdRegistry, BlockRegister, IdentityDecision, IdentityPlanError,
-        IdentityState, PageId, RegisterIdentity, RegisterOperation, RegistryChange,
+        append_block_id, block_ids_in_text, commit_identity_edit, plan_delete, plan_join,
+        plan_join_text, plan_paste, plan_split, plan_split_text, BlockId, BlockIdRegistry,
+        BlockRegister, IdentityDecision, IdentityPlanError, IdentityState, PageId,
+        RegisterIdentity, RegisterOperation, RegistryChange,
     };
+    use bloom_text::Doc;
+
+    const ADR3_IDENTITY_ORACLE: &str =
+        include_str!("../../../../testdata/adr3_vim_identity_oracle.v1");
 
     #[derive(Clone, Debug, Default, Eq, PartialEq)]
     struct FakeRegistry {
@@ -413,6 +567,29 @@ mod tests {
                 live_at_capture,
             }),
         }
+    }
+
+    fn oracle_case(name: &str) -> Vec<&str> {
+        ADR3_IDENTITY_ORACLE
+            .lines()
+            .find(|line| line.starts_with(&format!("{name}|")))
+            .unwrap_or_else(|| panic!("missing identity oracle case {name}"))
+            .split('|')
+            .collect()
+    }
+
+    fn decode_oracle_text(text: &str) -> String {
+        text.replace("\\n", "\n").replace("\\r", "\r")
+    }
+
+    fn oracle_edit(encoded: &str) -> (usize, usize, String) {
+        let fields = encoded.splitn(4, ',').collect::<Vec<_>>();
+        assert_eq!(fields.len(), 4);
+        (
+            fields[0].parse().unwrap(),
+            fields[1].parse().unwrap(),
+            decode_oracle_text(fields[2]),
+        )
     }
 
     #[test]
@@ -578,6 +755,105 @@ mod tests {
         assert_eq!(
             registry.state(&id("split2")),
             Ok(IdentityState::Live(page("page")))
+        );
+    }
+
+    #[test]
+    fn actual_join_stream_retires_the_second_id_and_moves_the_first_to_line_end() {
+        let fields = oracle_case("join");
+        assert_eq!(fields.len(), 7);
+        let canonical = decode_oracle_text(fields[1]);
+        let projection = Doc::new(&canonical).visible_projection();
+        assert_eq!(projection.text(), decode_oracle_text(fields[2]));
+        let (start, end, replacement) = oracle_edit(fields[6].split(';').next().unwrap());
+        let retained = id("left01");
+        let retired = id("right1");
+        let mut registry = FakeRegistry::default();
+        registry.seed(retained.clone(), page("page"));
+        registry.seed(retired.clone(), page("page"));
+        let plan = plan_join(&page("page"), &retained, &retired, &registry).unwrap();
+        let planned_text =
+            plan_join_text(&canonical, start..end, &replacement, &retained, &retired).unwrap();
+        let mut actual_text = canonical;
+
+        commit_identity_edit(&mut registry, &mut actual_text, planned_text, &plan).unwrap();
+
+        assert_eq!(actual_text, "left right ^left01\n");
+        assert_eq!(
+            Doc::new(&actual_text).visible_projection().text(),
+            decode_oracle_text(fields[5])
+        );
+        assert_eq!(block_ids_in_text(&actual_text), [retained.clone()]);
+        assert_eq!(
+            registry.state(&retained),
+            Ok(IdentityState::Live(page("page")))
+        );
+        assert_eq!(registry.state(&retired), Ok(IdentityState::Retired));
+    }
+
+    #[test]
+    fn actual_split_stream_keeps_the_left_id_and_allocates_the_right_id() {
+        let fields = oracle_case("split");
+        assert_eq!(fields.len(), 7);
+        let canonical = decode_oracle_text(fields[1]);
+        let projection = Doc::new(&canonical).visible_projection();
+        assert_eq!(projection.text(), decode_oracle_text(fields[2]));
+        let (start, end, replacement) = oracle_edit(fields[6].split(';').next().unwrap());
+        assert_eq!(replacement, "\n");
+        assert_eq!(start, end);
+        let original = id("split1");
+        let allocated = id("split2");
+        let mut registry = FakeRegistry::default();
+        registry.seed(original.clone(), page("page"));
+        let plan = plan_split(&page("page"), &original, allocated.clone(), &registry).unwrap();
+        let planned_text = plan_split_text(&canonical, start, &original, &allocated).unwrap();
+        let mut actual_text = canonical;
+
+        commit_identity_edit(&mut registry, &mut actual_text, planned_text, &plan).unwrap();
+
+        assert_eq!(actual_text, "alpha ^split1\n beta ^split2\n");
+        assert_eq!(
+            Doc::new(&actual_text).visible_projection().text(),
+            decode_oracle_text(fields[5])
+        );
+        assert_eq!(
+            block_ids_in_text(&actual_text),
+            [original.clone(), allocated.clone()]
+        );
+        assert_eq!(
+            registry.state(&original),
+            Ok(IdentityState::Live(page("page")))
+        );
+        assert_eq!(
+            registry.state(&allocated),
+            Ok(IdentityState::Live(page("page")))
+        );
+    }
+
+    #[test]
+    fn structural_text_plans_preserve_crlf_and_validate_line_bounds() {
+        let retained = id("left01");
+        let retired = id("right1");
+        let join_input = "left ^left01\r\nright ^right1\r\n";
+        assert_eq!(
+            plan_join_text(join_input, 4..6, " ", &retained, &retired).unwrap(),
+            "left right ^left01\r\n"
+        );
+        assert_eq!(
+            plan_join_text(join_input, 3..6, " ", &retained, &retired),
+            Err(super::IdentityTextPlanError::InvalidJoinEdit)
+        );
+
+        let original = id("split1");
+        let allocated = id("split2");
+        let split_input = "alpha beta ^split1\r\n";
+        assert_eq!(
+            plan_split_text(split_input, 5, &original, &allocated).unwrap(),
+            "alpha ^split1\r\n beta ^split2\r\n"
+        );
+        assert_eq!(
+            append_block_id("", 1, &original),
+            Err(super::IdentityTextPlanError::LineOutOfBounds(1))
         );
     }
 

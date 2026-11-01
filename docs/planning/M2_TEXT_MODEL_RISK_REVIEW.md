@@ -2,7 +2,7 @@
 
 > Architect review for the ADR-3 acceptance spike.
 > Scope is the spike only; this does not approve full M2 implementation.
-> Status: projection lowering and the serialized append oracle pass; ADR-3 remains unaccepted pending the identity-rule matrix.
+> Status: projection lowering and fixture-backed append, join, split, and boundary-edit prototypes pass; ADR-3 remains unaccepted pending the identity-rule matrix.
 
 ## Decision under test
 
@@ -39,9 +39,13 @@ The fixture exposed an existing legacy behavior mismatch: `p` pastes the
 linewise register at a character position (for example, `yy`+`p` yields
 `oone\nne\nnext\n`), rather than inserting a line. Treat this as observed
 legacy behavior, not as evidence that the ADR-3 move/copy rules are
-implemented. The structural `dd`/`p`, `yy`/`p`, `J`, and split streams are not
-yet connected to a canonical-text transaction; the bridge does not authorize
-ADR-3.
+implemented. Kernel prototype tests now consume the fixture's actual `J` and
+split edit ranges, build canonical text plans, and atomically commit those
+plans alongside retirement/reservation changes. These tests cover the
+prototype's join/split canonical-text transaction, not a production
+`VimState`-to-document integration. The structural `dd`/`p` and `yy`/`p`
+streams still lack canonical-text transaction plans; the bridge does not
+authorize ADR-3.
 
 ## Scope and ownership
 
@@ -120,16 +124,18 @@ all-or-nothing registry batches. The commit helper accepts already-built
 canonical text and assigns it only after the registry accepts the whole change
 set, so injected registry failures leave the original text unchanged.
 Projection tests also exercise `x`/`X`/`D`-shaped ranges at a trailing token
-boundary and verify that the hidden token is preserved.
+boundary and verify that the hidden token is preserved. Fixture-driven
+canonical-text planners replay the observed `J` and split ranges, then commit
+the resulting text with the join retirement or split reservation. The split
+planner preserves the current line's LF/CRLF style in this prototype.
 
-This is policy-level evidence only. It does not yet execute the identity matrix
-through real Vim key streams or apply edits to a canonical document; fresh ID
-candidates are supplied by the caller, durable registry behavior and cleanup
-when a detached register is overwritten are not implemented, and byte-identical
-undo/redo is not tested. Although real structural Vim streams are now recorded,
-they are not yet replayed through canonical-text transactions; only
-append-before-ID and visible-only `x`/`X`/`D` edits cross the full bridge.
-ADR-3 remains unaccepted.
+This remains prototype evidence, not acceptance. It does not execute the
+identity matrix through a production Vim-to-document path; fresh ID candidates
+are supplied by the caller, durable registry behavior and cleanup when a
+detached register is overwritten are not implemented, and byte-identical
+undo/redo is not tested. `dd`/`p` and `yy`/`p` are recorded as real key streams
+but are not replayed through canonical-text transactions. ADR-3 remains
+unaccepted.
 
 ## Acceptance gate
 
@@ -143,9 +149,11 @@ ADR-3 can be accepted only when:
    append cases and the identity-stream case. The current Vim API is coupled to
    `bloom_buffer::Buffer` and untyped `EditOp { range: Range<usize>, ... }`;
    the serialized test adapter must explicitly cover that seam without
-   introducing a cross-workspace dependency. The serialized bridge now covers
-   append, structural command streams, and visible-only boundary deletions, but
-   not structural canonical-text replay.
+   introducing a cross-workspace dependency. The serialized bridge covers
+   append, structural command streams, and
+   visible-only boundary deletions. Fixture-driven kernel tests now replay the
+   `J` and split edits as canonical-text transactions; move/copy paste still
+   lacks canonical-text replay.
 3. Every supported identity rule has a test or is explicitly recorded as
    uncovered; no rule is inferred from the current side-table implementation.
 4. The verdict and any remaining gaps are recorded. If the gate fails, prototype
