@@ -60,6 +60,37 @@ the external watchdog remains outside the process it observes.
    note text, filenames, clipboard data, or raw keystrokes. Enforce explicit
    event/byte ceilings and local-only storage.
 
+## State-store implementation constraints
+
+- One worker thread owns the SQLite connection for its entire lifetime. The
+  kernel and callers submit immutable version snapshots through a bounded,
+  non-blocking queue; queue saturation returns the unaccepted snapshot with an
+  explicit error, never a hidden wait or discarded edit on the input path.
+  The worker also caps each pending batch and commits at the cap, bounding
+  queued version count even during sustained input.
+- SQLite uses WAL with `synchronous=FULL`, foreign keys, and an explicit
+  `user_version`. Migrations run transactionally. A newer schema or an
+  unversioned database containing unknown tables is rejected; startup must
+  never "recover" by dropping or recreating user state.
+- A version receipt means accepted for persistence, not durable. Its separate
+  commit acknowledgement is delivered only after the transaction commits.
+  Normal edits group-commit after 300 ms idle, with a 2 s maximum from the
+  first accepted pending edit. That loss bound assumes a scheduled process
+  and storage that completes the transaction within the interval; OS or
+  device stalls can delay durability. Any commit error fails affected receipts
+  and must be surfaced as degraded durability. A forced barrier commits pending
+  versions before an explicit save can proceed.
+- M1 stores each submitted snapshot as a full keyframe and supports the
+  `Saved` version tag needed for restart recovery. Recovery reports the latest
+  version newer than the saved tag; it never writes a vault file or marks a
+  version saved on its own. Delta encoding and other tag kinds remain later
+  work.
+- Process-isolated crash tests terminate the writer immediately before and
+  after SQLite commit. Restart must expose only committed versions, and
+  `integrity_check` must remain clean in both cases. Commit failures are
+  reported to every affected receipt; the worker does not acknowledge a
+  success-shaped fallback.
+
 ## Bounded implementation sequence
 
 Dependencies are real prerequisites; tasks may proceed in parallel only where
@@ -67,8 +98,8 @@ the table shows no dependency.
 
 | ID | Deliverable | Depends on | Status | Exit check |
 |---|---|---|---|---|
-| M1-01 | Kernel model with `update`/`settle`/`view`, editor-only focus, and consuming `TimerWheel`; plain rope boundary | M0 | Implemented locally; hosted verification pending | Deterministic transition tests cover due timers on every event path, timer replacement/cancellation, exactly-one focus owner, and pure repeatable views |
-| M1-02 | Minimal `state.db` schema (`WAL`, `user_version`), version records, group-commit worker and startup recovery | M1-01 | Pending | Fresh and migrated schema tests; commit/ack ordering; crash injection demonstrates I2 and no corrupted database |
+| M1-01 | Kernel model with `update`/`settle`/`view`, editor-only focus, and consuming `TimerWheel`; plain rope boundary | M0 | Rewrite hosted gate passed; legacy root Clippy and two baseline e2e failures remain | Deterministic transition tests cover due timers on every event path, timer replacement/cancellation, exactly-one focus owner, and pure repeatable views |
+| M1-02 | Minimal `state.db` schema (`WAL`, `user_version`), version records, group-commit worker and startup recovery | M1-01 | Implemented locally; hosted verification pending | Fresh and migrated schema tests; commit/ack ordering; crash injection demonstrates I2 and no corrupted database |
 | M1-03 | Minimal Vault Store load and single-page CAS save, with `PageSync` and typed conflict result | M1-02 | Pending | Simulated stale-writer and write-failure tests preserve disk bytes; real filesystem tests verify replace/readback behavior |
 | M1-04 | Synthetic open/edit/save/crash/recover/replay journey with the external watchdog | M1-01, M1-02, M1-03 | Pending | Process-isolated replay checks I2, I5, I9, I10, I11 at every transition and reports blocked/failure distinctly |
 | M1-05 | GUI adapter paints kernel-provided layout using injected `FontMetrics`; bounded metadata recorder | M1-01, M1-04 | Pending | Headless snapshot and geometry agreement checks; recorder tests prove content exclusion and size bounds |

@@ -304,7 +304,7 @@ state.db: versions(page_id, version, parent, ts, txn_id, origin, keyframe | delt
           tags(page_id, version, kind: Saved | Checkpoint | Named)
 ```
 - **Undo tree** = an in-memory DAG view over that page's versions. Redo branches are just other children. The existing keyframe-every-50 + delta encoding (`undo.rs:184-329`) carries over.
-- **Durability (what "acknowledged" means):** edits are group-committed to `state.db` on idle (≈300 ms after the last keystroke) and at most every 2 s while typing. The worst case for a crash is losing the last ≤2 s of typing, never more and never a corrupt file. An explicit `:w` forces an immediate commit and write. A keypress never waits on fsync.
+- **Durability (what "acknowledged" means):** edits are group-committed to `state.db` on idle (≈300 ms after the last keystroke) and a commit is attempted at most every 2 s while typing. A version is not acknowledged as durable until its SQLite transaction commits. The ≤2 s loss bound assumes the process is scheduled and storage completes commits within that interval; on commit failure Bloom must surface degraded durability and must not claim that bound or a successful save. An explicit `:w` forces an immediate commit before the vault write. A keypress never waits on fsync.
 - **Save points / checkpoints** = tags. **Crash recovery:** at startup, if a page's latest version is newer than the `Saved` tag that matches disk, offer recovery. This replaces the checkpoint flush barrier (`files.rs:290-348`).
 - **Retention:** all versions for 48h, hourly for 30 days, daily afterward. Compaction rewrites keyframes, never touches heads or tags, and never removes retired-ID entries.
 - **Git:** becomes optional *export* (`bloom history export --git`), not the storage engine.
@@ -383,7 +383,7 @@ Every invariant has a **checker** (`fn check_*(model) -> Result<(), Violation>`)
 | ID | Invariant | Enforced by | Primary test |
 |---|---|---|---|
 | I1 | Round trip: `save(load(bytes)) == bytes` for unedited pages that are valid UTF-8 with uniform EOL (others: §5.3) | `TextProps` model | proptest + corpus + fuzz |
-| I2 | Bounded loss: after a crash at any point, every edit older than the group-commit window (≤2 s) is on disk or recoverable from `state.db`, and no vault file is ever torn | group commit + atomic writes + txn journal (L11) | simulation with crash injection |
+| I2 | When the scheduled process and writable storage complete commits within the group-commit window (≤2 s), every older edit is on disk or recoverable from `state.db` after a crash, and no vault file is ever torn; a failed commit is surfaced and never acknowledged as durable | group commit + atomic writes + txn journal (L11) | simulation with crash injection |
 | I3 | At most one `Doc` per `PageId`; at most one `PageId` per `PathKey` | `HashMap<PageId, Doc>` + path index owned by Vault Store | type + checker |
 | I4 | Live block IDs are unique vault-wide | assignment-time check + `UNIQUE` constraint | proptest on paste/duplicate/merge |
 | I5 | `!dirty ⇒ hash(doc.text) == disk.base`, and `disk.base` was the last observed disk hash | `PageSync` (`saved_version`) | simulation |

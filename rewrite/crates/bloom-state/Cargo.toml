@@ -7,3 +7,4 @@ license.workspace = true
 [dependencies]
 bloom-kernel = { path = "../bloom-kernel" }
 bloom-text = { path = "../bloom-text" }
+rusqlite = { version = "0.31", features = ["bundled"] }
