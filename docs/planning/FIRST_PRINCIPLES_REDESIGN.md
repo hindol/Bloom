@@ -471,6 +471,8 @@ The test system is itself part of the design. It must do more than replay known 
 
 **Ordering principle:** retire the biggest uncertainty first (integration, then the ADR-3 text-model spike), then data safety, then breadth. The State store still precedes the Vault Store (ADR-2). Sizes are relative (S < M < L); this is a personal project, so calendar estimates would suggest precision we don't have.
 
+**M0 execution backlog:** [M0_GROUND_RULES_TASKS.md](M0_GROUND_RULES_TASKS.md) breaks the ground rules into bounded tasks with dependencies and acceptance checks. The task-breakdown and CI groundwork slice does not complete M0 or start M1.
+
 | Milestone | Goal | Deliverables | Exit criteria |
 |---|---|---|---|
 | **M0 Ground rules** (S) | Make the rules mechanical before code exists | `v2` branch; crate layout (`bloom-kernel`, `bloom-state`, `bloom-vault`, `bloom-text`, `bloom-index`, `bloom-gui`, `bloom-mcp`); lints (`disallowed_methods`, unit newtypes); invariant-checker framework; ports (`Fs`, `Clock`, `Watcher`, `Rng`) + `SimFs`/`SimClock`/`SimWatcher`; e2e adapter + scenario triage list; synthetic replay format; progress watchdog contract; reference-model harness; curated detector-fault corpus; criterion harness with the §8 budgets. CI explicitly targets the rewrite branch from its first commit. **On `main`: tactical F1 and F13 fixes** | CI runs lints, checkers, one simulation journey, the small detector-fault corpus, and budgets against an empty kernel; triage list complete |
