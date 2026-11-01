@@ -107,8 +107,8 @@ the table shows no dependency.
 | M1-01 | Kernel model with `update`/`settle`/`view`, editor-only focus, and consuming `TimerWheel`; plain rope boundary | M0 | Rewrite hosted gate passed; legacy root Clippy and two baseline e2e failures remain | Deterministic transition tests cover due timers on every event path, timer replacement/cancellation, exactly-one focus owner, and pure repeatable views |
 | M1-02 | Minimal `state.db` schema (`WAL`, `user_version`), version records, group-commit worker and startup recovery | M1-01 | Rewrite hosted gate passed; legacy root Clippy and two baseline e2e failures remain | Fresh and migrated schema tests; commit/ack ordering; crash injection demonstrates I2 and no corrupted database |
 | M1-03 | Minimal Vault Store load and single-page CAS save, with `PageSync` and typed conflict result | M1-02 | Rewrite hosted gate passed; legacy root Clippy and two baseline e2e failures remain | Simulated stale-writer and write-failure tests preserve disk bytes; real filesystem tests verify replace/readback behavior |
-| M1-04 | Synthetic open/edit/save/crash/recover/replay journey with the external watchdog | M1-01, M1-02, M1-03 | Implemented; local workspace tests and strict Clippy passed; hosted gate pending | Crash matrix validates I2; each page observation checks I5, each save checks I9, and every update checks I10/I11; watchdog outcomes remain distinct |
-| M1-05 | GUI adapter paints kernel-provided layout using injected `FontMetrics`; bounded metadata recorder | M1-01, M1-04 | Pending | Headless snapshot and geometry agreement checks; recorder tests prove content exclusion and size bounds |
+| M1-04 | Synthetic open/edit/save/crash/recover/replay journey with the external watchdog | M1-01, M1-02, M1-03 | Rewrite hosted gate passed; legacy root Clippy and two root e2e tests failed | Crash matrix validates I2; each page observation checks I5, each save checks I9, and every update checks I10/I11; watchdog outcomes remain distinct |
+| M1-05 | GUI adapter paints kernel-provided layout using injected `FontMetrics`; bounded metadata recorder | M1-01, M1-04 | Implemented; local workspace tests and strict Clippy passed; hosted gate pending | Headless snapshots and geometry agreement checks; recorder tests prove content exclusion and size bounds |
 | M1-06 | CI, platform filesystem checks, and docs-steward closure | M1-01 through M1-05 | Pending | Rewrite gates pass on the supported OS matrix; M1 acceptance and pending parity/performance scope agree with code |
 
 ## Risks to retire before M1 exit
@@ -192,3 +192,32 @@ parity or as a product performance measurement.
 - The test backend is infrastructure only. It must not add persistence,
   scheduling, filesystem access, or recovery policy to `bloom-kernel`, and it
   must not add real-vault access, UI behavior, or M2-M7 scope.
+
+### M1-05 geometry and recorder contract
+
+- `bloom-kernel` owns wrapping, positioned text runs, line height, and cursor
+  geometry. Its layout input is the document snapshot, cursor, viewport width,
+  and injected `FontMetrics`; the GUI receives the resulting layout and must
+  not calculate a second wrap or cursor position.
+- Font metrics are finite, non-negative logical-pixel values with a positive
+  line height. The deterministic monospace implementation is used by headless
+  tests. The GUI implementation and its paint style share the same font family,
+  size, and shaping engine; layout tests compare the emitted text and cursor
+  positions against the kernel frame rather than a GUI-side estimate.
+- The paint adapter emits only primitives derived from `Frame`. A renderer
+  target may paint those primitives, but it may not change their geometry.
+  The Iced Canvas program consumes those primitives directly. Headless
+  snapshots cover soft wrapping, hard newlines, empty lines, and cursor
+  positions at wrap boundaries.
+- Production metadata records are a closed typed schema: event kind,
+  operation ID, version, elapsed time, and effect outcome only. Text, paths,
+  clipboard data, and raw keystrokes are not accepted as fields or free-form
+  error strings.
+- The M1 recorder is process-local and in-memory; it performs no file or
+  network I/O. It retains at most 512 fixed-size records and 16 KiB, evicts
+  oldest records first, and exposes the eviction count so truncation is
+  visible. It is not an exact replay log and must never be described as one.
+- The initial layout pass is eager over the document. It does not yet satisfy
+  the 10k-line keypress budget or the accepted per-line cache strategy; M1-06
+  must measure and close that gap before M1 exit. M1-05 geometry tests make no
+  performance claim.

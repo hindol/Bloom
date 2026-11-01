@@ -1,8 +1,9 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use bloom_text::{coordinates::CharIdx, Doc, DocError, DocSnapshot};
 
 use crate::{
+    geometry::{FontMetrics, Layout, LayoutError, MonospaceFontMetrics, Size},
     invariants::{RegistryError, Violation},
     timer::{TimerId, TimerWheel},
 };
@@ -43,17 +44,44 @@ pub struct Model {
     cursor: CharIdx,
     ui: Ui,
     timers: TimerWheel,
+    viewport: Size,
+    font_metrics: Arc<dyn FontMetrics>,
+    layout: Arc<Layout>,
 }
 
 impl Model {
     pub fn new(text: &str) -> Self {
+        Self::with_font_metrics(
+            text,
+            Size::default(),
+            Arc::new(MonospaceFontMetrics::default()),
+        )
+    }
+
+    pub fn with_font_metrics(
+        text: &str,
+        viewport: Size,
+        font_metrics: Arc<dyn FontMetrics>,
+    ) -> Self {
         let document = Doc::new(text);
         let cursor = document.start();
+        let layout = Arc::new(
+            Layout::compute(
+                &document.snapshot(),
+                cursor,
+                viewport,
+                font_metrics.as_ref(),
+            )
+            .expect("document start must always have valid geometry"),
+        );
         Self {
             document,
             cursor,
             ui: Ui::editor_only(),
             timers: TimerWheel::default(),
+            viewport,
+            font_metrics,
+            layout,
         }
     }
 
@@ -72,12 +100,17 @@ impl Model {
     pub fn next_deadline(&self) -> Option<Duration> {
         self.timers.next_deadline()
     }
+
+    pub fn layout(&self) -> &Layout {
+        &self.layout
+    }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     InsertText(String),
     Backspace,
+    Resize(Size),
     TimerWake,
 }
 
@@ -90,6 +123,7 @@ pub enum Effect {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UpdateError {
     Document(DocError),
+    Layout(LayoutError),
     DeadlineOverflow,
     CheckerRegistry(RegistryError),
     InvariantViolations(Vec<Violation>),
@@ -107,6 +141,7 @@ pub fn update(model: &mut Model, event: Event, now: Duration) -> Result<Vec<Effe
                 .map_err(UpdateError::Document)?
                 > 0
         }
+        Event::Resize(_) => false,
         Event::TimerWake => false,
     };
     let idle_deadline = if document_changed {
@@ -139,6 +174,9 @@ pub fn update(model: &mut Model, event: Event, now: Duration) -> Result<Vec<Effe
                 .delete_previous_char(model.cursor)
                 .map_err(UpdateError::Document)?;
         }
+        Event::Resize(size) => {
+            model.viewport = size;
+        }
         Event::TimerWake => {}
     }
 
@@ -150,7 +188,7 @@ pub fn update(model: &mut Model, event: Event, now: Duration) -> Result<Vec<Effe
         });
     }
 
-    settle(model).map_err(UpdateError::Document)?;
+    settle(model)?;
     #[cfg(any(debug_assertions, feature = "simulation"))]
     check_update_invariants(model, now)?;
     Ok(effects)
@@ -161,6 +199,7 @@ pub fn view(model: &Model) -> Frame {
         document: model.document.snapshot(),
         cursor: model.cursor(),
         focus: model.focus_owner(),
+        layout: Arc::clone(&model.layout),
     }
 }
 
@@ -169,6 +208,7 @@ pub struct Frame {
     pub document: DocSnapshot,
     pub cursor: CharIdx,
     pub focus: Option<FocusOwner>,
+    pub layout: Arc<Layout>,
 }
 
 pub fn check_exactly_one_focus_owner(ui: &Ui) -> Result<(), String> {
@@ -185,6 +225,7 @@ pub fn check_view_purity(model: &Model) -> Result<(), String> {
     if first.document.text() == second.document.text()
         && first.cursor == second.cursor
         && first.focus == second.focus
+        && first.layout == second.layout
     {
         Ok(())
     } else {
@@ -192,8 +233,21 @@ pub fn check_view_purity(model: &Model) -> Result<(), String> {
     }
 }
 
-fn settle(model: &Model) -> Result<(), DocError> {
-    model.document.char_offset(model.cursor).map(|_| ())
+fn settle(model: &mut Model) -> Result<(), UpdateError> {
+    model
+        .document
+        .char_offset(model.cursor)
+        .map_err(UpdateError::Document)?;
+    model.layout = Arc::new(
+        Layout::compute(
+            &model.document.snapshot(),
+            model.cursor,
+            model.viewport,
+            model.font_metrics.as_ref(),
+        )
+        .map_err(UpdateError::Layout)?,
+    );
+    Ok(())
 }
 
 #[cfg(any(debug_assertions, feature = "simulation"))]

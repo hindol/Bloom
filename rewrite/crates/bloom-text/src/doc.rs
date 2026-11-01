@@ -77,6 +77,25 @@ impl Doc {
 }
 
 impl DocSnapshot {
+    pub fn len_chars(&self) -> usize {
+        self.rope.len_chars()
+    }
+
+    pub fn char_idx(&self, position: usize) -> Result<CharIdx, DocError> {
+        if position > self.len_chars() {
+            return Err(DocError::PositionOutOfBounds {
+                position,
+                length: self.len_chars(),
+            });
+        }
+
+        Ok(CharIdx::new(position))
+    }
+
+    pub fn char_offset(&self, position: CharIdx) -> Result<usize, DocError> {
+        self.char_idx(position.get()).map(CharIdx::get)
+    }
+
     pub fn text(&self) -> String {
         self.rope.to_string()
     }
@@ -109,6 +128,21 @@ mod tests {
             Err(DocError::PositionOutOfBounds {
                 position: 4,
                 length: 3
+            })
+        );
+    }
+
+    #[test]
+    fn snapshot_owns_character_offset_conversion() {
+        let snapshot = Doc::new("é🙂").snapshot();
+
+        assert_eq!(snapshot.len_chars(), 2);
+        assert_eq!(snapshot.char_offset(snapshot.char_idx(2).unwrap()), Ok(2));
+        assert_eq!(
+            snapshot.char_idx(3),
+            Err(DocError::PositionOutOfBounds {
+                position: 3,
+                length: 2,
             })
         );
     }
