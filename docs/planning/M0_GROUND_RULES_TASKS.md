@@ -2,7 +2,7 @@
 
 > Source of truth: [FIRST_PRINCIPLES_REDESIGN.md](FIRST_PRINCIPLES_REDESIGN.md),
 > especially sections 7, 8, 11, and 14.
-> Status: M0-01 through M0-04 implemented; remaining M0 tasks pending.
+> Status: M0-01 through M0-05 implemented; remaining M0 tasks pending.
 
 ## Scope and branch contract
 
@@ -42,7 +42,7 @@ additional standing agents.
 | M0-02 | Establish crate boundaries and lint policy / architect + coding agent | M0-01 | Implemented; see [M0_CRATE_BOUNDARIES.md](M0_CRATE_BOUNDARIES.md) |
 | M0-03 | Add typed coordinates and injected ports / architect + coding agent | M0-02 | Implemented; see [M0_TYPED_PORTS.md](M0_TYPED_PORTS.md) |
 | M0-04 | Add invariant-checker framework and coverage map / coding agent + docs steward | M0-03 | Implemented; see [M0_INVARIANT_FRAMEWORK.md](M0_INVARIANT_FRAMEWORK.md) |
-| M0-05 | Inventory and triage the behavioral oracle / PM + tester | None | Pending |
+| M0-05 | Inventory and triage the behavioral oracle / PM + tester | None | Implemented; see [M0_ORACLE_INVENTORY.md](M0_ORACLE_INVENTORY.md) |
 | M0-06 | Add minimal deterministic simulation and replay / tester + coding agent | M0-03, M0-04 | Pending |
 | M0-07 | Add SimInput-compatible e2e adapter / tester + coding agent | M0-05, M0-06 | Pending |
 | M0-08 | Add external progress watchdog / architect + tester | M0-06 | Pending |
@@ -128,6 +128,12 @@ PM owns behavioral changes, and unresolved policy goes to the human lead.
 Acceptance: every discovered scenario has a unique entry, disposition, reason,
 and target journey. Nothing is silently omitted. This triage list is the parity
 checklist used through M6 and cutover.
+
+The checked-in case-by-case roster is [M0_ORACLE_INVENTORY.md](M0_ORACLE_INVENTORY.md).
+The chosen baseline has 209 e2e cases, 42 Vim cases, and 3 harness animation
+scenarios. The inventory also carries the F1 and F13 tactical regressions,
+records ignored cases without counting them as passing, and marks the UC95
+open-and-save regression explicitly.
 
 ### M0-06 - Deterministic simulation and synthetic replay
 
