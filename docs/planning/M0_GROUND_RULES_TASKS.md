@@ -2,7 +2,7 @@
 
 > Source of truth: [FIRST_PRINCIPLES_REDESIGN.md](FIRST_PRINCIPLES_REDESIGN.md),
 > especially sections 7, 8, 11, and 14.
-> Status: M0-01 through M0-10 implemented; remaining M0 tasks pending.
+> Status: M0-01 through M0-11 implemented; remaining M0 task pending.
 
 ## Scope and branch contract
 
@@ -48,7 +48,7 @@ additional standing agents.
 | M0-08 | Add external progress watchdog / architect + tester | M0-06 | Implemented; see [M0_PROGRESS_WATCHDOG.md](M0_PROGRESS_WATCHDOG.md) |
 | M0-09 | Add independent reference-model harness / architect + tester | M0-06 | Implemented; see [M0_REFERENCE_MODELS.md](M0_REFERENCE_MODELS.md) |
 | M0-10 | Add curated detector-fault corpus / tester + coding agent | M0-04, M0-08, M0-09 | Implemented; see [M0_DETECTOR_FAULTS.md](M0_DETECTOR_FAULTS.md) |
-| M0-11 | Add performance harness and budget gates / tester + coding agent | M0-06, M0-08 | Pending |
+| M0-11 | Add performance harness and budget gates / tester + coding agent | M0-06, M0-08 | Implemented; see [M0_PERFORMANCE_HARNESS.md](M0_PERFORMANCE_HARNESS.md) |
 | M0-12 | Wire executable M0 CI gates and close milestone / tester + docs steward | M0-07, M0-10, M0-11 | Pending |
 
 ## Bounded handoffs and acceptance checks
@@ -245,6 +245,13 @@ Acceptance: run an empty-kernel smoke measurement and verify the gate detects a
 deliberately regressed sample. Criterion throughput alone does not prove a p99
 budget: define latency sampling, warmup, and baseline comparability. Product
 budgets stay pending until their operations exist; no fabricated zero timings.
+
+The smoke measurement, comparison policy, explicit CI sampling settings, and
+pending product budgets are documented in
+[M0_PERFORMANCE_HARNESS.md](M0_PERFORMANCE_HARNESS.md). Criterion measures the
+checked-in synthetic replay. The comparison test allows exactly 10%, rejects
+larger regressions, and rejects invalid baselines. No performance baseline is
+fabricated; establish one only when same-runner comparability is available.
 
 ### M0-12 - Executable gates and milestone closure
 

@@ -169,14 +169,16 @@ fn matches_expected(expected: &ExpectedOperation, actual: Option<&StepObservatio
             }
         }
         (ExpectedOperation::Write(expected), Some(StepObservation::FsWrite(actual))) => {
-            match (expected, actual) {
-                (Ok(()), Ok(())) => true,
-                (
-                    Err(ReferenceError::InjectedWrite),
-                    Err(SimFsError::Injected(bloom_kernel::simulation::FsOperation::Write)),
-                ) => true,
-                _ => false,
-            }
+            matches!(
+                (expected, actual),
+                (Ok(()), Ok(()))
+                    | (
+                        Err(ReferenceError::InjectedWrite),
+                        Err(SimFsError::Injected(
+                            bloom_kernel::simulation::FsOperation::Write
+                        )),
+                    )
+            )
         }
         _ => false,
     }

@@ -9,3 +9,11 @@ simulation = []
 
 [dependencies]
 bloom-text = { path = "../bloom-text" }
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "simulation_smoke"
+harness = false
+required-features = ["simulation"]
