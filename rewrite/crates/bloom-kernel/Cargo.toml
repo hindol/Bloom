@@ -1,0 +1,8 @@
+[package]
+name = "bloom-kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bloom-text = { path = "../bloom-text" }

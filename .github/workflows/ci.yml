@@ -21,6 +21,20 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all --check
 
+  rewrite-foundation:
+    name: Rewrite foundation
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rewrite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo check --workspace --all-targets
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest

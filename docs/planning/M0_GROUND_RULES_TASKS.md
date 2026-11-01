@@ -40,7 +40,7 @@ additional standing agents.
 | ID | Task / owner | Depends on | Status |
 | --- | --- | --- | --- |
 | M0-01 | Publish rewrite-branch CI groundwork / coding agent | None | Implemented in this slice; verify first push below |
-| M0-02 | Establish crate boundaries and lint policy / architect + coding agent | M0-01 | Pending |
+| M0-02 | Establish crate boundaries and lint policy / architect + coding agent | M0-01 | Implemented; see [M0_CRATE_BOUNDARIES.md](M0_CRATE_BOUNDARIES.md) |
 | M0-03 | Add typed coordinates and injected ports / architect + coding agent | M0-02 | Pending |
 | M0-04 | Add invariant-checker framework and coverage map / coding agent + docs steward | M0-03 | Pending |
 | M0-05 | Inventory and triage the behavioral oracle / PM + tester | None | Pending |
@@ -75,6 +75,12 @@ Preserve the oracle inventory; do not delete tests as part of crate setup.
 Enforce the L7/I11 kernel ban on direct filesystem, wall-clock, and thread access
 with `disallowed_methods` and crate-level denial. Review salvaged leaves against
 L6 as well as the side-effect policy.
+
+The approved ownership, risk review, and temporary `rewrite/` workspace boundary
+are recorded in [M0_CRATE_BOUNDARIES.md](M0_CRATE_BOUNDARIES.md). The root
+workspace and behavioral oracle remain intact during staging; the rewrite
+workspace becomes the root workspace only at the approved cutover. CI runs
+real check and Clippy commands against the staged workspace on `v2`.
 
 Acceptance: the empty workspace builds and lints; a deliberately forbidden
 kernel call is rejected by the configured lint, then removed. No real

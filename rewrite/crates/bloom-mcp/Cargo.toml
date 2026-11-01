@@ -1,0 +1,8 @@
+[package]
+name = "bloom-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bloom-kernel = { path = "../bloom-kernel" }

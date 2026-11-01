@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/bloom-kernel",
+    "crates/bloom-state",
+    "crates/bloom-vault",
+    "crates/bloom-text",
+    "crates/bloom-index",
+    "crates/bloom-gui",
+    "crates/bloom-mcp",
+]
+
+[workspace.package]
+edition = "2021"
+license = "AGPL-3.0-or-later"
+version = "0.1.0"
