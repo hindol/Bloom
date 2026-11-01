@@ -2,7 +2,7 @@
 
 > Source of truth: [FIRST_PRINCIPLES_REDESIGN.md](FIRST_PRINCIPLES_REDESIGN.md),
 > especially sections 7, 8, 11, and 14.
-> Status: M0-01 through M0-09 implemented; remaining M0 tasks pending.
+> Status: M0-01 through M0-10 implemented; remaining M0 tasks pending.
 
 ## Scope and branch contract
 
@@ -47,7 +47,7 @@ additional standing agents.
 | M0-07 | Add SimInput-compatible e2e adapter / tester + coding agent | M0-05, M0-06 | Implemented; see [M0_SIMINPUT_ADAPTER.md](M0_SIMINPUT_ADAPTER.md) |
 | M0-08 | Add external progress watchdog / architect + tester | M0-06 | Implemented; see [M0_PROGRESS_WATCHDOG.md](M0_PROGRESS_WATCHDOG.md) |
 | M0-09 | Add independent reference-model harness / architect + tester | M0-06 | Implemented; see [M0_REFERENCE_MODELS.md](M0_REFERENCE_MODELS.md) |
-| M0-10 | Add curated detector-fault corpus / tester + coding agent | M0-04, M0-08, M0-09 | Pending |
+| M0-10 | Add curated detector-fault corpus / tester + coding agent | M0-04, M0-08, M0-09 | Implemented; see [M0_DETECTOR_FAULTS.md](M0_DETECTOR_FAULTS.md) |
 | M0-11 | Add performance harness and budget gates / tester + coding agent | M0-06, M0-08 | Pending |
 | M0-12 | Wire executable M0 CI gates and close milestone / tester + docs steward | M0-07, M0-10, M0-11 | Pending |
 
@@ -225,6 +225,13 @@ Keep fault hooks unavailable to production builds.
 Acceptance: every active curated fault is caught by its named detector; a
 surviving fault fails the corpus runner. Plan small PR and broader nightly
 campaigns as section 8 requires, with minimized deterministic regressions.
+
+The active replay-output fault and staged product-fault mappings are documented
+in [M0_DETECTOR_FAULTS.md](M0_DETECTOR_FAULTS.md). The feature-gated test corpus
+injects one synthetic empty-kernel corruption and requires the named replay
+determinism detector to catch it. Stale-index acceptance, skipped block-ID
+uniqueness, and an unconsumed timer remain explicitly staged for M5, M2, and M1;
+they are not reported as passing.
 
 ### M0-11 - Performance harness
 
