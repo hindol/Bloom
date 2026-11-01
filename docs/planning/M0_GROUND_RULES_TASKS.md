@@ -2,8 +2,9 @@
 
 > Source of truth: [FIRST_PRINCIPLES_REDESIGN.md](FIRST_PRINCIPLES_REDESIGN.md),
 > especially sections 7, 8, 11, and 14.
-> Status: M0-01 through M0-12 implemented; Rewrite foundation passed at
-> `9939e38` (CI run `41344363775`).
+> Status: M0 exit criteria met on `v2`; Rewrite foundation passed at
+> `7a811b1` (CI run `41344670963`). The legacy root-workspace Test/Clippy jobs
+> remain failing and are not represented as M0 rewrite-gate passes.
 
 ## Scope and branch contract
 

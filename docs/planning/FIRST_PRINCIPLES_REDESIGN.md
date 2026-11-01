@@ -471,7 +471,9 @@ The test system is itself part of the design. It must do more than replay known 
 
 **Ordering principle:** retire the biggest uncertainty first (integration, then the ADR-3 text-model spike), then data safety, then breadth. The State store still precedes the Vault Store (ADR-2). Sizes are relative (S < M < L); this is a personal project, so calendar estimates would suggest precision we don't have.
 
-**M0 execution backlog:** [M0_GROUND_RULES_TASKS.md](M0_GROUND_RULES_TASKS.md) breaks the ground rules into bounded tasks with dependencies and acceptance checks. The task-breakdown and CI groundwork slice does not complete M0 or start M1.
+**M0 execution backlog:** [M0_GROUND_RULES_TASKS.md](M0_GROUND_RULES_TASKS.md) records the bounded ground-rule tasks, dependencies, and acceptance checks. M0 exit is recorded there; it does not itself authorize product parity work.
+
+**M1 implementation constraints:** [M1_WALKING_SKELETON_RISK_REVIEW.md](M1_WALKING_SKELETON_RISK_REVIEW.md) records the pre-implementation risk review, bounded sequence, and gates for the walking skeleton.
 
 | Milestone | Goal | Deliverables | Exit criteria |
 |---|---|---|---|

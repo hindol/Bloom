@@ -1,0 +1,96 @@
+# M1 Walking Skeleton - Architect Risk Review
+
+> Status: pre-implementation risk review complete; no M1 product behavior is
+> implemented. This review constrains the accepted M1 row in
+> [FIRST_PRINCIPLES_REDESIGN.md](FIRST_PRINCIPLES_REDESIGN.md); it does not
+> change product scope or the accepted ADRs.
+
+## Goal and boundaries
+
+Retire integration risk with one synthetic-vault journey: open a page, edit it,
+save it, terminate the process at controlled persistence boundaries, recover,
+and replay the recorded journey. The real vault remains out of scope until M7.
+
+M1 includes the pure `update`/`settle`/`view` kernel, a consuming `TimerWheel`,
+an editor-only focus stack, plain rope text, the SQLite State store, a minimal
+single-page Vault Store, the GUI event/effect adapter, and a bounded local
+metadata recorder. It does not include Markdown parsing, block IDs, Vim
+parity, indexing, three-way merge, multi-page transactions, MCP, migration,
+or product parity claims.
+
+## Ownership constraints
+
+| Boundary | Owns | Must not do |
+|---|---|---|
+| `bloom-kernel` | Model, events, effects, transitions, focus, timer state, invariant checks | Read wall-clock time, access files or SQLite, own threads, or render through GUI APIs |
+| `bloom-text` | Plain rope and text operations required by the skeleton | Own vault paths, persistence, or editor orchestration |
+| `bloom-state` | `state.db`, schema versioning, version records, group commit, recovery metadata | Write Markdown files or route input |
+| `bloom-vault` | Synthetic page load, observed base hash, single-page CAS save and typed conflict result | Bypass State, overwrite a changed file, or silently resolve a conflict |
+| `bloom-gui` | Translate OS input/time and execute kernel effects; paint supplied frames | Add a second geometry authority or persistence policy |
+| Test harness | Synthetic fixtures, process supervision, crash injection, replay assertions | Treat an unavailable screen/buffer or pending oracle case as a pass |
+
+The kernel receives time as data. `update` drains all timers due at or before
+that time before handling the waking event, and removes a fired timer before
+dispatching its handler. Each completed update is checked for a due timer;
+the external watchdog remains outside the process it observes.
+
+## Persistence and failure invariants
+
+1. **State precedes Vault.** Persist version/recovery data in a SQLite
+   transaction before applying the corresponding file write. A saved marker is
+   recorded only after the Vault Store confirms the write.
+2. **Distinguish acceptance from durability.** The UI may accept an edit without
+   blocking on `fsync`, but it must not describe it as durably committed until
+   the State store reports commit. Preserve the accepted idle group-commit
+   behavior and the maximum two-second loss bound; explicit save forces a
+   synchronous commit before the CAS write.
+3. **Never overwrite an observed external change.** A save compares disk with
+   the last observed base. A mismatch returns a typed conflict and leaves disk
+   unchanged; merge and conflict UI are deferred to M4.
+4. **No torn vault file.** Use a unique same-directory temporary file, flush
+   its contents, replace the target, sync the directory where the platform
+   supports it, and read back to verify. Report every failed step; do not turn
+   unsupported durability operations into success-shaped results.
+5. **Recover at every boundary.** Inject termination before and after the
+   State commit, temporary-file flush, replace, readback, and saved-marker
+   commit. On restart, recover a committed version or report a conflict; never
+   infer success from process exit or a partially written temp file.
+6. **Keep diagnostics private and bounded.** Record event kinds, operation
+   identifiers, versions, timings, and effect outcomes only. Do not record
+   note text, filenames, clipboard data, or raw keystrokes. Enforce explicit
+   event/byte ceilings and local-only storage.
+
+## Bounded implementation sequence
+
+Dependencies are real prerequisites; tasks may proceed in parallel only where
+the table shows no dependency.
+
+| ID | Deliverable | Depends on | Exit check |
+|---|---|---|---|
+| M1-01 | Kernel model with `update`/`settle`/`view`, editor-only focus, and consuming `TimerWheel`; plain rope boundary | M0 | Deterministic transition tests cover due timers on every event path, timer replacement/cancellation, exactly-one focus owner, and pure repeatable views |
+| M1-02 | Minimal `state.db` schema (`WAL`, `user_version`), version records, group-commit worker and startup recovery | M1-01 | Fresh and migrated schema tests; commit/ack ordering; crash injection demonstrates I2 and no corrupted database |
+| M1-03 | Minimal Vault Store load and single-page CAS save, with `PageSync` and typed conflict result | M1-02 | Simulated stale-writer and write-failure tests preserve disk bytes; real filesystem tests verify replace/readback behavior |
+| M1-04 | Synthetic open/edit/save/crash/recover/replay journey with the external watchdog | M1-01, M1-02, M1-03 | Process-isolated replay checks I2, I5, I9, I10, I11 at every transition and reports blocked/failure distinctly |
+| M1-05 | GUI adapter paints kernel-provided layout using injected `FontMetrics`; bounded metadata recorder | M1-01, M1-04 | Headless snapshot and geometry agreement checks; recorder tests prove content exclusion and size bounds |
+| M1-06 | CI, platform filesystem checks, and docs-steward closure | M1-01 through M1-05 | Rewrite gates pass on the supported OS matrix; M1 acceptance and pending parity/performance scope agree with code |
+
+## Risks to retire before M1 exit
+
+| Risk | Required mitigation |
+|---|---|
+| Timer ordering regresses into a busy loop or skips a due timer | Deterministic clock tests, I10 checker after every update, the staged due-timer detector fault, and an external watchdog |
+| State commit and Vault write disagree after a crash | Single SQLite durability point, explicit saved marker, fault injection at each boundary, and restart/replay assertions |
+| `PageSync` or CAS accepts stale state | Derive dirtiness from versions; compare against last observed disk hash; test external writes and stale acknowledgements |
+| OS replace/flush semantics differ | Run real-filesystem tests on Windows, macOS, and Linux; if a platform cannot meet a durability claim, fail the gate and revise the guarantee rather than silently weakening it |
+| GUI and kernel geometry diverge | Inject the same shaping implementation used for painting; compare kernel positions with rendered glyph positions |
+| Recorder becomes a content leak or unbounded queue | Content-free typed records, explicit byte/event ceilings, and no raw text or keystrokes |
+| Walking skeleton expands into premature parity work | Keep all M2-M6 features and real-vault access outside the milestone; pending oracle scenarios remain pending |
+
+## M1 exit gate
+
+M1 is complete only when the synthetic journey can open, edit, save, terminate,
+recover, and replay; I2, I5, I9, I10, and I11 checkers run at the relevant
+boundaries; the external progress watchdog detects a stalled journey; the
+key-press budget is measured against its accepted fixture; and platform
+filesystem checks pass. No result from the empty kernel alone counts as product
+parity or as a product performance measurement.
