@@ -2,7 +2,7 @@
 
 > Source of truth: [FIRST_PRINCIPLES_REDESIGN.md](FIRST_PRINCIPLES_REDESIGN.md),
 > especially sections 7, 8, 11, and 14.
-> Status: M0-01 through M0-08 implemented; remaining M0 tasks pending.
+> Status: M0-01 through M0-09 implemented; remaining M0 tasks pending.
 
 ## Scope and branch contract
 
@@ -46,7 +46,7 @@ additional standing agents.
 | M0-06 | Add minimal deterministic simulation and replay / tester + coding agent | M0-03, M0-04 | Implemented; see [M0_SIMULATION_REPLAY.md](M0_SIMULATION_REPLAY.md) |
 | M0-07 | Add SimInput-compatible e2e adapter / tester + coding agent | M0-05, M0-06 | Implemented; see [M0_SIMINPUT_ADAPTER.md](M0_SIMINPUT_ADAPTER.md) |
 | M0-08 | Add external progress watchdog / architect + tester | M0-06 | Implemented; see [M0_PROGRESS_WATCHDOG.md](M0_PROGRESS_WATCHDOG.md) |
-| M0-09 | Add independent reference-model harness / architect + tester | M0-06 | Pending |
+| M0-09 | Add independent reference-model harness / architect + tester | M0-06 | Implemented; see [M0_REFERENCE_MODELS.md](M0_REFERENCE_MODELS.md) |
 | M0-10 | Add curated detector-fault corpus / tester + coding agent | M0-04, M0-08, M0-09 | Pending |
 | M0-11 | Add performance harness and budget gates / tester + coding agent | M0-06, M0-08 | Pending |
 | M0-12 | Wire executable M0 CI gates and close milestone / tester + docs steward | M0-07, M0-10, M0-11 | Pending |
@@ -206,6 +206,14 @@ duplicate-notification convergence comparisons without implementing M2/M4/M5.
 
 Acceptance: deliberately perturbing the candidate output causes a mismatch;
 the reference does not share the candidate's incremental caches or bookkeeping.
+
+The reference-model boundary and staged comparison roster are documented in
+[M0_REFERENCE_MODELS.md](M0_REFERENCE_MODELS.md). A test-only linear filesystem
+model independently interprets the synthetic replay and compares its reads,
+injected failures, writes, and final bytes with `run_replay`; a deliberately
+perturbed result is rejected. Full parse, index rebuild, UI/MCP equivalence, and
+watcher-convergence comparisons remain explicitly pending their milestones.
+CI runs the independent comparison with the simulation feature enabled.
 
 ### M0-10 - Detector sensitivity corpus
 
