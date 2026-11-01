@@ -39,6 +39,16 @@ macro_rules! define_index {
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct CharIdx(usize);
 
+impl CharIdx {
+    pub(crate) const fn new(value: usize) -> Self {
+        Self(value)
+    }
+
+    pub(crate) const fn get(self) -> usize {
+        self.0
+    }
+}
+
 define_index!(ByteIdx, "A byte offset, valid only at a UTF-8 boundary.");
 define_index!(LineIdx, "A zero-based line index.");
 define_index!(GraphemeIdx, "A zero-based extended grapheme-cluster index.");

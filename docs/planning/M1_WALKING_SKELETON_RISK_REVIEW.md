@@ -1,7 +1,7 @@
 # M1 Walking Skeleton - Architect Risk Review
 
-> Status: pre-implementation risk review complete; no M1 product behavior is
-> implemented. This review constrains the accepted M1 row in
+> Status: pre-implementation risk review complete; M1 end-to-end product
+> behavior is not yet implemented. This review constrains the accepted M1 row in
 > [FIRST_PRINCIPLES_REDESIGN.md](FIRST_PRINCIPLES_REDESIGN.md); it does not
 > change product scope or the accepted ADRs.
 
@@ -65,14 +65,14 @@ the external watchdog remains outside the process it observes.
 Dependencies are real prerequisites; tasks may proceed in parallel only where
 the table shows no dependency.
 
-| ID | Deliverable | Depends on | Exit check |
-|---|---|---|---|
-| M1-01 | Kernel model with `update`/`settle`/`view`, editor-only focus, and consuming `TimerWheel`; plain rope boundary | M0 | Deterministic transition tests cover due timers on every event path, timer replacement/cancellation, exactly-one focus owner, and pure repeatable views |
-| M1-02 | Minimal `state.db` schema (`WAL`, `user_version`), version records, group-commit worker and startup recovery | M1-01 | Fresh and migrated schema tests; commit/ack ordering; crash injection demonstrates I2 and no corrupted database |
-| M1-03 | Minimal Vault Store load and single-page CAS save, with `PageSync` and typed conflict result | M1-02 | Simulated stale-writer and write-failure tests preserve disk bytes; real filesystem tests verify replace/readback behavior |
-| M1-04 | Synthetic open/edit/save/crash/recover/replay journey with the external watchdog | M1-01, M1-02, M1-03 | Process-isolated replay checks I2, I5, I9, I10, I11 at every transition and reports blocked/failure distinctly |
-| M1-05 | GUI adapter paints kernel-provided layout using injected `FontMetrics`; bounded metadata recorder | M1-01, M1-04 | Headless snapshot and geometry agreement checks; recorder tests prove content exclusion and size bounds |
-| M1-06 | CI, platform filesystem checks, and docs-steward closure | M1-01 through M1-05 | Rewrite gates pass on the supported OS matrix; M1 acceptance and pending parity/performance scope agree with code |
+| ID | Deliverable | Depends on | Status | Exit check |
+|---|---|---|---|---|
+| M1-01 | Kernel model with `update`/`settle`/`view`, editor-only focus, and consuming `TimerWheel`; plain rope boundary | M0 | Implemented locally; hosted verification pending | Deterministic transition tests cover due timers on every event path, timer replacement/cancellation, exactly-one focus owner, and pure repeatable views |
+| M1-02 | Minimal `state.db` schema (`WAL`, `user_version`), version records, group-commit worker and startup recovery | M1-01 | Pending | Fresh and migrated schema tests; commit/ack ordering; crash injection demonstrates I2 and no corrupted database |
+| M1-03 | Minimal Vault Store load and single-page CAS save, with `PageSync` and typed conflict result | M1-02 | Pending | Simulated stale-writer and write-failure tests preserve disk bytes; real filesystem tests verify replace/readback behavior |
+| M1-04 | Synthetic open/edit/save/crash/recover/replay journey with the external watchdog | M1-01, M1-02, M1-03 | Pending | Process-isolated replay checks I2, I5, I9, I10, I11 at every transition and reports blocked/failure distinctly |
+| M1-05 | GUI adapter paints kernel-provided layout using injected `FontMetrics`; bounded metadata recorder | M1-01, M1-04 | Pending | Headless snapshot and geometry agreement checks; recorder tests prove content exclusion and size bounds |
+| M1-06 | CI, platform filesystem checks, and docs-steward closure | M1-01 through M1-05 | Pending | Rewrite gates pass on the supported OS matrix; M1 acceptance and pending parity/performance scope agree with code |
 
 ## Risks to retire before M1 exit
 

@@ -231,9 +231,9 @@ campaigns as section 8 requires, with minimized deterministic regressions.
 The active replay-output fault and staged product-fault mappings are documented
 in [M0_DETECTOR_FAULTS.md](M0_DETECTOR_FAULTS.md). The feature-gated test corpus
 injects one synthetic empty-kernel corruption and requires the named replay
-determinism detector to catch it. Stale-index acceptance, skipped block-ID
-uniqueness, and an unconsumed timer remain explicitly staged for M5, M2, and M1;
-they are not reported as passing.
+determinism detector to catch it. M1 activates the due-timer detector and its
+fault-sensitivity check. Stale-index acceptance and skipped block-ID uniqueness
+remain explicitly staged for M5 and M2; they are not reported as passing.
 
 ### M0-11 - Performance harness
 

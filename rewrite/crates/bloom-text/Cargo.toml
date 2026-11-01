@@ -3,3 +3,6 @@ name = "bloom-text"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+[dependencies]
+ropey = "1.6"

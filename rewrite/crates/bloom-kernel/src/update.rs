@@ -1,0 +1,368 @@
+use std::time::Duration;
+
+use bloom_text::{coordinates::CharIdx, Doc, DocError, DocSnapshot};
+
+use crate::{
+    invariants::{RegistryError, Violation},
+    timer::{TimerId, TimerWheel},
+};
+
+#[cfg(any(debug_assertions, feature = "simulation"))]
+use crate::{
+    invariants::{CheckerRegistry, InvariantId},
+    timer::check_no_due_armed_timers,
+};
+
+const IDLE_COMMIT_DEBOUNCE: Duration = Duration::from_millis(300);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FocusOwner {
+    Editor,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Ui {
+    focus_stack: Vec<FocusOwner>,
+}
+
+impl Ui {
+    fn editor_only() -> Self {
+        Self {
+            focus_stack: vec![FocusOwner::Editor],
+        }
+    }
+
+    pub fn focus_owner(&self) -> Option<FocusOwner> {
+        self.focus_stack.last().copied()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Model {
+    document: Doc,
+    cursor: CharIdx,
+    ui: Ui,
+    timers: TimerWheel,
+}
+
+impl Model {
+    pub fn new(text: &str) -> Self {
+        let document = Doc::new(text);
+        let cursor = document.start();
+        Self {
+            document,
+            cursor,
+            ui: Ui::editor_only(),
+            timers: TimerWheel::default(),
+        }
+    }
+
+    pub fn text(&self) -> String {
+        self.document.text()
+    }
+
+    pub fn cursor(&self) -> CharIdx {
+        self.cursor
+    }
+
+    pub fn focus_owner(&self) -> Option<FocusOwner> {
+        self.ui.focus_owner()
+    }
+
+    pub fn next_deadline(&self) -> Option<Duration> {
+        self.timers.next_deadline()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Event {
+    InsertText(String),
+    Backspace,
+    TimerWake,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Effect {
+    ArmTimer { id: TimerId, deadline: Duration },
+    TimerFired(TimerId),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum UpdateError {
+    Document(DocError),
+    DeadlineOverflow,
+    CheckerRegistry(RegistryError),
+    InvariantViolations(Vec<Violation>),
+}
+
+/// Applies an event at externally supplied monotonic time, draining all due
+/// timers before handling the event.
+pub fn update(model: &mut Model, event: Event, now: Duration) -> Result<Vec<Effect>, UpdateError> {
+    let document_changed = match &event {
+        Event::InsertText(text) => !text.is_empty(),
+        Event::Backspace => {
+            model
+                .document
+                .char_offset(model.cursor)
+                .map_err(UpdateError::Document)?
+                > 0
+        }
+        Event::TimerWake => false,
+    };
+    let idle_deadline = if document_changed {
+        Some(
+            now.checked_add(IDLE_COMMIT_DEBOUNCE)
+                .ok_or(UpdateError::DeadlineOverflow)?,
+        )
+    } else {
+        None
+    };
+    let mut effects = model
+        .timers
+        .drain_due(now)
+        .into_iter()
+        .map(Effect::TimerFired)
+        .collect::<Vec<_>>();
+
+    match event {
+        Event::InsertText(text) => {
+            if !text.is_empty() {
+                model.cursor = model
+                    .document
+                    .insert(model.cursor, &text)
+                    .map_err(UpdateError::Document)?;
+            }
+        }
+        Event::Backspace => {
+            model.cursor = model
+                .document
+                .delete_previous_char(model.cursor)
+                .map_err(UpdateError::Document)?;
+        }
+        Event::TimerWake => {}
+    }
+
+    if let Some(deadline) = idle_deadline {
+        model.timers.schedule(TimerId::IDLE_COMMIT, deadline);
+        effects.push(Effect::ArmTimer {
+            id: TimerId::IDLE_COMMIT,
+            deadline,
+        });
+    }
+
+    settle(model).map_err(UpdateError::Document)?;
+    #[cfg(any(debug_assertions, feature = "simulation"))]
+    check_update_invariants(model, now)?;
+    Ok(effects)
+}
+
+pub fn view(model: &Model) -> Frame {
+    Frame {
+        document: model.document.snapshot(),
+        cursor: model.cursor(),
+        focus: model.focus_owner(),
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Frame {
+    pub document: DocSnapshot,
+    pub cursor: CharIdx,
+    pub focus: Option<FocusOwner>,
+}
+
+pub fn check_exactly_one_focus_owner(ui: &Ui) -> Result<(), String> {
+    if ui.focus_stack.len() == 1 && ui.focus_stack[0] == FocusOwner::Editor {
+        Ok(())
+    } else {
+        Err("M1 UI must have exactly one editor focus owner".to_owned())
+    }
+}
+
+pub fn check_view_purity(model: &Model) -> Result<(), String> {
+    let first = view(model);
+    let second = view(model);
+    if first.document.text() == second.document.text()
+        && first.cursor == second.cursor
+        && first.focus == second.focus
+    {
+        Ok(())
+    } else {
+        Err("view returned different frames for the same model".to_owned())
+    }
+}
+
+fn settle(model: &Model) -> Result<(), DocError> {
+    model.document.char_offset(model.cursor).map(|_| ())
+}
+
+#[cfg(any(debug_assertions, feature = "simulation"))]
+fn check_update_invariants(model: &Model, now: Duration) -> Result<(), UpdateError> {
+    let mut registry = CheckerRegistry::new();
+    registry
+        .register(InvariantId::I7, || check_exactly_one_focus_owner(&model.ui))
+        .map_err(UpdateError::CheckerRegistry)?;
+    registry
+        .register(InvariantId::I10, || {
+            check_no_due_armed_timers(&model.timers, now)
+        })
+        .map_err(UpdateError::CheckerRegistry)?;
+
+    let violations = registry
+        .run_applicable(&[InvariantId::I7, InvariantId::I10])
+        .map_err(UpdateError::CheckerRegistry)?;
+    if violations.is_empty() {
+        Ok(())
+    } else {
+        Err(UpdateError::InvariantViolations(violations))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::{
+        check_exactly_one_focus_owner, check_view_purity, update, view, Effect, Event, FocusOwner,
+        Model, UpdateError,
+    };
+    use crate::timer::TimerId;
+
+    #[test]
+    fn update_edits_plain_text_and_settles_cursor() {
+        let mut model = Model::new("note");
+        update(
+            &mut model,
+            Event::InsertText("🙂".to_owned()),
+            Duration::ZERO,
+        )
+        .unwrap();
+        update(&mut model, Event::Backspace, Duration::ZERO).unwrap();
+
+        assert_eq!(view(&model).document.text(), "note");
+        assert_eq!(model.cursor, model.document.start());
+    }
+
+    #[test]
+    fn due_timer_is_consumed_before_each_event_path() {
+        let event_paths = [
+            Event::InsertText("x".to_owned()),
+            Event::Backspace,
+            Event::TimerWake,
+        ];
+
+        for event in event_paths {
+            let mut model = Model::new("a");
+            let timer = TimerId::new(7);
+            model.timers.schedule(timer, Duration::from_millis(5));
+            let arms_idle_timer = matches!(&event, Event::InsertText(text) if !text.is_empty());
+
+            let effects = update(&mut model, event, Duration::from_millis(5)).unwrap();
+
+            assert!(effects.contains(&Effect::TimerFired(timer)));
+            if arms_idle_timer {
+                assert!(effects.contains(&Effect::ArmTimer {
+                    id: TimerId::IDLE_COMMIT,
+                    deadline: Duration::from_millis(305),
+                }));
+                assert_eq!(model.next_deadline(), Some(Duration::from_millis(305)));
+            } else {
+                assert_eq!(model.next_deadline(), None);
+            }
+        }
+    }
+
+    #[test]
+    fn future_timer_remains_armed_without_blocking_update() {
+        let mut model = Model::new("");
+        let timer = TimerId::new(9);
+        model.timers.schedule(timer, Duration::from_millis(10));
+
+        assert!(
+            update(&mut model, Event::TimerWake, Duration::from_millis(9))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(model.next_deadline(), Some(Duration::from_millis(10)));
+    }
+
+    #[test]
+    fn text_edits_reset_the_idle_commit_deadline() {
+        let mut model = Model::new("");
+
+        let first = update(
+            &mut model,
+            Event::InsertText("a".to_owned()),
+            Duration::ZERO,
+        )
+        .unwrap();
+        assert!(first.contains(&Effect::ArmTimer {
+            id: TimerId::IDLE_COMMIT,
+            deadline: Duration::from_millis(300),
+        }));
+
+        let second = update(
+            &mut model,
+            Event::InsertText("b".to_owned()),
+            Duration::from_millis(100),
+        )
+        .unwrap();
+        assert!(second.contains(&Effect::ArmTimer {
+            id: TimerId::IDLE_COMMIT,
+            deadline: Duration::from_millis(400),
+        }));
+
+        assert!(
+            update(&mut model, Event::TimerWake, Duration::from_millis(300))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(model.next_deadline(), Some(Duration::from_millis(400)));
+    }
+
+    #[test]
+    fn no_op_edits_do_not_arm_idle_commit_timer() {
+        let mut model = Model::new("");
+
+        assert!(
+            update(&mut model, Event::InsertText(String::new()), Duration::ZERO)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(update(&mut model, Event::Backspace, Duration::ZERO)
+            .unwrap()
+            .is_empty());
+        assert_eq!(model.next_deadline(), None);
+    }
+
+    #[test]
+    fn deadline_overflow_does_not_partially_apply_an_edit_or_consume_timers() {
+        let mut model = Model::new("a");
+        let timer = TimerId::new(9);
+        model.timers.schedule(timer, Duration::MAX);
+
+        assert_eq!(
+            update(&mut model, Event::InsertText("b".to_owned()), Duration::MAX),
+            Err(UpdateError::DeadlineOverflow)
+        );
+        assert_eq!(model.text(), "a");
+        assert_eq!(model.next_deadline(), Some(Duration::MAX));
+    }
+
+    #[test]
+    fn focus_stack_ownership_is_enforced_by_the_model() {
+        let mut model = Model::new("");
+        assert_eq!(model.focus_owner(), Some(FocusOwner::Editor));
+        assert_eq!(check_exactly_one_focus_owner(&model.ui), Ok(()));
+
+        model.ui.focus_stack.clear();
+        assert!(check_exactly_one_focus_owner(&model.ui).is_err());
+    }
+
+    #[test]
+    fn repeated_view_is_identical() {
+        let model = Model::new("synthetic note");
+
+        assert_eq!(check_view_purity(&model), Ok(()));
+    }
+}

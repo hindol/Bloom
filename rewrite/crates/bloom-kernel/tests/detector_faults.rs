@@ -1,6 +1,11 @@
 #![cfg(feature = "simulation")]
 
-use bloom_kernel::simulation::{run_replay, ReplayCase, ReplayResult};
+use std::time::Duration;
+
+use bloom_kernel::{
+    simulation::{run_replay, ReplayCase, ReplayResult},
+    timer::{check_no_due_armed_timers, TimerId, TimerWheel},
+};
 
 const REPLAY_FIXTURE: &str = include_str!("../../../testdata/replays/empty-kernel-smoke.sim");
 
@@ -52,15 +57,17 @@ const FAULT_CORPUS: [FaultCase; 4] = [
     FaultCase {
         fault: Fault::LeaveDueTimerArmed,
         detector: Detector::CheckNoDueArmedTimers,
-        status: FaultStatus::Staged("M1"),
+        status: FaultStatus::Active,
     },
 ];
 
 #[test]
-fn active_empty_kernel_fault_is_caught_by_its_named_detector() {
+fn active_replay_fault_is_caught_by_its_named_detector() {
     let active: Vec<_> = FAULT_CORPUS
         .iter()
-        .filter(|case| case.status == FaultStatus::Active)
+        .filter(|case| {
+            case.status == FaultStatus::Active && case.fault == Fault::CorruptSyntheticReplayOutput
+        })
         .collect();
     assert_eq!(active.len(), 1);
 
@@ -80,6 +87,26 @@ fn active_empty_kernel_fault_is_caught_by_its_named_detector() {
 }
 
 #[test]
+fn active_due_timer_fault_is_caught_by_its_named_detector() {
+    let case = FAULT_CORPUS
+        .iter()
+        .find(|case| case.fault == Fault::LeaveDueTimerArmed)
+        .unwrap();
+    assert_eq!(case.status, FaultStatus::Active);
+
+    let now = Duration::from_secs(2);
+    let mut faulted_wheel = TimerWheel::default();
+    faulted_wheel.schedule(TimerId::new(1), now);
+
+    assert!(
+        check_no_due_armed_timers(&faulted_wheel, now).is_err(),
+        "detector {:?} missed fault {:?}",
+        case.detector,
+        case.fault
+    );
+}
+
+#[test]
 fn future_product_faults_are_registered_as_staged_not_passing() {
     let staged: Vec<_> = FAULT_CORPUS
         .iter()
@@ -89,7 +116,7 @@ fn future_product_faults_are_registered_as_staged_not_passing() {
         })
         .collect();
 
-    assert_eq!(staged.len(), 3);
+    assert_eq!(staged.len(), 2);
     assert!(staged.iter().all(|(case, milestone)| {
         !milestone.is_empty()
             && matches!(
@@ -100,7 +127,7 @@ fn future_product_faults_are_registered_as_staged_not_passing() {
                 ) | (
                     Fault::SkipBlockIdUniquenessCheck,
                     Detector::CheckUniqueLiveBlockIds
-                ) | (Fault::LeaveDueTimerArmed, Detector::CheckNoDueArmedTimers)
+                )
             )
     }));
 }
@@ -110,10 +137,11 @@ fn inject(fault: Fault, candidate: &mut ReplayResult) {
         Fault::CorruptSyntheticReplayOutput => {
             candidate.files[0].bytes = b"injected detector fault".to_vec();
         }
-        Fault::AcceptStaleIndexResult
-        | Fault::SkipBlockIdUniquenessCheck
-        | Fault::LeaveDueTimerArmed => {
-            panic!("staged fault {fault:?} must not be injected at M0")
+        Fault::LeaveDueTimerArmed => {
+            panic!("timer fault must use the dedicated TimerWheel detector path")
+        }
+        Fault::AcceptStaleIndexResult | Fault::SkipBlockIdUniquenessCheck => {
+            panic!("staged fault {fault:?} must not be injected before its milestone")
         }
     }
 }
@@ -121,10 +149,11 @@ fn inject(fault: Fault, candidate: &mut ReplayResult) {
 fn detect(detector: Detector, expected: &ReplayResult, candidate: &ReplayResult) -> bool {
     match detector {
         Detector::ReplayDeterminismComparison => expected != candidate,
-        Detector::CheckIndexMatchesVersions
-        | Detector::CheckUniqueLiveBlockIds
-        | Detector::CheckNoDueArmedTimers => {
-            panic!("product detector {detector:?} must remain staged at M0")
+        Detector::CheckIndexMatchesVersions | Detector::CheckUniqueLiveBlockIds => {
+            panic!("product detector {detector:?} must remain staged until its milestone")
+        }
+        Detector::CheckNoDueArmedTimers => {
+            panic!("timer detector uses the dedicated TimerWheel fault path")
         }
     }
 }
