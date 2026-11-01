@@ -109,7 +109,7 @@ the table shows no dependency.
 | M1-03 | Minimal Vault Store load and single-page CAS save, with `PageSync` and typed conflict result | M1-02 | Rewrite hosted gate passed; legacy root Clippy and two baseline e2e failures remain | Simulated stale-writer and write-failure tests preserve disk bytes; real filesystem tests verify replace/readback behavior |
 | M1-04 | Synthetic open/edit/save/crash/recover/replay journey with the external watchdog | M1-01, M1-02, M1-03 | Rewrite hosted gate passed; legacy root Clippy and two root e2e tests failed | Crash matrix validates I2; each page observation checks I5, each save checks I9, and every update checks I10/I11; watchdog outcomes remain distinct |
 | M1-05 | GUI adapter paints kernel-provided layout using injected `FontMetrics`; bounded metadata recorder | M1-01, M1-04 | Implemented; local workspace tests and strict Clippy passed; first hosted Rewrite foundation failed because Linux Iced had no X11/Wayland backend enabled; corrected in M1-06 | Headless snapshots and geometry agreement checks; recorder tests prove content exclusion and size bounds |
-| M1-06 | CI, platform filesystem checks, and docs-steward closure | M1-01 through M1-05 | Hosted run [41353138093](https://github.com/hindol/Bloom/actions/runs/41353138093) passed Linux and macOS Rewrite gates; Windows exposed a timing assertion with insufficient scheduler tolerance. The assertion is widened and passed 10 local repetitions plus the full workspace suite; hosted rerun pending. Root Test/Clippy failures remain on the known legacy baseline. | Rewrite gates pass on the supported OS matrix; M1 acceptance and pending parity/performance scope agree with code |
+| M1-06 | CI, platform filesystem checks, and docs-steward closure | M1-01 through M1-05 | Hosted run [41353605457](https://github.com/hindol/Bloom/actions/runs/41353605457) passed all Rewrite foundation gates on Linux, macOS, and Windows after widening the Windows timing-test tolerance. The legacy root Test/Clippy jobs still fail on the known baseline. | Rewrite gates pass on the supported OS matrix; M1 acceptance and pending parity/performance scope agree with code |
 
 ## Risks to retire before M1 exit
 
@@ -220,11 +220,13 @@ parity or as a product performance measurement.
 - Initial model construction still shapes every physical line. Subsequent
   edits reuse line-relative wrap geometry, reshape only the affected line
   range, and materialize only viewport rows. The deterministic 10k-line test
-  verifies one-line invalidation. The Windows release harness measures
-  alternating line splits/merges at the start of the 10k-line document; it
-  reported single-editor p50 of 83.7 us and p99 of 119.7 us against the
-  necessary 8 ms ceiling. The supported-host CI run is still required; this
-  is not a three-pane product-budget claim.
+  verifies one-line invalidation. The Windows local release harness reports
+  single-editor p50 of 83.7 us and p99 of 119.7 us; hosted Linux run
+  [41353605457](https://github.com/hindol/Bloom/actions/runs/41353605457)
+  reports p50 of 89.688 us and p99 of 105.988 us, against the necessary 8 ms
+  ceiling. Rewrite foundation gates passed on all three supported operating
+  systems. These are single-editor kernel measurements, not a three-pane
+  product-budget claim.
 
 ## M1-06 performance and platform closure
 

@@ -29,7 +29,7 @@ budgets need their own synthetic vault sizes and warm/cold state definitions.
 | Operation | Fixture / method | Status |
 |---|---|---|
 | Empty-kernel replay smoke | Checked-in replay, Criterion repeated sample | Active measurement; no regression baseline yet |
-| Keypress to frame p99 | 10k-line single-editor split/merge sample is active in M1; three-pane product fixture remains pending | M1 single-editor harness; full product budget pending |
+| Keypress to frame p99 | M1 10k-line single-editor kernel sample: Windows local p50 83.7 us / p99 119.7 us; hosted Linux p50 89.688 us / p99 105.988 us; three-pane product fixture remains pending | M1 single-editor harness; full product budget pending |
 | Open page | 10k-line page, cold/warm state specified per run | Pending M1/M2 |
 | Search | 10k-page synthetic vault, sampled query latency | Pending index milestone |
 | Cold start to first frame | 10k-page vault with explicitly warm cache | Pending product startup |
