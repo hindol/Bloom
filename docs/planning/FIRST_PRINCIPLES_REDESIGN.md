@@ -1,6 +1,6 @@
 # Bloom from First Principles — Redesign Proposal
 
-> **Status:** Architect proposal, revision 3. Incorporates an independent design review (§15) and records the CEO decisions (§14). No code has changed.
+> **Status:** Architect proposal, revision 4. Incorporates an independent design review (§15), records the CEO decisions (§14), and adds a self-testing feedback loop (§8). No code has changed.
 > **Scope:** Whole system: persistence, identity, text model, history, input/focus, geometry, index, MCP.
 > **Relationship to existing docs:** This proposal *builds on* `ARCHITECTURE.md`, `GOALS.md`, `BLOCK_IDENTITY.md`, `FILE_FORMAT.md`, and `planning/AUTO_MERGE.md`. If its ADRs are accepted, it *supersedes* parts of `planning/UNIFIED_DOCUMENT_LAYER*.md`, `planning/HISTORY_PRODUCTION_HARDENING*.md`, and `planning/UNDO_DELTA*.md` (see §11).
 
@@ -24,8 +24,9 @@ Most of Bloom's bugs fall into about ten **recurring classes**. Each class has t
 | L10 | **One incremental parser.** It is checked against a full parse. | Three parsers disagreeing |
 | L11 | **All mutations are transactions.** Multi-file changes commit atomically to a journal and recover without blind roll-forward. | Half-applied refactors, MCP side doors |
 | L12 | **Three stores, three lifetimes.** The vault is the source of truth, state is durable, and the cache is disposable. | "Derived" index that can't safely be dropped |
+| L13 | **The checks are checked too.** Independent oracles, generated journeys, and deliberate fault injection test both the product and our ability to detect its failures. | Unknown combinations, blind spots in the test suite |
 
-Delivery is a **big-bang rewrite in place** on a long-lived branch (D1, §11). The existing e2e and vim tests are ported as the behavioral oracle, and the new core is dogfooded in shadow mode on a vault copy before a gated cutover.
+Delivery is a **big-bang rewrite in place** on a long-lived branch (D1, §11). The existing e2e and vim tests are ported as the behavioral oracle, and the new core is dogfooded in shadow mode on a vault copy before a gated cutover. A self-testing feedback loop explores beyond those known scenarios and checks whether its detectors can catch representative failures (§8).
 
 ---
 
@@ -400,16 +401,31 @@ Make the docs-steward role partly mechanical: a test asserts every `I*` in this 
 
 ## 8. Verification strategy
 
+The test system is itself part of the design. It must do more than replay known bugs: it should explore new combinations, compare behavior against independent models, detect hangs and resource leaks, and prove that its detectors notice representative faults. Automation can discover counterexamples to specified properties; it cannot decide product intent or prove the absence of every unknown bug. Those still require human review and a willingness to revise the properties when evidence contradicts them.
+
+### 8.1 Feedback loop: explore → detect → reproduce → minimize → generalize
+
+1. **Explore combinations.** Generate bounded, stateful journeys that interleave editor operations (edit, undo, pane change, search, save) with environment actions (external write, rename, delayed acknowledgement, duplicate or reordered watcher event, crash, restart). Bias generation toward unexplored state transitions, not only uncovered lines. Start with hand-written scenarios; expand generators with each subsystem.
+2. **Detect through independent checks.** Compare incremental behavior with a deliberately simple reference implementation built from the same input but not the same incremental bookkeeping. Examples: incremental index versus full rebuild; UI versus MCP semantic edits; and convergence after duplicate watcher notifications. Add progress watchdogs outside the component being watched: each operation must complete, report failure, or enter an explicit blocked state within a bound. Check bounded queues, retained documents, and memory over repeated open/edit/close cycles.
+3. **Prove the detectors have sensitivity.** Maintain a small set of deliberate test-only faults (e.g. accept a stale index result, skip a block-ID uniqueness check, fail to consume a due timer). The matching detector must fail for each fault. Run targeted fault-injection checks in PR CI and broader mutation/fault campaigns nightly; a surviving fault is a test-system regression, not a passing build. Use the curated corpus rather than an arbitrary mutation-score target.
+4. **Preserve and minimize counterexamples.** A failing generated journey records its seed and a minimized event sequence, then becomes a deterministic regression case. Group failures by stable signature so a storm of equivalent failures yields one actionable case.
+5. **Generalize the fix.** Every escaped bug adds both its minimal reproduction and a broader property, invariant, reference check, or injected fault that would have detected the class. A fix without a stronger detector is incomplete. Human review decides whether the behavior or the expectation was wrong; generators and agents must not silently weaken assertions to make a failure disappear.
+
+**Replay and privacy:** generated tests use synthetic vaults and can be replayed exactly from their fixture plus seed/event log. Production diagnostics are bounded and local: by default they record event kinds, operation IDs, versions, timings, and effect outcomes—not note contents, filenames, clipboard data, or raw keystrokes. Exact capture of real-vault state is a separate, explicit opt-in; its bundle may contain private content and must be reviewed locally before it is shared. A content-free diagnostic report must not be presented as an exact replay.
+
+**Feedback health:** track time to detection, reproducible/minimized counterexamples, recurring failure signatures, explored state transitions, and whether curated injected faults are caught. Review unexplored transitions and detector gaps at every milestone. Seed count and line coverage are supporting signals only; neither proves useful exploration or detector strength.
+
 | Layer | What | Tooling | Runs |
 |---|---|---|---|
 | Types | L3, L5, L6, I3, I6, I7 | Rust type system, `#[deny(clippy::disallowed_methods)]` | compile |
 | Property | I1, I4, I6, I12; incremental == full parse; one test per block-ID identity rule (L4); undo algebra | `proptest` | every PR |
 | Differential | Vim motions/operators vs **headless Neovim** (`nvim --embed`) on random key sequences within the supported subset; incremental vs full parser | proptest + msgpack-rpc | nightly + PR smoke |
-| **Deterministic simulation** | Whole kernel + Vault Store against `SimFs`, `SimClock`, `SimWatcher`, an external-writer actor, and an MCP-client actor. Faults: crash at any effect boundary, torn temp writes, rename failure, ENOSPC, reordered, dropped, or duplicated watcher events, clock jumps. After each step: all invariant checkers. Failing seed → minimal event log → regression test | Custom harness (FoundationDB / TigerBeetle VOPR style). **Start small:** a dozen hand-written race/crash scenarios first, then randomized seeds once those pass | scenarios + 1k seeds per PR; longer nightly runs once the harness has earned it |
+| **Deterministic simulation** | Whole kernel + Vault Store against `SimFs`, `SimClock`, `SimWatcher`, an external-writer actor, and an MCP-client actor. Faults: crash at any effect boundary, torn temp writes, rename failure, ENOSPC, reordered, dropped, or duplicated watcher events, clock jumps. After each step: all invariant checkers and progress bounds. Failing seed → minimized event log → regression test | Custom harness (FoundationDB / TigerBeetle VOPR style). **Start small:** a dozen hand-written race/crash scenarios first, then stateful randomized journeys once those pass | scenarios + bounded PR seeds; broader seed campaigns nightly |
 | Fuzz | Loader, parser, frontmatter, vim keystroke streams | `cargo-fuzz` | nightly |
 | E2E (existing) | User journeys via `SimInput` / `TestScreen`, **now including wrap and heading geometry** (L8) | `bloom-test-harness` | every PR |
 | Snapshot | Frames, layout, rendered views | `insta` | every PR |
 | Performance | Budgets below | `criterion` + CI regression gate (>10% fails) | every PR (smoke), nightly (full) |
+| Detector sensitivity | Curated injected faults map to named invariants/properties and must be detected | Test-only fault hooks + targeted mutation checks | every PR (small corpus), nightly (expanded) |
 
 ### Performance budgets
 
@@ -457,11 +473,11 @@ Make the docs-steward role partly mechanical: a test asserts every `I*` in this 
 
 | Milestone | Goal | Deliverables | Exit criteria |
 |---|---|---|---|
-| **M0 Ground rules** (S) | Make the rules mechanical before code exists | `v2` branch; crate layout (`bloom-kernel`, `bloom-state`, `bloom-vault`, `bloom-text`, `bloom-index`, `bloom-gui`, `bloom-mcp`); lints (`disallowed_methods`, unit newtypes); invariant-checker framework; ports (`Fs`, `Clock`, `Watcher`, `Rng`) + `SimFs`/`SimClock`/`SimWatcher`; e2e adapter + scenario triage list; criterion harness with the §8 budgets. **On `main`: tactical F1 and F13 fixes** | CI runs lints, checkers, simulation, and budgets against an empty kernel; triage list complete |
-| **M1 Walking skeleton** (M) | Retire integration risk | `update`/`settle`/`view` + `TimerWheel`; focus stack with only the editor component; plain rope; `state.db` (WAL, `user_version`, versions, group commit); minimal Vault Store (load, CAS save with unique temp name + dir fsync + readback, `PageSync` without merge); GUI paints kernel layout via `FontMetrics` | Open a vault copy, edit, save, kill -9, recover; I2, I5, I9, I10, I11 checkers live; keypress budget met |
+| **M0 Ground rules** (S) | Make the rules mechanical before code exists | `v2` branch; crate layout (`bloom-kernel`, `bloom-state`, `bloom-vault`, `bloom-text`, `bloom-index`, `bloom-gui`, `bloom-mcp`); lints (`disallowed_methods`, unit newtypes); invariant-checker framework; ports (`Fs`, `Clock`, `Watcher`, `Rng`) + `SimFs`/`SimClock`/`SimWatcher`; e2e adapter + scenario triage list; synthetic replay format; progress watchdog contract; reference-model harness; curated detector-fault corpus; criterion harness with the §8 budgets. CI explicitly targets the rewrite branch from its first commit. **On `main`: tactical F1 and F13 fixes** | CI runs lints, checkers, one simulation journey, the small detector-fault corpus, and budgets against an empty kernel; triage list complete |
+| **M1 Walking skeleton** (M) | Retire integration risk | `update`/`settle`/`view` + `TimerWheel`; focus stack with only the editor component; plain rope; `state.db` (WAL, `user_version`, versions, group commit); minimal Vault Store (load, CAS save with unique temp name + dir fsync + readback, `PageSync` without merge); GUI paints kernel layout via `FontMetrics`; bounded local metadata recorder | Open a synthetic vault, edit, save, kill -9, recover, and replay the recorded journey; I2, I5, I9, I10, I11 checkers and external progress watchdog live; keypress budget met |
 | **M2 Text model** (L) | Eliminate C5, C7, C9 | **ADR-3 spike first (acceptance gate)**; ID tokens + visible projection + identity rules + typed registers; `TextProps`; grapheme motions; single incremental parser; 7-char ID generation (D7) | I1, I4, I6, I12 green; spike verdict recorded (fallback (c) if it fails); shadow dogfooding starts |
 | **M3 Vim** (M) | Muscle-memory parity | Salvaged `bloom-vim` on the projection; ported vim tests; Neovim differential | Vim tests green; differential clean on the supported subset |
-| **M4 Sync and transactions** (L) | Eliminate C1, C2, C8 | Watcher fencing; reconciliation scans; three-way merge with base from `state.db` (D4); rename/delete states; multi-page `Txn` + commit/recovery protocol (L11); vault lock; IPC endpoint; `bloom-mcp` over IPC + headless kernel | I3, I5, I9 hold across scenarios and randomized seeds (external-writer, MCP, and crash-injection actors) |
+| **M4 Sync and transactions** (L) | Eliminate C1, C2, C8 | Watcher fencing; reconciliation scans; three-way merge with base from `state.db` (D4); rename/delete states; multi-page `Txn` + commit/recovery protocol (L11); vault lock; IPC endpoint; `bloom-mcp` over IPC + headless kernel | I3, I5, I9 hold across scenarios and randomized seeds (external-writer, MCP, and crash-injection actors); duplicate/reordered watcher metamorphic checks converge; injected stale-result and missed-timer faults are caught |
 | **M5 Index, views, BQL** (L) | Emergent structure on projections | Version-tagged index projector (I8); FTS, tags, tasks, links/backlinks, Agenda; live views; pickers; **BQL as optional user-facing syntax (D5)** from a PM-owned language spec | I8 differential green; every search/filter flow works without BQL (G12); search budget met |
 | **M6 Product parity** (L) | Everything the parity checklist requires | Journal, quick capture, transclusion `![[page^id]]` (D2), history UI on `state.db` + git export (D3), remaining overlays as focus-stack components, settings/theme, Logseq import | Every *port*/*rewrite* scenario green; PM-owned user docs updated; tester sign-off |
 | **M7 Vault migration + cutover** (M) | Move the real vault safely | One-shot migrator: 5→7-char ID rewrite with every in-vault link rewritten in the same `Txn` (D7); `^=` mirrors → transclusion (D2); git + undo history import into `state.db` (D3); dry-run report; full vault snapshot before applying | Cutover gate below |
@@ -481,6 +497,8 @@ Make the docs-steward role partly mechanical: a test asserts every `I*` in this 
 - **History import (D3):** read-only first. `.index/.git` and the old cache DB stay untouched until the user confirms.
 
 **Kill criteria:** if a milestone overruns its relative size by 2×, or the M2 spike fails *and* fallback (c) also fails the acceptance gate, stop and re-plan. If v2 hasn't reached shadow dogfooding by the end of M3, re-evaluate the rewrite against a strangler.
+
+**Bug-escape rule:** every bug found in shadow dogfooding, a user report, or production adds a minimized replayable regression and a generalized detector before the relevant milestone can pass. If the failure cannot be replayed exactly without private content, add a synthetic equivalent and preserve any sensitive capture locally, opt-in only.
 
 **Superseded docs (on cutover):** `planning/UNIFIED_DOCUMENT_LAYER*.md` (block-ID side table → ADR-3), `planning/HISTORY_PRODUCTION_HARDENING*.md` (→ ADR-5), `planning/UNDO_DELTA_PERSISTENCE.md` (→ version store). Archive them with a header pointing to the ADRs rather than deleting them.
 
@@ -502,6 +520,8 @@ Make the docs-steward role partly mechanical: a test asserts every `I*` in this 
 | Group-commit window loses the last ≤2 s of typing on a hard crash | Low | Low | Explicit, documented bound (I2); `:w` forces durability; tune the window from measurements |
 | CAS race window (§5.1) | Low | Low–Medium | Documented limitation; post-write readback; reconciliation scans |
 | Simulator fidelity (real fs behaves differently) | Medium | Medium | Keep a small real-fs integration suite (Windows + macOS + Linux) for rename/fsync/watcher semantics |
+| Generators or reference models share the implementation bug | Medium | High | Keep reference models deliberately simple; use cross-implementation differential and metamorphic checks; inject curated faults and require detector failures |
+| Diagnostic replay captures private note content | Low | High | Synthetic fixtures and metadata-only local recorder by default; exact real-state capture opt-in, visibly content-bearing, never uploaded automatically |
 
 ---
 
@@ -511,6 +531,7 @@ Make the docs-steward role partly mechanical: a test asserts every `I*` in this 
 - **Executable specs.** Every invariant has a checker and a test (§7). Docs-steward drift checks become partly automatic.
 - **Measure whether the laws worked.** Tag fix commits by class (`fix(sync):`, `fix(identity):`, `fix(geometry):` …) and track recurrence per class. Success means **zero recurrences** in the classes a milestone claims to close.
 - **Bug reports become seeds.** Every field bug gets reproduced in the simulator before it's fixed, and the seed stays as a regression test.
+- **The feedback loop is tested.** Curated injected faults must be caught; every escaped bug adds a minimized reproduction and a broader detector. Track reproducibility and detection latency, not just coverage.
 - **Performance is a feature with a budget.** Regressions fail CI, the same as test failures.
 
 ---
@@ -548,3 +569,5 @@ Revision 2 incorporates an independent adversarial review of revision 1. It inde
 | Too many custom infrastructure bets | Suggestion | SQLite instead of a custom log; simulation starts with hand-written scenarios; D6 counterpoint recorded |
 
 Revision 3 records the CEO decisions in §14. D1 (rewrite instead of strangler), D5 (ship BQL as optional syntax), and D7 (rewrite all IDs to 7 chars) differed from the recommendations, so §0, §9, §10, §11, §12, ADR-10, and ADR-12 were revised to match.
+
+Revision 4 adds L13 and §8.1 after the CEO endorsed making the feedback loop a product-engineering capability: explore novel stateful journeys, use independent checks, test detector sensitivity with deliberate faults, minimize and generalize failures, and protect private note content in diagnostics.
