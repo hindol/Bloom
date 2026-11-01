@@ -40,6 +40,10 @@ impl BloomEditor {
         // UI thread gets a read-only connection. The indexer thread owns the
         // read-write connection and handles all writes (index, undo trees).
         self.index = Some(index::Index::open_readonly(&index_path)?);
+        self.known_block_ids.clear();
+        self.block_ids_ready = false;
+        self.pending_block_id_assignments.clear();
+        self.indexer_requests_in_flight = 0;
 
         self.journal = Some(journal::Journal::new(vault_root));
         let file_store = bloom_store::local::LocalFileStore::new(vault_root.to_path_buf())?;
@@ -73,6 +77,7 @@ impl BloomEditor {
         let (idx_completion_tx, idx_completion_rx) = crossbeam::channel::bounded(4);
         self.indexer_rx = Some(idx_completion_rx);
         self.indexing = true;
+        self.indexer_requests_in_flight = 1;
         let indexer_tx =
             index::indexer::spawn_indexer(vault_root.to_path_buf(), index_path, idx_completion_tx);
         self.indexer_tx = Some(indexer_tx);

@@ -12,7 +12,7 @@ use bloom_buffer::{BlockIdInsertion, BlockNeedingId};
 use bloom_md::parser::traits::Document;
 
 /// Load all known block IDs (live + retired) from the index.
-pub fn load_all_known_ids(conn: &Connection) -> HashSet<String> {
+pub fn load_all_known_ids(conn: &Connection) -> rusqlite::Result<HashSet<String>> {
     bloom_buffer::block_id::load_all_known_ids(conn)
 }
 

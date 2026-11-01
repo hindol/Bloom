@@ -115,6 +115,7 @@ impl BloomEditor {
             return false;
         }
 
+        self.block_ids_ready = false;
         let mut visual_changed = false;
 
         if let Some(page_id) = self.writer.buffers().find_by_path(&path).cloned() {
@@ -193,8 +194,17 @@ impl BloomEditor {
                 self.file_event_deadline = None;
                 if let Some(tx) = &self.indexer_tx {
                     tracing::info!(file_count = paths.len(), files = ?paths, "flushing file events to indexer");
-                    let _ = tx.send(index::indexer::IndexRequest::IncrementalBatch(paths));
-                    self.indexing = true;
+                    self.block_ids_ready = false;
+                    match tx.send(index::indexer::IndexRequest::IncrementalBatch(paths)) {
+                        Ok(()) => {
+                            self.indexing = true;
+                            self.indexer_requests_in_flight += 1;
+                        }
+                        Err(error) => self.push_notification(
+                            format!("Index update could not be queued: {error}"),
+                            render::NotificationLevel::Error,
+                        ),
+                    }
                     return true;
                 }
             }
@@ -441,15 +451,16 @@ impl BloomEditor {
             return false;
         }
 
+        if !self.block_ids_ready {
+            self.pending_block_id_assignments.insert(page_id.clone());
+            return false;
+        }
+        self.pending_block_id_assignments.remove(page_id);
+
         let parser = &self.parser;
-        let known_ids = if self.known_block_ids.is_empty() {
-            None
-        } else {
-            Some(&mut self.known_block_ids)
-        };
         let Some(mut doc) = self.writer.buffers_mut().document_mut(page_id) else {
             return false;
         };
-        doc.ensure_block_ids(parser, known_ids)
+        doc.ensure_block_ids(parser, Some(&mut self.known_block_ids))
     }
 }

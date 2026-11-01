@@ -4744,7 +4744,10 @@ fn uc95_block_id_assignment() {
     let page_path = vault.root().join("pages/blocks.md");
     let mut sim = SimInput::with_vault(vault);
     flush_background(&mut sim.editor);
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    sim.keys("SPC f f");
+    sim.type_text("Blocks");
+    sim.keys("Enter");
+    sim.editor.save_current().unwrap();
     flush_background(&mut sim.editor);
 
     let saved = std::fs::read_to_string(page_path).unwrap();

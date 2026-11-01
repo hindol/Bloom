@@ -330,8 +330,17 @@ impl BloomEditor {
                 }
                 keymap::dispatch::Action::RebuildIndex => {
                     if let Some(tx) = &self.indexer_tx {
-                        let _ = tx.send(index::indexer::IndexRequest::FullRebuild);
-                        self.indexing = true;
+                        self.block_ids_ready = false;
+                        match tx.send(index::indexer::IndexRequest::FullRebuild) {
+                            Ok(()) => {
+                                self.indexing = true;
+                                self.indexer_requests_in_flight += 1;
+                            }
+                            Err(error) => self.push_notification(
+                                format!("Index rebuild could not be queued: {error}"),
+                                render::NotificationLevel::Error,
+                            ),
+                        }
                     }
                 }
                 keymap::dispatch::Action::QuickCapture(kind) => {
