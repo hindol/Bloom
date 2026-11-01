@@ -97,6 +97,26 @@ set of IDs in the current document. New IDs are generated inside the same
 planned edit as the text change; a reservation failure must not partially
 mutate the rope.
 
+### Current prototype evidence (not acceptance)
+
+`rewrite/crates/bloom-kernel/src/identity.rs` now contains a policy prototype
+with typed page/block IDs, register provenance, available/live/detached/retired
+registry states, and explicit reserve/detach/move/retire plans. Its fake
+registry covers cross-page copy behavior, move-vs-copy selection, stale-yank
+protection, join retirement, split reservation, collision rejection, and
+all-or-nothing registry batches. The commit helper accepts already-built
+canonical text and assigns it only after the registry accepts the whole change
+set, so injected registry failures leave the original text unchanged.
+Projection tests also exercise `x`/`X`/`D`-shaped ranges at a trailing token
+boundary and verify that the hidden token is preserved.
+
+This is policy-level evidence only. It does not yet execute the identity matrix
+through real Vim key streams or apply edits to a canonical document; fresh ID
+candidates are supplied by the caller, durable registry behavior and cleanup
+when a detached register is overwritten are not implemented, and byte-identical
+undo/redo is not tested. The serialized legacy bridge still covers
+append-before-ID only. ADR-3 remains unaccepted.
+
 ## Acceptance gate
 
 ADR-3 can be accepted only when:
@@ -104,12 +124,13 @@ ADR-3 can be accepted only when:
 1. The projection and all identity rules have executable tests, including
    property tests for visible-to-raw range lowering and canonical round trips.
 2. The existing Vim unit suite and ID-bearing e2e scenarios pass without
-   changing their expected behavior. At baseline, `cargo test -p bloom-vim`
-   passes 42 tests, and the two hidden block-ID append scenarios pass. The
-   current Vim API is coupled to `bloom_buffer::Buffer` and untyped
-   `EditOp { range: Range<usize>, ... }`; the serialized test adapter must
-   explicitly cover that seam without introducing a cross-workspace
-   dependency. Current coverage is limited to the two append cases above.
+   changing their expected behavior. Before the new oracle checks,
+   `cargo test -p bloom-vim` passed 42 tests; it now passes 44, including the
+   two append-oracle cases. The current Vim API is coupled to
+   `bloom_buffer::Buffer` and untyped `EditOp { range: Range<usize>, ... }`;
+   the serialized test adapter must explicitly cover that seam without
+   introducing a cross-workspace dependency. Current bridge coverage remains
+   limited to the two append cases above.
 3. Every supported identity rule has a test or is explicitly recorded as
    uncovered; no rule is inferred from the current side-table implementation.
 4. The verdict and any remaining gaps are recorded. If the gate fails, prototype

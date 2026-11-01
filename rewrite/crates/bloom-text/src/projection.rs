@@ -578,6 +578,29 @@ mod tests {
     }
 
     #[test]
+    fn token_boundary_deletions_only_remove_visible_characters() {
+        let raw = "hello ^id";
+        let projection = VisibleProjection::parse(raw);
+        let raw_chars = raw.chars().collect::<Vec<_>>();
+
+        for (operation, start, end) in [("x", 4, 5), ("X", 4, 5), ("D", 1, 5)] {
+            let range = projection.range(start, end).unwrap();
+            let lowered = projection.lower(range).unwrap();
+            let mut edited = raw_chars.clone();
+            for segment in lowered.raw_segments.iter().rev() {
+                edited.drain(segment.start().get()..segment.end().get());
+            }
+
+            let edited = edited.into_iter().collect::<String>();
+            assert!(edited.ends_with("^id"), "{operation} removed the token");
+            assert!(lowered
+                .token_effects
+                .iter()
+                .all(|effect| effect.disposition == TokenDisposition::Preserve));
+        }
+    }
+
+    #[test]
     fn insertion_at_an_id_only_line_requires_an_explicit_structural_decision() {
         let projection = VisibleProjection::parse("^id\n");
         let range = projection.range(0, 0).unwrap();

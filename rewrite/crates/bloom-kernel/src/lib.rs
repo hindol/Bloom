@@ -1,6 +1,7 @@
 #![deny(clippy::disallowed_methods)]
 
 pub mod geometry;
+pub mod identity;
 pub mod invariants;
 pub mod ports;
 pub mod timer;
