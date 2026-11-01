@@ -1,6 +1,6 @@
 # Bloom from First Principles — Redesign Proposal
 
-> **Status:** Architect proposal, revision 2 (incorporates an independent design review; see §15). Waiting on CEO decisions (§14). No code has changed.
+> **Status:** Architect proposal, revision 3. Incorporates an independent design review (§15) and records the CEO decisions (§14). No code has changed.
 > **Scope:** Whole system: persistence, identity, text model, history, input/focus, geometry, index, MCP.
 > **Relationship to existing docs:** This proposal *builds on* `ARCHITECTURE.md`, `GOALS.md`, `BLOCK_IDENTITY.md`, `FILE_FORMAT.md`, and `planning/AUTO_MERGE.md`. If its ADRs are accepted, it *supersedes* parts of `planning/UNIFIED_DOCUMENT_LAYER*.md`, `planning/HISTORY_PRODUCTION_HARDENING*.md`, and `planning/UNDO_DELTA*.md` (see §11).
 
@@ -25,7 +25,7 @@ Most of Bloom's bugs fall into about ten **recurring classes**. Each class has t
 | L11 | **All mutations are transactions.** Multi-file changes commit atomically to a journal and recover without blind roll-forward. | Half-applied refactors, MCP side doors |
 | L12 | **Three stores, three lifetimes.** The vault is the source of truth, state is durable, and the cache is disposable. | "Derived" index that can't safely be dropped |
 
-Migration is a **strangler**, not a rewrite (§11). Each phase has exit criteria and deletes code. The existing 209 e2e tests serve as the behavioral oracle.
+Delivery is a **big-bang rewrite in place** on a long-lived branch (D1, §11). The existing e2e and vim tests are ported as the behavioral oracle, and the new core is dogfooded in shadow mode on a vault copy before a gated cutover.
 
 ---
 
@@ -49,7 +49,7 @@ A single user with one local vault. They write continuously in a Vim-modal edito
 - Keep the Vim-modal feel and the frictionless capture flow.
 - Existing vaults must keep working (format migration has to be automatic and reversible).
 
-### Questions for the PM
+### Questions for the PM (all resolved by CEO decisions; see §14)
 1. Do users need **mirrors** (the same text physically present in several files), or is **editable transclusion** (one source, rendered in several places) enough? (D2)
 2. How much does `git log` on the internal history matter, compared with a Bloom-native history UI? (D3)
 3. Should Bloom treat external editors as **writers** (three-way merge) or **readers** (lock + warn)? (D4)
@@ -66,11 +66,11 @@ These features are what make Bloom Bloom. The redesign keeps all of them, and se
 | Vim-modal editing (`bloom-vim` intent model) | Muscle memory, speed | Keep the intent model. Add differential tests against Neovim |
 | Journal-first capture, quick capture | "Don't decide where" | Unchanged. Journal mode becomes *derived* from the doc kind |
 | Plain Markdown + YAML frontmatter, stable page `id:` | Local-first, portable | Byte-identical round trip becomes an invariant (I1) |
-| Block IDs `^id` + deep links `[[page^block]]` | Fine-grained structure | IDs become first-class tokens. Undo is correct by construction |
+| Block IDs `^id` + deep links `[[page^block]]` | Fine-grained structure | IDs become first-class tokens (7 chars, D7). Undo is correct by construction |
 | Links/backlinks, tags, tasks, Agenda | Emergent structure | Index is a pure projection that also covers unsaved buffers |
 | Fuzzy pickers (nucleo), FTS search | Retrieval | Unchanged engine. Search sees what's on screen |
 | Time travel / history | Safety net, trust | One version store replaces git + undo-in-cache |
-| Live views | Structure on demand | Built on the projection model (L1) |
+| Live views | Structure on demand | Built on the projection model (L1); optionally authored in BQL (D5) |
 | MCP access for agents | AI-native workflow | Goes through the kernel API, so it gets the same guarantees as the UI |
 
 ---
@@ -294,7 +294,7 @@ enum Conflict { Content { theirs: Hash }, DeletedExternally, EditVsDelete, Renam
 
 ### 5.3 Text model (L4, L6, L10)
 - **Rope** (ropey) stays. On top of it the `Doc` owns: `TextProps { eol, bom, final_newline }`, the `ParseTree` (incremental), the ID token spans and visible projection (derived from the parse tree), and the version counter.
-- **Block-ID assignment:** follows D6. Universal assignment is current behavior (`ensure_block_ids` at save). IDs are generated in the edit transaction, drawn from the OS CSPRNG, and checked against live + retired IDs in State, which is always loaded and never "empty because the index hasn't loaded yet" (fixes F7 and F13).
+- **Block-ID assignment:** universal (D6), as today, but no longer at save (`ensure_block_ids`). IDs are 7 base-36 characters (D7), generated in the edit transaction, drawn from the OS CSPRNG, and checked against live + retired IDs in State, which is always loaded and never "empty because the index hasn't loaded yet" (fixes F7 and F13).
 - **Byte-identical round trip (I1)** for valid UTF-8 files with a uniform EOL style: load then save without edits produces identical bytes. **Mixed-EOL** files open normally and are normalized only on the first real edit, with a one-time notification. **Invalid UTF-8** files open read-only with a banner. Property test over a corpus plus fuzzed inputs.
 
 ### 5.4 History: one version store (replaces git + SQLite undo-in-cache)
@@ -313,7 +313,7 @@ state.db: versions(page_id, version, parent, ts, txn_id, origin, keyframe | delt
 - The kernel emits `Snapshot { page_id, version, rope: Arc<Rope> }` (O(1) rope clone) after edits (debounced through a timer effect) and after loads. The index projector parses and writes the cache DB on its own thread.
 - **Index ⊇ open buffers:** search, backlinks, and Agenda reflect unsaved text (fixes F10).
 - **Convergence (I8):** every row is tagged with `(page_id, version)`; stale snapshots are dropped. After quiescence, the index equals `project(latest versions)`.
-- Block-ID uniqueness becomes a real DB constraint (`UNIQUE(block_id)` on live IDs) once mirrors are resolved (D2).
+- Block-ID uniqueness is a real DB constraint (`UNIQUE(block_id)` on live IDs) from the start, because mirrors are gone (D2).
 - Block IDs double as **chunk identity for Emergence embeddings**, which answers EMERGENCE open question 6.
 
 ### 5.6 MCP and CLI (L11)
@@ -335,7 +335,7 @@ state.db: versions(page_id, version, parent, ts, txn_id, origin, keyframe | delt
 **ADR-2 · Vault Store with base tracking + CAS (L2)**
 - *Decision:* replace `self_write_hashes`/`pending_write_id` with per-page `base` and the `PageSync` state machine (§5.1).
 - *Alternatives:* (a) better heuristics (larger hash ring, mtime): the same class stays open; (b) exclusive file locks: other editors ignore advisory locks, and Windows mandatory locks break Obsidian/VS Code.
-- *Consequences:* + the external-edit story becomes principled (merge). − Needs `base` content available for merging, which comes from the State store (ADR-5). That's why the State spine comes *before* the Vault Store in §11.
+- *Consequences:* + the external-edit story becomes principled (merge). − Needs `base` content available for merging, which comes from the State store (ADR-5). That's why the State store is built *before* the Vault Store in §11 (M1).
 - *Reversibility:* medium.
 
 **ADR-3 · Inline block IDs with a visible projection (L4), reversing the side-table design**
@@ -350,7 +350,7 @@ state.db: versions(page_id, version, parent, ts, txn_id, origin, keyframe | delt
 
 **ADR-5 · One version store in `state.db` replaces git + undo-in-cache (§5.4)**
 - *Alternatives:* (a) keep git (mature tooling, but commit granularity ≠ undo granularity, slow for per-keystroke deltas, and two histories to reconcile); (b) custom per-page append-only log files (rejected: multi-page atomicity, CRC/compaction, and recovery would all be ours to build and test).
-- *Consequences:* + one history for undo, time travel, crash recovery, and merge base, + atomic multi-page commits for free. − Lose free `git log`; mitigated by export. Escalated as **D3**.
+- *Consequences:* + one history for undo, time travel, crash recovery, and merge base, + atomic multi-page commits for free. − Lose free `git log`; mitigated by export. **Accepted (D3).**
 
 **ADR-6 · Three stores, three lifetimes (L12)**: uncontroversial; fixes F3 and F4.
 
@@ -361,15 +361,17 @@ state.db: versions(page_id, version, parent, ts, txn_id, origin, keyframe | delt
 
 **ADR-9 · Single incremental parser (L10)**: keep `BloomMarkdownParser` as the *full-parse oracle* in tests only.
 
-**ADR-10 · Mirroring → editable transclusion**: **escalated as D2.**
+**ADR-10 · Mirroring → editable transclusion**: **accepted (D2).** Existing mirrors are converted by the migrator (§11).
 - *Today:* `^=id` replicates text physically across files; promotion/demotion yields `pending_writes`; section mirroring adds more. That is cross-file replicated state with a loop-prevention variant (`MirrorEdit`).
 - *Proposal:* one canonical block, embedded elsewhere as `![[page^id]]`, rendered and edited in place; edits route to the source page through a `Txn`.
 - *Trade-off:* other editors show the embed syntax instead of the text. Obsidian renders `![[page#^id]]` natively, so the syntax should align with it.
 
 **ADR-11 · MCP via kernel IPC (L11)**: fixes F6; no product trade-off.
 
-**ADR-12 · Defer user-authored BQL**
-- `query/` (~2.7k lines) is in tension with G12 ("structured search without a heavy query language"). Keep the engine internal for Agenda and live views; hide the surface syntax until PM discovery shows demand. Escalated as **D5**.
+**ADR-12 · BQL ships as optional syntax (D5; the architect had recommended deferring it)**
+- *Context:* `query/` (~2.7k lines) is in tension with G12, which says users shouldn't have to learn a second mini-language just to search.
+- *Decision:* BQL ships in v2 as a user-facing language for live views and power queries. It is **never required**: every search and filter flow (pickers, tag/date/link/task filters) works without it, so G12 stands as written.
+- *Consequences:* the PM owns a written language spec (grammar, error messages, examples) before M5. The e2e suite includes "search without BQL" journeys so G12 can't erode silently. BQL compiles to the same projection queries as the built-in views, so there's one engine.
 
 ---
 
@@ -423,9 +425,9 @@ Make the docs-steward role partly mechanical: a test asserts every `I*` in this 
 
 ## 9. Scope triage
 
-| Keep as-is | Change | Defer | Cut / replace |
+| Keep / salvage | Rebuild | Defer | Cut / replace |
 |---|---|---|---|
-| Rust, Iced 0.14, ropey, crossbeam threads, SQLite + FTS5 as cache, nucleo, Markdown + frontmatter, `bloom-vim` intent model, journal, quick capture, pickers, tags/tasks/Agenda, e2e harness | Identity (L3), sync (L2), block IDs (L4), focus (L5), geometry (L8), parser (L10), history (ADR-5), MCP path (ADR-11), store layout (L12) | User-facing BQL (D5), Emergence embeddings (until block identity is stable), live-view authoring UI | Self-write hash ring, side-table block IDs + `block_id_history`, GUI wrap/drawer arbitration, `update_layout`, git-backed history engine, mirrors (if D2 = transclusion), direct fs writes in MCP |
+| Rust, Iced 0.14, ropey, crossbeam threads, SQLite + FTS5 as cache, nucleo, Markdown + frontmatter, `bloom-vim` intent model, journal, quick capture, pickers, tags/tasks/Agenda, e2e scenarios (ported) | Identity (L3), sync (L2), block IDs (L4), focus (L5), geometry (L8), parser (L10), history (ADR-5), MCP path (ADR-11), store layout (L12), BQL as optional syntax (D5) | Emergence embeddings (until block identity is stable) | Self-write hash ring, side-table block IDs + `block_id_history`, GUI wrap/drawer arbitration, `update_layout`, git-backed history engine, `^=` mirrors (D2), direct fs writes in MCP |
 
 ---
 
@@ -435,32 +437,52 @@ Make the docs-steward role partly mechanical: a test asserts every `I*` in this 
 - **No CRDT.** One user, one device at a time. Three-way merge with a known base covers external editors and agents. Revisit only if multi-device live sync becomes a goal.
 - **No database as source of truth.** Markdown on disk stays canonical. This is what makes Bloom trustworthy.
 - **No new GUI framework.** Iced stays. L8 makes the GUI *thinner*, which lowers the cost of ever swapping it.
-- **No change to the on-disk format** apart from optional transclusion syntax (D2) and the `.bloom/` directory layout (L12).
+- **No other on-disk format changes.** The only ones are transclusion replacing mirrors (D2), 7-char block IDs (D7), and the `.bloom/` directory layout (L12). The one-shot migrator applies all three, and they can be reversed from its migration record (§11).
 
 ---
 
-## 11. Migration plan: strangler, not rewrite
+## 11. Delivery plan: rewrite in place (D1)
 
-**Why not a rewrite:** 648 commits of behavior are encoded in about 320 tests. A rewrite throws away that oracle and stalls dogfooding. Instead, introduce a `bloom-kernel` crate and move responsibilities into it phase by phase behind the existing `SimInput` / e2e API. **Every phase must delete code**; a phase that only adds is a smell.
+**Decision (D1):** a big-bang rewrite on a long-lived `v2` branch of this repo, replacing the current crates in place. The old app on `main` stays the daily driver until cutover. The review's case for a strangler (keep the oracle, keep dogfooding) still stands as a risk, so this plan buys both back: the oracle is *ported*, and dogfooding starts early in shadow mode.
 
-**Ordering principle:** risk reduction per unit of effort. Data-loss classes come first, the harness that proves them comes before them, and cosmetic classes come last. Sizes are relative (S < M < L); this is a personal project, so calendar estimates would suggest precision we don't have.
+**Rules of the rewrite**
+- **Rewrite the core, salvage the leaves.** New: kernel, Vault Store, State store, text model, index projector, GUI shell. Salvaged after review against the laws: the `bloom-vim` intent model and its tests, `undo.rs` keyframe/delta encoding, parser grammar pieces, nucleo picker scoring, theme, the `planning/AUTO_MERGE.md` merge algorithm, and the Logseq importer. A salvaged module must pass the new lints (L6 unit types, `disallowed_methods`) before it lands.
+- **Port the oracle, not the code.** The 209 e2e scenarios and 42 vim tests are behavior specs. A `SimInput`-compatible adapter runs them against the v2 kernel. Each scenario is triaged as *port* (behavior kept), *rewrite* (behavior intentionally changed, e.g. mirrors → transclusion; cite the decision), or *drop* (tests an implementation detail). The triage list is checked in and becomes the parity checklist.
+- **`main` is fix-only until cutover.** Only data-loss and crash fixes land on `main`, and each one also adds a scenario to the v2 oracle ("port the test, not the fix"). F1 and F13 get tactical fixes on `main` now, because the old app remains the daily driver for months.
+- **Never merge `main` into `v2`.** The code diverges by design; scenarios are the only channel between them.
+- **Walking skeleton first.** v2 runs end to end (open → edit → save → crash-recover) before any subsystem goes deep. Integration risk is retired early; depth comes after.
+- **Shadow dogfooding.** From M2 on, v2 runs daily against a *copy* of the real vault (re-copied nightly) with invariant checkers on and violations logged. v2 never touches the real vault before cutover.
 
-| Phase | Goal | Deliverables | Exit criteria | Deletes |
-|---|---|---|---|---|
-| **P0 Foundations** (S) | Measure and pin behavior | Invariants doc + `check_*` stubs; newtyped units in `bloom-buffer`; I1 round-trip proptest; `cargo-fuzz` for parser/loader; criterion baseline; **tactical fixes for F1 and F13** with regression tests | Baselines recorded in CI; I1 green on corpus | — |
-| **P1 Ports + simulator** (M) | Make time and I/O injectable | `Fs`, `Clock`, `Watcher`, `Rng` traits used by the current editor; `TimerWheel` replaces hand-listed deadlines; `SimFs/SimClock/SimWatcher`; hand-written scenarios (external edit while dirty, crash mid-save, own-rename event storm) | Scenarios green; I10 checker active | `next_deadline` body, ad-hoc `tick` logic, test sleeps |
-| **P2 State spine** (M) | Give persistence a transactional backbone *before* rebuilding sync on top of it | `state.db` (WAL, `user_version`, tested migrations); move `undo_tree`, `page_access`, retired IDs out of the cache DB; version records + tags; txn journal + commit/recovery protocol (L11); vault lock; in-process `apply(Txn)` API + local IPC endpoint; **`bloom-mcp` switches to IPC** (headless kernel if no instance is running); atomic session file | Cache DB deletable with zero data loss; I2 holds under crash scenarios; MCP has no fs writes | Undo/frecency tables + `PersistUndo`/`Prune*` in the indexer, MCP `std::fs::write` paths, non-atomic session write |
-| **P3 Vault Store** (L) | Eliminate C1, C2, the rest of C8 | `PageSync` state machine; base tracking; CAS writes with unique temp names + dir fsync + readback; watcher fencing; reconciliation scans; three-way merge (planning/AUTO_MERGE.md) with base from `state.db`; `HashMap<PageId, Doc>` + `PathKey`; session by PageId + anchor | I3, I5, I9 hold across scenarios and randomized seeds | `self_write_hashes`, `pending_write_id` matching, `find_by_path` dedup, synchronous disk read in save |
-| **P4 Text model** (L) | Eliminate C5, C7, C9 | **ADR-3 spike first (acceptance gate)**; visible projection + identity rules + typed registers; `TextProps` newline model; grapheme motions; single incremental parser; Neovim differential tests | I1, I4, I6, I12 green; README "undo doesn't re-assign IDs" closed | Side table, `canonical_text` reassembly, `block_id_history`, `ensure_block_ids` at save, duplicate parsers |
-| **P5 History consolidation** (M) | One history, one UI | Git + legacy undo importer (read-only first); crash-recovery prompt; retention compaction; git export; history UI reads `state.db` | Importer verified on a real vault; recovery works in simulation | `bloom-history` git engine, checkpoint flush barrier |
-| **P6 Kernel/UI split** (L) | Eliminate C3, C4, C6 | First **inventory all render-time I/O and mutation** (F2); then `update`/`view`; focus stack + `Component`; kernel layout via `FontMetrics` with per-line caches; GUI paints only | GUI crate has no layout/wrap/priority logic; e2e covers geometry; keypress budget held | `keys.rs` chain, 13 overlay flags, `update_layout`, `bloom-gui/src/wrap.rs`, GUI drawer arbitration |
-| **P7 Product** | Build on the foundation | Transclusion (if D2), live views on projections, Emergence using block IDs as chunk identity, BQL decision (D5) | PM-owned docs updated; tester sign-off | Mirror sync code (if D2) |
+**Ordering principle:** retire the biggest uncertainty first (integration, then the ADR-3 text-model spike), then data safety, then breadth. The State store still precedes the Vault Store (ADR-2). Sizes are relative (S < M < L); this is a personal project, so calendar estimates would suggest precision we don't have.
 
-**Feature freeze rule:** during P2–P4, only bug fixes and the phase's own work merge. New features wait for P7.
+| Milestone | Goal | Deliverables | Exit criteria |
+|---|---|---|---|
+| **M0 Ground rules** (S) | Make the rules mechanical before code exists | `v2` branch; crate layout (`bloom-kernel`, `bloom-state`, `bloom-vault`, `bloom-text`, `bloom-index`, `bloom-gui`, `bloom-mcp`); lints (`disallowed_methods`, unit newtypes); invariant-checker framework; ports (`Fs`, `Clock`, `Watcher`, `Rng`) + `SimFs`/`SimClock`/`SimWatcher`; e2e adapter + scenario triage list; criterion harness with the §8 budgets. **On `main`: tactical F1 and F13 fixes** | CI runs lints, checkers, simulation, and budgets against an empty kernel; triage list complete |
+| **M1 Walking skeleton** (M) | Retire integration risk | `update`/`settle`/`view` + `TimerWheel`; focus stack with only the editor component; plain rope; `state.db` (WAL, `user_version`, versions, group commit); minimal Vault Store (load, CAS save with unique temp name + dir fsync + readback, `PageSync` without merge); GUI paints kernel layout via `FontMetrics` | Open a vault copy, edit, save, kill -9, recover; I2, I5, I9, I10, I11 checkers live; keypress budget met |
+| **M2 Text model** (L) | Eliminate C5, C7, C9 | **ADR-3 spike first (acceptance gate)**; ID tokens + visible projection + identity rules + typed registers; `TextProps`; grapheme motions; single incremental parser; 7-char ID generation (D7) | I1, I4, I6, I12 green; spike verdict recorded (fallback (c) if it fails); shadow dogfooding starts |
+| **M3 Vim** (M) | Muscle-memory parity | Salvaged `bloom-vim` on the projection; ported vim tests; Neovim differential | Vim tests green; differential clean on the supported subset |
+| **M4 Sync and transactions** (L) | Eliminate C1, C2, C8 | Watcher fencing; reconciliation scans; three-way merge with base from `state.db` (D4); rename/delete states; multi-page `Txn` + commit/recovery protocol (L11); vault lock; IPC endpoint; `bloom-mcp` over IPC + headless kernel | I3, I5, I9 hold across scenarios and randomized seeds (external-writer, MCP, and crash-injection actors) |
+| **M5 Index, views, BQL** (L) | Emergent structure on projections | Version-tagged index projector (I8); FTS, tags, tasks, links/backlinks, Agenda; live views; pickers; **BQL as optional user-facing syntax (D5)** from a PM-owned language spec | I8 differential green; every search/filter flow works without BQL (G12); search budget met |
+| **M6 Product parity** (L) | Everything the parity checklist requires | Journal, quick capture, transclusion `![[page^id]]` (D2), history UI on `state.db` + git export (D3), remaining overlays as focus-stack components, settings/theme, Logseq import | Every *port*/*rewrite* scenario green; PM-owned user docs updated; tester sign-off |
+| **M7 Vault migration + cutover** (M) | Move the real vault safely | One-shot migrator: 5→7-char ID rewrite with every in-vault link rewritten in the same `Txn` (D7); `^=` mirrors → transclusion (D2); git + undo history import into `state.db` (D3); dry-run report; full vault snapshot before applying | Cutover gate below |
 
-**Kill criteria:** if a phase overruns its relative size by 2×, or the simulator finds nothing in a phase's scope while field bugs in that scope keep appearing, stop and re-plan. Either the model is wrong or the harness is.
+**Cutover gate** (all required):
+1. Parity checklist: every *port* and *rewrite* scenario green.
+2. Simulation: 10k randomized seeds clean; performance budgets met on the 10k-page fixture.
+3. Shadow dogfooding: at least two weeks on a nightly vault copy with zero invariant violations and no lost edits.
+4. Migrator: the dry run on the real vault is clean, and migrate → reverse (from the migration record) → diff is byte-identical on a copy.
+5. Rollback is ready: the pre-migration snapshot and the last `main` binary are kept. Rolling back restores the snapshot after exporting any pages edited in v2 since cutover as Markdown.
 
-**Superseded docs (on acceptance):** `planning/UNIFIED_DOCUMENT_LAYER*.md` (block-ID side table → ADR-3), `planning/HISTORY_PRODUCTION_HARDENING*.md` (→ ADR-5), `planning/UNDO_DELTA_PERSISTENCE.md` (→ version store). Archive them with a header pointing to the ADRs rather than deleting them.
+**After cutover:** `v2` merges into `main` as a replacement, the old crates are deleted in that merge, and the superseded docs are archived.
+
+**Migration details that need care**
+- **ID rewrite (D7):** old 5-char IDs go into the retired set and into an alias table in `state.db`, so references from outside the vault (agent transcripts, copied links) still resolve and get rewritten when next touched. The lengths differ, so old and new ID spaces can't collide.
+- **Mirrors → transclusion (D2):** the `^id` original becomes the source, and each `^=id` copy becomes `![[page^id]]`. Copies that have diverged from their source are listed in the dry run; nothing is guessed.
+- **History import (D3):** read-only first. `.index/.git` and the old cache DB stay untouched until the user confirms.
+
+**Kill criteria:** if a milestone overruns its relative size by 2×, or the M2 spike fails *and* fallback (c) also fails the acceptance gate, stop and re-plan. If v2 hasn't reached shadow dogfooding by the end of M3, re-evaluate the rewrite against a strangler.
+
+**Superseded docs (on cutover):** `planning/UNIFIED_DOCUMENT_LAYER*.md` (block-ID side table → ADR-3), `planning/HISTORY_PRODUCTION_HARDENING*.md` (→ ADR-5), `planning/UNDO_DELTA_PERSISTENCE.md` (→ version store). Archive them with a header pointing to the ADRs rather than deleting them.
 
 ---
 
@@ -468,13 +490,16 @@ Make the docs-steward role partly mechanical: a test asserts every `I*` in this 
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| Second-system effect / scope creep | High | High | Phases must delete code; feature freeze; kill criteria; ADRs are short; prefer SQLite and existing crates over custom formats |
+| Second-system effect: the rewrite never ships | High | High | Walking skeleton first (M1); salvage the leaves; explicit cutover gate; kill criteria including "re-evaluate vs strangler if no shadow dogfooding by end of M3"; ADRs are short; SQLite and existing crates over custom formats |
+| Months without dogfooding the new core | High | Medium | Shadow dogfooding on a nightly vault copy from M2; ported e2e/vim oracle runs on every PR |
+| `main` and `v2` diverge (fixes on `main` never reach v2) | Medium | Medium | `main` is fix-only; every `main` fix adds a v2 scenario; never merge code across |
+| Vault migration damages real data (ID rewrite, mirror conversion, history import) | Low | High | Dry-run report; full snapshot before applying; migrate → reverse → diff on a copy is a cutover gate; nothing is guessed on diverged mirrors |
+| BQL grows scope or erodes G12 | Medium | Medium | PM-owned language spec before M5; one engine for BQL and built-in views; e2e journeys for search *without* BQL |
 | Block-ID identity edge cases (visual block, `J`, `x` at token edge, `:s`, `.` repeat, register provenance) | Medium | High | ADR-3 acceptance-gate spike; identity-rules table (L4) with one property test per rule; fallback option (c) |
 | Layout recomputation blows the keypress budget | Medium | Medium | Per-line layout caches keyed by content hash; criterion gate on keypress → frame |
 | Font metrics drift between kernel layout and painted glyphs | Medium | Medium | Same shaping call for both; rect-vs-glyph snapshot test |
 | `state.db` corruption or unbounded growth | Low | High | SQLite WAL + `integrity_check` at startup; retention compaction tested in the simulator; git export as escape hatch |
 | Group-commit window loses the last ≤2 s of typing on a hard crash | Low | Low | Explicit, documented bound (I2); `:w` forces durability; tune the window from measurements |
-| History import loses fidelity | Medium | Medium | Importer runs read-only first and keeps `.index/.git` untouched until the user confirms |
 | CAS race window (§5.1) | Low | Low–Medium | Documented limitation; post-write readback; reconciliation scans |
 | Simulator fidelity (real fs behaves differently) | Medium | Medium | Keep a small real-fs integration suite (Windows + macOS + Linux) for rename/fsync/watcher semantics |
 
@@ -484,23 +509,25 @@ Make the docs-steward role partly mechanical: a test asserts every `I*` in this 
 
 - **ADRs over long planning docs.** Most decisions fit in one page. Long docs become out of date; ADRs are dated decisions that get superseded explicitly.
 - **Executable specs.** Every invariant has a checker and a test (§7). Docs-steward drift checks become partly automatic.
-- **Measure whether the laws worked.** Tag fix commits by class (`fix(sync):`, `fix(identity):`, `fix(geometry):` …) and track recurrence per class. Success means **zero recurrences** in the classes a phase claims to close.
+- **Measure whether the laws worked.** Tag fix commits by class (`fix(sync):`, `fix(identity):`, `fix(geometry):` …) and track recurrence per class. Success means **zero recurrences** in the classes a milestone claims to close.
 - **Bug reports become seeds.** Every field bug gets reproduced in the simulator before it's fixed, and the seed stays as a regression test.
 - **Performance is a feature with a budget.** Regressions fail CI, the same as test failures.
 
 ---
 
-## 14. Decisions for the CEO
+## 14. CEO decisions
 
-| # | Decision | Options | Recommendation | Why |
+Recorded after review of revision 2. Three decisions (D1, D5, D7) differ from the architect's recommendation; revision 3 replans around them.
+
+| # | Decision | Recommendation | **CEO decision** | Consequence in this doc |
 |---|---|---|---|---|
-| D1 | Migration approach | Strangler / big-bang rewrite | **Strangler** | Keeps the e2e oracle and daily dogfooding; each phase pays for itself |
-| D2 | Mirrors vs transclusion | Keep `^=` mirrors / editable transclusion `![[page^id]]` / mirrors as Vault-Store-materialized views | **Transclusion** | Removes all cross-file replicated state; Obsidian-compatible syntax; cost: other editors show the embed, not the text |
-| D3 | History engine | One version store in `state.db` (+ git export) / keep git + undo-in-cache | **Version store** | One history for undo, time travel, crash recovery, and merge base, with atomic multi-page commits |
-| D4 | External editors | Writers (three-way merge) / readers (warn on change, Bloom wins) | **Writers** | Agents and git pull are writers; merge is principled with `base` from `state.db` |
-| D5 | User-authored BQL | Ship / defer (keep engine internal) / cut | **Defer** | G12 tension; no evidence of demand yet |
-| D6 | Block-ID policy | Universal (every block, the current behavior) / lazy (assigned on first reference) | **Universal**, weakly held | Stable chunk identity for links, history, merge, and Emergence, and it's what users have today. *Counterpoint from review:* lazy assignment removes ID noise for readers in other editors and shrinks the identity surface until transclusion or Emergence actually needs it |
-| D7 | Block-ID length | Keep 5 chars base36 (~60M) / grow to 7 for new IDs (~78B) | **Grow new IDs to 7** | A collision check against live + retired IDs is always required (birthday bound). Length decides the blast radius when that check runs on incomplete data (cold cache, external edits): with 300k existing blocks, a single new ID collides with probability ~0.5% at 5 chars vs ~0.0004% at 7. The parser accepts both lengths, so existing IDs need no migration |
+| D1 | Delivery approach: strangler / big-bang rewrite | Strangler | **Big-bang rewrite, in place, on a long-lived branch** | §11 rewritten as M0–M7 with a ported oracle, shadow dogfooding, and a cutover gate; new rewrite risks in §12 |
+| D2 | Mirrors vs editable transclusion `![[page^id]]` | Transclusion | **Transclusion; drop `^=` mirrors** | ADR-10 accepted; the migrator converts existing mirrors; `UNIQUE(block_id)` from the start |
+| D3 | History engine: version store in `state.db` (+ git export) / keep git + undo-in-cache | Version store | **Version store in `state.db` + git export** | ADR-5 accepted; history import in M7 |
+| D4 | External editors: writers (three-way merge) / readers (Bloom wins) | Writers | **Writers, with three-way merge against the stored base** | §5.1 as written; M4 |
+| D5 | User-authored BQL: ship / defer / cut | Defer | **Ship as optional syntax.** Search and filters never require it; it's for live views and power queries. G12 stays as written | ADR-12 reversed to "ship, optional"; PM spec before M5 |
+| D6 | Block-ID policy: universal / lazy | Universal (weakly held) | **Universal** | §5.3; review counterpoint (lazy reduces noise in other editors) noted and declined |
+| D7 | Block-ID length: keep 5 / 7 for new IDs / rewrite all to 7 | 7 for new IDs only | **Rewrite all IDs to 7 chars in a one-time migration** | M7 migrator rewrites IDs and in-vault links in one `Txn`; old IDs are retired and kept as aliases. Rationale for 7: at 300k blocks a new ID collides ~0.5% of the time at 5 chars vs ~0.0004% at 7 |
 
 ---
 
@@ -512,10 +539,12 @@ Revision 2 incorporates an independent adversarial review of revision 1. It inde
 |---|---|---|
 | "Log-before-ack" was undefined; per-page logs can't commit multi-page txns atomically; blind roll-forward could clobber external edits | Blocking | State store is one SQLite DB; explicit commit/recovery protocol with `NeedsResolution` (L11); durability defined as a ≤2 s group-commit bound (§5.4, I2) |
 | Sync enum couldn't express edits during a write, renames/deletes, own-rename watcher noise, or dropped events | Blocking | `PageSync` with derived dirtiness, `saved_version = from_version`, typed in-flight ops, watcher fencing, reconciliation scans, delete/rename conflicts (§5.1) |
-| Migration dependencies were backwards (merge base and IPC before the stores existed) | Blocking | New P2 "State spine" before the Vault Store; history UX moved later (§11) |
+| Migration dependencies were backwards (merge base and IPC before the stores existed) | Blocking | State store now precedes the Vault Store; history UX moved later (§11; carried into the M0–M7 rewrite plan) |
 | "Yank strips IDs" broke `dd`+`p`; operator rules were unspecified | Blocking | Typed registers with provenance; identity-rules table; ADR-3 acceptance-gate spike with fallback (L4, ADR-3) |
 | Layout per event could blow the latency budget; due timers could be skipped | Non-blocking | Per-line layout caches; `update` drains due timers first (L7, L9, I10) |
 | Retired IDs aren't derivable after compaction | Non-blocking | Explicit monotonic set in State (L12) |
 | I1/I3 not checkable as stated (mixed EOL, invalid UTF-8, case-insensitive paths) | Non-blocking | Scoped I1; `PathKey` normalization (§5.2, §5.3) |
-| F3 overstated (rebuild preserves those tables); render does more I/O than F2 said | Correction | F2/F3 reworded; P6 starts with a render-side-effect inventory |
+| F3 overstated (rebuild preserves those tables); render does more I/O than F2 said | Correction | F2/F3 reworded; the render side-effect inventory feeds the M0 lints (`disallowed_methods`) |
 | Too many custom infrastructure bets | Suggestion | SQLite instead of a custom log; simulation starts with hand-written scenarios; D6 counterpoint recorded |
+
+Revision 3 records the CEO decisions in §14. D1 (rewrite instead of strangler), D5 (ship BQL as optional syntax), and D7 (rewrite all IDs to 7 chars) differed from the recommendations, so §0, §9, §10, §11, §12, ADR-10, and ADR-12 were revised to match.
