@@ -41,7 +41,7 @@ additional standing agents.
 | --- | --- | --- | --- |
 | M0-01 | Publish rewrite-branch CI groundwork / coding agent | None | Implemented in this slice; verify first push below |
 | M0-02 | Establish crate boundaries and lint policy / architect + coding agent | M0-01 | Implemented; see [M0_CRATE_BOUNDARIES.md](M0_CRATE_BOUNDARIES.md) |
-| M0-03 | Add typed coordinates and injected ports / architect + coding agent | M0-02 | Pending |
+| M0-03 | Add typed coordinates and injected ports / architect + coding agent | M0-02 | Implemented; see [M0_TYPED_PORTS.md](M0_TYPED_PORTS.md) |
 | M0-04 | Add invariant-checker framework and coverage map / coding agent + docs steward | M0-03 | Pending |
 | M0-05 | Inventory and triage the behavioral oracle / PM + tester | None | Pending |
 | M0-06 | Add minimal deterministic simulation and replay / tester + coding agent | M0-03, M0-04 | Pending |
@@ -97,6 +97,12 @@ injection contracts. Keep store protocols and text semantics for later milestone
 Acceptance: compile-fail checks reject mixed units and unrestricted construction;
 port fakes can return explicit errors and supply deterministic time and randomness
 without accessing production I/O.
+
+The coordinate ownership and port error/ownership contracts are recorded in
+[M0_TYPED_PORTS.md](M0_TYPED_PORTS.md). Opaque units live in `bloom-text` or
+`bloom-kernel` according to conversion authority; the port traits are in the
+kernel boundary and are exercised only by deterministic test fakes in this
+slice.
 
 ### M0-04 - Invariant framework
 
