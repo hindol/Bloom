@@ -2,7 +2,7 @@
 
 > Source of truth: [FIRST_PRINCIPLES_REDESIGN.md](FIRST_PRINCIPLES_REDESIGN.md),
 > especially sections 7, 8, 11, and 14.
-> Status: task breakdown and CI groundwork implemented; remaining M0 tasks pending.
+> Status: M0-01 through M0-04 implemented; remaining M0 tasks pending.
 
 ## Scope and branch contract
 
@@ -10,10 +10,9 @@ This is the actionable backlog for the accepted M0 milestone, not another design
 proposal. It preserves the accepted laws, CEO decisions, milestone ordering, and
 exit criteria. Follow [AGENT_WORKFLOW.md](../AGENT_WORKFLOW.md) for role ownership.
 
-The current slice delivers only this backlog and rewrite-branch CI targeting.
-It does **not** create crates, unit types, ports, simulators, checkers, adapters,
-replay/watchdog/reference/fault infrastructure, or benchmark harnesses.
-Those are separate M0 implementation tasks below. M1-M7 work is out of scope.
+This file is the actionable M0 plan and status record. Each task below is a
+bounded implementation slice; M1-M7 work remains out of scope until the M0 exit
+criteria are met.
 
 The published long-lived branch is `v2`. The app-managed local work branch may
 have a prefix (this slice uses `hindol-v2`); publish the isolated groundwork
@@ -42,7 +41,7 @@ additional standing agents.
 | M0-01 | Publish rewrite-branch CI groundwork / coding agent | None | Implemented in this slice; verify first push below |
 | M0-02 | Establish crate boundaries and lint policy / architect + coding agent | M0-01 | Implemented; see [M0_CRATE_BOUNDARIES.md](M0_CRATE_BOUNDARIES.md) |
 | M0-03 | Add typed coordinates and injected ports / architect + coding agent | M0-02 | Implemented; see [M0_TYPED_PORTS.md](M0_TYPED_PORTS.md) |
-| M0-04 | Add invariant-checker framework and coverage map / coding agent + docs steward | M0-03 | Pending |
+| M0-04 | Add invariant-checker framework and coverage map / coding agent + docs steward | M0-03 | Implemented; see [M0_INVARIANT_FRAMEWORK.md](M0_INVARIANT_FRAMEWORK.md) |
 | M0-05 | Inventory and triage the behavioral oracle / PM + tester | None | Pending |
 | M0-06 | Add minimal deterministic simulation and replay / tester + coding agent | M0-03, M0-04 | Pending |
 | M0-07 | Add SimInput-compatible e2e adapter / tester + coding agent | M0-05, M0-06 | Pending |
