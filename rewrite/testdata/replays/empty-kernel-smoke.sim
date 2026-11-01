@@ -1,0 +1,20 @@
+BLOOM-SIM-REPLAY 1
+seed 000000000000002a
+clock 0
+file 6e6f7465732f612e6d64 696e697469616c
+step read 6e6f7465732f612e6d64
+step fail-fs-read
+step read 6e6f7465732f612e6d64
+step fail-fs-write
+step write 6e6f7465732f612e6d64 6578706563746564
+step write 6e6f7465732f612e6d64 75706461746564
+step queue-watch changed 6e6f7465732f612e6d64
+step queue-watch created 6e6f7465732f622e6d64
+step queue-watch changed 6e6f7465732f612e6d64
+step fail-watcher
+step poll-watch
+step poll-watch
+step poll-watch
+step poll-watch
+step advance 5
+step random 8

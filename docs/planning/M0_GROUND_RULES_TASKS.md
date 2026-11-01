@@ -43,7 +43,7 @@ additional standing agents.
 | M0-03 | Add typed coordinates and injected ports / architect + coding agent | M0-02 | Implemented; see [M0_TYPED_PORTS.md](M0_TYPED_PORTS.md) |
 | M0-04 | Add invariant-checker framework and coverage map / coding agent + docs steward | M0-03 | Implemented; see [M0_INVARIANT_FRAMEWORK.md](M0_INVARIANT_FRAMEWORK.md) |
 | M0-05 | Inventory and triage the behavioral oracle / PM + tester | None | Implemented; see [M0_ORACLE_INVENTORY.md](M0_ORACLE_INVENTORY.md) |
-| M0-06 | Add minimal deterministic simulation and replay / tester + coding agent | M0-03, M0-04 | Pending |
+| M0-06 | Add minimal deterministic simulation and replay / tester + coding agent | M0-03, M0-04 | Implemented; see [M0_SIMULATION_REPLAY.md](M0_SIMULATION_REPLAY.md) |
 | M0-07 | Add SimInput-compatible e2e adapter / tester + coding agent | M0-05, M0-06 | Pending |
 | M0-08 | Add external progress watchdog / architect + tester | M0-06 | Pending |
 | M0-09 | Add independent reference-model harness / architect + tester | M0-06 | Pending |
@@ -147,6 +147,16 @@ Acceptance: identical fixture plus seed/log replays identical outcomes, includin
 injected filesystem errors and duplicate/reordered notifications. Replay uses no
 real vault. Synthetic exact replay and content-free production diagnostics are
 clearly distinct; sensitive capture is local and opt-in only.
+
+The constraints and failure semantics are recorded in
+[M0_SIMULATION_REPLAY.md](M0_SIMULATION_REPLAY.md). The feature-gated
+`bloom-kernel::simulation` module provides the in-memory ports, strict versioned
+codec, stable failure signatures, and
+[`empty-kernel-smoke.sim`](../../rewrite/testdata/replays/empty-kernel-smoke.sim).
+The replay and port tests verify deterministic outcomes, explicit failures,
+watcher ordering/duplicates, and malformed or unsupported input. No product
+transition or real-vault persistence is exercised. Rewrite CI checks nested
+workspace formatting and builds the opt-in simulation feature.
 
 ### M0-07 - E2e compatibility adapter
 
