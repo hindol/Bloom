@@ -11,6 +11,7 @@ pub enum SimInputEvent {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UnavailableReason {
     EmptyKernelHasNoProductModel,
+    LayoutNotImplemented,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -191,8 +191,13 @@ pub fn run_watchdog(mut command: Command, limits: WatchdogLimits) -> WatchdogOut
 
 fn finish(terminal: Option<Terminal>, status: ExitStatus, steps: u64) -> WatchdogOutcome {
     if !status.success() {
-        return WatchdogOutcome::TerminalButNonzeroExit {
-            exit_code: status.code(),
+        return match terminal {
+            Some(_) => WatchdogOutcome::TerminalButNonzeroExit {
+                exit_code: status.code(),
+            },
+            None => WatchdogOutcome::ExitedWithoutOutcome {
+                exit_code: status.code(),
+            },
         };
     }
     match terminal {

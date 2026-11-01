@@ -38,6 +38,11 @@ fn watchdog_child() {
         "failure" => emit("BLOOM_WATCHDOG/1 FAILED synthetic-failure"),
         "blocked" => emit("BLOOM_WATCHDOG/1 BLOCKED waiting-for-explicit-input"),
         "exit" => {}
+        "nonzero-exit" => std::process::exit(7),
+        "terminal-nonzero-exit" => {
+            emit("BLOOM_WATCHDOG/1 SUCCEEDED");
+            std::process::exit(7);
+        }
         "malformed" => emit("BLOOM_WATCHDOG/1 PROGRESS queue=x retained=0 due=0"),
         "stall" => {
             emit("BLOOM_WATCHDOG/1 PROGRESS queue=0 retained=0 due=0");
@@ -79,6 +84,14 @@ fn watchdog_observes_terminal_states_and_unreported_exit() {
         run_watchdog(child("exit"), limits()),
         WatchdogOutcome::ExitedWithoutOutcome { exit_code: Some(0) }
     ));
+    assert_eq!(
+        run_watchdog(child("nonzero-exit"), limits()),
+        WatchdogOutcome::ExitedWithoutOutcome { exit_code: Some(7) }
+    );
+    assert_eq!(
+        run_watchdog(child("terminal-nonzero-exit"), limits()),
+        WatchdogOutcome::TerminalButNonzeroExit { exit_code: Some(7) }
+    );
 }
 
 #[test]

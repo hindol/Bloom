@@ -16,6 +16,8 @@ state.
 The M0 empty-kernel driver records input operations in order but does not
 interpret keys, edit a document, access a vault, or fabricate a render frame.
 Its `TestScreen` explicitly reports that product rendering is unavailable.
+Future model-backed drivers may expose buffer text before a renderer exists;
+they must report `LayoutNotImplemented` rather than fabricate a screen.
 Screen and buffer assertions against that driver return an error, never an
 empty/default value that could look like a passing assertion.
 

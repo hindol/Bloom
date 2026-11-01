@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+test-hooks = []
+
 [dependencies]
 bloom-kernel = { path = "../bloom-kernel" }
 bloom-text = { path = "../bloom-text" }

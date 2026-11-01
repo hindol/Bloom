@@ -762,7 +762,9 @@ fn mark_saved(
          ON CONFLICT(page_id, kind) DO UPDATE SET version = excluded.version",
         params![page_id.as_str(), version.0],
     )?;
+    crash_test_hook("before-saved-commit");
     transaction.commit()?;
+    crash_test_hook("after-saved-commit");
     Ok(())
 }
 
@@ -988,14 +990,14 @@ impl From<rusqlite::Error> for StateError {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, all(feature = "test-hooks", debug_assertions)))]
 fn crash_test_hook(point: &str) {
     if std::env::var("BLOOM_STATE_CRASH_AT").as_deref() == Ok(point) {
         std::process::exit(86);
     }
 }
 
-#[cfg(not(test))]
+#[cfg(not(any(test, all(feature = "test-hooks", debug_assertions))))]
 fn crash_test_hook(_point: &str) {}
 
 #[cfg(test)]

@@ -107,7 +107,7 @@ the table shows no dependency.
 | M1-01 | Kernel model with `update`/`settle`/`view`, editor-only focus, and consuming `TimerWheel`; plain rope boundary | M0 | Rewrite hosted gate passed; legacy root Clippy and two baseline e2e failures remain | Deterministic transition tests cover due timers on every event path, timer replacement/cancellation, exactly-one focus owner, and pure repeatable views |
 | M1-02 | Minimal `state.db` schema (`WAL`, `user_version`), version records, group-commit worker and startup recovery | M1-01 | Rewrite hosted gate passed; legacy root Clippy and two baseline e2e failures remain | Fresh and migrated schema tests; commit/ack ordering; crash injection demonstrates I2 and no corrupted database |
 | M1-03 | Minimal Vault Store load and single-page CAS save, with `PageSync` and typed conflict result | M1-02 | Rewrite hosted gate passed; legacy root Clippy and two baseline e2e failures remain | Simulated stale-writer and write-failure tests preserve disk bytes; real filesystem tests verify replace/readback behavior |
-| M1-04 | Synthetic open/edit/save/crash/recover/replay journey with the external watchdog | M1-01, M1-02, M1-03 | Pending | Process-isolated replay checks I2, I5, I9, I10, I11 at every transition and reports blocked/failure distinctly |
+| M1-04 | Synthetic open/edit/save/crash/recover/replay journey with the external watchdog | M1-01, M1-02, M1-03 | Implemented; local workspace tests and strict Clippy passed; hosted gate pending | Crash matrix validates I2; each page observation checks I5, each save checks I9, and every update checks I10/I11; watchdog outcomes remain distinct |
 | M1-05 | GUI adapter paints kernel-provided layout using injected `FontMetrics`; bounded metadata recorder | M1-01, M1-04 | Pending | Headless snapshot and geometry agreement checks; recorder tests prove content exclusion and size bounds |
 | M1-06 | CI, platform filesystem checks, and docs-steward closure | M1-01 through M1-05 | Pending | Rewrite gates pass on the supported OS matrix; M1 acceptance and pending parity/performance scope agree with code |
 
@@ -161,3 +161,34 @@ parity or as a product performance measurement.
   Windows does not claim a POSIX directory `fsync`; filesystems that reject
   the documented replacement operation fail closed. No result claims to
   eliminate the documented compare/read-to-replace race.
+
+### M1-04 crash-recovery journey contract
+
+- The test-only journey uses `SimInput` to open the synthetic page, insert
+  literal text, advance logical time, flush background work, and explicitly
+  save. Its recorded `SimInputEvent` sequence is replayed against a fresh
+  synthetic vault and State database. This does not extend the M0 port replay
+  format or claim GUI/oracle parity.
+- Crash injection is scoped to child processes and explicit test hooks. Cover
+  both sides of the State version transaction, temporary-file sync, durable
+  replacement, readback, and saved-marker transaction. No production
+  diagnostics or user content capture is added.
+- Recovery expectations are boundary-specific: before the version commit,
+  only the previous saved page is promised; after that commit and before
+  replacement, the committed draft must remain a recovery candidate while disk
+  stays unchanged; after replacement but before the saved-marker commit, the
+  exact draft remains recoverable and disk is treated as an observed mismatch,
+  not assumed saved; after the saved-marker commit, disk and State must agree
+  and no recovery candidate remains. Orphan `.bloom-tmp` files are ignored.
+- Every completed input/update checks I10 and I11. Every page observation
+  checks I5. Each save checks I9 by preserving disk bytes whenever the
+  observed base no longer matches. Restart checks I2, including SQLite
+  integrity and untorn page bytes. Conflicts and failures remain explicit;
+  neither is converted into success.
+- The existing external watchdog remains outside each watched child and owns
+  its time, step, queue, retained-document, and due-timer bounds. A deliberate
+  child exit at a crash point is distinguished from timeout, malformed
+  protocol, failure, and blocked outcomes.
+- The test backend is infrastructure only. It must not add persistence,
+  scheduling, filesystem access, or recovery policy to `bloom-kernel`, and it
+  must not add real-vault access, UI behavior, or M2-M7 scope.

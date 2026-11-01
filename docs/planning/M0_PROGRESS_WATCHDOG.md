@@ -14,6 +14,9 @@ observer or rely on its own clock to report a timeout.
 
 The child protocol distinguishes `PROGRESS`, `SUCCEEDED`, `FAILED`, and
 `BLOCKED`; process exit without a terminal message is a failure, not success.
+The watchdog reports a nonzero exit without a terminal message as
+`ExitedWithoutOutcome` with its exit code; `TerminalButNonzeroExit` is reserved
+for a terminal report followed by a nonzero exit.
 Progress reports include observed queue depth, retained-document count, and
 whether an armed timer remains due after the reported update. The observer
 counts reports itself rather than trusting a child-supplied step counter or
