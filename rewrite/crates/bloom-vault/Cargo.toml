@@ -8,3 +8,8 @@ license.workspace = true
 bloom-kernel = { path = "../bloom-kernel" }
 bloom-state = { path = "../bloom-state" }
 bloom-text = { path = "../bloom-text" }
+blake3 = "1"
+tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }

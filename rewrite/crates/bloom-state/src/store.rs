@@ -375,6 +375,32 @@ impl StateStore {
         response.recv().map_err(|_| StateError::WorkerStopped)?
     }
 
+    /// Returns an exact committed snapshot, first committing any queued versions.
+    pub fn get_version(
+        &self,
+        page_id: PageId,
+        version: Version,
+    ) -> Result<Option<VersionRecord>, StateError> {
+        let (reply, response) = mpsc::channel();
+        self.sender()?
+            .send(Command::GetVersion {
+                page_id,
+                version,
+                reply,
+            })
+            .map_err(|_| StateError::WorkerStopped)?;
+        response.recv().map_err(|_| StateError::WorkerStopped)?
+    }
+
+    /// Returns the durable saved snapshot after committing queued versions.
+    pub fn saved_record(&self, page_id: PageId) -> Result<Option<VersionRecord>, StateError> {
+        let (reply, response) = mpsc::channel();
+        self.sender()?
+            .send(Command::SavedRecord { page_id, reply })
+            .map_err(|_| StateError::WorkerStopped)?;
+        response.recv().map_err(|_| StateError::WorkerStopped)?
+    }
+
     /// Returns the newest version newer than the saved marker, if any.
     pub fn recovery_candidate(&self, page_id: PageId) -> Result<Option<VersionRecord>, StateError> {
         let (reply, response) = mpsc::channel();
@@ -496,6 +522,15 @@ enum Command {
         version: Version,
         reply: mpsc::Sender<Result<(), StateError>>,
     },
+    GetVersion {
+        page_id: PageId,
+        version: Version,
+        reply: mpsc::Sender<Result<Option<VersionRecord>, StateError>>,
+    },
+    SavedRecord {
+        page_id: PageId,
+        reply: mpsc::Sender<Result<Option<VersionRecord>, StateError>>,
+    },
     RecoveryCandidate {
         page_id: PageId,
         reply: mpsc::Sender<Result<Option<VersionRecord>, StateError>>,
@@ -592,6 +627,32 @@ fn run_worker(
                     return Err(error);
                 }
                 let result = mark_saved(connection, &page_id, version);
+                let _ = reply.send(result);
+            }
+            Command::GetVersion {
+                page_id,
+                version,
+                reply,
+            } => {
+                let flush_result = commit_pending(connection, &mut pending);
+                first_pending_at = None;
+                last_pending_at = None;
+                if let Err(error) = flush_result {
+                    let _ = reply.send(Err(error.clone()));
+                    return Err(error);
+                }
+                let result = get_version(connection, &page_id, version);
+                let _ = reply.send(result);
+            }
+            Command::SavedRecord { page_id, reply } => {
+                let flush_result = commit_pending(connection, &mut pending);
+                first_pending_at = None;
+                last_pending_at = None;
+                if let Err(error) = flush_result {
+                    let _ = reply.send(Err(error.clone()));
+                    return Err(error);
+                }
+                let result = saved_record(connection, &page_id);
                 let _ = reply.send(result);
             }
             Command::RecoveryCandidate { page_id, reply } => {
@@ -730,6 +791,42 @@ fn recovery_candidate(
         Ok(Some(latest))
     } else {
         Ok(None)
+    }
+}
+
+fn get_version(
+    connection: &Connection,
+    page_id: &PageId,
+    version: Version,
+) -> Result<Option<VersionRecord>, StateError> {
+    read_version(
+        connection,
+        "SELECT page_id, version, parent_version, timestamp_ms, transaction_id,
+                origin, content, cursor_anchor
+         FROM versions WHERE page_id = ?1 AND version = ?2",
+        params![page_id.as_str(), version.0],
+    )
+}
+
+fn saved_version(connection: &Connection, page_id: &PageId) -> Result<Option<Version>, StateError> {
+    connection
+        .query_row(
+            "SELECT version FROM tags WHERE page_id = ?1 AND kind = 'saved'",
+            [page_id.as_str()],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?
+        .map(|version| Version::new(version as u64))
+        .transpose()
+}
+
+fn saved_record(
+    connection: &Connection,
+    page_id: &PageId,
+) -> Result<Option<VersionRecord>, StateError> {
+    match saved_version(connection, page_id)? {
+        Some(version) => get_version(connection, page_id, version),
+        None => Ok(None),
     }
 }
 
@@ -1069,6 +1166,39 @@ mod tests {
                 .recovery_candidate(PageId::new("page-a").unwrap())
                 .unwrap(),
             None
+        );
+        store.shutdown().unwrap();
+    }
+
+    #[test]
+    fn exact_version_read_commits_pending_snapshot_and_reports_missing_version() {
+        let db = TempDb::new();
+        let store = open_test_store(db.path());
+        let expected = record(1, None, "committed before read");
+        store.try_submit(expected.clone()).unwrap();
+
+        assert_eq!(
+            store
+                .get_version(expected.page_id().clone(), expected.version())
+                .unwrap(),
+            Some(expected.clone())
+        );
+        assert_eq!(
+            store
+                .get_version(expected.page_id().clone(), Version::new(2).unwrap())
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            store.saved_record(expected.page_id().clone()).unwrap(),
+            None
+        );
+        store
+            .mark_saved(expected.page_id().clone(), expected.version())
+            .unwrap();
+        assert_eq!(
+            store.saved_record(expected.page_id().clone()).unwrap(),
+            Some(expected.clone())
         );
         store.shutdown().unwrap();
     }
