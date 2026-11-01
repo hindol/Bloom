@@ -35,12 +35,9 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo check --workspace --all-targets
       - run: cargo check -p bloom-kernel --features simulation
-      - run: cargo test -p bloom-kernel --features simulation --test reference_model
-      - run: cargo test -p bloom-kernel --features simulation --test detector_faults
-      - run: cargo test -p bloom-kernel --features simulation --test performance_gate
       - run: cargo bench -p bloom-kernel --features simulation --bench simulation_smoke -- --sample-size 10 --warm-up-time 0.1 --measurement-time 0.2 --noplot
-      - run: cargo test --workspace
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace --all-features
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   clippy:
     name: Clippy

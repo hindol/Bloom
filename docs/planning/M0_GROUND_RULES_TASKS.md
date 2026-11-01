@@ -2,7 +2,7 @@
 
 > Source of truth: [FIRST_PRINCIPLES_REDESIGN.md](FIRST_PRINCIPLES_REDESIGN.md),
 > especially sections 7, 8, 11, and 14.
-> Status: M0-01 through M0-11 implemented; remaining M0 task pending.
+> Status: M0-01 through M0-12 implemented; final hosted gate run pending.
 
 ## Scope and branch contract
 
@@ -49,7 +49,7 @@ additional standing agents.
 | M0-09 | Add independent reference-model harness / architect + tester | M0-06 | Implemented; see [M0_REFERENCE_MODELS.md](M0_REFERENCE_MODELS.md) |
 | M0-10 | Add curated detector-fault corpus / tester + coding agent | M0-04, M0-08, M0-09 | Implemented; see [M0_DETECTOR_FAULTS.md](M0_DETECTOR_FAULTS.md) |
 | M0-11 | Add performance harness and budget gates / tester + coding agent | M0-06, M0-08 | Implemented; see [M0_PERFORMANCE_HARNESS.md](M0_PERFORMANCE_HARNESS.md) |
-| M0-12 | Wire executable M0 CI gates and close milestone / tester + docs steward | M0-07, M0-10, M0-11 | Pending |
+| M0-12 | Wire executable M0 CI gates and close milestone / tester + docs steward | M0-07, M0-10, M0-11 | Implemented; see M0-12 below |
 
 ## Bounded handoffs and acceptance checks
 
@@ -267,3 +267,11 @@ triage is complete, and no missing detector or budget is reported as passing.
 Only then mark M0 complete and proceed to M1's walking skeleton. Keep the State
 store before the Vault Store and the ADR-3 acceptance spike at the start of M2;
 this backlog does not reorder those decisions.
+
+The `Rewrite foundation` CI job now enables the simulation feature for all
+workspace tests and Clippy targets, runs the independent-reference and detector
+fault checks, and executes the Criterion smoke benchmark with fixed sampling
+parameters. The empty-kernel adapter, invariant coverage, watchdog, and replay
+smoke also run through the same workspace test suite. Product parity scenarios
+and product performance budgets remain explicitly pending; M0 closure does not
+claim root-workspace legacy Test/Clippy failures are fixed.
