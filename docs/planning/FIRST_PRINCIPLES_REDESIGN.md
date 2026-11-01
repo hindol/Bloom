@@ -1,6 +1,6 @@
 # Bloom from First Principles — Redesign Proposal
 
-> **Status:** Architect proposal, revision 4. Incorporates an independent design review (§15), records the CEO decisions (§14), and adds a self-testing feedback loop (§8). No code has changed.
+> **Status:** Architect proposal, revision 4. Incorporates an independent design review (§15), records the CEO decisions (§14), and adds a self-testing feedback loop (§8). The redesign implementation has not started; tactical F1/F13 fixes are tracked separately.
 > **Scope:** Whole system: persistence, identity, text model, history, input/focus, geometry, index, MCP.
 > **Relationship to existing docs:** This proposal *builds on* `ARCHITECTURE.md`, `GOALS.md`, `BLOCK_IDENTITY.md`, `FILE_FORMAT.md`, and `planning/AUTO_MERGE.md`. If its ADRs are accepted, it *supersedes* parts of `planning/UNIFIED_DOCUMENT_LAYER*.md`, `planning/HISTORY_PRODUCTION_HARDENING*.md`, and `planning/UNDO_DELTA*.md` (see §11).
 
