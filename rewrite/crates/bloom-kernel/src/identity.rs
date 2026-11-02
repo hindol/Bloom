@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use bloom_text::{BlockIdMarker, Doc, ProjectionError};
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -35,11 +37,36 @@ impl BlockId {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct DetachGeneration(u64);
+
+impl DetachGeneration {
+    pub const INITIAL: Self = Self(0);
+
+    pub fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub fn get(self) -> u64 {
+        self.0
+    }
+
+    fn next(self) -> Option<Self> {
+        self.0.checked_add(1).map(Self)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IdentityState {
     Available,
-    Live(PageId),
-    Detached(PageId),
+    Live {
+        page: PageId,
+        generation: DetachGeneration,
+    },
+    Detached {
+        page: PageId,
+        generation: DetachGeneration,
+    },
     Retired,
 }
 
@@ -48,6 +75,7 @@ pub enum RegistryChange {
     AssertLive {
         id: BlockId,
         page: PageId,
+        generation: DetachGeneration,
     },
     Reserve {
         id: BlockId,
@@ -56,24 +84,30 @@ pub enum RegistryChange {
     Detach {
         id: BlockId,
         page: PageId,
+        previous_generation: DetachGeneration,
     },
     MoveDetached {
         id: BlockId,
         source_page: PageId,
         target_page: PageId,
+        generation: DetachGeneration,
     },
     RetireDetached {
         id: BlockId,
         page: PageId,
+        generation: DetachGeneration,
     },
     Retire {
         id: BlockId,
         page: PageId,
+        generation: DetachGeneration,
     },
 }
 
 /// `apply` must atomically validate each change's preconditions and commit the
-/// complete change set or leave the registry unchanged.
+/// complete change set or leave the registry unchanged. Reservations start at
+/// generation zero; detachment increments the expected generation without
+/// wrapping, and moves retain it.
 pub trait BlockIdRegistry {
     type Error;
 
@@ -84,7 +118,7 @@ pub trait BlockIdRegistry {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RegisterOperation {
     Yank,
-    Delete,
+    Delete { generation: DetachGeneration },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -92,13 +126,69 @@ pub struct RegisterIdentity {
     pub id: BlockId,
     pub source_page: PageId,
     pub operation: RegisterOperation,
-    pub live_at_capture: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// A captured register cannot be cloned outside its owning register bank.
+///
+/// ```compile_fail,E0599
+/// use bloom_kernel::identity::BlockRegister;
+/// fn untracked_alias(register: BlockRegister) {
+///     let _other = register.clone();
+/// }
+/// ```
+#[must_use = "move registers require explicit ownership and cleanup"]
+#[derive(Debug, Eq, PartialEq)]
 pub struct BlockRegister {
-    pub visible_text: String,
-    pub identity: Option<RegisterIdentity>,
+    visible_text: String,
+    identity: Option<RegisterIdentity>,
+}
+
+impl BlockRegister {
+    pub fn yank(visible_text: String, id: BlockId, source_page: PageId) -> Self {
+        Self {
+            visible_text,
+            identity: Some(RegisterIdentity {
+                id,
+                source_page,
+                operation: RegisterOperation::Yank,
+            }),
+        }
+    }
+
+    pub fn without_identity(visible_text: String) -> Self {
+        Self {
+            visible_text,
+            identity: None,
+        }
+    }
+
+    pub fn visible_text(&self) -> &str {
+        &self.visible_text
+    }
+
+    pub fn identity(&self) -> Option<&RegisterIdentity> {
+        self.identity.as_ref()
+    }
+
+    pub fn discard<R: BlockIdRegistry>(
+        self,
+        registry: &mut R,
+    ) -> Result<(), RegisterDiscardFailure<R::Error>> {
+        if let Err(error) = discard_identity(&self, registry) {
+            return Err(RegisterDiscardFailure {
+                error,
+                register: self,
+            });
+        }
+        Ok(())
+    }
+
+    fn tracked_alias(&self) -> Self {
+        Self {
+            visible_text: self.visible_text.clone(),
+            identity: self.identity.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -141,6 +231,8 @@ pub enum IdentityPlanError<E> {
     InvalidFreshId,
     FreshIdUnavailable(BlockId),
     DeleteSourceNotLive(BlockId),
+    DeleteIdentityMissing(BlockId),
+    DetachGenerationExhausted(BlockId),
     JoinedIdsMustDiffer,
     JoinedIdNotLive(BlockId),
     SplitSourceNotLive(BlockId),
@@ -166,6 +258,90 @@ pub enum IdentityTextPlanError {
 pub enum IdentityEditPlanError<E> {
     Identity(IdentityPlanError<E>),
     Text(IdentityTextPlanError),
+}
+
+#[derive(Debug, Default)]
+pub struct RegisterBank {
+    slots: BTreeMap<char, BlockRegister>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RegisterSlotError {
+    Empty(char),
+    Occupied(char),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RegisterCleanupError<E> {
+    Identity(IdentityPlanError<E>),
+    Registry(E),
+}
+
+#[derive(Debug)]
+pub struct RegisterDiscardFailure<E> {
+    pub error: RegisterCleanupError<E>,
+    pub register: BlockRegister,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RegisterClearError<E> {
+    Empty(char),
+    Identity(IdentityPlanError<E>),
+    Registry(E),
+}
+
+impl RegisterBank {
+    pub fn get(&self, slot: char) -> Option<&BlockRegister> {
+        self.slots.get(&slot)
+    }
+
+    pub fn insert(&mut self, slot: char, register: BlockRegister) -> Result<(), BlockRegister> {
+        match self.slots.entry(slot) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(register);
+                Ok(())
+            }
+            std::collections::btree_map::Entry::Occupied(_) => Err(register),
+        }
+    }
+
+    pub fn alias(&mut self, source: char, target: char) -> Result<(), RegisterSlotError> {
+        let register = self
+            .slots
+            .get(&source)
+            .ok_or(RegisterSlotError::Empty(source))?;
+        if self.slots.contains_key(&target) {
+            return Err(RegisterSlotError::Occupied(target));
+        }
+        let alias = register.tracked_alias();
+        self.slots.insert(target, alias);
+        Ok(())
+    }
+
+    pub fn clear<R: BlockIdRegistry>(
+        &mut self,
+        slot: char,
+        registry: &mut R,
+    ) -> Result<(), RegisterClearError<R::Error>> {
+        let register = self
+            .slots
+            .get(&slot)
+            .ok_or(RegisterClearError::Empty(slot))?;
+        let has_other_owner = register.identity.as_ref().is_some_and(|identity| {
+            matches!(identity.operation, RegisterOperation::Delete { .. })
+                && self.slots.iter().any(|(other_slot, other)| {
+                    *other_slot != slot && other.identity.as_ref() == Some(identity)
+                })
+        });
+        if !has_other_owner {
+            discard_identity(register, registry).map_err(|error| match error {
+                RegisterCleanupError::Identity(error) => RegisterClearError::Identity(error),
+                RegisterCleanupError::Registry(error) => RegisterClearError::Registry(error),
+            })?;
+        }
+        self.slots.remove(&slot);
+        Ok(())
+    }
 }
 
 /// A complete in-memory edit bound to the text and registry it was planned for.
@@ -198,16 +374,32 @@ pub struct CanonicalBlockDeletePlan<'a, R: BlockIdRegistry> {
     register: BlockRegister,
 }
 
-pub fn plan_delete<R: BlockIdRegistry>(
+fn live_generation_on_page<R: BlockIdRegistry>(
+    registry: &R,
+    page: &PageId,
+    id: &BlockId,
+) -> Result<Option<DetachGeneration>, R::Error> {
+    Ok(match registry.state(id)? {
+        IdentityState::Live {
+            page: live_page,
+            generation,
+        } if live_page == *page => Some(generation),
+        _ => None,
+    })
+}
+
+fn plan_delete<R: BlockIdRegistry>(
     page: &PageId,
     id: &BlockId,
     visible_text: String,
     registry: &R,
 ) -> Result<(BlockRegister, IdentityPlan), IdentityPlanError<R::Error>> {
-    if registry.state(id).map_err(IdentityPlanError::Registry)? != IdentityState::Live(page.clone())
-    {
-        return Err(IdentityPlanError::DeleteSourceNotLive(id.clone()));
-    }
+    let previous_generation = live_generation_on_page(registry, page, id)
+        .map_err(IdentityPlanError::Registry)?
+        .ok_or_else(|| IdentityPlanError::DeleteSourceNotLive(id.clone()))?;
+    let generation = previous_generation
+        .next()
+        .ok_or_else(|| IdentityPlanError::DetachGenerationExhausted(id.clone()))?;
 
     Ok((
         BlockRegister {
@@ -215,8 +407,7 @@ pub fn plan_delete<R: BlockIdRegistry>(
             identity: Some(RegisterIdentity {
                 id: id.clone(),
                 source_page: page.clone(),
-                operation: RegisterOperation::Delete,
-                live_at_capture: true,
+                operation: RegisterOperation::Delete { generation },
             }),
         },
         IdentityPlan {
@@ -226,6 +417,7 @@ pub fn plan_delete<R: BlockIdRegistry>(
             changes: vec![RegistryChange::Detach {
                 id: id.clone(),
                 page: page.clone(),
+                previous_generation,
             }],
         },
     ))
@@ -250,41 +442,57 @@ pub fn plan_paste<R: BlockIdRegistry>(
     let source_state = registry
         .state(&identity.id)
         .map_err(IdentityPlanError::Registry)?;
-    let (assigned_id, reused_source_id) = match source_state {
-        IdentityState::Detached(source_page)
-            if identity.operation == RegisterOperation::Delete
-                && identity.source_page == source_page =>
-        {
-            (identity.id.clone(), true)
-        }
-        IdentityState::Available
-        | IdentityState::Live(_)
-        | IdentityState::Detached(_)
-        | IdentityState::Retired => {
-            let fresh_id = fresh_id.ok_or(IdentityPlanError::InvalidFreshId)?;
-            if fresh_id == identity.id
-                || registry
-                    .state(&fresh_id)
-                    .map_err(IdentityPlanError::Registry)?
-                    != IdentityState::Available
-            {
-                return Err(IdentityPlanError::FreshIdUnavailable(fresh_id));
+    if source_state == IdentityState::Available
+        && matches!(identity.operation, RegisterOperation::Delete { .. })
+    {
+        return Err(IdentityPlanError::DeleteIdentityMissing(
+            identity.id.clone(),
+        ));
+    }
+    let owned_generation = match (source_state, identity.operation) {
+        (
+            IdentityState::Detached {
+                page: source_page,
+                generation,
+            },
+            RegisterOperation::Delete {
+                generation: captured_generation,
+            },
+        ) if generation == captured_generation => {
+            if source_page != identity.source_page {
+                return Err(IdentityPlanError::DetachedRegisterPageMismatch(
+                    identity.id.clone(),
+                ));
             }
-            (fresh_id, false)
+            Some(generation)
         }
+        _ => None,
     };
 
-    let change = if reused_source_id {
-        RegistryChange::MoveDetached {
+    let (assigned_id, reused_source_id, change) = if let Some(generation) = owned_generation {
+        let assigned_id = identity.id.clone();
+        let change = RegistryChange::MoveDetached {
             id: assigned_id.clone(),
             source_page: identity.source_page.clone(),
             target_page: target_page.clone(),
-        }
+            generation,
+        };
+        (assigned_id, true, change)
     } else {
-        RegistryChange::Reserve {
-            id: assigned_id.clone(),
-            page: target_page.clone(),
+        let fresh_id = fresh_id.ok_or(IdentityPlanError::InvalidFreshId)?;
+        if fresh_id == identity.id
+            || registry
+                .state(&fresh_id)
+                .map_err(IdentityPlanError::Registry)?
+                != IdentityState::Available
+        {
+            return Err(IdentityPlanError::FreshIdUnavailable(fresh_id));
         }
+        let change = RegistryChange::Reserve {
+            id: fresh_id.clone(),
+            page: target_page.clone(),
+        };
+        (fresh_id, false, change)
     };
 
     Ok(IdentityPlan {
@@ -296,7 +504,7 @@ pub fn plan_paste<R: BlockIdRegistry>(
     })
 }
 
-pub fn plan_discard_register<R: BlockIdRegistry>(
+fn plan_discard_register<R: BlockIdRegistry>(
     register: &BlockRegister,
     registry: &R,
 ) -> Result<IdentityPlan, IdentityPlanError<R::Error>> {
@@ -306,38 +514,61 @@ pub fn plan_discard_register<R: BlockIdRegistry>(
             changes: Vec::new(),
         });
     };
-    if identity.operation != RegisterOperation::Delete {
+    let RegisterOperation::Delete {
+        generation: captured_generation,
+    } = identity.operation
+    else {
         return Ok(IdentityPlan {
             decision: IdentityDecision::DiscardRegister { retired_id: None },
             changes: Vec::new(),
         });
-    }
+    };
 
-    match registry
+    let change = match registry
         .state(&identity.id)
         .map_err(IdentityPlanError::Registry)?
     {
-        IdentityState::Detached(source_page) if source_page == identity.source_page => {
-            Ok(IdentityPlan {
-                decision: IdentityDecision::DiscardRegister {
-                    retired_id: Some(identity.id.clone()),
-                },
-                changes: vec![RegistryChange::RetireDetached {
-                    id: identity.id.clone(),
-                    page: identity.source_page.clone(),
-                }],
+        IdentityState::Detached {
+            page: source_page,
+            generation,
+        } if generation == captured_generation => {
+            if source_page != identity.source_page {
+                return Err(IdentityPlanError::DetachedRegisterPageMismatch(
+                    identity.id.clone(),
+                ));
+            }
+            Some(RegistryChange::RetireDetached {
+                id: identity.id.clone(),
+                page: source_page,
+                generation,
             })
         }
-        IdentityState::Detached(_) => Err(IdentityPlanError::DetachedRegisterPageMismatch(
-            identity.id.clone(),
-        )),
-        IdentityState::Available | IdentityState::Live(_) | IdentityState::Retired => {
-            Ok(IdentityPlan {
-                decision: IdentityDecision::DiscardRegister { retired_id: None },
-                changes: Vec::new(),
-            })
+        IdentityState::Available => {
+            return Err(IdentityPlanError::DeleteIdentityMissing(
+                identity.id.clone(),
+            ));
         }
+        _ => None,
+    };
+    Ok(IdentityPlan {
+        decision: IdentityDecision::DiscardRegister {
+            retired_id: change.as_ref().map(|_| identity.id.clone()),
+        },
+        changes: change.into_iter().collect(),
+    })
+}
+
+fn discard_identity<R: BlockIdRegistry>(
+    register: &BlockRegister,
+    registry: &mut R,
+) -> Result<(), RegisterCleanupError<R::Error>> {
+    let plan = plan_discard_register(register, registry).map_err(RegisterCleanupError::Identity)?;
+    if !plan.changes.is_empty() {
+        registry
+            .apply(&plan.changes)
+            .map_err(RegisterCleanupError::Registry)?;
     }
+    Ok(())
 }
 
 pub fn plan_join<R: BlockIdRegistry>(
@@ -349,13 +580,12 @@ pub fn plan_join<R: BlockIdRegistry>(
     if retained_id == retired_id {
         return Err(IdentityPlanError::JoinedIdsMustDiffer);
     }
-    for id in [retained_id, retired_id] {
-        if registry.state(id).map_err(IdentityPlanError::Registry)?
-            != IdentityState::Live(page.clone())
-        {
-            return Err(IdentityPlanError::JoinedIdNotLive(id.clone()));
-        }
-    }
+    let retained_generation = live_generation_on_page(registry, page, retained_id)
+        .map_err(IdentityPlanError::Registry)?
+        .ok_or_else(|| IdentityPlanError::JoinedIdNotLive(retained_id.clone()))?;
+    let retired_generation = live_generation_on_page(registry, page, retired_id)
+        .map_err(IdentityPlanError::Registry)?
+        .ok_or_else(|| IdentityPlanError::JoinedIdNotLive(retired_id.clone()))?;
 
     Ok(IdentityPlan {
         decision: IdentityDecision::Join {
@@ -366,10 +596,12 @@ pub fn plan_join<R: BlockIdRegistry>(
             RegistryChange::AssertLive {
                 id: retained_id.clone(),
                 page: page.clone(),
+                generation: retained_generation,
             },
             RegistryChange::Retire {
                 id: retired_id.clone(),
                 page: page.clone(),
+                generation: retired_generation,
             },
         ],
     })
@@ -381,13 +613,9 @@ pub fn plan_split<R: BlockIdRegistry>(
     right_id: BlockId,
     registry: &R,
 ) -> Result<IdentityPlan, IdentityPlanError<R::Error>> {
-    if registry
-        .state(left_id)
+    let generation = live_generation_on_page(registry, page, left_id)
         .map_err(IdentityPlanError::Registry)?
-        != IdentityState::Live(page.clone())
-    {
-        return Err(IdentityPlanError::SplitSourceNotLive(left_id.clone()));
-    }
+        .ok_or_else(|| IdentityPlanError::SplitSourceNotLive(left_id.clone()))?;
     if registry
         .state(&right_id)
         .map_err(IdentityPlanError::Registry)?
@@ -405,6 +633,7 @@ pub fn plan_split<R: BlockIdRegistry>(
             RegistryChange::AssertLive {
                 id: left_id.clone(),
                 page: page.clone(),
+                generation,
             },
             RegistryChange::Reserve {
                 id: right_id,
@@ -704,9 +933,20 @@ pub fn plan_paste_block_text(
                 ..
             },
             [RegistryChange::MoveDetached {
-                id, source_page, ..
+                id,
+                source_page,
+                generation,
+                ..
             }],
-        ) => id == assigned_id && source_page == &identity.source_page && id == &identity.id,
+        ) => {
+            id == assigned_id
+                && source_page == &identity.source_page
+                && id == &identity.id
+                && identity.operation
+                    == (RegisterOperation::Delete {
+                        generation: *generation,
+                    })
+        }
         (
             IdentityDecision::Paste {
                 reused_source_id: false,
@@ -986,8 +1226,9 @@ mod tests {
         commit_planned_identity_edit, plan_delete, plan_delete_block_text, plan_delete_edit,
         plan_discard_register, plan_join, plan_join_edit, plan_join_text, plan_paste,
         plan_paste_edit, plan_split, plan_split_edit, plan_split_text, BlockId, BlockIdRegistry,
-        BlockRegister, IdentityDecision, IdentityEditPlanError, IdentityPlanError, IdentityState,
-        PageId, RegisterIdentity, RegisterOperation, RegistryChange,
+        BlockRegister, DetachGeneration, IdentityDecision, IdentityEditPlanError,
+        IdentityPlanError, IdentityState, PageId, RegisterBank, RegisterCleanupError,
+        RegisterClearError, RegisterIdentity, RegisterOperation, RegisterSlotError, RegistryChange,
     };
     use bloom_text::Doc;
 
@@ -996,15 +1237,15 @@ mod tests {
 
     #[derive(Clone, Debug, Default, Eq, PartialEq)]
     struct FakeRegistry {
-        live: BTreeMap<BlockId, PageId>,
-        detached: BTreeMap<BlockId, PageId>,
+        live: BTreeMap<BlockId, (PageId, DetachGeneration)>,
+        detached: BTreeMap<BlockId, (PageId, DetachGeneration)>,
         retired: BTreeSet<BlockId>,
         fail_next_apply: bool,
     }
 
     impl FakeRegistry {
         fn seed(&mut self, id: BlockId, page: PageId) {
-            self.live.insert(id, page);
+            self.live.insert(id, (page, DetachGeneration::INITIAL));
         }
     }
 
@@ -1012,10 +1253,16 @@ mod tests {
         type Error = &'static str;
 
         fn state(&self, id: &BlockId) -> Result<IdentityState, Self::Error> {
-            Ok(if let Some(page) = self.live.get(id) {
-                IdentityState::Live(page.clone())
-            } else if let Some(page) = self.detached.get(id) {
-                IdentityState::Detached(page.clone())
+            Ok(if let Some((page, generation)) = self.live.get(id) {
+                IdentityState::Live {
+                    page: page.clone(),
+                    generation: *generation,
+                }
+            } else if let Some((page, generation)) = self.detached.get(id) {
+                IdentityState::Detached {
+                    page: page.clone(),
+                    generation: *generation,
+                }
             } else if self.retired.contains(id) {
                 IdentityState::Retired
             } else {
@@ -1031,45 +1278,100 @@ mod tests {
             let mut staged = self.clone();
             for change in changes {
                 match change {
-                    RegistryChange::AssertLive { id, page } => {
-                        if staged.state(id)? != IdentityState::Live(page.clone()) {
-                            return Err("identity is not live on page");
+                    RegistryChange::AssertLive {
+                        id,
+                        page,
+                        generation,
+                    } => {
+                        if staged.state(id)?
+                            != (IdentityState::Live {
+                                page: page.clone(),
+                                generation: *generation,
+                            })
+                        {
+                            return Err("identity is not live at the expected page and generation");
                         }
                     }
                     RegistryChange::Reserve { id, page } => {
                         if staged.state(id)? != IdentityState::Available {
                             return Err("identity is not available");
                         }
-                        staged.live.insert(id.clone(), page.clone());
+                        staged
+                            .live
+                            .insert(id.clone(), (page.clone(), DetachGeneration::INITIAL));
                     }
-                    RegistryChange::Detach { id, page } => {
-                        if staged.state(id)? != IdentityState::Live(page.clone()) {
-                            return Err("identity is not live on page");
+                    RegistryChange::Detach {
+                        id,
+                        page,
+                        previous_generation,
+                    } => {
+                        if staged.state(id)?
+                            != (IdentityState::Live {
+                                page: page.clone(),
+                                generation: *previous_generation,
+                            })
+                        {
+                            return Err("identity is not live at the expected page and generation");
                         }
+                        let generation = previous_generation
+                            .next()
+                            .ok_or("detach generation exhausted")?;
                         staged.live.remove(id);
-                        staged.detached.insert(id.clone(), page.clone());
+                        staged
+                            .detached
+                            .insert(id.clone(), (page.clone(), generation));
                     }
                     RegistryChange::MoveDetached {
                         id,
                         source_page,
                         target_page,
+                        generation,
                     } => {
-                        if staged.state(id)? != IdentityState::Detached(source_page.clone()) {
-                            return Err("identity is not detached from page");
+                        if staged.state(id)?
+                            != (IdentityState::Detached {
+                                page: source_page.clone(),
+                                generation: *generation,
+                            })
+                        {
+                            return Err(
+                                "identity is not detached at the expected page and generation",
+                            );
                         }
                         staged.detached.remove(id);
-                        staged.live.insert(id.clone(), target_page.clone());
+                        staged
+                            .live
+                            .insert(id.clone(), (target_page.clone(), *generation));
                     }
-                    RegistryChange::RetireDetached { id, page } => {
-                        if staged.state(id)? != IdentityState::Detached(page.clone()) {
-                            return Err("identity is not detached from page");
+                    RegistryChange::RetireDetached {
+                        id,
+                        page,
+                        generation,
+                    } => {
+                        if staged.state(id)?
+                            != (IdentityState::Detached {
+                                page: page.clone(),
+                                generation: *generation,
+                            })
+                        {
+                            return Err(
+                                "identity is not detached at the expected page and generation",
+                            );
                         }
                         staged.detached.remove(id);
                         staged.retired.insert(id.clone());
                     }
-                    RegistryChange::Retire { id, page } => {
-                        if staged.state(id)? != IdentityState::Live(page.clone()) {
-                            return Err("identity is not live on page");
+                    RegistryChange::Retire {
+                        id,
+                        page,
+                        generation,
+                    } => {
+                        if staged.state(id)?
+                            != (IdentityState::Live {
+                                page: page.clone(),
+                                generation: *generation,
+                            })
+                        {
+                            return Err("identity is not live at the expected page and generation");
                         }
                         staged.live.remove(id);
                         staged.retired.insert(id.clone());
@@ -1104,16 +1406,78 @@ mod tests {
         BlockId::new(value).unwrap()
     }
 
-    fn register(value: &str, operation: RegisterOperation, live_at_capture: bool) -> BlockRegister {
+    fn live(page: PageId, generation: u64) -> IdentityState {
+        IdentityState::Live {
+            page,
+            generation: DetachGeneration::new(generation),
+        }
+    }
+
+    fn detached(page: PageId, generation: u64) -> IdentityState {
+        IdentityState::Detached {
+            page,
+            generation: DetachGeneration::new(generation),
+        }
+    }
+
+    fn delete_operation(generation: u64) -> RegisterOperation {
+        RegisterOperation::Delete {
+            generation: DetachGeneration::new(generation),
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum OwnershipModelState {
+        Live(u64),
+        Detached(u64),
+        Retired,
+    }
+
+    fn model_registry_state(state: OwnershipModelState, source_page: &PageId) -> IdentityState {
+        match state {
+            OwnershipModelState::Live(generation) => live(source_page.clone(), generation),
+            OwnershipModelState::Detached(generation) => detached(source_page.clone(), generation),
+            OwnershipModelState::Retired => IdentityState::Retired,
+        }
+    }
+
+    fn model_paste_decision(
+        state: OwnershipModelState,
+        captured_generation: u64,
+        moved_id: &BlockId,
+    ) -> IdentityDecision {
+        let can_move = state == OwnershipModelState::Detached(captured_generation);
+        IdentityDecision::Paste {
+            assigned_id: Some(if can_move {
+                moved_id.clone()
+            } else {
+                id("fresh1")
+            }),
+            reused_source_id: can_move,
+        }
+    }
+
+    fn register(value: &str, operation: RegisterOperation) -> BlockRegister {
         BlockRegister {
             visible_text: "block text".to_owned(),
             identity: Some(RegisterIdentity {
                 id: id(value),
                 source_page: page("source"),
                 operation,
-                live_at_capture,
             }),
         }
+    }
+
+    fn detach_and_return<R: BlockIdRegistry<Error = &'static str>>(
+        registry: &mut R,
+        source_page: &PageId,
+        block_id: &BlockId,
+    ) {
+        let (register, delete) =
+            plan_delete(source_page, block_id, "one".to_owned(), registry).unwrap();
+        registry.apply(&delete.changes).unwrap();
+        let paste = plan_paste(&register, source_page, None, registry).unwrap();
+        registry.apply(&paste.changes).unwrap();
     }
 
     fn oracle_case(name: &str) -> Vec<&str> {
@@ -1159,7 +1523,7 @@ mod tests {
         registry.apply(&delete_plan.changes).unwrap();
         assert_eq!(
             registry.state(&id("move01")),
-            Ok(IdentityState::Detached(page("source")))
+            Ok(detached(page("source"), 1))
         );
 
         let plan = plan_paste(&deleted, &page("target"), None, &registry).unwrap();
@@ -1171,10 +1535,7 @@ mod tests {
             }
         );
         registry.apply(&plan.changes).unwrap();
-        assert_eq!(
-            registry.state(&id("move01")),
-            Ok(IdentityState::Live(page("target")))
-        );
+        assert_eq!(registry.state(&id("move01")), Ok(live(page("target"), 1)));
     }
 
     #[test]
@@ -1233,10 +1594,7 @@ mod tests {
             IdentityDecision::DiscardRegister { retired_id: None }
         );
         assert!(discard_plan.changes.is_empty());
-        assert_eq!(
-            registry.state(&moved_id),
-            Ok(IdentityState::Live(target_page))
-        );
+        assert_eq!(registry.state(&moved_id), Ok(live(target_page, 1)));
     }
 
     #[test]
@@ -1245,43 +1603,534 @@ mod tests {
         let mut registry = FakeRegistry::default();
         registry.seed(original_id.clone(), page("source"));
 
-        let plan = plan_discard_register(
-            &register("copy01", RegisterOperation::Yank, true),
-            &registry,
-        )
-        .unwrap();
+        let plan =
+            plan_discard_register(&register("copy01", RegisterOperation::Yank), &registry).unwrap();
 
         assert_eq!(
             plan.decision,
             IdentityDecision::DiscardRegister { retired_id: None }
         );
         assert!(plan.changes.is_empty());
-        assert_eq!(
-            registry.state(&original_id),
-            Ok(IdentityState::Live(page("source")))
-        );
+        assert_eq!(registry.state(&original_id), Ok(live(page("source"), 0)));
     }
 
     #[test]
     fn discarding_a_stale_move_register_rejects_another_pages_detached_id() {
         let move_id = id("move01");
         let mut registry = FakeRegistry::default();
-        registry.detached.insert(move_id.clone(), page("other"));
+        registry
+            .detached
+            .insert(move_id.clone(), (page("other"), DetachGeneration::new(1)));
 
         assert_eq!(
-            plan_discard_register(
-                &register("move01", RegisterOperation::Delete, true),
-                &registry
-            ),
+            plan_discard_register(&register("move01", delete_operation(1)), &registry),
             Err(IdentityPlanError::DetachedRegisterPageMismatch(move_id))
         );
+    }
+
+    #[test]
+    fn old_register_cannot_claim_or_retire_a_later_detachment_on_the_same_page() {
+        let source_page = page("source");
+        let moved_id = id("move01");
+        let mut registry = FakeRegistry::default();
+        registry.seed(moved_id.clone(), source_page.clone());
+        let (old_register, first_delete) =
+            plan_delete(&source_page, &moved_id, "one".to_owned(), &registry).unwrap();
+        registry.apply(&first_delete.changes).unwrap();
+        let stale_move = plan_paste(&old_register, &page("target"), None, &registry).unwrap();
+        let stale_retire = plan_discard_register(&old_register, &registry).unwrap();
+        let first_paste = plan_paste(&old_register, &source_page, None, &registry).unwrap();
+        registry.apply(&first_paste.changes).unwrap();
+        let (_new_register, second_delete) =
+            plan_delete(&source_page, &moved_id, "two".to_owned(), &registry).unwrap();
+        registry.apply(&second_delete.changes).unwrap();
+        let before = registry.clone();
+
+        assert_eq!(
+            plan_paste(
+                &old_register,
+                &page("target"),
+                Some(id("fresh1")),
+                &registry
+            )
+            .unwrap()
+            .decision,
+            IdentityDecision::Paste {
+                assigned_id: Some(id("fresh1")),
+                reused_source_id: false,
+            }
+        );
+        assert_eq!(
+            plan_discard_register(&old_register, &registry)
+                .unwrap()
+                .decision,
+            IdentityDecision::DiscardRegister { retired_id: None }
+        );
+        assert!(registry.apply(&stale_move.changes).is_err());
+        assert!(registry.apply(&stale_retire.changes).is_err());
+        assert_eq!(registry, before);
+    }
+
+    #[test]
+    fn old_register_can_be_cleared_after_a_later_detachment_on_another_page() {
+        let moved_id = id("move01");
+        let mut registry = FakeRegistry::default();
+        registry.seed(moved_id.clone(), page("source"));
+        let (old_register, first_delete) =
+            plan_delete(&page("source"), &moved_id, "one".to_owned(), &registry).unwrap();
+        registry.apply(&first_delete.changes).unwrap();
+        let paste = plan_paste(&old_register, &page("target"), None, &registry).unwrap();
+        registry.apply(&paste.changes).unwrap();
+        let (_new_register, second_delete) =
+            plan_delete(&page("target"), &moved_id, "two".to_owned(), &registry).unwrap();
+        registry.apply(&second_delete.changes).unwrap();
+        let before = registry.clone();
+        let mut bank = RegisterBank::default();
+        bank.insert('a', old_register).unwrap();
+
+        bank.clear('a', &mut registry).unwrap();
+        assert!(bank.get('a').is_none());
+        assert_eq!(registry, before);
+        assert_eq!(registry.state(&moved_id), Ok(detached(page("target"), 2)));
+    }
+
+    #[test]
+    fn register_bank_retains_a_detached_identity_until_the_last_alias_is_cleared() {
+        let source_page = page("source");
+        let moved_id = id("move01");
+        let mut registry = FakeRegistry::default();
+        registry.seed(moved_id.clone(), source_page.clone());
+        let (register, delete) =
+            plan_delete(&source_page, &moved_id, "one".to_owned(), &registry).unwrap();
+        registry.apply(&delete.changes).unwrap();
+        let mut bank = RegisterBank::default();
+        bank.insert('"', register).unwrap();
+        bank.alias('"', 'a').unwrap();
+        registry.fail_next_apply = true;
+
+        bank.clear('"', &mut registry).unwrap();
+        assert!(bank.get('"').is_none());
+        assert!(bank.get('a').is_some());
+        assert_eq!(
+            registry.state(&moved_id),
+            Ok(detached(source_page.clone(), 1))
+        );
+        let before = registry.clone();
+        assert_eq!(
+            bank.clear('a', &mut registry),
+            Err(RegisterClearError::Registry("registry transaction failed"))
+        );
+        assert!(bank.get('a').is_some());
+        assert_eq!(registry, before);
+
+        registry.fail_next_apply = false;
+        bank.clear('a', &mut registry).unwrap();
+        assert!(bank.get('a').is_none());
+        assert_eq!(registry.state(&moved_id), Ok(IdentityState::Retired));
+    }
+
+    #[test]
+    fn a_surviving_register_alias_can_move_the_original_identity() {
+        let source_page = page("source");
+        let moved_id = id("move01");
+        let mut registry = FakeRegistry::default();
+        registry.seed(moved_id.clone(), source_page.clone());
+        let (register, delete) =
+            plan_delete(&source_page, &moved_id, "one".to_owned(), &registry).unwrap();
+        registry.apply(&delete.changes).unwrap();
+        let mut bank = RegisterBank::default();
+        bank.insert('"', register).unwrap();
+        bank.alias('"', 'a').unwrap();
+        bank.clear('"', &mut registry).unwrap();
+
+        let paste = plan_paste(bank.get('a').unwrap(), &page("target"), None, &registry).unwrap();
+        assert_eq!(
+            paste.decision,
+            IdentityDecision::Paste {
+                assigned_id: Some(moved_id.clone()),
+                reused_source_id: true,
+            }
+        );
+        registry.apply(&paste.changes).unwrap();
+        bank.clear('a', &mut registry).unwrap();
+        assert_eq!(registry.state(&moved_id), Ok(live(page("target"), 1)));
+    }
+
+    #[test]
+    fn clearing_old_aliases_does_not_retire_a_newer_detachment() {
+        let source_page = page("source");
+        let moved_id = id("move01");
+        let mut registry = FakeRegistry::default();
+        registry.seed(moved_id.clone(), source_page.clone());
+        let (old_register, first_delete) =
+            plan_delete(&source_page, &moved_id, "one".to_owned(), &registry).unwrap();
+        registry.apply(&first_delete.changes).unwrap();
+        let mut bank = RegisterBank::default();
+        bank.insert('"', old_register).unwrap();
+        bank.alias('"', 'a').unwrap();
+        let paste = plan_paste(bank.get('"').unwrap(), &source_page, None, &registry).unwrap();
+        registry.apply(&paste.changes).unwrap();
+        let (new_register, second_delete) =
+            plan_delete(&source_page, &moved_id, "two".to_owned(), &registry).unwrap();
+        registry.apply(&second_delete.changes).unwrap();
+        bank.insert('b', new_register).unwrap();
+
+        bank.clear('"', &mut registry).unwrap();
+        bank.clear('a', &mut registry).unwrap();
+        assert_eq!(
+            registry.state(&moved_id),
+            Ok(detached(source_page.clone(), 2))
+        );
+        bank.clear('b', &mut registry).unwrap();
+        assert_eq!(registry.state(&moved_id), Ok(IdentityState::Retired));
+    }
+
+    #[test]
+    fn register_clear_revalidates_ownership_when_the_registry_changes_during_apply() {
+        struct RacingRegistry {
+            inner: FakeRegistry,
+            moved_id: BlockId,
+            source_page: PageId,
+            interfere: bool,
+        }
+
+        impl BlockIdRegistry for RacingRegistry {
+            type Error = &'static str;
+
+            fn state(&self, id: &BlockId) -> Result<IdentityState, Self::Error> {
+                self.inner.state(id)
+            }
+
+            fn apply(&mut self, changes: &[RegistryChange]) -> Result<(), Self::Error> {
+                if self.interfere {
+                    self.interfere = false;
+                    let generation = DetachGeneration::new(1);
+                    self.inner.apply(&[
+                        RegistryChange::MoveDetached {
+                            id: self.moved_id.clone(),
+                            source_page: self.source_page.clone(),
+                            target_page: self.source_page.clone(),
+                            generation,
+                        },
+                        RegistryChange::Detach {
+                            id: self.moved_id.clone(),
+                            page: self.source_page.clone(),
+                            previous_generation: generation,
+                        },
+                    ])?;
+                }
+                self.inner.apply(changes)
+            }
+        }
+
+        let source_page = page("source");
+        let moved_id = id("move01");
+        let mut inner = FakeRegistry::default();
+        inner.seed(moved_id.clone(), source_page.clone());
+        let (register, delete) =
+            plan_delete(&source_page, &moved_id, "one".to_owned(), &inner).unwrap();
+        inner.apply(&delete.changes).unwrap();
+        let mut registry = RacingRegistry {
+            inner,
+            moved_id: moved_id.clone(),
+            source_page: source_page.clone(),
+            interfere: true,
+        };
+        let mut bank = RegisterBank::default();
+        bank.insert('a', register).unwrap();
+
+        assert_eq!(
+            bank.clear('a', &mut registry),
+            Err(RegisterClearError::Registry(
+                "identity is not detached at the expected page and generation"
+            ))
+        );
+        assert!(bank.get('a').is_some());
+        assert_eq!(
+            registry.state(&moved_id),
+            Ok(detached(source_page.clone(), 2))
+        );
+        bank.clear('a', &mut registry).unwrap();
+        assert_eq!(registry.state(&moved_id), Ok(detached(source_page, 2)));
+    }
+
+    #[test]
+    fn missing_delete_identity_is_reported_without_clearing_its_register() {
+        let source_page = page("source");
+        let moved_id = id("move01");
+        let mut registry = FakeRegistry::default();
+        registry.seed(moved_id.clone(), source_page.clone());
+        let (register, delete) =
+            plan_delete(&source_page, &moved_id, "one".to_owned(), &registry).unwrap();
+        registry.apply(&delete.changes).unwrap();
+        registry.detached.remove(&moved_id);
+        let mut bank = RegisterBank::default();
+        bank.insert('a', register).unwrap();
+
+        assert_eq!(
+            plan_paste(
+                bank.get('a').unwrap(),
+                &page("target"),
+                Some(id("fresh1")),
+                &registry
+            ),
+            Err(IdentityPlanError::DeleteIdentityMissing(moved_id.clone()))
+        );
+        assert_eq!(
+            bank.clear('a', &mut registry),
+            Err(RegisterClearError::Identity(
+                IdentityPlanError::DeleteIdentityMissing(moved_id)
+            ))
+        );
+        assert!(bank.get('a').is_some());
+    }
+
+    #[test]
+    fn register_bank_rejects_missing_sources_and_occupied_slots() {
+        let mut bank = RegisterBank::default();
+        assert_eq!(bank.alias('a', 'b'), Err(RegisterSlotError::Empty('a')));
+        bank.insert('a', BlockRegister::without_identity("one".to_owned()))
+            .unwrap();
+        let rejected = bank
+            .insert('a', BlockRegister::without_identity("two".to_owned()))
+            .unwrap_err();
+        assert_eq!(rejected.visible_text(), "two");
+        assert_eq!(bank.alias('a', 'a'), Err(RegisterSlotError::Occupied('a')));
+        assert_eq!(bank.get('a').unwrap().visible_text(), "one");
+        assert_eq!(
+            bank.clear('b', &mut FakeRegistry::default()),
+            Err(RegisterClearError::Empty('b'))
+        );
+    }
+
+    #[test]
+    fn occupied_slot_returns_the_new_move_register_without_losing_either_identity() {
+        let source_page = page("source");
+        let first_id = id("first1");
+        let second_id = id("second");
+        let mut registry = FakeRegistry::default();
+        registry.seed(first_id.clone(), source_page.clone());
+        registry.seed(second_id.clone(), source_page.clone());
+        let (first, first_delete) =
+            plan_delete(&source_page, &first_id, "one".to_owned(), &registry).unwrap();
+        registry.apply(&first_delete.changes).unwrap();
+        let (second, second_delete) =
+            plan_delete(&source_page, &second_id, "two".to_owned(), &registry).unwrap();
+        registry.apply(&second_delete.changes).unwrap();
+        let mut bank = RegisterBank::default();
+        bank.insert('a', first).unwrap();
+        let second = bank.insert('a', second).unwrap_err();
+
+        assert_eq!(bank.get('a').unwrap().visible_text(), "one");
+        assert_eq!(second.visible_text(), "two");
+        assert_eq!(
+            registry.state(&first_id),
+            Ok(detached(source_page.clone(), 1))
+        );
+        assert_eq!(
+            registry.state(&second_id),
+            Ok(detached(source_page.clone(), 1))
+        );
+        bank.clear('a', &mut registry).unwrap();
+        bank.insert('a', second).unwrap();
+        bank.clear('a', &mut registry).unwrap();
+        assert_eq!(registry.state(&first_id), Ok(IdentityState::Retired));
+        assert_eq!(registry.state(&second_id), Ok(IdentityState::Retired));
+    }
+
+    #[test]
+    fn discarding_an_uninstalled_register_returns_it_if_retirement_fails() {
+        let source_page = page("source");
+        let moved_id = id("move01");
+        let mut registry = FakeRegistry::default();
+        registry.seed(moved_id.clone(), source_page.clone());
+        let (register, delete) =
+            plan_delete(&source_page, &moved_id, "one".to_owned(), &registry).unwrap();
+        registry.apply(&delete.changes).unwrap();
+        registry.fail_next_apply = true;
+        let before = registry.clone();
+
+        let failure = register.discard(&mut registry).unwrap_err();
+        assert_eq!(
+            failure.error,
+            RegisterCleanupError::Registry("registry transaction failed")
+        );
+        assert_eq!(failure.register.visible_text(), "one");
+        assert_eq!(registry, before);
+        registry.fail_next_apply = false;
+        failure.register.discard(&mut registry).unwrap();
+        assert_eq!(registry.state(&moved_id), Ok(IdentityState::Retired));
+    }
+
+    #[test]
+    fn bounded_register_histories_match_an_independent_ownership_model() {
+        const SLOTS: [char; 2] = ['a', 'b'];
+        const ACTIONS: usize = 8;
+        const DEPTH: u32 = 5;
+        for encoded in 0..ACTIONS.pow(DEPTH) {
+            let mut registry = FakeRegistry::default();
+            let source_page = page("source");
+            let moved_id = id("move01");
+            registry.seed(moved_id.clone(), source_page.clone());
+            let mut bank = RegisterBank::default();
+            let mut state = OwnershipModelState::Live(0);
+            let mut slots = [None; 2];
+            let mut remaining = encoded;
+            let mut trace = Vec::new();
+
+            for _ in 0..DEPTH {
+                let action = remaining % ACTIONS;
+                remaining /= ACTIONS;
+                trace.push(action);
+                match action {
+                    0 | 1 => {
+                        let slot = action;
+                        if let (OwnershipModelState::Live(generation), None) = (state, slots[slot])
+                        {
+                            let (register, plan) =
+                                plan_delete(&source_page, &moved_id, "one".to_owned(), &registry)
+                                    .unwrap();
+                            registry.apply(&plan.changes).unwrap();
+                            bank.insert(SLOTS[slot], register).unwrap();
+                            state = OwnershipModelState::Detached(generation + 1);
+                            slots[slot] = Some(generation + 1);
+                        }
+                    }
+                    2 | 3 => {
+                        let slot = action - 2;
+                        if let (OwnershipModelState::Detached(generation), Some(captured)) =
+                            (state, slots[slot])
+                        {
+                            if generation == captured {
+                                let plan = plan_paste(
+                                    bank.get(SLOTS[slot]).unwrap(),
+                                    &source_page,
+                                    None,
+                                    &registry,
+                                )
+                                .unwrap();
+                                registry.apply(&plan.changes).unwrap();
+                                state = OwnershipModelState::Live(generation);
+                            }
+                        }
+                    }
+                    4 | 5 => {
+                        let source = action - 4;
+                        let target = 1 - source;
+                        if slots[source].is_some() && slots[target].is_none() {
+                            bank.alias(SLOTS[source], SLOTS[target]).unwrap();
+                            slots[target] = slots[source];
+                        }
+                    }
+                    6 | 7 => {
+                        let slot = action - 6;
+                        if let Some(captured) = slots[slot] {
+                            bank.clear(SLOTS[slot], &mut registry).unwrap();
+                            slots[slot] = None;
+                            if state == OwnershipModelState::Detached(captured)
+                                && !slots.contains(&Some(captured))
+                            {
+                                state = OwnershipModelState::Retired;
+                            }
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+
+                let expected = model_registry_state(state, &source_page);
+                assert_eq!(registry.state(&moved_id), Ok(expected), "trace: {trace:?}");
+                for (slot, captured) in SLOTS.into_iter().zip(slots) {
+                    let register = bank.get(slot);
+                    assert_eq!(register.is_some(), captured.is_some(), "trace: {trace:?}");
+                    if let (Some(register), Some(captured)) = (register, captured) {
+                        let plan =
+                            plan_paste(register, &source_page, Some(id("fresh1")), &registry)
+                                .unwrap();
+                        assert_eq!(
+                            plan.decision,
+                            model_paste_decision(state, captured, &moved_id),
+                            "trace: {trace:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ownership_model_detects_injected_early_retirement_and_stale_reuse() {
+        let source_page = page("source");
+        let moved_id = id("move01");
+        let mut registry = FakeRegistry::default();
+        registry.seed(moved_id.clone(), source_page.clone());
+        let (register, delete) =
+            plan_delete(&source_page, &moved_id, "one".to_owned(), &registry).unwrap();
+        registry.apply(&delete.changes).unwrap();
+        let mut bank = RegisterBank::default();
+        bank.insert('a', register).unwrap();
+        bank.alias('a', 'b').unwrap();
+        bank.clear('a', &mut registry).unwrap();
+
+        let expected = model_registry_state(OwnershipModelState::Detached(1), &source_page);
+        assert_eq!(registry.state(&moved_id), Ok(expected.clone()));
+        let mut faulted_registry = registry.clone();
+        faulted_registry.detached.remove(&moved_id);
+        faulted_registry.retired.insert(moved_id.clone());
+        assert_ne!(faulted_registry.state(&moved_id), Ok(expected));
+
+        let old_register = bank.get('b').unwrap();
+        let paste = plan_paste(old_register, &source_page, None, &registry).unwrap();
+        registry.apply(&paste.changes).unwrap();
+        let (_new_register, second_delete) =
+            plan_delete(&source_page, &moved_id, "two".to_owned(), &registry).unwrap();
+        registry.apply(&second_delete.changes).unwrap();
+        let mut plan =
+            plan_paste(old_register, &source_page, Some(id("fresh1")), &registry).unwrap();
+        let expected = model_paste_decision(OwnershipModelState::Detached(2), 1, &moved_id);
+        assert_eq!(plan.decision, expected);
+        plan.decision = IdentityDecision::Paste {
+            assigned_id: Some(moved_id),
+            reused_source_id: true,
+        };
+        assert_ne!(plan.decision, expected);
+    }
+
+    #[test]
+    fn exhausted_detach_generation_fails_without_changing_text_or_registry() {
+        let source_page = page("source");
+        let moved_id = id("move01");
+        let mut registry = FakeRegistry::default();
+        registry.live.insert(
+            moved_id.clone(),
+            (source_page.clone(), DetachGeneration::new(u64::MAX)),
+        );
+        let before = registry.clone();
+        let mut text = "one ^move01\n".to_owned();
+
+        assert!(matches!(
+            plan_delete_edit(&source_page, &mut text, &moved_id, &mut registry),
+            Err(IdentityEditPlanError::Identity(
+                IdentityPlanError::DetachGenerationExhausted(id)
+            )) if id == moved_id
+        ));
+        assert_eq!(text, "one ^move01\n");
+        assert_eq!(registry, before);
+        assert_eq!(
+            registry.apply(&[RegistryChange::Detach {
+                id: moved_id,
+                page: source_page,
+                previous_generation: DetachGeneration::new(u64::MAX),
+            }]),
+            Err("detach generation exhausted")
+        );
+        assert_eq!(registry, before);
     }
 
     #[test]
     fn yank_then_paste_allocates_a_fresh_identity_while_source_is_live() {
         let mut registry = FakeRegistry::default();
         registry.seed(id("copy01"), page("source"));
-        let copied = register("copy01", RegisterOperation::Yank, true);
+        let copied = register("copy01", RegisterOperation::Yank);
         let plan = plan_paste(&copied, &page("target"), Some(id("copy02")), &registry).unwrap();
         assert_eq!(
             plan.decision,
@@ -1291,21 +2140,15 @@ mod tests {
             }
         );
         registry.apply(&plan.changes).unwrap();
-        assert_eq!(
-            registry.state(&id("copy01")),
-            Ok(IdentityState::Live(page("source")))
-        );
-        assert_eq!(
-            registry.state(&id("copy02")),
-            Ok(IdentityState::Live(page("target")))
-        );
+        assert_eq!(registry.state(&id("copy01")), Ok(live(page("source"), 0)));
+        assert_eq!(registry.state(&id("copy02")), Ok(live(page("target"), 0)));
     }
 
     #[test]
     fn stale_yank_cannot_claim_an_identity_detached_for_a_move_register() {
         let mut registry = FakeRegistry::default();
         registry.seed(id("copy01"), page("source"));
-        let copied = register("copy01", RegisterOperation::Yank, true);
+        let copied = register("copy01", RegisterOperation::Yank);
         let (_, delete_plan) = plan_delete(
             &page("source"),
             &id("copy01"),
@@ -1325,7 +2168,7 @@ mod tests {
         );
         assert_eq!(
             registry.state(&id("copy01")),
-            Ok(IdentityState::Detached(page("source")))
+            Ok(detached(page("source"), 1))
         );
     }
 
@@ -1334,7 +2177,7 @@ mod tests {
         let mut registry = FakeRegistry::default();
         registry.retired.insert(id("old001"));
         registry.seed(id("taken1"), page("other"));
-        let copied = register("old001", RegisterOperation::Delete, false);
+        let copied = register("old001", delete_operation(1));
 
         assert_eq!(
             plan_paste(&copied, &page("target"), Some(id("taken1")), &registry),
@@ -1353,7 +2196,7 @@ mod tests {
     #[test]
     fn a_fresh_candidate_cannot_be_the_unavailable_register_identity() {
         let registry = FakeRegistry::default();
-        let copied = register("source1", RegisterOperation::Yank, true);
+        let copied = register("source1", RegisterOperation::Yank);
 
         assert_eq!(
             plan_paste(&copied, &page("target"), Some(id("source1")), &registry),
@@ -1375,10 +2218,7 @@ mod tests {
             }
         );
         registry.apply(&plan.changes).unwrap();
-        assert_eq!(
-            registry.state(&id("left01")),
-            Ok(IdentityState::Live(page("page")))
-        );
+        assert_eq!(registry.state(&id("left01")), Ok(live(page("page"), 0)));
         assert_eq!(registry.state(&id("right1")), Ok(IdentityState::Retired));
     }
 
@@ -1395,14 +2235,8 @@ mod tests {
             }
         );
         registry.apply(&plan.changes).unwrap();
-        assert_eq!(
-            registry.state(&id("split1")),
-            Ok(IdentityState::Live(page("page")))
-        );
-        assert_eq!(
-            registry.state(&id("split2")),
-            Ok(IdentityState::Live(page("page")))
-        );
+        assert_eq!(registry.state(&id("split1")), Ok(live(page("page"), 0)));
+        assert_eq!(registry.state(&id("split2")), Ok(live(page("page"), 0)));
     }
 
     #[test]
@@ -1412,15 +2246,35 @@ mod tests {
             registry.seed(id("left01"), page("page"));
             registry.seed(id("right1"), page("page"));
             let plan = plan_join(&page("page"), &id("left01"), &id("right1"), &registry).unwrap();
-            registry.live.insert(id(stale_id), page("other"));
+            registry
+                .live
+                .insert(id(stale_id), (page("other"), DetachGeneration::INITIAL));
             let before = registry.clone();
 
             assert_eq!(
                 registry.apply(&plan.changes),
-                Err("identity is not live on page")
+                Err("identity is not live at the expected page and generation")
             );
             assert_eq!(registry, before);
         }
+    }
+
+    #[test]
+    fn join_rejects_a_live_identity_detached_and_returned_after_planning() {
+        let source_page = page("source");
+        let mut registry = FakeRegistry::default();
+        registry.seed(id("left01"), source_page.clone());
+        registry.seed(id("right1"), source_page.clone());
+        let join = plan_join(&source_page, &id("left01"), &id("right1"), &registry).unwrap();
+        let (register, delete) =
+            plan_delete(&source_page, &id("right1"), "right".to_owned(), &registry).unwrap();
+        registry.apply(&delete.changes).unwrap();
+        let paste = plan_paste(&register, &source_page, None, &registry).unwrap();
+        registry.apply(&paste.changes).unwrap();
+        let before = registry.clone();
+
+        assert!(registry.apply(&join.changes).is_err());
+        assert_eq!(registry, before);
     }
 
     #[test]
@@ -1444,14 +2298,135 @@ mod tests {
             .0
             .borrow_mut()
             .live
-            .insert(id("right1"), page("other"));
+            .insert(id("right1"), (page("other"), DetachGeneration::INITIAL));
         let before_commit = external.0.borrow().clone();
 
         assert_eq!(
             commit_planned_identity_edit(plan),
-            Err("identity is not live on page")
+            Err("identity is not live at the expected page and generation")
         );
         assert_eq!(text, "left ^left01\nright ^right1\n");
+        assert_eq!(*external.0.borrow(), before_commit);
+    }
+
+    #[test]
+    fn shared_registry_aba_rejects_stale_join_and_split_edits() {
+        for stale_id in ["left01", "right1"] {
+            let source_page = page("source");
+            let mut registry = SharedRegistry::default();
+            registry
+                .0
+                .borrow_mut()
+                .seed(id("left01"), source_page.clone());
+            registry
+                .0
+                .borrow_mut()
+                .seed(id("right1"), source_page.clone());
+            let mut external = registry.clone();
+            let mut text = "left ^left01\nright ^right1\n".to_owned();
+            let plan = plan_join_edit(
+                &source_page,
+                &mut text,
+                4..5,
+                " ",
+                &id("left01"),
+                &id("right1"),
+                &mut registry,
+            )
+            .unwrap();
+            detach_and_return(&mut external, &source_page, &id(stale_id));
+            let before_commit = external.0.borrow().clone();
+
+            assert_eq!(
+                commit_planned_identity_edit(plan),
+                Err("identity is not live at the expected page and generation")
+            );
+            assert_eq!(text, "left ^left01\nright ^right1\n");
+            assert_eq!(*external.0.borrow(), before_commit);
+        }
+
+        let source_page = page("source");
+        let mut registry = SharedRegistry::default();
+        registry
+            .0
+            .borrow_mut()
+            .seed(id("left01"), source_page.clone());
+        let mut external = registry.clone();
+        let mut text = "left ^left01\n".to_owned();
+        let plan = plan_split_edit(
+            &source_page,
+            &mut text,
+            2,
+            &id("left01"),
+            id("right1"),
+            &mut registry,
+        )
+        .unwrap();
+        detach_and_return(&mut external, &source_page, &id("left01"));
+        let before_commit = external.0.borrow().clone();
+
+        assert_eq!(
+            commit_planned_identity_edit(plan),
+            Err("identity is not live at the expected page and generation")
+        );
+        assert_eq!(text, "left ^left01\n");
+        assert_eq!(*external.0.borrow(), before_commit);
+    }
+
+    #[test]
+    fn shared_registry_aba_rejects_stale_delete_and_paste_edits() {
+        let source_page = page("source");
+        let moved_id = id("move01");
+        let mut registry = SharedRegistry::default();
+        registry
+            .0
+            .borrow_mut()
+            .seed(moved_id.clone(), source_page.clone());
+        let mut external = registry.clone();
+        let mut source_text = "one ^move01\n".to_owned();
+        let delete =
+            plan_delete_edit(&source_page, &mut source_text, &moved_id, &mut registry).unwrap();
+        detach_and_return(&mut external, &source_page, &moved_id);
+        let before_commit = external.0.borrow().clone();
+
+        assert_eq!(
+            commit_planned_block_delete(delete),
+            Err("identity is not live at the expected page and generation")
+        );
+        assert_eq!(source_text, "one ^move01\n");
+        assert_eq!(*external.0.borrow(), before_commit);
+
+        let (old_register, first_delete) =
+            plan_delete(&source_page, &moved_id, "one".to_owned(), &external).unwrap();
+        external.apply(&first_delete.changes).unwrap();
+        let mut target_text = "target ^dest01\n".to_owned();
+        external.0.borrow_mut().seed(id("dest01"), page("target"));
+        let insertion_at = Doc::new(&target_text)
+            .visible_projection()
+            .text()
+            .chars()
+            .count();
+        let paste = plan_paste_edit(
+            &page("target"),
+            &mut target_text,
+            insertion_at,
+            &old_register,
+            None,
+            &mut registry,
+        )
+        .unwrap();
+        let first_paste = plan_paste(&old_register, &source_page, None, &external).unwrap();
+        external.apply(&first_paste.changes).unwrap();
+        let (_new_register, second_delete) =
+            plan_delete(&source_page, &moved_id, "two".to_owned(), &external).unwrap();
+        external.apply(&second_delete.changes).unwrap();
+        let before_commit = external.0.borrow().clone();
+
+        assert_eq!(
+            commit_planned_identity_edit(paste),
+            Err("identity is not detached at the expected page and generation")
+        );
+        assert_eq!(target_text, "target ^dest01\n");
         assert_eq!(*external.0.borrow(), before_commit);
     }
 
@@ -1462,7 +2437,9 @@ mod tests {
             registry.seed(id("split1"), page("page"));
             let plan = plan_split(&page("page"), &id("split1"), id("split2"), &registry).unwrap();
             if stale_source {
-                registry.live.insert(id("split1"), page("other"));
+                registry
+                    .live
+                    .insert(id("split1"), (page("other"), DetachGeneration::INITIAL));
             } else {
                 registry.seed(id("split2"), page("other"));
             }
@@ -1471,7 +2448,7 @@ mod tests {
             assert_eq!(
                 registry.apply(&plan.changes),
                 Err(if stale_source {
-                    "identity is not live on page"
+                    "identity is not live at the expected page and generation"
                 } else {
                     "identity is not available"
                 })
@@ -1552,10 +2529,7 @@ mod tests {
             block_ids_in_text(&actual_text).as_slice(),
             std::slice::from_ref(&retained)
         );
-        assert_eq!(
-            registry.state(&retained),
-            Ok(IdentityState::Live(page("page")))
-        );
+        assert_eq!(registry.state(&retained), Ok(live(page("page"), 0)));
         assert_eq!(registry.state(&retired), Ok(IdentityState::Retired));
     }
 
@@ -1597,14 +2571,8 @@ mod tests {
             block_ids_in_text(&actual_text),
             [original.clone(), allocated.clone()]
         );
-        assert_eq!(
-            registry.state(&original),
-            Ok(IdentityState::Live(page("page")))
-        );
-        assert_eq!(
-            registry.state(&allocated),
-            Ok(IdentityState::Live(page("page")))
-        );
+        assert_eq!(registry.state(&original), Ok(live(page("page"), 0)));
+        assert_eq!(registry.state(&allocated), Ok(live(page("page"), 0)));
     }
 
     #[test]
@@ -1745,6 +2713,10 @@ mod tests {
         let register = commit_planned_block_delete(deletion).unwrap();
         assert_eq!(register.visible_text, "one");
         assert_eq!(source_text, "next ^blk02\n");
+        let mut registers = RegisterBank::default();
+        registers.insert('"', register).unwrap();
+        registers.alias('"', 'a').unwrap();
+        registers.clear('"', &mut registry).unwrap();
 
         let mut target_text = "target ^dest01\n".to_owned();
         let target_projection = Doc::new(&target_text).visible_projection();
@@ -1752,18 +2724,16 @@ mod tests {
             &target_page,
             &mut target_text,
             target_projection.text().chars().count(),
-            &register,
+            registers.get('a').unwrap(),
             None,
             &mut registry,
         )
         .unwrap();
         commit_planned_identity_edit(paste_plan).unwrap();
+        registers.clear('a', &mut registry).unwrap();
 
         assert_eq!(target_text, "target ^dest01\none ^blk01\n");
-        assert_eq!(
-            registry.state(&moved_id),
-            Ok(IdentityState::Live(target_page))
-        );
+        assert_eq!(registry.state(&moved_id), Ok(live(target_page, 1)));
         assert_eq!(Doc::new(&source_text).visible_projection().text(), "next\n");
         assert_eq!(
             Doc::new(&target_text).visible_projection().text(),
@@ -1806,10 +2776,7 @@ mod tests {
         commit_planned_identity_edit(paste).unwrap();
 
         assert_eq!(target_text, "target ^dest01\r\none ^blk01\r\n");
-        assert_eq!(
-            registry.state(&moved_id),
-            Ok(IdentityState::Live(target_page))
-        );
+        assert_eq!(registry.state(&moved_id), Ok(live(target_page, 1)));
     }
 
     #[test]
@@ -1820,15 +2787,8 @@ mod tests {
         let mut registry = FakeRegistry::default();
         registry.seed(original_id.clone(), source_page.clone());
         let mut canonical_text = "one ^blk01\r\nnext\r\n".to_owned();
-        let register = BlockRegister {
-            visible_text: "one".to_owned(),
-            identity: Some(RegisterIdentity {
-                id: original_id.clone(),
-                source_page: source_page.clone(),
-                operation: RegisterOperation::Yank,
-                live_at_capture: true,
-            }),
-        };
+        let register =
+            BlockRegister::yank("one".to_owned(), original_id.clone(), source_page.clone());
         let insertion_at = Doc::new(&canonical_text)
             .visible_projection()
             .text()
@@ -1852,12 +2812,9 @@ mod tests {
         );
         assert_eq!(
             registry.state(&original_id),
-            Ok(IdentityState::Live(source_page.clone()))
+            Ok(live(source_page.clone(), 0))
         );
-        assert_eq!(
-            registry.state(&fresh_id),
-            Ok(IdentityState::Live(source_page))
-        );
+        assert_eq!(registry.state(&fresh_id), Ok(live(source_page, 0)));
     }
 
     #[test]
@@ -1865,15 +2822,7 @@ mod tests {
         let target_page = page("target");
         let original_id = id("blk01");
         let fresh_id = id("blk02");
-        let register = BlockRegister {
-            visible_text: "one".to_owned(),
-            identity: Some(RegisterIdentity {
-                id: original_id.clone(),
-                source_page: page("source"),
-                operation: RegisterOperation::Yank,
-                live_at_capture: true,
-            }),
-        };
+        let register = BlockRegister::yank("one".to_owned(), original_id.clone(), page("source"));
         let mut registry = FakeRegistry::default();
         registry.seed(original_id, page("source"));
         let expected_text = "target ^dest01\n".to_owned();
@@ -1901,6 +2850,33 @@ mod tests {
         );
         assert_eq!(target_text, expected_text);
         assert_eq!(registry, before_registry);
+    }
+
+    #[test]
+    fn canonical_paste_rejects_a_plan_for_a_different_detachment_generation() {
+        let source_page = page("source");
+        let moved_id = id("move01");
+        let mut registry = FakeRegistry::default();
+        registry.seed(moved_id.clone(), source_page.clone());
+        let (register, delete) =
+            plan_delete(&source_page, &moved_id, "one".to_owned(), &registry).unwrap();
+        registry.apply(&delete.changes).unwrap();
+        let mut plan = plan_paste(&register, &page("target"), None, &registry).unwrap();
+        let [RegistryChange::MoveDetached { generation, .. }] = plan.changes.as_mut_slice() else {
+            panic!("expected a move plan");
+        };
+        *generation = DetachGeneration::new(2);
+        let target_text = "target ^dest01\n";
+        let insertion_at = Doc::new(target_text)
+            .visible_projection()
+            .text()
+            .chars()
+            .count();
+
+        assert_eq!(
+            super::plan_paste_block_text(target_text, insertion_at, &register, &plan),
+            Err(super::IdentityTextPlanError::InvalidPastePlan)
+        );
     }
 
     #[test]
@@ -1984,9 +2960,10 @@ mod tests {
                 RegistryChange::Retire {
                     id: id("missing"),
                     page: page("page"),
+                    generation: DetachGeneration::INITIAL,
                 },
             ]),
-            Err("identity is not live on page")
+            Err("identity is not live at the expected page and generation")
         );
         assert_eq!(registry, before);
     }

@@ -72,7 +72,7 @@ semantics; the bridge does not authorize ADR-3.
 | Legacy grammar narrowing | Existing IDs stop parsing after the generator changes to seven characters | Preserve the current read grammar during the spike. The legacy parser accepts alphanumeric, `-`, and `_` IDs and recognizes `^=` markers; the new generator's seven-character base36 format must not narrow reads |
 | Mirror transition | Existing `^=id` content is treated as a second live identity or rewritten before the migration | Parse and preserve legacy mirror markers as legacy tokens; do not create or propagate mirrors in the new model; defer their conversion to the approved M7 migration |
 | Register provenance loss | `dd`+`p` duplicates an ID or `yy`+`p` steals the source ID | Typed register payload records source identity and operation provenance; paste consults an explicit liveness port rather than assuming a document-local answer |
-| Detached register discarded | An ID remains detached forever when its move register is replaced or cleared | Retire the matching detached ID on register discard; verify an already-moved ID remains live and unrelated pages cannot be retired |
+| Detached register discarded | An ID remains detached forever when its final move-register alias is replaced or cleared | Retire the matching detached ID only when its final owner is cleared; verify an already-moved ID remains live and unrelated pages cannot be retired |
 | Stale delete-register alias | An old register claims or retires a later detachment of the same ID from the same page | Associate each detach with a unique generation, and require paste and discard to match it; page identity alone is insufficient |
 | Cross-page liveness | A local document incorrectly concludes that a vault-wide ID is unused | Keep liveness/reservation behind a State-owned port; test with a deterministic multi-page registry |
 | Partial structural edit | Allocation, parsing, or range validation fails after text has already changed | Produce a complete edit plan first; apply atomically or return an explicit error with the original document unchanged |
@@ -116,6 +116,40 @@ set of IDs in the current document. New IDs are generated inside the same
 planned edit as the text change; a reservation failure must not partially
 mutate the rope.
 
+### Detachment generations and register aliases: spike constraints
+
+The in-memory registry prototype must keep a monotonic detachment generation
+with each identity even while it is live. Reserving a never-used ID starts at
+generation zero; detaching increments it with checked arithmetic in the same
+atomic batch as the live-state precondition. A delete register records the
+resulting generation. Move and retirement must compare the exact ID, source
+page, and generation, and join/split/delete plans must revalidate their live
+generation so that a detach-and-return to the same page cannot satisfy a stale
+plan. Overflow is an explicit error. The production State store must persist
+these generations and make them part of its transaction/recovery rules; the
+spike's fake registry does not provide that durability.
+Undo and recovery must also define how historical IDs are restored without
+rewinding an issued generation or weakening retired-ID guarantees; the spike
+does not yet implement those transitions.
+
+The spike's register owner must track aliases rather than retire an identity
+whenever any alias is cleared. Registers carrying move provenance are not
+freely cloneable outside that owner. Copying an occupied slot into a vacant
+slot creates another tracked alias; clearing a nonfinal alias only removes that
+slot, and clearing the final alias retires its still-matching detachment.
+Failure of retirement leaves the slot unchanged. An older generation is never
+the owner of a newer detachment, even if both use the same ID and source page.
+If a delete register's identity unexpectedly becomes available rather than
+live, detached, or retired, paste and final clear report the missing registry
+entry instead of silently abandoning the register. An uninstalled register can
+also be explicitly discarded; if cleanup fails, the caller gets the register
+back for retry.
+The prototype does not define Vim register names or replacement semantics:
+atomic replacement, integration with the real register lifecycle, shutdown,
+undo, and crash recovery remain required before this control is production
+ready. Dropping an uninstalled register or its owner cannot perform fallible
+registry cleanup automatically.
+
 ### Current prototype evidence (not acceptance)
 
 `rewrite/crates/bloom-kernel/src/identity.rs` now contains a policy prototype
@@ -155,11 +189,17 @@ fails. A CRLF delete/paste test verifies that the line separator does not enter
 the register text. These are explicit policy/text-plan tests, not replays of
 the legacy `dd`/`p` or `yy`/`p` streams. The two-phase
 move can leave a detached identity in its register after a failed paste or
-process interruption. A discard plan now retires a still-detached move identity
-when its register is abandoned, and tests ensure it does not retire an identity
-already moved to another page. The current kernel has no register owner that
-invokes this plan on replacement or clear; durable transaction recovery also
-remains unimplemented.
+process interruption. The prototype now assigns per-ID detachment generations
+and rechecks them in delete, move, discard, join, and split batches. Its
+register bank tracks aliases and retires a matching detachment only on the last
+clear; failed retirement leaves the slot intact. A bounded independent model
+checks all 32,768 five-action schedules of delete, move, alias, and clear
+across two slots, including stale aliases; inapplicable actions are skipped.
+The same model comparisons reject injected premature-retirement and
+stale-reuse outcomes. These are in-memory prototype controls only. The actual
+editor register lifecycle does not invoke this bank
+on replacement or clear; durable generation storage and transaction recovery
+also remain unimplemented.
 
 This remains prototype evidence, not acceptance. It does not execute the
 identity matrix through a production Vim-to-document path; fresh ID candidates
