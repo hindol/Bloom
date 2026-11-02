@@ -3,6 +3,7 @@
 #[cfg(unix)]
 use std::fs::File;
 use std::{
+    collections::HashMap,
     error::Error,
     fmt, fs,
     io::{self, Write},
@@ -73,6 +74,16 @@ pub enum VaultError {
     RootIsNotDirectory,
     DifferentVault,
     DifferentStateStore,
+    PageIdPathConflict {
+        page_id: PageId,
+        existing: PathBuf,
+        requested: PathBuf,
+    },
+    PagePathIdConflict {
+        path: PathBuf,
+        existing: PageId,
+        requested: PageId,
+    },
     PagePathChanged,
     InvalidUtf8(std::string::FromUtf8Error),
     VersionRegression {
@@ -112,6 +123,28 @@ impl fmt::Display for VaultError {
             Self::DifferentStateStore => {
                 f.write_str("page sync state belongs to another state store")
             }
+            Self::PageIdPathConflict {
+                page_id,
+                existing,
+                requested,
+            } => write!(
+                f,
+                "page {} is already bound to {}, not {}",
+                page_id.as_str(),
+                existing.display(),
+                requested.display()
+            ),
+            Self::PagePathIdConflict {
+                path,
+                existing,
+                requested,
+            } => write!(
+                f,
+                "vault path {} is already bound to page {}, not {}",
+                path.display(),
+                existing.as_str(),
+                requested.as_str()
+            ),
             Self::PagePathChanged => {
                 f.write_str("page path no longer resolves to its originally loaded file")
             }
@@ -210,6 +243,9 @@ impl LoadedPage {
 pub struct VaultStore {
     root: PathBuf,
     actor: Arc<()>,
+    state_identity: Option<StateStoreIdentity>,
+    page_paths: HashMap<PageId, PathBuf>,
+    path_pages: HashMap<PathBuf, PageId>,
 }
 
 impl VaultStore {
@@ -230,6 +266,9 @@ impl VaultStore {
         Ok(Self {
             root,
             actor: Arc::new(()),
+            state_identity: None,
+            page_paths: HashMap::new(),
+            path_pages: HashMap::new(),
         })
     }
 
@@ -265,6 +304,7 @@ impl VaultStore {
             .to_path_buf();
         let disk_hash = hash(&bytes);
         let saved_record = state.saved_record(page_id.clone())?;
+        self.bind_page_identity(&state.identity(), &page_id, &relative_path)?;
         let (base, saved_version, observed_saved_version, conflict) = match saved_record {
             Some(record) => {
                 let version = record.version();
@@ -330,6 +370,13 @@ impl VaultStore {
             return Err(VaultError::DifferentVault);
         }
         if sync.state_identity != state.identity() {
+            return Err(VaultError::DifferentStateStore);
+        }
+        if self
+            .state_identity
+            .as_ref()
+            .is_some_and(|identity| identity != &sync.state_identity)
+        {
             return Err(VaultError::DifferentStateStore);
         }
         let save_guard = state.lock_saves()?;
@@ -467,6 +514,47 @@ impl VaultStore {
             return Err(VaultError::PageIsNotFile);
         }
         Ok(resolved)
+    }
+
+    fn bind_page_identity(
+        &mut self,
+        state_identity: &StateStoreIdentity,
+        page_id: &PageId,
+        relative_path: &Path,
+    ) -> Result<(), VaultError> {
+        if self
+            .state_identity
+            .as_ref()
+            .is_some_and(|identity| identity != state_identity)
+        {
+            return Err(VaultError::DifferentStateStore);
+        }
+        if let Some(existing) = self.page_paths.get(page_id) {
+            if existing != relative_path {
+                return Err(VaultError::PageIdPathConflict {
+                    page_id: page_id.clone(),
+                    existing: existing.clone(),
+                    requested: relative_path.to_path_buf(),
+                });
+            }
+        }
+        if let Some(existing) = self.path_pages.get(relative_path) {
+            if existing != page_id {
+                return Err(VaultError::PagePathIdConflict {
+                    path: relative_path.to_path_buf(),
+                    existing: existing.clone(),
+                    requested: page_id.clone(),
+                });
+            }
+        }
+
+        self.state_identity
+            .get_or_insert_with(|| state_identity.clone());
+        self.page_paths
+            .insert(page_id.clone(), relative_path.to_path_buf());
+        self.path_pages
+            .insert(relative_path.to_path_buf(), page_id.clone());
+        Ok(())
     }
 }
 
@@ -859,6 +947,83 @@ mod tests {
         ));
         assert_eq!(fs::read(&page_path).unwrap(), b"ours");
         state.shutdown().unwrap();
+    }
+
+    #[test]
+    fn vault_page_identity_bindings_are_bijective_for_one_store() {
+        let (_directory, mut vault, page_id, state, page_path) = setup();
+        let other_path = page_path.with_file_name("other.md");
+        fs::write(&other_path, "other").unwrap();
+
+        let mut loaded = vault.load_page(&state, page_id.clone(), "note.md").unwrap();
+        assert!(matches!(
+            vault.load_page(&state, page_id.clone(), "other.md"),
+            Err(VaultError::PageIdPathConflict {
+                page_id: ref observed,
+                ref existing,
+                ref requested,
+            }) if observed == &page_id
+                && existing == Path::new("note.md")
+                && requested == Path::new("other.md")
+        ));
+
+        let other_page_id = PageId::new("page-b").unwrap();
+        assert!(matches!(
+            vault.load_page(&state, other_page_id.clone(), "note.md"),
+            Err(VaultError::PagePathIdConflict {
+                ref path,
+                ref existing,
+                ref requested,
+            }) if path == Path::new("note.md")
+                && existing == &page_id
+                && requested == &other_page_id
+        ));
+
+        let other_page = vault
+            .load_page(&state, other_page_id.clone(), "other.md")
+            .unwrap();
+        assert_eq!(other_page.page_id(), &other_page_id);
+        assert_eq!(other_page.text(), "other");
+
+        let next = Version::new(1).unwrap();
+        state
+            .try_submit(record(&page_id, 1, None, "updated"))
+            .unwrap()
+            .wait()
+            .unwrap();
+        assert!(matches!(
+            vault.save_page(loaded.sync_mut(), &state, next),
+            Ok(SaveOutcome::Saved { version, .. }) if version == next
+        ));
+        assert_eq!(fs::read(&page_path).unwrap(), b"updated");
+        assert_eq!(fs::read(&other_path).unwrap(), b"other");
+        state.shutdown().unwrap();
+    }
+
+    #[test]
+    fn vault_rejects_mixing_state_store_authorities() {
+        let (_directory, mut vault, page_id, state, page_path) = setup();
+        let mut loaded = vault.load_page(&state, page_id.clone(), "note.md").unwrap();
+        let other_state =
+            StateStore::open(page_path.parent().unwrap().join("other-state.db")).unwrap();
+
+        assert!(matches!(
+            vault.load_page(&other_state, page_id, "note.md"),
+            Err(VaultError::DifferentStateStore)
+        ));
+        let reloaded = vault
+            .load_page(&state, PageId::new("page-a").unwrap(), "note.md")
+            .unwrap();
+        assert_eq!(reloaded.text(), "original");
+        assert!(matches!(
+            vault.save_page(loaded.sync_mut(), &state, Version::new(1).unwrap()),
+            Err(VaultError::StateVersionMissing { page_id: missing, version })
+                if missing == PageId::new("page-a").unwrap()
+                    && version == Version::new(1).unwrap()
+        ));
+        assert_eq!(fs::read(&page_path).unwrap(), b"original");
+        state.shutdown().unwrap();
+        other_state.shutdown().unwrap();
     }
 
     #[test]

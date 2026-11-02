@@ -166,6 +166,13 @@ guarantee.
   differ, load records an external-change conflict rather than treating the
   page as clean. A missing page or changed hash is a typed conflict; the store
   does not create a missing page or overwrite an observed external edit.
+- One `VaultStore` binds each loaded `PageId` to one canonical vault-relative
+  path and each canonical path to one `PageId`; a conflicting load is rejected
+  without changing either binding. The instance also uses one `StateStore`
+  authority. This in-memory map is reconstructed as pages load; it does not
+  persist across restarts, guarantee uniqueness for pages not yet reloaded,
+  coordinate separate `VaultStore` instances or processes, or implement
+  rename reconciliation.
 - Save first asks State for the exact version record, with a commit barrier,
   and writes that record's bytes rather than caller-supplied text. State's
   `Saved` marker advances only after replacement, the platform durability
@@ -228,10 +235,11 @@ conflict is not silently cleared when the disk returns to its former bytes.
 A synthetic `SimInput` journey must also type, backspace to the original bytes,
 save, and reject an older handle without changing the saved file; another
 journey must surface an observed conflict after the disk returns to its base.
-This fence coordinates only callers sharing the same StateStore instance. It
-does not enforce one PageId per path, coordinate separate StateStore instances
-or processes, fence unsaved document heads, or eliminate races with external
-editors between compare and replace; those remain product-level ownership and
+The save fence coordinates only callers sharing the same StateStore instance.
+The identity binding is likewise local to one VaultStore and its loaded pages.
+Neither mechanism coordinates separate processes or VaultStore instances,
+fences unsaved document heads, or eliminates races with external editors
+between compare and replace; those remain product-level ownership and
 synchronization risks.
 
 ### M1-04 crash-recovery journey contract
