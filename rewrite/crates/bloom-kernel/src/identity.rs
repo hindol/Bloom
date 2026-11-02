@@ -45,6 +45,10 @@ pub enum IdentityState {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RegistryChange {
+    AssertLive {
+        id: BlockId,
+        page: PageId,
+    },
     Reserve {
         id: BlockId,
         page: PageId,
@@ -64,10 +68,12 @@ pub enum RegistryChange {
     },
     Retire {
         id: BlockId,
+        page: PageId,
     },
 }
 
-/// `apply` must commit the complete change set or leave the registry unchanged.
+/// `apply` must atomically validate each change's preconditions and commit the
+/// complete change set or leave the registry unchanged.
 pub trait BlockIdRegistry {
     type Error;
 
@@ -162,11 +168,34 @@ pub enum IdentityEditPlanError<E> {
     Text(IdentityTextPlanError),
 }
 
-/// Complete structural text and registry changes, ready for one atomic commit.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CanonicalIdentityEditPlan {
-    canonical_text: String,
+/// A complete in-memory edit bound to the text and registry it was planned for.
+///
+/// The exclusive borrows prevent intervening edits before the plan is consumed:
+///
+/// ```compile_fail,E0499
+/// use bloom_kernel::identity::{
+///     commit_planned_identity_edit, plan_split_edit, BlockId, BlockIdRegistry, PageId,
+/// };
+/// fn stale_edit<R: BlockIdRegistry>(
+///     page: &PageId, text: &mut String, left: &BlockId, right: BlockId, registry: &mut R,
+/// ) {
+///     let Ok(plan) = plan_split_edit(page, text, 1, left, right, registry) else { return };
+///     text.push_str("another edit");
+///     let _ = commit_planned_identity_edit(plan);
+/// }
+/// ```
+#[must_use]
+pub struct CanonicalIdentityEditPlan<'a, R: BlockIdRegistry> {
+    canonical_text: &'a mut String,
+    registry: &'a mut R,
+    planned_text: String,
     identity: IdentityPlan,
+}
+
+#[must_use]
+pub struct CanonicalBlockDeletePlan<'a, R: BlockIdRegistry> {
+    edit: CanonicalIdentityEditPlan<'a, R>,
+    register: BlockRegister,
 }
 
 pub fn plan_delete<R: BlockIdRegistry>(
@@ -333,9 +362,16 @@ pub fn plan_join<R: BlockIdRegistry>(
             retained_id: retained_id.clone(),
             retired_id: retired_id.clone(),
         },
-        changes: vec![RegistryChange::Retire {
-            id: retired_id.clone(),
-        }],
+        changes: vec![
+            RegistryChange::AssertLive {
+                id: retained_id.clone(),
+                page: page.clone(),
+            },
+            RegistryChange::Retire {
+                id: retired_id.clone(),
+                page: page.clone(),
+            },
+        ],
     })
 }
 
@@ -365,16 +401,22 @@ pub fn plan_split<R: BlockIdRegistry>(
             left_id: left_id.clone(),
             right_id: right_id.clone(),
         },
-        changes: vec![RegistryChange::Reserve {
-            id: right_id,
-            page: page.clone(),
-        }],
+        changes: vec![
+            RegistryChange::AssertLive {
+                id: left_id.clone(),
+                page: page.clone(),
+            },
+            RegistryChange::Reserve {
+                id: right_id,
+                page: page.clone(),
+            },
+        ],
     })
 }
 
 /// Applies a precomputed canonical-text result only after the registry accepts
 /// its complete change set. `String` replacement is infallible after that point.
-pub fn commit_identity_edit<R: BlockIdRegistry>(
+fn commit_identity_edit<R: BlockIdRegistry>(
     registry: &mut R,
     canonical_text: &mut String,
     planned_text: String,
@@ -470,18 +512,18 @@ pub fn plan_split_text(
 }
 
 /// Plans join text and identity changes together; neither is applied on error.
-pub fn plan_join_edit<R: BlockIdRegistry>(
+pub fn plan_join_edit<'a, R: BlockIdRegistry>(
     page: &PageId,
-    canonical_text: &str,
+    canonical_text: &'a mut String,
     visible_range: std::ops::Range<usize>,
     replacement: &str,
     retained_id: &BlockId,
     retired_id: &BlockId,
-    registry: &R,
-) -> Result<CanonicalIdentityEditPlan, IdentityEditPlanError<R::Error>> {
+    registry: &'a mut R,
+) -> Result<CanonicalIdentityEditPlan<'a, R>, IdentityEditPlanError<R::Error>> {
     let identity = plan_join(page, retained_id, retired_id, registry)
         .map_err(IdentityEditPlanError::Identity)?;
-    let canonical_text = plan_join_text(
+    let planned_text = plan_join_text(
         canonical_text,
         visible_range,
         replacement,
@@ -491,39 +533,41 @@ pub fn plan_join_edit<R: BlockIdRegistry>(
     .map_err(IdentityEditPlanError::Text)?;
     Ok(CanonicalIdentityEditPlan {
         canonical_text,
+        registry,
+        planned_text,
         identity,
     })
 }
 
 /// Plans split text and identity changes together; neither is applied on error.
-pub fn plan_split_edit<R: BlockIdRegistry>(
+pub fn plan_split_edit<'a, R: BlockIdRegistry>(
     page: &PageId,
-    canonical_text: &str,
+    canonical_text: &'a mut String,
     split_at: usize,
     left_id: &BlockId,
     right_id: BlockId,
-    registry: &R,
-) -> Result<CanonicalIdentityEditPlan, IdentityEditPlanError<R::Error>> {
+    registry: &'a mut R,
+) -> Result<CanonicalIdentityEditPlan<'a, R>, IdentityEditPlanError<R::Error>> {
     let identity = plan_split(page, left_id, right_id.clone(), registry)
         .map_err(IdentityEditPlanError::Identity)?;
-    let canonical_text = plan_split_text(canonical_text, split_at, left_id, &right_id)
+    let planned_text = plan_split_text(canonical_text, split_at, left_id, &right_id)
         .map_err(IdentityEditPlanError::Text)?;
     Ok(CanonicalIdentityEditPlan {
         canonical_text,
+        registry,
+        planned_text,
         identity,
     })
 }
 
 /// Applies a fully validated structural edit to registry and canonical text.
 pub fn commit_planned_identity_edit<R: BlockIdRegistry>(
-    registry: &mut R,
-    canonical_text: &mut String,
-    plan: CanonicalIdentityEditPlan,
+    plan: CanonicalIdentityEditPlan<'_, R>,
 ) -> Result<(), R::Error> {
     commit_identity_edit(
-        registry,
-        canonical_text,
+        plan.registry,
         plan.canonical_text,
+        plan.planned_text,
         &plan.identity,
     )
 }
@@ -562,7 +606,15 @@ pub fn plan_delete_block_text(
         .map_or(visible_chars.len(), |offset| {
             token.visible_boundary().get() + offset
         });
-    let visible_text = visible_chars[visible_line_start..visible_line_end]
+    let visible_content_end = if visible_line_end < visible_chars.len()
+        && visible_line_end > visible_line_start
+        && visible_chars[visible_line_end - 1] == '\r'
+    {
+        visible_line_end - 1
+    } else {
+        visible_line_end
+    };
+    let visible_text = visible_chars[visible_line_start..visible_content_end]
         .iter()
         .collect::<String>();
 
@@ -757,6 +809,58 @@ pub fn plan_paste_block_text(
     Ok(planned)
 }
 
+/// Plans deletion and keeps the register private until the edit commits.
+pub fn plan_delete_edit<'a, R: BlockIdRegistry>(
+    page: &PageId,
+    canonical_text: &'a mut String,
+    id: &BlockId,
+    registry: &'a mut R,
+) -> Result<CanonicalBlockDeletePlan<'a, R>, IdentityEditPlanError<R::Error>> {
+    let deletion =
+        plan_delete_block_text(canonical_text, id).map_err(IdentityEditPlanError::Text)?;
+    let (register, identity) = plan_delete(page, id, deletion.visible_text, registry)
+        .map_err(IdentityEditPlanError::Identity)?;
+    Ok(CanonicalBlockDeletePlan {
+        edit: CanonicalIdentityEditPlan {
+            canonical_text,
+            registry,
+            planned_text: deletion.canonical_text,
+            identity,
+        },
+        register,
+    })
+}
+
+/// Commits a block deletion and returns its register only after success.
+pub fn commit_planned_block_delete<R: BlockIdRegistry>(
+    plan: CanonicalBlockDeletePlan<'_, R>,
+) -> Result<BlockRegister, R::Error> {
+    let CanonicalBlockDeletePlan { edit, register } = plan;
+    commit_planned_identity_edit(edit)?;
+    Ok(register)
+}
+
+/// Plans a linewise paste against its exact destination and registry.
+pub fn plan_paste_edit<'a, R: BlockIdRegistry>(
+    page: &PageId,
+    canonical_text: &'a mut String,
+    insertion_at: usize,
+    register: &BlockRegister,
+    fresh_id: Option<BlockId>,
+    registry: &'a mut R,
+) -> Result<CanonicalIdentityEditPlan<'a, R>, IdentityEditPlanError<R::Error>> {
+    let identity =
+        plan_paste(register, page, fresh_id, registry).map_err(IdentityEditPlanError::Identity)?;
+    let planned_text = plan_paste_block_text(canonical_text, insertion_at, register, &identity)
+        .map_err(IdentityEditPlanError::Text)?;
+    Ok(CanonicalIdentityEditPlan {
+        canonical_text,
+        registry,
+        planned_text,
+        identity,
+    })
+}
+
 fn validate_planned_text(
     canonical_text: &str,
     visible_text: &str,
@@ -873,15 +977,17 @@ pub fn block_ids_in_text(text: &str) -> Vec<BlockId> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
     use std::collections::{BTreeMap, BTreeSet};
+    use std::rc::Rc;
 
     use super::{
-        append_block_id, block_ids_in_text, commit_identity_edit, commit_planned_identity_edit,
-        plan_delete, plan_delete_block_text, plan_discard_register, plan_join, plan_join_edit,
-        plan_join_text, plan_paste, plan_paste_block_text, plan_split, plan_split_edit,
-        plan_split_text, BlockId, BlockIdRegistry, BlockRegister, IdentityDecision,
-        IdentityEditPlanError, IdentityPlanError, IdentityState, PageId, RegisterIdentity,
-        RegisterOperation, RegistryChange,
+        append_block_id, block_ids_in_text, commit_planned_block_delete,
+        commit_planned_identity_edit, plan_delete, plan_delete_block_text, plan_delete_edit,
+        plan_discard_register, plan_join, plan_join_edit, plan_join_text, plan_paste,
+        plan_paste_edit, plan_split, plan_split_edit, plan_split_text, BlockId, BlockIdRegistry,
+        BlockRegister, IdentityDecision, IdentityEditPlanError, IdentityPlanError, IdentityState,
+        PageId, RegisterIdentity, RegisterOperation, RegistryChange,
     };
     use bloom_text::Doc;
 
@@ -925,6 +1031,11 @@ mod tests {
             let mut staged = self.clone();
             for change in changes {
                 match change {
+                    RegistryChange::AssertLive { id, page } => {
+                        if staged.state(id)? != IdentityState::Live(page.clone()) {
+                            return Err("identity is not live on page");
+                        }
+                    }
                     RegistryChange::Reserve { id, page } => {
                         if staged.state(id)? != IdentityState::Available {
                             return Err("identity is not available");
@@ -956,16 +1067,32 @@ mod tests {
                         staged.detached.remove(id);
                         staged.retired.insert(id.clone());
                     }
-                    RegistryChange::Retire { id } => {
-                        if staged.live.remove(id).is_none() {
-                            return Err("identity is not live");
+                    RegistryChange::Retire { id, page } => {
+                        if staged.state(id)? != IdentityState::Live(page.clone()) {
+                            return Err("identity is not live on page");
                         }
+                        staged.live.remove(id);
                         staged.retired.insert(id.clone());
                     }
                 }
             }
             *self = staged;
             Ok(())
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct SharedRegistry(Rc<RefCell<FakeRegistry>>);
+
+    impl BlockIdRegistry for SharedRegistry {
+        type Error = &'static str;
+
+        fn state(&self, id: &BlockId) -> Result<IdentityState, Self::Error> {
+            self.0.borrow().state(id)
+        }
+
+        fn apply(&mut self, changes: &[RegistryChange]) -> Result<(), Self::Error> {
+            self.0.borrow_mut().apply(changes)
         }
     }
 
@@ -1279,6 +1406,115 @@ mod tests {
     }
 
     #[test]
+    fn join_revalidates_both_identities_on_the_expected_page() {
+        for stale_id in ["left01", "right1"] {
+            let mut registry = FakeRegistry::default();
+            registry.seed(id("left01"), page("page"));
+            registry.seed(id("right1"), page("page"));
+            let plan = plan_join(&page("page"), &id("left01"), &id("right1"), &registry).unwrap();
+            registry.live.insert(id(stale_id), page("other"));
+            let before = registry.clone();
+
+            assert_eq!(
+                registry.apply(&plan.changes),
+                Err("identity is not live on page")
+            );
+            assert_eq!(registry, before);
+        }
+    }
+
+    #[test]
+    fn shared_registry_change_after_planning_rejects_join_without_changing_text() {
+        let mut registry = SharedRegistry::default();
+        registry.0.borrow_mut().seed(id("left01"), page("page"));
+        registry.0.borrow_mut().seed(id("right1"), page("page"));
+        let external = registry.clone();
+        let mut text = "left ^left01\nright ^right1\n".to_owned();
+        let plan = plan_join_edit(
+            &page("page"),
+            &mut text,
+            4..5,
+            " ",
+            &id("left01"),
+            &id("right1"),
+            &mut registry,
+        )
+        .unwrap();
+        external
+            .0
+            .borrow_mut()
+            .live
+            .insert(id("right1"), page("other"));
+        let before_commit = external.0.borrow().clone();
+
+        assert_eq!(
+            commit_planned_identity_edit(plan),
+            Err("identity is not live on page")
+        );
+        assert_eq!(text, "left ^left01\nright ^right1\n");
+        assert_eq!(*external.0.borrow(), before_commit);
+    }
+
+    #[test]
+    fn split_revalidates_source_liveness_and_fresh_id_availability() {
+        for stale_source in [true, false] {
+            let mut registry = FakeRegistry::default();
+            registry.seed(id("split1"), page("page"));
+            let plan = plan_split(&page("page"), &id("split1"), id("split2"), &registry).unwrap();
+            if stale_source {
+                registry.live.insert(id("split1"), page("other"));
+            } else {
+                registry.seed(id("split2"), page("other"));
+            }
+            let before = registry.clone();
+
+            assert_eq!(
+                registry.apply(&plan.changes),
+                Err(if stale_source {
+                    "identity is not live on page"
+                } else {
+                    "identity is not available"
+                })
+            );
+            assert_eq!(registry, before);
+        }
+    }
+
+    #[test]
+    fn dropping_a_planned_delete_leaves_text_and_registry_unchanged() {
+        let mut registry = FakeRegistry::default();
+        registry.seed(id("block1"), page("page"));
+        let before_registry = registry.clone();
+        let mut text = "one ^block1\n".to_owned();
+
+        {
+            let _plan =
+                plan_delete_edit(&page("page"), &mut text, &id("block1"), &mut registry).unwrap();
+        }
+
+        assert_eq!(text, "one ^block1\n");
+        assert_eq!(registry, before_registry);
+    }
+
+    #[test]
+    fn failed_block_delete_does_not_return_a_register_or_mutate_state() {
+        let mut registry = FakeRegistry::default();
+        registry.seed(id("block1"), page("page"));
+        registry.fail_next_apply = true;
+        let before_registry = registry.clone();
+        let mut text = "one ^block1\n".to_owned();
+        let plan =
+            plan_delete_edit(&page("page"), &mut text, &id("block1"), &mut registry).unwrap();
+
+        assert_eq!(
+            commit_planned_block_delete(plan),
+            Err("registry transaction failed")
+        );
+        assert_eq!(text, "one ^block1\n");
+        assert_eq!(registry, before_registry);
+    }
+
+    #[test]
     fn actual_join_stream_retires_the_second_id_and_moves_the_first_to_line_end() {
         let fields = oracle_case("join");
         assert_eq!(fields.len(), 7);
@@ -1293,19 +1529,19 @@ mod tests {
         let mut registry = FakeRegistry::default();
         registry.seed(retained.clone(), page("page"));
         registry.seed(retired.clone(), page("page"));
+        let mut actual_text = canonical;
         let plan = plan_join_edit(
             &page("page"),
-            &canonical,
+            &mut actual_text,
             start..end,
             &replacement,
             &retained,
             &retired,
-            &registry,
+            &mut registry,
         )
         .unwrap();
-        let mut actual_text = canonical;
 
-        commit_planned_identity_edit(&mut registry, &mut actual_text, plan).unwrap();
+        commit_planned_identity_edit(plan).unwrap();
 
         assert_eq!(actual_text, "left right ^left01\n");
         assert_eq!(
@@ -1339,18 +1575,18 @@ mod tests {
         let allocated = id("split2");
         let mut registry = FakeRegistry::default();
         registry.seed(original.clone(), page("page"));
+        let mut actual_text = canonical;
         let plan = plan_split_edit(
             &page("page"),
-            &canonical,
+            &mut actual_text,
             start,
             &original,
             allocated.clone(),
-            &registry,
+            &mut registry,
         )
         .unwrap();
-        let mut actual_text = canonical;
 
-        commit_planned_identity_edit(&mut registry, &mut actual_text, plan).unwrap();
+        commit_planned_identity_edit(plan).unwrap();
 
         assert_eq!(actual_text, "alpha ^split1\n beta ^split2\n");
         assert_eq!(
@@ -1469,25 +1705,25 @@ mod tests {
 
     #[test]
     fn rejected_inline_code_split_leaves_text_and_registry_unchanged() {
-        let canonical = "a `bc` ^split1\n";
+        let mut canonical = "a `bc` ^split1\n".to_owned();
         let original = id("split1");
         let mut registry = FakeRegistry::default();
         registry.seed(original.clone(), page("page"));
         let before_registry = registry.clone();
 
-        assert_eq!(
+        assert!(matches!(
             plan_split_edit(
                 &page("page"),
-                canonical,
+                &mut canonical,
                 4,
                 &original,
                 id("split2"),
-                &registry
+                &mut registry
             ),
             Err(IdentityEditPlanError::Text(
                 super::IdentityTextPlanError::InvalidResult
             ))
-        );
+        ));
         assert_eq!(canonical, "a `bc` ^split1\n");
         assert_eq!(registry, before_registry);
     }
@@ -1500,38 +1736,28 @@ mod tests {
         let destination_id = id("dest01");
         let mut registry = FakeRegistry::default();
         registry.seed(moved_id.clone(), source_page.clone());
+        registry.seed(id("blk02"), source_page.clone());
         registry.seed(destination_id.clone(), target_page.clone());
         let mut source_text = "one ^blk01\nnext ^blk02\n".to_owned();
 
-        let deletion = plan_delete_block_text(&source_text, &moved_id).unwrap();
-        assert_eq!(deletion.visible_text, "one");
-        let (register, detach_plan) = plan_delete(
-            &source_page,
-            &moved_id,
-            deletion.visible_text.clone(),
-            &registry,
-        )
-        .unwrap();
-        commit_identity_edit(
-            &mut registry,
-            &mut source_text,
-            deletion.canonical_text,
-            &detach_plan,
-        )
-        .unwrap();
+        let deletion =
+            plan_delete_edit(&source_page, &mut source_text, &moved_id, &mut registry).unwrap();
+        let register = commit_planned_block_delete(deletion).unwrap();
+        assert_eq!(register.visible_text, "one");
         assert_eq!(source_text, "next ^blk02\n");
 
         let mut target_text = "target ^dest01\n".to_owned();
         let target_projection = Doc::new(&target_text).visible_projection();
-        let paste_plan = plan_paste(&register, &target_page, None, &registry).unwrap();
-        let planned_target = plan_paste_block_text(
-            &target_text,
+        let paste_plan = plan_paste_edit(
+            &target_page,
+            &mut target_text,
             target_projection.text().chars().count(),
             &register,
-            &paste_plan,
+            None,
+            &mut registry,
         )
         .unwrap();
-        commit_identity_edit(&mut registry, &mut target_text, planned_target, &paste_plan).unwrap();
+        commit_planned_identity_edit(paste_plan).unwrap();
 
         assert_eq!(target_text, "target ^dest01\none ^blk01\n");
         assert_eq!(
@@ -1542,6 +1768,47 @@ mod tests {
         assert_eq!(
             Doc::new(&target_text).visible_projection().text(),
             "target\none\n"
+        );
+    }
+
+    #[test]
+    fn canonical_crlf_block_can_be_deleted_and_pasted() {
+        let source_page = page("source");
+        let target_page = page("target");
+        let moved_id = id("blk01");
+        let mut registry = FakeRegistry::default();
+        registry.seed(moved_id.clone(), source_page.clone());
+        registry.seed(id("blk02"), source_page.clone());
+        registry.seed(id("dest01"), target_page.clone());
+        let mut source_text = "one ^blk01\r\nnext ^blk02\r\n".to_owned();
+
+        let deletion =
+            plan_delete_edit(&source_page, &mut source_text, &moved_id, &mut registry).unwrap();
+        let register = commit_planned_block_delete(deletion).unwrap();
+        assert_eq!(register.visible_text, "one");
+        assert_eq!(source_text, "next ^blk02\r\n");
+
+        let mut target_text = "target ^dest01\r\n".to_owned();
+        let insertion_at = Doc::new(&target_text)
+            .visible_projection()
+            .text()
+            .chars()
+            .count();
+        let paste = plan_paste_edit(
+            &target_page,
+            &mut target_text,
+            insertion_at,
+            &register,
+            None,
+            &mut registry,
+        )
+        .unwrap();
+        commit_planned_identity_edit(paste).unwrap();
+
+        assert_eq!(target_text, "target ^dest01\r\none ^blk01\r\n");
+        assert_eq!(
+            registry.state(&moved_id),
+            Ok(IdentityState::Live(target_page))
         );
     }
 
@@ -1567,11 +1834,16 @@ mod tests {
             .text()
             .chars()
             .count();
-        let plan = plan_paste(&register, &source_page, Some(fresh_id.clone()), &registry).unwrap();
-        let planned_text =
-            plan_paste_block_text(&canonical_text, insertion_at, &register, &plan).unwrap();
-
-        commit_identity_edit(&mut registry, &mut canonical_text, planned_text, &plan).unwrap();
+        let plan = plan_paste_edit(
+            &source_page,
+            &mut canonical_text,
+            insertion_at,
+            &register,
+            Some(fresh_id.clone()),
+            &mut registry,
+        )
+        .unwrap();
+        commit_planned_identity_edit(plan).unwrap();
 
         assert_eq!(canonical_text, "one ^blk01\r\nnext\r\none ^blk02\r\n");
         assert_eq!(
@@ -1604,27 +1876,31 @@ mod tests {
         };
         let mut registry = FakeRegistry::default();
         registry.seed(original_id, page("source"));
-        let target_text = "target ^dest01\n".to_owned();
+        let expected_text = "target ^dest01\n".to_owned();
+        let mut target_text = expected_text.clone();
         let insertion_at = Doc::new(&target_text)
             .visible_projection()
             .text()
             .chars()
             .count();
-        let plan = plan_paste(&register, &target_page, Some(fresh_id), &registry).unwrap();
-        let planned_text =
-            plan_paste_block_text(&target_text, insertion_at, &register, &plan).unwrap();
-        let mut actual_text = target_text.clone();
-        let before_registry = registry.clone();
         registry.fail_next_apply = true;
+        let before_registry = registry.clone();
+        let plan = plan_paste_edit(
+            &target_page,
+            &mut target_text,
+            insertion_at,
+            &register,
+            Some(fresh_id),
+            &mut registry,
+        )
+        .unwrap();
 
         assert_eq!(
-            commit_identity_edit(&mut registry, &mut actual_text, planned_text, &plan),
+            commit_planned_identity_edit(plan),
             Err("registry transaction failed")
         );
-        assert_eq!(actual_text, target_text);
-        assert_eq!(registry.live, before_registry.live);
-        assert_eq!(registry.detached, before_registry.detached);
-        assert_eq!(registry.retired, before_registry.retired);
+        assert_eq!(target_text, expected_text);
+        assert_eq!(registry, before_registry);
     }
 
     #[test]
@@ -1653,21 +1929,21 @@ mod tests {
         registry.seed(id("left01"), page("page"));
         registry.seed(id("right1"), page("page"));
         let mut text = "left ^left01\nright ^right1\n".to_owned();
+        registry.fail_next_apply = true;
+        let before_registry = registry.clone();
         let join = plan_join_edit(
             &page("page"),
-            &text,
+            &mut text,
             4..5,
             " ",
             &id("left01"),
             &id("right1"),
-            &registry,
+            &mut registry,
         )
         .unwrap();
-        registry.fail_next_apply = true;
-        let before_registry = registry.clone();
 
         assert_eq!(
-            commit_planned_identity_edit(&mut registry, &mut text, join),
+            commit_planned_identity_edit(join),
             Err("registry transaction failed")
         );
         assert_eq!(text, "left ^left01\nright ^right1\n");
@@ -1677,15 +1953,15 @@ mod tests {
         let mut split_text = split_before.clone();
         let split = plan_split_edit(
             &page("page"),
-            &split_text,
+            &mut split_text,
             4,
             &id("left01"),
             id("new001"),
-            &registry,
+            &mut registry,
         )
         .unwrap();
         assert_eq!(
-            commit_planned_identity_edit(&mut registry, &mut split_text, split),
+            commit_planned_identity_edit(split),
             Err("registry transaction failed")
         );
         assert_eq!(text, "left ^left01\nright ^right1\n");
@@ -1705,9 +1981,12 @@ mod tests {
                     id: id("new001"),
                     page: page("page"),
                 },
-                RegistryChange::Retire { id: id("missing") },
+                RegistryChange::Retire {
+                    id: id("missing"),
+                    page: page("page"),
+                },
             ]),
-            Err("identity is not live")
+            Err("identity is not live on page")
         );
         assert_eq!(registry, before);
     }

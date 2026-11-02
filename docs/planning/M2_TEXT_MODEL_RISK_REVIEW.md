@@ -73,8 +73,10 @@ semantics; the bridge does not authorize ADR-3.
 | Mirror transition | Existing `^=id` content is treated as a second live identity or rewritten before the migration | Parse and preserve legacy mirror markers as legacy tokens; do not create or propagate mirrors in the new model; defer their conversion to the approved M7 migration |
 | Register provenance loss | `dd`+`p` duplicates an ID or `yy`+`p` steals the source ID | Typed register payload records source identity and operation provenance; paste consults an explicit liveness port rather than assuming a document-local answer |
 | Detached register discarded | An ID remains detached forever when its move register is replaced or cleared | Retire the matching detached ID on register discard; verify an already-moved ID remains live and unrelated pages cannot be retired |
+| Stale delete-register alias | An old register claims or retires a later detachment of the same ID from the same page | Associate each detach with a unique generation, and require paste and discard to match it; page identity alone is insufficient |
 | Cross-page liveness | A local document incorrectly concludes that a vault-wide ID is unused | Keep liveness/reservation behind a State-owned port; test with a deterministic multi-page registry |
 | Partial structural edit | Allocation, parsing, or range validation fails after text has already changed | Produce a complete edit plan first; apply atomically or return an explicit error with the original document unchanged |
+| Stale edit plan | A prepared text result overwrites a different or newer document, or its registry assumptions change before commit | Bind in-memory plans to the exact document and registry until commit; validate all expected identity states in the atomic registry batch. Production transactions must additionally validate their expected page versions across effect boundaries |
 | Undo/redo identity drift | Undo removes an ID and redo invents a different one, or an undone ID is reused | Include IDs in the text history snapshot; reserve generated IDs monotonically; assert byte-identical undo/redo restoration |
 | Legacy Vim integration gap | Projection tests pass but existing key handling still sends raw coordinates | Exercise the actual legacy `VimState` through a test-only projection adapter and run the existing ID-bearing scenarios; do not declare ADR-3 accepted if this boundary is untested |
 | Performance and stale snapshots | Full-document remapping or stale spans enter the keypress path | Start with correctness-first recomputation in the spike; production M2 must use the single incremental parser and prove unaffected lines remain valid |
@@ -121,9 +123,14 @@ with typed page/block IDs, register provenance, available/live/detached/retired
 registry states, and explicit reserve/detach/move/retire plans. Its fake
 registry covers cross-page copy behavior, move-vs-copy selection, stale-yank
 protection, join retirement, split reservation, collision rejection, and
-all-or-nothing registry batches. The commit helper accepts already-built
-canonical text and assigns it only after the registry accepts the whole change
-set, so injected registry failures leave the original text unchanged.
+all-or-nothing registry batches. The canonical edit facades retain exclusive
+borrows of the exact text and registry until the plan is consumed or dropped;
+they assign the planned text only after the registry accepts the whole change
+set. Registry changes revalidate expected page/liveness and fresh-ID
+preconditions atomically, including if another registry handle changes the
+underlying state after planning. Injected failures leave the original text
+unchanged. This is a synchronous in-memory boundary, not a substitute for
+page/version preconditions or atomic persistence across effect boundaries.
 Projection tests also exercise `x`/`X`/`D`-shaped ranges at a trailing token
 boundary and verify that the hidden token is preserved. Fixture-driven
 canonical-text planners replay the observed `J` and split ranges, then commit
@@ -139,11 +146,14 @@ commit-ready edit. Their tests exercise this path, including a rejected
 inline-code split that leaves the source text and registry unchanged.
 
 The kernel prototype now also plans canonical deletion of one uniquely
-identified block line and linewise paste of a one-line register. Policy tests
-cover moving a detached ID to another page and copying a live ID with a newly
-reserved identity; target text and the registry remain
-unchanged when the paste commit fails. These are explicit policy/text-plan
-tests, not replays of the legacy `dd`/`p` or `yy`/`p` streams. The two-phase
+identified block line and linewise paste of a one-line register. Delete and
+paste use the same borrow-bound plan boundary; a deleted register is returned
+only after its text and registry changes succeed. Policy tests cover moving a
+detached ID to another page and copying a live ID with a newly reserved
+identity; target text and the registry remain unchanged when the paste commit
+fails. A CRLF delete/paste test verifies that the line separator does not enter
+the register text. These are explicit policy/text-plan tests, not replays of
+the legacy `dd`/`p` or `yy`/`p` streams. The two-phase
 move can leave a detached identity in its register after a failed paste or
 process interruption. A discard plan now retires a still-detached move identity
 when its register is abandoned, and tests ensure it does not retire an identity
