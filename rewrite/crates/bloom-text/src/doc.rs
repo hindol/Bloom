@@ -472,7 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn crlf_merges_and_splits_across_long_rope_chunks() {
+    fn crlf_merges_and_splits_in_long_ropes() {
         for prefix_len in [1_023, 1_024, 1_025, 2_047, 2_048, 2_049] {
             let text = format!("{}\rX\nlast", "a".repeat(prefix_len));
             let before = Doc::new(&text);
@@ -482,6 +482,37 @@ mod tests {
                 .unwrap();
             assert_eq!(after.text(), format!("{}\r\nlast", "a".repeat(prefix_len)));
             assert_eq!(cursor.get(), prefix_len + 1);
+            assert_delta_covers_changed_lines(&before, &after, delta);
+
+            let joined = after.clone();
+            let (_, delta) = after.insert_with_delta(cursor, "X").unwrap();
+            assert_eq!(after.text(), text);
+            assert_delta_covers_changed_lines(&joined, &after, delta);
+        }
+    }
+
+    #[test]
+    fn crlf_merges_at_rope_chunk_boundaries_and_splits_again() {
+        let length = 1_030;
+        let base = Doc::new(&"a".repeat(length));
+        let boundary = base.rope.chunks().next().unwrap().chars().count();
+        assert!(boundary > 2 && boundary < length - 3);
+
+        for marker_chars_before_boundary in [1, 2] {
+            let prefix_len = boundary - marker_chars_before_boundary;
+            let prefix = "a".repeat(prefix_len);
+            let suffix = "b".repeat(length - prefix_len - 3);
+            let text = format!("{prefix}\rX\n{suffix}");
+            let before = Doc::new(&text);
+            assert_eq!(
+                before.rope.chunks().next().unwrap().chars().count(),
+                boundary
+            );
+            let mut after = before.clone();
+            let (cursor, delta) = after
+                .delete_previous_char_with_delta(after.raw_char_idx(prefix_len + 2).unwrap())
+                .unwrap();
+            assert_eq!(after.text(), format!("{prefix}\r\n{suffix}"));
             assert_delta_covers_changed_lines(&before, &after, delta);
 
             let joined = after.clone();

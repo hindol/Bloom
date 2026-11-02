@@ -303,7 +303,9 @@ empty lines, and EOF against an independent physical-line reference. Compare
 incremental frames with full layout over both individual and deterministic
 multi-step edits, include the kernel-level CRLF regression, and retain the
 10k-line single-invalidation check. A deliberately underreported CRLF delta
-must be rejected or caught by the incremental-versus-full comparison.
+must be rejected or caught by the incremental-versus-full comparison. Verify
+that CR-X-LF joins actually straddle Ropey chunk boundaries, then split the
+resulting CRLF again.
 
 ### Synthetic journey submission rejection
 
