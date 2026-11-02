@@ -156,6 +156,19 @@ pub enum IdentityTextPlanError {
     LineOutOfBounds(usize),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum IdentityEditPlanError<E> {
+    Identity(IdentityPlanError<E>),
+    Text(IdentityTextPlanError),
+}
+
+/// Complete structural text and registry changes, ready for one atomic commit.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CanonicalIdentityEditPlan {
+    canonical_text: String,
+    identity: IdentityPlan,
+}
+
 pub fn plan_delete<R: BlockIdRegistry>(
     page: &PageId,
     id: &BlockId,
@@ -454,6 +467,65 @@ pub fn plan_split_text(
     let planned = append_block_id(&with_left_id, left_line + 1, right_id)?;
     validate_planned_text(&planned, &edited, &[left_id, right_id])?;
     Ok(planned)
+}
+
+/// Plans join text and identity changes together; neither is applied on error.
+pub fn plan_join_edit<R: BlockIdRegistry>(
+    page: &PageId,
+    canonical_text: &str,
+    visible_range: std::ops::Range<usize>,
+    replacement: &str,
+    retained_id: &BlockId,
+    retired_id: &BlockId,
+    registry: &R,
+) -> Result<CanonicalIdentityEditPlan, IdentityEditPlanError<R::Error>> {
+    let identity = plan_join(page, retained_id, retired_id, registry)
+        .map_err(IdentityEditPlanError::Identity)?;
+    let canonical_text = plan_join_text(
+        canonical_text,
+        visible_range,
+        replacement,
+        retained_id,
+        retired_id,
+    )
+    .map_err(IdentityEditPlanError::Text)?;
+    Ok(CanonicalIdentityEditPlan {
+        canonical_text,
+        identity,
+    })
+}
+
+/// Plans split text and identity changes together; neither is applied on error.
+pub fn plan_split_edit<R: BlockIdRegistry>(
+    page: &PageId,
+    canonical_text: &str,
+    split_at: usize,
+    left_id: &BlockId,
+    right_id: BlockId,
+    registry: &R,
+) -> Result<CanonicalIdentityEditPlan, IdentityEditPlanError<R::Error>> {
+    let identity = plan_split(page, left_id, right_id.clone(), registry)
+        .map_err(IdentityEditPlanError::Identity)?;
+    let canonical_text = plan_split_text(canonical_text, split_at, left_id, &right_id)
+        .map_err(IdentityEditPlanError::Text)?;
+    Ok(CanonicalIdentityEditPlan {
+        canonical_text,
+        identity,
+    })
+}
+
+/// Applies a fully validated structural edit to registry and canonical text.
+pub fn commit_planned_identity_edit<R: BlockIdRegistry>(
+    registry: &mut R,
+    canonical_text: &mut String,
+    plan: CanonicalIdentityEditPlan,
+) -> Result<(), R::Error> {
+    commit_identity_edit(
+        registry,
+        canonical_text,
+        plan.canonical_text,
+        &plan.identity,
+    )
 }
 
 pub fn plan_delete_block_text(
@@ -804,11 +876,12 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
     use super::{
-        append_block_id, block_ids_in_text, commit_identity_edit, plan_delete,
-        plan_delete_block_text, plan_discard_register, plan_join, plan_join_text, plan_paste,
-        plan_paste_block_text, plan_split, plan_split_text, BlockId, BlockIdRegistry,
-        BlockRegister, IdentityDecision, IdentityPlanError, IdentityState, PageId,
-        RegisterIdentity, RegisterOperation, RegistryChange,
+        append_block_id, block_ids_in_text, commit_identity_edit, commit_planned_identity_edit,
+        plan_delete, plan_delete_block_text, plan_discard_register, plan_join, plan_join_edit,
+        plan_join_text, plan_paste, plan_paste_block_text, plan_split, plan_split_edit,
+        plan_split_text, BlockId, BlockIdRegistry, BlockRegister, IdentityDecision,
+        IdentityEditPlanError, IdentityPlanError, IdentityState, PageId, RegisterIdentity,
+        RegisterOperation, RegistryChange,
     };
     use bloom_text::Doc;
 
@@ -1220,12 +1293,19 @@ mod tests {
         let mut registry = FakeRegistry::default();
         registry.seed(retained.clone(), page("page"));
         registry.seed(retired.clone(), page("page"));
-        let plan = plan_join(&page("page"), &retained, &retired, &registry).unwrap();
-        let planned_text =
-            plan_join_text(&canonical, start..end, &replacement, &retained, &retired).unwrap();
+        let plan = plan_join_edit(
+            &page("page"),
+            &canonical,
+            start..end,
+            &replacement,
+            &retained,
+            &retired,
+            &registry,
+        )
+        .unwrap();
         let mut actual_text = canonical;
 
-        commit_identity_edit(&mut registry, &mut actual_text, planned_text, &plan).unwrap();
+        commit_planned_identity_edit(&mut registry, &mut actual_text, plan).unwrap();
 
         assert_eq!(actual_text, "left right ^left01\n");
         assert_eq!(
@@ -1259,11 +1339,18 @@ mod tests {
         let allocated = id("split2");
         let mut registry = FakeRegistry::default();
         registry.seed(original.clone(), page("page"));
-        let plan = plan_split(&page("page"), &original, allocated.clone(), &registry).unwrap();
-        let planned_text = plan_split_text(&canonical, start, &original, &allocated).unwrap();
+        let plan = plan_split_edit(
+            &page("page"),
+            &canonical,
+            start,
+            &original,
+            allocated.clone(),
+            &registry,
+        )
+        .unwrap();
         let mut actual_text = canonical;
 
-        commit_identity_edit(&mut registry, &mut actual_text, planned_text, &plan).unwrap();
+        commit_planned_identity_edit(&mut registry, &mut actual_text, plan).unwrap();
 
         assert_eq!(actual_text, "alpha ^split1\n beta ^split2\n");
         assert_eq!(
@@ -1378,6 +1465,31 @@ mod tests {
             plan_split_text(canonical, 4, &id("split1"), &id("split2")),
             Err(super::IdentityTextPlanError::InvalidResult)
         );
+    }
+
+    #[test]
+    fn rejected_inline_code_split_leaves_text_and_registry_unchanged() {
+        let canonical = "a `bc` ^split1\n";
+        let original = id("split1");
+        let mut registry = FakeRegistry::default();
+        registry.seed(original.clone(), page("page"));
+        let before_registry = registry.clone();
+
+        assert_eq!(
+            plan_split_edit(
+                &page("page"),
+                canonical,
+                4,
+                &original,
+                id("split2"),
+                &registry
+            ),
+            Err(IdentityEditPlanError::Text(
+                super::IdentityTextPlanError::InvalidResult
+            ))
+        );
+        assert_eq!(canonical, "a `bc` ^split1\n");
+        assert_eq!(registry, before_registry);
     }
 
     #[test]
@@ -1540,34 +1652,45 @@ mod tests {
         let mut registry = FakeRegistry::default();
         registry.seed(id("left01"), page("page"));
         registry.seed(id("right1"), page("page"));
-        let join = plan_join(&page("page"), &id("left01"), &id("right1"), &registry).unwrap();
         let mut text = "left ^left01\nright ^right1\n".to_owned();
+        let join = plan_join_edit(
+            &page("page"),
+            &text,
+            4..5,
+            " ",
+            &id("left01"),
+            &id("right1"),
+            &registry,
+        )
+        .unwrap();
         registry.fail_next_apply = true;
         let before_registry = registry.clone();
 
         assert_eq!(
-            commit_identity_edit(
-                &mut registry,
-                &mut text,
-                "left right ^left01\n".to_owned(),
-                &join
-            ),
+            commit_planned_identity_edit(&mut registry, &mut text, join),
             Err("registry transaction failed")
         );
         assert_eq!(text, "left ^left01\nright ^right1\n");
         assert_eq!(registry, before_registry);
 
-        let split = plan_split(&page("page"), &id("left01"), id("new001"), &registry).unwrap();
+        let split_before = "left ^left01\n".to_owned();
+        let mut split_text = split_before.clone();
+        let split = plan_split_edit(
+            &page("page"),
+            &split_text,
+            4,
+            &id("left01"),
+            id("new001"),
+            &registry,
+        )
+        .unwrap();
         assert_eq!(
-            commit_identity_edit(
-                &mut registry,
-                &mut text,
-                "left\nright ^left01\n".to_owned(),
-                &split
-            ),
+            commit_planned_identity_edit(&mut registry, &mut split_text, split),
             Err("registry transaction failed")
         );
         assert_eq!(text, "left ^left01\nright ^right1\n");
+        assert_eq!(split_text, split_before);
+        assert_eq!(registry, before_registry);
     }
 
     #[test]

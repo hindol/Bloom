@@ -133,6 +133,10 @@ planners reject edits on unrelated lines and verify the resulting visible text
 and parsed identities before returning a plan. They currently support
 exactly two ordinary ID tokens in the whole document for join, and one for
 split; documents with additional tokens are explicitly rejected.
+The structural `plan_join_edit` and `plan_split_edit` facades bundle canonical
+text with the corresponding registry changes, so a failed text plan returns no
+commit-ready edit. Their tests exercise this path, including a rejected
+inline-code split that leaves the source text and registry unchanged.
 
 The kernel prototype now also plans canonical deletion of one uniquely
 identified block line and linewise paste of a one-line register. Policy tests
