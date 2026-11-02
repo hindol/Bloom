@@ -135,6 +135,11 @@ hidden ID, but the M1 cursor does not use that detector. Keep this contract
 distinct from ordinary Unicode typing order; cursor landing and deletion policy
 require an explicit grapheme-aware design.
 
+Backspacing between CR and LF can also form a CRLF around the raw cursor. M1
+now settles that edit without corrupting layout, but the cursor remains inside
+the resulting grapheme. A separate ignored I6 contract records this failure;
+the invalidation fix does not choose a cursor-landing policy.
+
 For detector sensitivity, the fault corpus may run an I6-attributed, test-only
 probe on a raw cursor in a plain snapshot whose prototype projection has no
 hidden tokens. It must reject snapshots with recognized tokens and

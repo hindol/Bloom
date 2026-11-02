@@ -436,6 +436,24 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "M2 I6 blocker: joining CRLF leaves the cursor inside its grapheme"]
+    fn backspace_joining_crlf_keeps_the_cursor_on_a_grapheme_boundary() {
+        let mut sim = SimInput::new(PlainTextBackend {
+            model: Model::new("\n"),
+        });
+        sim.type_text("\rX").unwrap().keys("<BS>").unwrap();
+        assert_eq!(sim.buffer_text().unwrap(), "\r\n");
+        let frame = view(&sim.backend().model);
+        let offset = frame.document.raw_char_offset(frame.cursor).unwrap();
+        let projection = frame.document.visible_projection();
+        assert!(projection.tokens().is_empty());
+        assert!(
+            projection.range(offset, offset).is_ok(),
+            "cursor {offset} splits the CRLF grapheme"
+        );
+    }
+
+    #[test]
     fn empty_kernel_smoke_dispatches_compatible_input_without_product_parity() {
         let mut sim = SimInput::new(EmptyKernelBackend::default());
         sim.keys("i")
