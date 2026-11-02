@@ -182,6 +182,58 @@ guarantee.
   the documented replacement operation fail closed. No result claims to
   eliminate the documented compare/read-to-replace race.
 
+### Stale page-sync and saved-marker fencing
+
+Two page handles can share a Vault Store while retaining separate saved-version
+snapshots. A newer save may leave the file bytes identical to the stale
+handle's base; a hash comparison then succeeds even though State's saved marker
+has advanced. The stale handle can replace the file before State rejects the
+marker regression. File hashes alone therefore cannot fence editor-owned
+versions.
+
+For the M1 single-StateStore boundary, bind each page-sync handle to the exact
+StateStore that loaded it. Serialize saves and direct saved-marker updates
+through a StateStore-owned guard; the SQLite worker itself must not acquire
+that guard. Loads hold the same guard while reading both file bytes and the
+saved marker, so a concurrent internal save cannot bind a newer marker to old
+bytes. Saves hold it from the version and saved-marker preflight through the
+file replacement, readback, and marker result. Reject an outdated observed
+saved marker before replacing the file, including when the file bytes match
+the old base. Expose a distinct error for a different StateStore, a stale
+handle, and a poisoned guard. The guard may block the synchronous load and
+save paths for all pages sharing the store; it must not be acquired by
+non-blocking version submission. A direct saved-marker update returns an
+explicit busy error while a load or save holds the guard rather than waiting
+or re-entering the lock.
+
+Track the last observed State marker separately from the clean saved version:
+a loaded disk conflict and a failed marker update must not erase the expected
+marker. When a save discovers that its observed marker is stale, invalidate
+the handle's clean version; it must not continue claiming a known-stale
+snapshot is clean. Once replacement may have occurred, do not report any
+version as clean until readback and the State marker succeed. Retain the
+verified disk hash for a safe retry after a marker failure; an unverified
+replacement must instead be re-observed through the normal conflict path.
+
+An observed conflict remains attached to its page-sync handle even if disk
+later returns to the original base. The handle cannot write again until the
+caller explicitly reloads or reconciles; a fresh load alone does not merge or
+discard the previously committed draft. M1 does not implement a merge UI.
+
+Exercise same-byte ABA saves through separate handles, including a stale
+request newer than the current marker, a different StateStore, guard
+serialization, a load overlapping an internal save, and an injected
+saved-marker failure followed by a retry. Verify that an observed external
+conflict is not silently cleared when the disk returns to its former bytes.
+A synthetic `SimInput` journey must also type, backspace to the original bytes,
+save, and reject an older handle without changing the saved file; another
+journey must surface an observed conflict after the disk returns to its base.
+This fence coordinates only callers sharing the same StateStore instance. It
+does not enforce one PageId per path, coordinate separate StateStore instances
+or processes, fence unsaved document heads, or eliminate races with external
+editors between compare and replace; those remain product-level ownership and
+synchronization risks.
+
 ### M1-04 crash-recovery journey contract
 
 - The test-only journey uses `SimInput` to open the synthetic page, insert

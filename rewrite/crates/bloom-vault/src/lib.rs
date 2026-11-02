@@ -10,7 +10,7 @@ use std::{
     sync::{Arc, Weak},
 };
 
-use bloom_state::{PageId, StateError, StateStore, Version};
+use bloom_state::{PageId, StateError, StateStore, StateStoreIdentity, Version};
 use tempfile::Builder;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -72,11 +72,16 @@ pub enum VaultError {
     PageIsNotFile,
     RootIsNotDirectory,
     DifferentVault,
+    DifferentStateStore,
     PagePathChanged,
     InvalidUtf8(std::string::FromUtf8Error),
     VersionRegression {
         saved: Version,
         requested: Version,
+    },
+    StalePageSync {
+        expected: Option<Version>,
+        observed: Option<Version>,
     },
     SavedMarkerAfterWrite(StateError),
 }
@@ -104,6 +109,9 @@ impl fmt::Display for VaultError {
             Self::PageIsNotFile => f.write_str("page path does not resolve to a regular file"),
             Self::RootIsNotDirectory => f.write_str("vault root is not a directory"),
             Self::DifferentVault => f.write_str("page sync state belongs to another vault"),
+            Self::DifferentStateStore => {
+                f.write_str("page sync state belongs to another state store")
+            }
             Self::PagePathChanged => {
                 f.write_str("page path no longer resolves to its originally loaded file")
             }
@@ -113,6 +121,10 @@ impl fmt::Display for VaultError {
                 "refusing to save version {} behind already-saved version {}",
                 requested.get(),
                 saved.get()
+            ),
+            Self::StalePageSync { expected, observed } => write!(
+                f,
+                "page sync state is stale: expected saved marker {expected:?}, observed {observed:?}"
             ),
             Self::SavedMarkerAfterWrite(error) => write!(
                 f,
@@ -142,11 +154,13 @@ impl From<StateError> for VaultError {
 #[derive(Debug)]
 pub struct PageSync {
     actor: Weak<()>,
+    state_identity: StateStoreIdentity,
     page_id: PageId,
     root: PathBuf,
     relative_path: PathBuf,
     base: ContentHash,
     saved_version: Option<Version>,
+    observed_saved_version: Option<Version>,
     conflict: Option<SaveConflict>,
 }
 
@@ -227,8 +241,20 @@ impl VaultStore {
         page_id: PageId,
         relative_path: impl AsRef<Path>,
     ) -> Result<LoadedPage, VaultError> {
+        self.load_page_with(state, page_id, relative_path, read_page)
+    }
+
+    #[allow(clippy::disallowed_methods)]
+    fn load_page_with(
+        &mut self,
+        state: &StateStore,
+        page_id: PageId,
+        relative_path: impl AsRef<Path>,
+        read: impl FnOnce(&Path) -> io::Result<Vec<u8>>,
+    ) -> Result<LoadedPage, VaultError> {
+        let _save_guard = state.lock_saves()?;
         let path = self.resolve_existing(relative_path.as_ref())?;
-        let bytes = fs::read(&path).map_err(|source| VaultError::Io {
+        let bytes = read(&path).map_err(|source| VaultError::Io {
             operation: "read page",
             source,
         })?;
@@ -239,16 +265,17 @@ impl VaultStore {
             .to_path_buf();
         let disk_hash = hash(&bytes);
         let saved_record = state.saved_record(page_id.clone())?;
-        let (base, saved_version, conflict) = match saved_record {
+        let (base, saved_version, observed_saved_version, conflict) = match saved_record {
             Some(record) => {
                 let version = record.version();
                 let base = hash(record.content().as_bytes());
                 if base == disk_hash {
-                    (base, Some(version), None)
+                    (base, Some(version), Some(version), None)
                 } else {
                     (
                         base,
                         None,
+                        Some(version),
                         Some(SaveConflict::ExternalChange {
                             base,
                             observed: disk_hash,
@@ -256,18 +283,20 @@ impl VaultStore {
                     )
                 }
             }
-            None => (disk_hash, None, None),
+            None => (disk_hash, None, None, None),
         };
         Ok(LoadedPage {
             page_id: page_id.clone(),
             text,
             sync: PageSync {
                 actor: Arc::downgrade(&self.actor),
+                state_identity: state.identity(),
                 page_id: page_id.clone(),
                 root: self.root.clone(),
                 relative_path,
                 base,
                 saved_version,
+                observed_saved_version,
                 conflict,
             },
         })
@@ -277,14 +306,15 @@ impl VaultStore {
     ///
     /// The State lookup commits queued snapshots before returning. State's
     /// saved marker is advanced only after replacement, durability, and
-    /// readback all succeed.
+    /// readback all succeed. An observed conflict remains on the handle and
+    /// requires an explicit reload or reconciliation before another write.
     pub fn save_page(
         &mut self,
         sync: &mut PageSync,
         state: &StateStore,
         version: Version,
     ) -> Result<SaveOutcome, VaultError> {
-        self.save_page_with(sync, state, version, |_| Ok(()))
+        self.save_page_with(sync, state, version, |_| Ok(()), read_page)
     }
 
     #[allow(clippy::disallowed_methods)]
@@ -294,17 +324,38 @@ impl VaultStore {
         state: &StateStore,
         version: Version,
         before_replace: impl FnOnce(&Path) -> io::Result<()>,
+        readback: impl FnOnce(&Path) -> io::Result<Vec<u8>>,
     ) -> Result<SaveOutcome, VaultError> {
         if sync.root != self.root || !Weak::ptr_eq(&sync.actor, &Arc::downgrade(&self.actor)) {
             return Err(VaultError::DifferentVault);
         }
-        if let Some(saved) = sync.saved_version {
+        if sync.state_identity != state.identity() {
+            return Err(VaultError::DifferentStateStore);
+        }
+        let save_guard = state.lock_saves()?;
+        let observed_saved_version = state
+            .saved_record(sync.page_id.clone())?
+            .map(|record| record.version());
+        let marker_is_stale = observed_saved_version != sync.observed_saved_version;
+        if marker_is_stale {
+            sync.saved_version = None;
+        }
+        if let Some(saved) = observed_saved_version {
             if version < saved {
                 return Err(VaultError::VersionRegression {
                     saved,
                     requested: version,
                 });
             }
+        }
+        if marker_is_stale {
+            return Err(VaultError::StalePageSync {
+                expected: sync.observed_saved_version,
+                observed: observed_saved_version,
+            });
+        }
+        if let Some(conflict) = &sync.conflict {
+            return Ok(SaveOutcome::Conflict(conflict.clone()));
         }
 
         let record = state
@@ -349,11 +400,17 @@ impl VaultStore {
             sync.conflict = Some(conflict.clone());
             return Ok(SaveOutcome::Conflict(conflict));
         }
-
         let target_hash = hash(record.content().as_bytes());
-        replace_file(&path, record.content().as_bytes(), before_replace)?;
+        match replace_file(&path, record.content().as_bytes(), before_replace) {
+            Ok(()) => sync.saved_version = None,
+            Err(error @ VaultError::PostReplace { .. }) => {
+                sync.saved_version = None;
+                return Err(error);
+            }
+            Err(error) => return Err(error),
+        }
         crash_test_hook("before-readback");
-        let readback = fs::read(&path).map_err(|source| VaultError::PostReplace {
+        let readback = readback(&path).map_err(|source| VaultError::PostReplace {
             operation: "read back page",
             source,
         })?;
@@ -369,12 +426,13 @@ impl VaultStore {
         }
 
         sync.base = target_hash;
-        sync.saved_version = Some(version);
         sync.conflict = None;
         crash_test_hook("before-saved-marker");
-        state
+        save_guard
             .mark_saved(sync.page_id.clone(), version)
             .map_err(VaultError::SavedMarkerAfterWrite)?;
+        sync.saved_version = Some(version);
+        sync.observed_saved_version = Some(version);
         crash_test_hook("after-saved-marker");
         Ok(SaveOutcome::Saved {
             version,
@@ -414,6 +472,11 @@ impl VaultStore {
 
 fn hash(bytes: &[u8]) -> ContentHash {
     ContentHash(*blake3::hash(bytes).as_bytes())
+}
+
+#[allow(clippy::disallowed_methods)]
+fn read_page(path: &Path) -> io::Result<Vec<u8>> {
+    fs::read(path)
 }
 
 #[allow(clippy::disallowed_methods)]
@@ -544,7 +607,7 @@ mod watchdog_support;
 #[cfg(test)]
 #[allow(clippy::disallowed_methods)]
 mod tests {
-    use std::{fs, io, path::PathBuf};
+    use std::{fs, io, path::PathBuf, sync::mpsc, thread, time::Duration};
 
     use bloom_state::{Origin, TransactionId, VersionRecord};
     use tempfile::tempdir;
@@ -689,10 +752,16 @@ mod tests {
         let mut loaded = vault.load_page(&state, page_id.clone(), "note.md").unwrap();
 
         let error = vault
-            .save_page_with(loaded.sync_mut(), &state, second, |temp| {
-                assert!(temp.exists());
-                Err(io::Error::other("injected replace failure"))
-            })
+            .save_page_with(
+                loaded.sync_mut(),
+                &state,
+                second,
+                |temp| {
+                    assert!(temp.exists());
+                    Err(io::Error::other("injected replace failure"))
+                },
+                read_page,
+            )
             .unwrap_err();
         assert!(matches!(error, VaultError::Io { .. }));
         assert_eq!(fs::read(&page_path).unwrap(), b"original");
@@ -703,6 +772,54 @@ mod tests {
             .map(Result::unwrap)
             .any(|entry| entry.file_name().to_string_lossy().ends_with(".bloom-tmp")));
         assert!(state.recovery_candidate(page_id).unwrap().is_some());
+        state.shutdown().unwrap();
+    }
+
+    #[test]
+    fn observed_conflict_requires_a_fresh_load_even_if_disk_returns_to_base() {
+        let (_directory, mut vault, page_id, state, page_path) = setup();
+        let (first, second) = seed_initial(&state, &page_id, "original", "ours");
+        fs::write(&page_path, "external").unwrap();
+        let mut loaded = vault.load_page(&state, page_id.clone(), "note.md").unwrap();
+        let conflict = SaveConflict::ExternalChange {
+            base: hash(b"original"),
+            observed: hash(b"external"),
+        };
+        assert_eq!(loaded.sync().conflict(), Some(&conflict));
+        fs::write(&page_path, "original").unwrap();
+
+        assert_eq!(
+            vault.save_page(loaded.sync_mut(), &state, second).unwrap(),
+            SaveOutcome::Conflict(conflict.clone())
+        );
+        assert_eq!(fs::read(&page_path).unwrap(), b"original");
+        assert_eq!(loaded.sync().conflict(), Some(&conflict));
+        assert!(loaded.sync().is_dirty(second));
+        assert_eq!(
+            state
+                .saved_record(page_id.clone())
+                .unwrap()
+                .unwrap()
+                .version(),
+            first
+        );
+        assert_eq!(
+            state
+                .recovery_candidate(page_id.clone())
+                .unwrap()
+                .unwrap()
+                .version(),
+            second
+        );
+
+        let mut refreshed = vault.load_page(&state, page_id, "note.md").unwrap();
+        assert_eq!(refreshed.text(), "original");
+        assert_eq!(refreshed.sync().conflict(), None);
+        assert!(matches!(
+            vault.save_page(refreshed.sync_mut(), &state, second),
+            Ok(SaveOutcome::Saved { version, .. }) if version == second
+        ));
+        assert_eq!(fs::read(&page_path).unwrap(), b"ours");
         state.shutdown().unwrap();
     }
 
@@ -739,6 +856,420 @@ mod tests {
         assert!(matches!(
             other_vault.save_page(loaded.sync_mut(), &state, second),
             Err(VaultError::DifferentVault)
+        ));
+        assert_eq!(fs::read(&page_path).unwrap(), b"ours");
+        state.shutdown().unwrap();
+    }
+
+    #[test]
+    fn stale_page_sync_cannot_overwrite_a_newer_saved_version_with_the_same_base_bytes() {
+        let (_directory, mut vault, page_id, state, page_path) = setup();
+        let (first, second) = seed_initial(&state, &page_id, "original", "stale");
+        let third = Version::new(3).unwrap();
+        state
+            .try_submit(record(&page_id, 3, Some(2), "original"))
+            .unwrap()
+            .wait()
+            .unwrap();
+
+        let mut stale = vault.load_page(&state, page_id.clone(), "note.md").unwrap();
+        let mut current = vault.load_page(&state, page_id.clone(), "note.md").unwrap();
+        assert!(matches!(
+            vault.save_page(current.sync_mut(), &state, third),
+            Ok(SaveOutcome::Saved { .. })
+        ));
+        let result = vault.save_page(stale.sync_mut(), &state, second);
+        let disk = fs::read(&page_path).unwrap();
+
+        assert!(
+            matches!(result, Err(VaultError::VersionRegression { .. })),
+            "stale save returned {result:?}; disk contains {disk:?}"
+        );
+        assert_eq!(disk, b"original");
+        assert_eq!(stale.sync().saved_version(), None);
+        assert!(stale.sync().is_dirty(first));
+        assert_eq!(stale.sync().base(), hash(b"original"));
+        assert_eq!(
+            state.saved_record(page_id).unwrap().unwrap().version(),
+            third
+        );
+        state.shutdown().unwrap();
+    }
+
+    #[test]
+    fn newer_version_from_a_stale_page_sync_is_rejected_before_io() {
+        let (_directory, mut vault, page_id, state, page_path) = setup();
+        let (first, _) = seed_initial(&state, &page_id, "original", "intermediate");
+        let third = Version::new(3).unwrap();
+        let fourth = Version::new(4).unwrap();
+        state
+            .try_submit(record(&page_id, 3, Some(2), "original"))
+            .unwrap()
+            .wait()
+            .unwrap();
+        state
+            .try_submit(record(&page_id, 4, Some(1), "stale branch"))
+            .unwrap()
+            .wait()
+            .unwrap();
+
+        let mut stale = vault.load_page(&state, page_id.clone(), "note.md").unwrap();
+        let mut current = vault.load_page(&state, page_id.clone(), "note.md").unwrap();
+        vault.save_page(current.sync_mut(), &state, third).unwrap();
+
+        assert!(matches!(
+            vault.save_page(stale.sync_mut(), &state, fourth),
+            Err(VaultError::StalePageSync {
+                expected: Some(expected),
+                observed: Some(observed),
+            }) if expected == first && observed == third
+        ));
+        assert_eq!(fs::read(&page_path).unwrap(), b"original");
+        assert_eq!(stale.sync().saved_version(), None);
+        assert!(stale.sync().is_dirty(first));
+        assert_eq!(
+            state
+                .saved_record(page_id.clone())
+                .unwrap()
+                .unwrap()
+                .version(),
+            third
+        );
+        assert_eq!(
+            state
+                .recovery_candidate(page_id)
+                .unwrap()
+                .unwrap()
+                .version(),
+            fourth
+        );
+        state.shutdown().unwrap();
+    }
+
+    #[test]
+    fn first_saved_marker_invalidates_handles_loaded_without_one() {
+        let (_directory, mut vault, page_id, state, page_path) = setup();
+        let first = Version::new(1).unwrap();
+        let second = Version::new(2).unwrap();
+        state
+            .try_submit(record(&page_id, 1, None, "original"))
+            .unwrap()
+            .wait()
+            .unwrap();
+        state
+            .try_submit(record(&page_id, 2, Some(1), "next"))
+            .unwrap()
+            .wait()
+            .unwrap();
+        let mut current = vault.load_page(&state, page_id.clone(), "note.md").unwrap();
+        let mut stale = vault.load_page(&state, page_id.clone(), "note.md").unwrap();
+
+        assert_eq!(current.sync().saved_version(), None);
+        vault.save_page(current.sync_mut(), &state, first).unwrap();
+        assert!(matches!(
+            vault.save_page(stale.sync_mut(), &state, second),
+            Err(VaultError::StalePageSync {
+                expected: None,
+                observed: Some(observed),
+            }) if observed == first
+        ));
+        assert_eq!(fs::read(&page_path).unwrap(), b"original");
+
+        let mut refreshed = vault.load_page(&state, page_id, "note.md").unwrap();
+        assert!(matches!(
+            vault.save_page(refreshed.sync_mut(), &state, second),
+            Ok(SaveOutcome::Saved { version, .. }) if version == second
+        ));
+        assert_eq!(fs::read(&page_path).unwrap(), b"next");
+        state.shutdown().unwrap();
+    }
+
+    #[test]
+    fn load_and_save_share_a_consistent_file_and_marker_snapshot() {
+        let (_directory, mut first_vault, page_id, state, page_path) = setup();
+        let (first, second) = seed_initial(&state, &page_id, "original", "new content");
+        let mut current = first_vault
+            .load_page(&state, page_id.clone(), "note.md")
+            .unwrap();
+        let mut second_vault = VaultStore::open(page_path.parent().unwrap()).unwrap();
+        let state = Arc::new(state);
+        let load_state = Arc::clone(&state);
+        let load_page_id = page_id.clone();
+        let (read_sender, read_receiver) = mpsc::channel();
+        let (release_sender, release_receiver) = mpsc::channel();
+        let (load_result_sender, load_result_receiver) = mpsc::channel();
+        let load_thread = thread::spawn(move || {
+            let result =
+                second_vault.load_page_with(&load_state, load_page_id, "note.md", move |path| {
+                    let bytes = fs::read(path)?;
+                    read_sender
+                        .send(())
+                        .map_err(|error| io::Error::other(error.to_string()))?;
+                    release_receiver
+                        .recv()
+                        .map_err(|error| io::Error::other(error.to_string()))?;
+                    Ok(bytes)
+                });
+            assert!(load_result_sender.send((second_vault, result)).is_ok());
+        });
+        read_receiver
+            .recv_timeout(Duration::from_secs(20))
+            .expect("load did not read the file");
+
+        assert_eq!(
+            state.mark_saved(page_id.clone(), first),
+            Err(StateError::SaveFenceBusy)
+        );
+        let save_state = Arc::clone(&state);
+        let (started_sender, started_receiver) = mpsc::channel();
+        let (save_result_sender, save_result_receiver) = mpsc::channel();
+        let save_thread = thread::spawn(move || {
+            started_sender.send(()).unwrap();
+            let result = first_vault.save_page(current.sync_mut(), &save_state, second);
+            save_result_sender.send(result).unwrap();
+        });
+        started_receiver
+            .recv_timeout(Duration::from_secs(20))
+            .expect("save did not start");
+        release_sender.send(()).unwrap();
+
+        let (mut second_vault, loaded) = load_result_receiver
+            .recv_timeout(Duration::from_secs(20))
+            .expect("load did not finish");
+        let mut loaded = loaded.unwrap();
+        assert_eq!(loaded.text(), "original");
+        assert_eq!(loaded.sync().saved_version(), Some(first));
+        assert_eq!(loaded.sync().conflict(), None);
+        assert!(matches!(
+            save_result_receiver
+                .recv_timeout(Duration::from_secs(20))
+                .expect("save did not finish"),
+            Ok(SaveOutcome::Saved { version, .. }) if version == second
+        ));
+        load_thread.join().unwrap();
+        save_thread.join().unwrap();
+
+        let third = Version::new(3).unwrap();
+        state
+            .try_submit(record(&page_id, 3, Some(1), "stale branch"))
+            .unwrap()
+            .wait()
+            .unwrap();
+        assert!(matches!(
+            second_vault.save_page(loaded.sync_mut(), &state, third),
+            Err(VaultError::StalePageSync {
+                expected: Some(expected),
+                observed: Some(observed),
+            }) if expected == first && observed == second
+        ));
+        assert_eq!(fs::read(&page_path).unwrap(), b"new content");
+        match Arc::try_unwrap(state) {
+            Ok(state) => state.shutdown().unwrap(),
+            Err(_) => panic!("a load or save retained the StateStore"),
+        }
+    }
+
+    #[test]
+    fn separate_vault_actors_serialize_saves_through_the_shared_state() {
+        let (_directory, mut first_vault, page_id, state, page_path) = setup();
+        let (first, _) = seed_initial(&state, &page_id, "original", "intermediate");
+        let third = Version::new(3).unwrap();
+        let fourth = Version::new(4).unwrap();
+        state
+            .try_submit(record(&page_id, 3, Some(2), "original"))
+            .unwrap()
+            .wait()
+            .unwrap();
+        state
+            .try_submit(record(&page_id, 4, Some(1), "stale branch"))
+            .unwrap()
+            .wait()
+            .unwrap();
+        let state = Arc::new(state);
+        let mut second_vault = VaultStore::open(page_path.parent().unwrap()).unwrap();
+        let mut current = first_vault
+            .load_page(&state, page_id.clone(), "note.md")
+            .unwrap();
+        let mut stale = second_vault
+            .load_page(&state, page_id.clone(), "note.md")
+            .unwrap();
+        let (entered_sender, entered_receiver) = mpsc::channel();
+        let (release_sender, release_receiver) = mpsc::channel();
+        let (first_result_sender, first_result_receiver) = mpsc::channel();
+        let first_state = Arc::clone(&state);
+        let first_thread = thread::spawn(move || {
+            let result = first_vault.save_page_with(
+                current.sync_mut(),
+                &first_state,
+                third,
+                move |_| {
+                    entered_sender
+                        .send(())
+                        .map_err(|error| io::Error::other(error.to_string()))?;
+                    release_receiver
+                        .recv()
+                        .map_err(|error| io::Error::other(error.to_string()))
+                },
+                read_page,
+            );
+            first_result_sender.send(result).unwrap();
+        });
+        entered_receiver
+            .recv_timeout(Duration::from_secs(20))
+            .expect("first save did not reach replacement");
+
+        let (started_sender, started_receiver) = mpsc::channel();
+        let (second_result_sender, second_result_receiver) = mpsc::channel();
+        let second_state = Arc::clone(&state);
+        let second_thread = thread::spawn(move || {
+            started_sender.send(()).unwrap();
+            let result = second_vault.save_page(stale.sync_mut(), &second_state, fourth);
+            second_result_sender.send(result).unwrap();
+        });
+        started_receiver
+            .recv_timeout(Duration::from_secs(20))
+            .expect("second save did not start");
+        release_sender.send(()).unwrap();
+
+        assert!(matches!(
+            first_result_receiver
+                .recv_timeout(Duration::from_secs(20))
+                .expect("first save did not finish"),
+            Ok(SaveOutcome::Saved { version, .. }) if version == third
+        ));
+        assert!(matches!(
+            second_result_receiver
+                .recv_timeout(Duration::from_secs(20))
+                .expect("second save did not finish"),
+            Err(VaultError::StalePageSync {
+                expected: Some(expected),
+                observed: Some(observed),
+            }) if expected == first && observed == third
+        ));
+        first_thread.join().unwrap();
+        second_thread.join().unwrap();
+        assert_eq!(fs::read(&page_path).unwrap(), b"original");
+        assert_eq!(
+            state
+                .saved_record(page_id.clone())
+                .unwrap()
+                .unwrap()
+                .version(),
+            third
+        );
+        assert_eq!(
+            state
+                .recovery_candidate(page_id)
+                .unwrap()
+                .unwrap()
+                .version(),
+            fourth
+        );
+        match Arc::try_unwrap(state) {
+            Ok(state) => state.shutdown().unwrap(),
+            Err(_) => panic!("a save retained the StateStore"),
+        }
+    }
+
+    #[test]
+    fn page_sync_rejects_a_different_state_store_even_with_matching_versions() {
+        let (directory, mut vault, page_id, state, page_path) = setup();
+        let (first, second) = seed_initial(&state, &page_id, "original", "ours");
+        let other = StateStore::open(directory.path().join("other-state.db")).unwrap();
+        seed_initial(&other, &page_id, "original", "other state");
+        let mut loaded = vault.load_page(&state, page_id.clone(), "note.md").unwrap();
+
+        assert!(matches!(
+            vault.save_page(loaded.sync_mut(), &other, second),
+            Err(VaultError::DifferentStateStore)
+        ));
+        assert_eq!(fs::read(&page_path).unwrap(), b"original");
+        assert_eq!(loaded.sync().saved_version(), Some(first));
+        assert_eq!(
+            other.saved_record(page_id).unwrap().unwrap().version(),
+            first
+        );
+        other.shutdown().unwrap();
+        state.shutdown().unwrap();
+    }
+
+    #[test]
+    fn failed_saved_marker_leaves_the_page_dirty_and_can_be_retried() {
+        let (directory, mut vault, page_id, state, page_path) = setup();
+        let (first, second) = seed_initial(&state, &page_id, "original", "ours");
+        let mut loaded = vault.load_page(&state, page_id.clone(), "note.md").unwrap();
+        let connection = rusqlite::Connection::open(directory.path().join("state.db")).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER reject_saved_marker BEFORE UPDATE ON tags
+                 BEGIN SELECT RAISE(FAIL, 'injected marker failure'); END;",
+            )
+            .unwrap();
+
+        assert!(matches!(
+            vault.save_page(loaded.sync_mut(), &state, second),
+            Err(VaultError::SavedMarkerAfterWrite(StateError::Sqlite(_)))
+        ));
+        assert_eq!(fs::read(&page_path).unwrap(), b"ours");
+        assert_eq!(loaded.sync().base(), hash(b"ours"));
+        assert_eq!(loaded.sync().saved_version(), None);
+        assert!(loaded.sync().is_dirty(first));
+        assert!(loaded.sync().is_dirty(second));
+        assert_eq!(
+            state
+                .saved_record(page_id.clone())
+                .unwrap()
+                .unwrap()
+                .version(),
+            first
+        );
+
+        connection
+            .execute_batch("DROP TRIGGER reject_saved_marker;")
+            .unwrap();
+        assert!(matches!(
+            vault.save_page(loaded.sync_mut(), &state, second),
+            Ok(SaveOutcome::Saved { version, .. }) if version == second
+        ));
+        assert!(!loaded.sync().is_dirty(second));
+        assert_eq!(
+            state.saved_record(page_id).unwrap().unwrap().version(),
+            second
+        );
+        state.shutdown().unwrap();
+    }
+
+    #[test]
+    fn failed_readback_leaves_the_page_dirty_and_requires_reobservation() {
+        let (_directory, mut vault, page_id, state, page_path) = setup();
+        let (first, second) = seed_initial(&state, &page_id, "original", "ours");
+        let mut loaded = vault.load_page(&state, page_id.clone(), "note.md").unwrap();
+
+        assert!(matches!(
+            vault.save_page_with(
+                loaded.sync_mut(),
+                &state,
+                second,
+                |_| Ok(()),
+                |_| Err(io::Error::other("injected readback failure")),
+            ),
+            Err(VaultError::PostReplace {
+                operation: "read back page",
+                ..
+            })
+        ));
+        assert_eq!(fs::read(&page_path).unwrap(), b"ours");
+        assert_eq!(loaded.sync().base(), hash(b"original"));
+        assert_eq!(loaded.sync().saved_version(), None);
+        assert!(loaded.sync().is_dirty(first));
+        assert!(loaded.sync().is_dirty(second));
+        assert_eq!(
+            state.saved_record(page_id).unwrap().unwrap().version(),
+            first
+        );
+        assert!(matches!(
+            vault.save_page(loaded.sync_mut(), &state, second),
+            Ok(SaveOutcome::Conflict(SaveConflict::ExternalChange { .. }))
         ));
         assert_eq!(fs::read(&page_path).unwrap(), b"ours");
         state.shutdown().unwrap();
@@ -928,6 +1459,31 @@ mod journey_tests {
             Ok(())
         }
 
+        fn apply_edit(&mut self, event: Event) -> Result<(), JourneyError> {
+            let mut candidate = self.model.clone();
+            update(&mut candidate, event, Duration::from_millis(self.clock_ms))
+                .map_err(|error| JourneyError(format!("{error:?}")))?;
+            let parent = self.version;
+            let version = Version::new(parent.get() + 1).map_err(JourneyError::from_display)?;
+            let record = VersionRecord::new(
+                self.page_id.clone(),
+                version,
+                Some(parent),
+                i64::try_from(self.clock_ms).map_err(JourneyError::from_display)?,
+                TransactionId::new(format!("journey-{}", version.get()))
+                    .map_err(JourneyError::from_display)?,
+                Origin::User,
+                candidate.text(),
+                None,
+            )
+            .map_err(JourneyError::from_display)?;
+            let receipt = self.submission.try_submit(&self.state, record)?;
+            self.model = candidate;
+            self.version = version;
+            self.receipts.push(receipt);
+            Ok(())
+        }
+
         fn check_kernel_invariants(&self) -> Result<(), JourneyError> {
             let now = Duration::from_millis(self.clock_ms);
             if self
@@ -944,7 +1500,8 @@ mod journey_tests {
 
         fn check_page_sync(&self) -> Result<(), JourneyError> {
             let disk = fs::read(&self.page_path).map_err(JourneyError::from_display)?;
-            if !self.loaded.sync().is_dirty(self.version)
+            if self.loaded.sync().conflict().is_none()
+                && !self.loaded.sync().is_dirty(self.version)
                 && hash(&disk) != self.loaded.sync().base()
             {
                 return Err(JourneyError(
@@ -954,9 +1511,9 @@ mod journey_tests {
             if let Some(SaveConflict::ExternalChange { base, observed }) =
                 self.loaded.sync().conflict()
             {
-                if *base != self.loaded.sync().base() || *observed != hash(&disk) {
+                if *base != self.loaded.sync().base() || observed == base {
                     return Err(JourneyError(
-                        "I5: conflict does not describe the observed disk bytes".to_owned(),
+                        "I5: conflict does not describe a divergent observation".to_owned(),
                     ));
                 }
             }
@@ -966,28 +1523,35 @@ mod journey_tests {
         fn save(&mut self) -> Result<(), JourneyError> {
             let before = fs::read(&self.page_path).map_err(JourneyError::from_display)?;
             let base_matches = hash(&before) == self.loaded.sync().base();
+            let existing_conflict = self.loaded.sync().conflict().cloned();
             let outcome = self
                 .vault
                 .save_page(self.loaded.sync_mut(), &self.state, self.version)
                 .map_err(JourneyError::from_display)?;
             let after = fs::read(&self.page_path).map_err(JourneyError::from_display)?;
 
-            if base_matches {
-                match outcome {
-                    SaveOutcome::Saved {
-                        version,
-                        hash: saved_hash,
-                    } if version == self.version && saved_hash == hash(&after) => {}
-                    other => {
-                        return Err(JourneyError(format!(
-                            "I9: save did not persist its version on the observed base: {other:?}"
-                        )));
-                    }
+            match outcome {
+                SaveOutcome::Saved {
+                    version,
+                    hash: saved_hash,
+                } if existing_conflict.is_none()
+                    && base_matches
+                    && version == self.version
+                    && saved_hash == hash(&after) => {}
+                SaveOutcome::Conflict(conflict)
+                    if before == after
+                        && match &existing_conflict {
+                            Some(existing) => *existing == conflict,
+                            None => !base_matches,
+                        } =>
+                {
+                    return Err(JourneyError(format!("save conflict: {conflict:?}")));
                 }
-            } else if !matches!(outcome, SaveOutcome::Conflict(_)) || after != before {
-                return Err(JourneyError(
-                    "I9: save overwrote bytes that differed from its observed base".to_owned(),
-                ));
+                other => {
+                    return Err(JourneyError(format!(
+                        "I9: save violated the observed base or conflict: {other:?}"
+                    )));
+                }
             }
 
             for receipt in self.receipts.drain(..) {
@@ -1003,34 +1567,7 @@ mod journey_tests {
         fn apply(&mut self, event: SimInputEvent) -> Result<(), Self::Error> {
             let recorded = event.clone();
             match event {
-                SimInputEvent::Text(text) => {
-                    let mut candidate = self.model.clone();
-                    update(
-                        &mut candidate,
-                        Event::InsertText(text),
-                        Duration::from_millis(self.clock_ms),
-                    )
-                    .map_err(|error| JourneyError(format!("{error:?}")))?;
-                    let parent = self.version;
-                    let version =
-                        Version::new(parent.get() + 1).map_err(JourneyError::from_display)?;
-                    let record = VersionRecord::new(
-                        self.page_id.clone(),
-                        version,
-                        Some(parent),
-                        i64::try_from(self.clock_ms).map_err(JourneyError::from_display)?,
-                        TransactionId::new(format!("journey-{}", version.get()))
-                            .map_err(JourneyError::from_display)?,
-                        Origin::User,
-                        candidate.text(),
-                        None,
-                    )
-                    .map_err(JourneyError::from_display)?;
-                    let receipt = self.submission.try_submit(&self.state, record)?;
-                    self.model = candidate;
-                    self.version = version;
-                    self.receipts.push(receipt);
-                }
+                SimInputEvent::Text(text) => self.apply_edit(Event::InsertText(text))?,
                 SimInputEvent::AdvanceTime(millis) => {
                     self.clock_ms = self
                         .clock_ms
@@ -1050,6 +1587,7 @@ mod journey_tests {
                     }
                 }
                 SimInputEvent::FlushBackground => self.flush_state()?,
+                SimInputEvent::Keys(keys) if keys == "<BS>" => self.apply_edit(Event::Backspace)?,
                 SimInputEvent::Keys(keys) if keys == ":w" => self.save()?,
                 SimInputEvent::Keys(keys) => {
                     return Err(JourneyError(format!(
@@ -1073,6 +1611,24 @@ mod journey_tests {
 
         fn buffer_text(&self) -> Result<BufferSnapshot, Self::Error> {
             Ok(BufferSnapshot::Available(self.model.text()))
+        }
+    }
+
+    struct BorrowedJourney<'a>(&'a mut JourneyBackend);
+
+    impl SimInputBackend for BorrowedJourney<'_> {
+        type Error = JourneyError;
+
+        fn apply(&mut self, event: SimInputEvent) -> Result<(), Self::Error> {
+            self.0.apply(event)
+        }
+
+        fn screen(&mut self, width: u16, height: u16) -> Result<ScreenSnapshot, Self::Error> {
+            self.0.screen(width, height)
+        }
+
+        fn buffer_text(&self) -> Result<BufferSnapshot, Self::Error> {
+            self.0.buffer_text()
         }
     }
 
@@ -1137,6 +1693,111 @@ mod journey_tests {
         state.mark_saved(page_id, first).unwrap();
         state.shutdown().unwrap();
         (root, database)
+    }
+
+    #[test]
+    fn stale_save_after_simulated_edit_and_backspace_preserves_saved_content() {
+        let directory = tempdir().unwrap();
+        let (root, database) = initialize_fixture(&directory);
+        let mut backend = JourneyBackend::open(&root, &database).unwrap();
+        let mut stale = backend
+            .vault
+            .load_page(&backend.state, backend.page_id.clone(), "note.md")
+            .unwrap();
+        {
+            let mut sim = SimInput::new(BorrowedJourney(&mut backend));
+            sim.type_text("x")
+                .unwrap()
+                .keys("<BS>")
+                .unwrap()
+                .keys(":w")
+                .unwrap();
+            assert_eq!(sim.buffer_text().unwrap(), INITIAL_TEXT);
+        }
+        let saved = Version::new(3).unwrap();
+        let stale_edit = Version::new(2).unwrap();
+        assert_eq!(backend.version, saved);
+        assert!(matches!(
+            backend
+                .vault
+                .save_page(stale.sync_mut(), &backend.state, stale_edit),
+            Err(VaultError::VersionRegression { saved: actual, requested })
+                if actual == saved && requested == stale_edit
+        ));
+        assert!(stale.sync().is_dirty(Version::new(1).unwrap()));
+        assert_eq!(
+            fs::read(root.join("note.md")).unwrap(),
+            INITIAL_TEXT.as_bytes()
+        );
+        assert!(!backend.loaded.sync().is_dirty(saved));
+        assert_eq!(
+            backend
+                .state
+                .saved_record(backend.page_id.clone())
+                .unwrap()
+                .unwrap()
+                .version(),
+            saved
+        );
+        assert!(backend
+            .state
+            .recovery_candidate(backend.page_id.clone())
+            .unwrap()
+            .is_none());
+        backend.state.shutdown().unwrap();
+    }
+
+    #[test]
+    fn simulated_save_surfaces_a_conflict_even_after_disk_returns_to_base() {
+        let directory = tempdir().unwrap();
+        let (root, database) = initialize_fixture(&directory);
+        let backend = JourneyBackend::open(&root, &database).unwrap();
+        let mut sim = SimInput::new(backend);
+        sim.type_text("draft").unwrap();
+        fs::write(root.join("note.md"), "external").unwrap();
+        let conflict = SaveConflict::ExternalChange {
+            base: hash(INITIAL_TEXT.as_bytes()),
+            observed: hash(b"external"),
+        };
+
+        assert!(matches!(
+            sim.keys(":w"),
+            Err(SimInputError::Backend(JourneyError(message)))
+                if message.starts_with("save conflict:")
+        ));
+        assert_eq!(sim.backend().loaded.sync().conflict(), Some(&conflict));
+        sim.backend().check_page_sync().unwrap();
+        fs::write(root.join("note.md"), INITIAL_TEXT).unwrap();
+        assert!(matches!(
+            sim.keys(":w"),
+            Err(SimInputError::Backend(JourneyError(message)))
+                if message.starts_with("save conflict:")
+        ));
+        assert_eq!(sim.buffer_text().unwrap(), "draft");
+        assert_eq!(
+            fs::read(root.join("note.md")).unwrap(),
+            INITIAL_TEXT.as_bytes()
+        );
+        assert_eq!(sim.backend().loaded.sync().conflict(), Some(&conflict));
+        sim.backend().check_page_sync().unwrap();
+        assert_eq!(
+            sim.backend()
+                .state
+                .saved_record(sim.backend().page_id.clone())
+                .unwrap()
+                .unwrap()
+                .version(),
+            Version::new(1).unwrap()
+        );
+        assert_eq!(
+            sim.backend()
+                .state
+                .recovery_candidate(sim.backend().page_id.clone())
+                .unwrap()
+                .unwrap()
+                .content(),
+            "draft"
+        );
     }
 
     #[test]
@@ -1209,6 +1870,49 @@ mod journey_tests {
                 SimInputEvent::FlushBackground,
                 SimInputEvent::Keys(":w".to_owned())
             ]
+        );
+    }
+
+    #[test]
+    fn rejected_backspace_keeps_the_journey_unchanged_until_retry() {
+        let directory = tempdir().unwrap();
+        let (root, database) = initialize_fixture(&directory);
+        let mut backend = JourneyBackend::open(&root, &database).unwrap();
+        backend.apply(SimInputEvent::Text("x".to_owned())).unwrap();
+        backend.submission.reject_next = true;
+        let original_cursor = backend.model.cursor();
+        let original_layout = backend.model.layout().clone();
+        let original_deadline = backend.model.next_deadline();
+        let original_events = backend.events.clone();
+        let mut sim = SimInput::new(backend);
+
+        assert!(matches!(
+            sim.keys("<BS>"),
+            Err(SimInputError::Backend(JourneyError(message)))
+                if message == StateError::QueueFull.to_string()
+        ));
+        assert_eq!(sim.buffer_text().unwrap(), format!("x{INITIAL_TEXT}"));
+        assert_eq!(sim.backend().model.cursor(), original_cursor);
+        assert_eq!(sim.backend().model.layout(), &original_layout);
+        assert_eq!(sim.backend().model.next_deadline(), original_deadline);
+        assert_eq!(sim.backend().version, Version::new(2).unwrap());
+        assert_eq!(sim.backend().events, original_events);
+        assert_eq!(
+            fs::read(root.join("note.md")).unwrap(),
+            INITIAL_TEXT.as_bytes()
+        );
+        let rejected = sim.backend().submission.rejected.as_ref().unwrap().clone();
+        assert_eq!(rejected.content(), INITIAL_TEXT);
+        assert_eq!(rejected.version(), Version::new(3).unwrap());
+
+        sim.keys("<BS>").unwrap().flush_background().unwrap();
+        assert_eq!(sim.buffer_text().unwrap(), INITIAL_TEXT);
+        assert_eq!(
+            sim.backend()
+                .state
+                .get_version(sim.backend().page_id.clone(), rejected.version())
+                .unwrap(),
+            Some(rejected)
         );
     }
 

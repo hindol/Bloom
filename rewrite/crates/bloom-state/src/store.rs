@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
-        Mutex,
+        Arc, Mutex, MutexGuard, Weak,
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -175,6 +175,8 @@ pub enum StateError {
     IntegrityCheck(String),
     VersionNotFound,
     SavedTagRegression,
+    SaveFenceBusy,
+    SaveFencePoisoned,
     Sqlite(String),
     ThreadSpawn(String),
 }
@@ -202,6 +204,8 @@ impl fmt::Display for StateError {
             }
             Self::VersionNotFound => f.write_str("version does not exist"),
             Self::SavedTagRegression => f.write_str("saved version cannot move backwards"),
+            Self::SaveFenceBusy => f.write_str("a state save is already in progress"),
+            Self::SaveFencePoisoned => f.write_str("state save fence is poisoned"),
             Self::Sqlite(message) => write!(f, "SQLite error: {message}"),
             Self::ThreadSpawn(message) => write!(f, "could not start state writer: {message}"),
         }
@@ -256,6 +260,26 @@ impl Default for GroupCommitPolicy {
 pub struct StateStore {
     sender: Option<SyncSender<Command>>,
     worker: Option<JoinHandle<Result<(), StateError>>>,
+    save_fence: Arc<Mutex<()>>,
+}
+
+/// Identifies one in-process StateStore instance, not a database path.
+#[derive(Clone, Debug)]
+pub struct StateStoreIdentity(Weak<Mutex<()>>);
+
+impl PartialEq for StateStoreIdentity {
+    fn eq(&self, other: &Self) -> bool {
+        Weak::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for StateStoreIdentity {}
+
+/// Serializes vault observations and saves with saved-marker updates in this store.
+#[must_use = "the save fence is released when the guard is dropped"]
+pub struct StateSaveGuard<'a> {
+    store: &'a StateStore,
+    _guard: MutexGuard<'a, ()>,
 }
 
 impl StateStore {
@@ -290,6 +314,7 @@ impl StateStore {
             Ok(Ok(())) => Ok(Self {
                 sender: Some(sender),
                 worker: Some(worker),
+                save_fence: Arc::new(Mutex::new(())),
             }),
             Ok(Err(error)) => {
                 let _ = worker.join();
@@ -363,7 +388,42 @@ impl StateStore {
     /// Records that a vault write was confirmed for this version.
     ///
     /// Callers must invoke this only after the Vault Store confirms its write.
+    /// Returns `SaveFenceBusy` rather than waiting for a guarded operation;
+    /// the request is not queued and can be retried.
     pub fn mark_saved(&self, page_id: PageId, version: Version) -> Result<(), StateError> {
+        let guard = match self.save_fence.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::WouldBlock) => return Err(StateError::SaveFenceBusy),
+            Err(std::sync::TryLockError::Poisoned(_)) => return Err(StateError::SaveFencePoisoned),
+        };
+        StateSaveGuard {
+            store: self,
+            _guard: guard,
+        }
+        .mark_saved(page_id, version)
+    }
+
+    pub fn identity(&self) -> StateStoreIdentity {
+        StateStoreIdentity(Arc::downgrade(&self.save_fence))
+    }
+
+    /// Locks vault observations, saves, and saved-marker updates sharing this StateStore.
+    ///
+    /// Use the guard's `mark_saved` method while it is held. Re-entering
+    /// `lock_saves`, including through a vault load or save, would deadlock;
+    /// `StateStore::mark_saved` returns busy.
+    pub fn lock_saves(&self) -> Result<StateSaveGuard<'_>, StateError> {
+        let guard = self
+            .save_fence
+            .lock()
+            .map_err(|_| StateError::SaveFencePoisoned)?;
+        Ok(StateSaveGuard {
+            store: self,
+            _guard: guard,
+        })
+    }
+
+    fn mark_saved_unlocked(&self, page_id: PageId, version: Version) -> Result<(), StateError> {
         let (reply, response) = mpsc::channel();
         self.sender()?
             .send(Command::MarkSaved {
@@ -436,6 +496,12 @@ impl StateStore {
             Some(worker) => worker.join().map_err(|_| StateError::WorkerPanicked)?,
             None => Ok(()),
         }
+    }
+}
+
+impl StateSaveGuard<'_> {
+    pub fn mark_saved(&self, page_id: PageId, version: Version) -> Result<(), StateError> {
+        self.store.mark_saved_unlocked(page_id, version)
     }
 }
 
@@ -1449,6 +1515,7 @@ mod tests {
         let store = StateStore {
             sender: Some(sender),
             worker: None,
+            save_fence: Arc::new(Mutex::new(())),
         };
         let last_version = COMMAND_QUEUE_CAPACITY as u64;
         let retry_version = last_version + 1;
@@ -1483,6 +1550,67 @@ mod tests {
             assert_eq!(queued, expected);
         }
         assert!(matches!(receiver.try_recv(), Err(TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn save_guard_is_exclusive_without_blocking_version_submissions() {
+        let db = TempDb::new();
+        let store = open_test_store(db.path());
+        let identity = store.identity();
+        let guard = store.lock_saves().unwrap();
+        assert!(matches!(
+            store.save_fence.try_lock(),
+            Err(std::sync::TryLockError::WouldBlock)
+        ));
+
+        let receipt = store.try_submit(record(1, None, "one")).unwrap();
+        receipt.wait().unwrap();
+        let page = PageId::new("page-a").unwrap();
+        assert_eq!(
+            store.mark_saved(page.clone(), Version::new(1).unwrap()),
+            Err(StateError::SaveFenceBusy)
+        );
+        assert_eq!(store.saved_record(page.clone()).unwrap(), None);
+        guard
+            .mark_saved(page.clone(), Version::new(1).unwrap())
+            .unwrap();
+        assert_eq!(
+            store.saved_record(page.clone()).unwrap().unwrap().content(),
+            "one"
+        );
+        drop(guard);
+
+        assert!(store.save_fence.try_lock().is_ok());
+        store.mark_saved(page, Version::new(1).unwrap()).unwrap();
+        assert_eq!(store.identity(), identity);
+        store.shutdown().unwrap();
+    }
+
+    #[test]
+    fn poisoned_save_guard_is_reported_without_blocking_submissions() {
+        let db = TempDb::new();
+        let store = open_test_store(db.path());
+        let fence = Arc::clone(&store.save_fence);
+        let thread = thread::spawn(move || {
+            let _guard = fence.lock().unwrap();
+            panic!("injected save-fence panic");
+        });
+        assert!(thread.join().is_err());
+
+        store
+            .try_submit(record(1, None, "one"))
+            .unwrap()
+            .wait()
+            .unwrap();
+        assert!(matches!(
+            store.lock_saves(),
+            Err(StateError::SaveFencePoisoned)
+        ));
+        assert_eq!(
+            store.mark_saved(PageId::new("page-a").unwrap(), Version::new(1).unwrap()),
+            Err(StateError::SaveFencePoisoned)
+        );
+        store.shutdown().unwrap();
     }
 
     #[test]

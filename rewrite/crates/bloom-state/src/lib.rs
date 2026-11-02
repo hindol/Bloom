@@ -3,6 +3,6 @@
 mod store;
 
 pub use store::{
-    CommitReceipt, Origin, PageId, StateError, StateStore, SubmitError, TransactionId, Version,
-    VersionRecord,
+    CommitReceipt, Origin, PageId, StateError, StateSaveGuard, StateStore, StateStoreIdentity,
+    SubmitError, TransactionId, Version, VersionRecord,
 };
