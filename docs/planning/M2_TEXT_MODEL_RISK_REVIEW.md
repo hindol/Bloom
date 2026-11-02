@@ -72,6 +72,7 @@ semantics; the bridge does not authorize ADR-3.
 | Legacy grammar narrowing | Existing IDs stop parsing after the generator changes to seven characters | Preserve the current read grammar during the spike. The legacy parser accepts alphanumeric, `-`, and `_` IDs and recognizes `^=` markers; the new generator's seven-character base36 format must not narrow reads |
 | Mirror transition | Existing `^=id` content is treated as a second live identity or rewritten before the migration | Parse and preserve legacy mirror markers as legacy tokens; do not create or propagate mirrors in the new model; defer their conversion to the approved M7 migration |
 | Register provenance loss | `dd`+`p` duplicates an ID or `yy`+`p` steals the source ID | Typed register payload records source identity and operation provenance; paste consults an explicit liveness port rather than assuming a document-local answer |
+| Detached register discarded | An ID remains detached forever when its move register is replaced or cleared | Retire the matching detached ID on register discard; verify an already-moved ID remains live and unrelated pages cannot be retired |
 | Cross-page liveness | A local document incorrectly concludes that a vault-wide ID is unused | Keep liveness/reservation behind a State-owned port; test with a deterministic multi-page registry |
 | Partial structural edit | Allocation, parsing, or range validation fails after text has already changed | Produce a complete edit plan first; apply atomically or return an explicit error with the original document unchanged |
 | Undo/redo identity drift | Undo removes an ID and redo invents a different one, or an undone ID is reused | Include IDs in the text history snapshot; reserve generated IDs monotonically; assert byte-identical undo/redo restoration |
@@ -140,16 +141,18 @@ reserved identity; target text and the registry remain
 unchanged when the paste commit fails. These are explicit policy/text-plan
 tests, not replays of the legacy `dd`/`p` or `yy`/`p` streams. The two-phase
 move can leave a detached identity in its register after a failed paste or
-process interruption; register cleanup and durable transaction recovery remain
-unimplemented.
+process interruption. A discard plan now retires a still-detached move identity
+when its register is abandoned, and tests ensure it does not retire an identity
+already moved to another page. The current kernel has no register owner that
+invokes this plan on replacement or clear; durable transaction recovery also
+remains unimplemented.
 
 This remains prototype evidence, not acceptance. It does not execute the
 identity matrix through a production Vim-to-document path; fresh ID candidates
-are supplied by the caller, durable registry behavior and cleanup when a
-detached register is overwritten are not implemented, and byte-identical
-undo/redo is not tested. `dd`/`p` and `yy`/`p` are recorded as real key streams
-but are not replayed through canonical-text transactions. ADR-3 remains
-unaccepted.
+are supplied by the caller, durable registry behavior and register lifecycle
+wiring are not implemented, and byte-identical undo/redo is not tested.
+`dd`/`p` and `yy`/`p` are recorded as real key streams but are not replayed
+through canonical-text transactions. ADR-3 remains unaccepted.
 
 An ordinary split inside an inline-code span can make the generated ID tokens
 unrecognizable to the current line-oriented token parser. The planner now
