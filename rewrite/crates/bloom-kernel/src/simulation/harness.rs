@@ -287,7 +287,96 @@ impl SimInputBackend for EmptyKernelBackend {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use crate::update::{update, view, Event, Model};
+
     use super::*;
+
+    struct PlainTextBackend {
+        model: Model,
+    }
+
+    fn cursor_offset(backend: &PlainTextBackend) -> usize {
+        let frame = view(&backend.model);
+        frame.document.raw_char_offset(frame.cursor).unwrap()
+    }
+
+    impl SimInputBackend for PlainTextBackend {
+        type Error = String;
+
+        fn apply(&mut self, event: SimInputEvent) -> Result<(), Self::Error> {
+            let SimInputEvent::Text(text) = event else {
+                return Err(format!("unsupported plain-text event: {event:?}"));
+            };
+            update(&mut self.model, Event::InsertText(text), Duration::ZERO)
+                .map(|_| ())
+                .map_err(|error| format!("{error:?}"))
+        }
+
+        fn screen(&mut self, _width: u16, _height: u16) -> Result<ScreenSnapshot, Self::Error> {
+            Ok(ScreenSnapshot::Unavailable(
+                UnavailableReason::LayoutNotImplemented,
+            ))
+        }
+
+        fn buffer_text(&self) -> Result<BufferSnapshot, Self::Error> {
+            Ok(BufferSnapshot::Available(self.model.text()))
+        }
+    }
+
+    #[test]
+    fn plain_text_unicode_input_preserves_order_and_character_offsets() {
+        for typed in ["Ωλ", "aé中🙂", "e\u{301}👩\u{200d}💻"] {
+            let mut sim = SimInput::new(PlainTextBackend {
+                model: Model::new("ab\n"),
+            });
+            let mut prefix = String::new();
+            for character in typed.chars() {
+                sim.type_text(&character.to_string()).unwrap();
+                prefix.push(character);
+                assert_eq!(sim.buffer_text().unwrap(), format!("{prefix}ab\n"));
+                assert_eq!(cursor_offset(sim.backend()), prefix.chars().count());
+            }
+            assert_eq!(
+                sim.screen(80, 24).unwrap().all_lines(),
+                Err(SimInputError::ScreenUnavailable(
+                    UnavailableReason::LayoutNotImplemented
+                ))
+            );
+
+            let mut whole = SimInput::new(PlainTextBackend {
+                model: Model::new("ab\n"),
+            });
+            whole.type_text(typed).unwrap();
+            assert_eq!(whole.buffer_text().unwrap(), sim.buffer_text().unwrap());
+            assert_eq!(cursor_offset(whole.backend()), typed.chars().count());
+        }
+    }
+
+    #[test]
+    #[ignore = "M2 I6 blocker: insertion can merge with the existing grapheme suffix"]
+    fn insertion_before_a_combining_suffix_keeps_the_cursor_on_a_grapheme_boundary() {
+        let mut failures = Vec::new();
+        for (initial, typed, expected) in [
+            ("\u{301}ab", "e", "e\u{301}ab"),
+            ("\u{200d}💻ab", "👩", "👩\u{200d}💻ab"),
+        ] {
+            let mut sim = SimInput::new(PlainTextBackend {
+                model: Model::new(initial),
+            });
+            sim.type_text(typed).unwrap();
+            assert_eq!(sim.buffer_text().unwrap(), expected);
+            let frame = view(&sim.backend().model);
+            let offset = frame.document.raw_char_offset(frame.cursor).unwrap();
+            let projection = frame.document.visible_projection();
+            assert!(projection.tokens().is_empty());
+            if let Err(error) = projection.range(offset, offset) {
+                failures.push(format!("{expected:?} at {offset}: {error:?}"));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
 
     #[test]
     fn empty_kernel_smoke_dispatches_compatible_input_without_product_parity() {

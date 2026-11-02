@@ -1015,6 +1015,25 @@ mod tests {
     }
 
     #[test]
+    fn projected_cursor_ranges_reject_every_interior_grapheme_offset() {
+        let projection = VisibleProjection::parse("e\u{301}👩\u{200d}💻 ^id");
+        assert_eq!(projection.text(), "e\u{301}👩\u{200d}💻");
+        assert_eq!(projection.tokens().len(), 1);
+        assert_eq!(projection.tokens()[0].id(), "id");
+
+        for offset in 0..=5 {
+            if [0, 2, 5].contains(&offset) {
+                assert!(projection.range(offset, offset).is_ok(), "{offset}");
+            } else {
+                assert_eq!(
+                    projection.range(offset, offset),
+                    Err(ProjectionError::SplitsGrapheme { offset })
+                );
+            }
+        }
+    }
+
+    #[test]
     fn serialized_legacy_vim_edits_lower_without_touching_block_or_mirror_ids() {
         assert_eq!(ADR3_VIM_ORACLE.lines().next(), Some("BLOOM_VIM_ORACLE_V1"));
         for line in ADR3_VIM_ORACLE.lines().skip(1) {

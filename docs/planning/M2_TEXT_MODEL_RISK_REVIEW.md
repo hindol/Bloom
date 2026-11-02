@@ -104,6 +104,26 @@ is not rewrite UX policy. A change-and-repeat probe also produced an unexpected
 edit on the following line, so Unicode repeat behavior must not be inferred
 from this legacy path. The bug is separate from the existing CI failures.
 
+An in-memory `SimInput` test now sends the same Unicode input, plus mixed
+one- through four-byte scalars and combining/emoji sequences, to the existing
+M1 kernel's `InsertText` event. It checks text order and character cursor
+offsets after each scalar as well as a whole-string insertion. The test backend
+rejects unsupported events and reports the screen as unavailable. This is plain
+rope input evidence only: it is not Vim, projected ID-token editing, grapheme
+cursor policy, or product parity.
+
+The M2 I6 gate must also cover an insertion that joins a newly typed scalar to
+an existing combining mark or emoji sequence. A character-counted cursor can
+then land inside the resulting grapheme even when its offset is in bounds.
+The plain M1 kernel currently does so: inserting `e` before a combining acute,
+or `👩` before an existing ZWJ-laptop suffix, leaves its cursor at scalar
+offset 1 inside the new grapheme. The explicit I6 contract test is ignored and
+fails when run; M1's update checks I7 and I10, not I6. A separate projection
+test checks every interior offset of combining and ZWJ graphemes beside a
+hidden ID, but the M1 cursor does not use that detector. Keep this contract
+distinct from ordinary Unicode typing order; cursor landing and deletion policy
+require an explicit grapheme-aware design.
+
 ## Scope and ownership
 
 - `bloom-text` owns canonical text, parsed ID-token spans, and projection
