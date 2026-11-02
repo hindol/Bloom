@@ -680,6 +680,57 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "known ADR-3 blocker: inline-code context is lost across lines"]
+    fn multiline_inline_code_keeps_trailing_marker_literal() {
+        let mut failures = Vec::new();
+        for ending in ["\n", "\r\n"] {
+            for delimiter in ["`", "``"] {
+                let raw = format!(
+                    "α {delimiter}start{ending}literal ^inside{ending}end{delimiter}{ending}"
+                );
+                let projection = Doc::new(&raw).visible_projection();
+                if projection.text() != raw || !projection.tokens().is_empty() {
+                    failures.push(format!(
+                        "{ending:?}, {delimiter:?}: visible {:?}, IDs {:?}",
+                        projection.text(),
+                        projection
+                            .tokens()
+                            .iter()
+                            .map(|token| token.id())
+                            .collect::<Vec<_>>()
+                    ));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    #[ignore = "known ADR-3 blocker: a multiline code closer looks like an opener"]
+    fn trailing_marker_after_multiline_inline_code_is_hidden() {
+        let mut failures = Vec::new();
+        for ending in ["\n", "\r\n"] {
+            for delimiter in ["`", "``"] {
+                let raw = format!("α {delimiter}start{ending}end{delimiter} ^outside{ending}");
+                let expected = format!("α {delimiter}start{ending}end{delimiter}{ending}");
+                let projection = Doc::new(&raw).visible_projection();
+                let ids = projection
+                    .tokens()
+                    .iter()
+                    .map(|token| token.id())
+                    .collect::<Vec<_>>();
+                if projection.text() != expected || ids != ["outside"] {
+                    failures.push(format!(
+                        "{ending:?}, {delimiter:?}: visible {:?}, IDs {ids:?}",
+                        projection.text()
+                    ));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
     fn typed_span_fallback_cannot_recover_ambiguous_identity_from_markdown_alone() {
         struct TypedSpanSnapshot<'a> {
             canonical: &'a str,
@@ -717,7 +768,7 @@ mod tests {
             let second = generated_canonical.find(" ^split2").unwrap();
             let literal = TypedSpanSnapshot {
                 canonical: &literal_canonical,
-                token_spans: vec![],
+                token_spans: std::iter::once(second..second + " ^split2".len()).collect(),
             };
             let generated = TypedSpanSnapshot {
                 canonical: &generated_canonical,
@@ -726,19 +777,21 @@ mod tests {
                     second..second + " ^split2".len(),
                 ],
             };
+            let expected_literal = format!("α `β ^split1{ending}γ`{ending}");
             let expected_generated = format!("α `β{ending}γ`{ending}");
 
             assert_eq!(literal.canonical, generated.canonical);
-            assert_eq!(literal.visible(), literal_canonical);
+            assert_eq!(literal.visible(), expected_literal);
             assert_eq!(generated.visible(), expected_generated);
             assert_ne!(literal.visible(), generated.visible());
 
             let reloaded_literal = Doc::new(literal.canonical).visible_projection();
             let reloaded_generated = Doc::new(generated.canonical).visible_projection();
-            assert_eq!(reloaded_literal.text(), literal.visible());
             assert_eq!(reloaded_generated.text(), reloaded_literal.text());
-            assert_ne!(reloaded_generated.text(), generated.visible());
-            assert!(reloaded_generated.tokens().is_empty());
+            assert!(
+                reloaded_literal.text() != literal.visible()
+                    || reloaded_generated.text() != generated.visible()
+            );
         }
     }
 

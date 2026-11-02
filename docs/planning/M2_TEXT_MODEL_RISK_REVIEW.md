@@ -248,6 +248,23 @@ Record that divergence rather than changing the legacy oracle or claiming
 parser parity; the production parser and migration need an explicit
 compatibility review.
 
+### Multiline inline-code context: open spike risk
+
+The format also promises that IDs inside inline code remain literal. A matched
+inline-code span can cross a line break within a Markdown paragraph, but the
+prototype currently scans backticks independently on each line. It can therefore
+hide a literal ID on an intermediate line and expose a real trailing ID after
+the closing backticks on another line. The unchanged legacy parser is not an
+oracle for this case: its block-ID parser does not consult inline-code context.
+
+Keep executable, explicitly ignored contract tests for these two known failures
+until the parser can pass them. Do not treat ignored tests as acceptance
+evidence. The L10 per-line inline parser must eventually obtain the enclosing
+block's context without disagreeing with rendering or incrementally parsed
+results. Blank and structural block boundaries, unmatched and escaped
+backticks, fences, line endings, and edit invalidation require a reviewed
+parser design; this spike does not approve a grammar or format change.
+
 ### Identity-bearing version snapshots: spike constraints
 
 The spike may exercise State's existing schema, transaction, and snapshot-read
@@ -316,6 +333,13 @@ keep code IDs visible and recognize IDs after a matching close; a 360-case
 boundary model exercises both marker types, run lengths, and closing suffixes.
 A visible replacement can edit such literal code without changing an outside
 ID; a fence edit that would reclassify IDs is rejected.
+
+Two ignored contract tests expose the multiline inline-code gap. When run
+explicitly, all four LF/CRLF and one-/two-backtick combinations in each test
+fail: the intermediate literal `^inside` is hidden, and the real `^outside`
+after a closing delimiter stays visible. Canonical bytes are not changed by
+projection, but users could not edit the hidden literal through the visible
+view. These are acceptance blockers, not passing parity tests.
 
 Fixture-driven canonical-text planners replay the observed `J` and split
 ranges, then commit the resulting text with the join retirement or split
@@ -410,26 +434,29 @@ both in-memory projections and reconstruction from the serialized Markdown,
 including Unicode and CRLF. This experiment must not add a persisted sidecar,
 change the format, or be presented as a complete fallback implementation.
 
-The trailing-token parser rejects candidates inside inline code
-(`rewrite/crates/bloom-text/src/projection.rs`, `parse_trailing_id_token`), so
-`^id` there is literal content and not an identity. A parallel typed-span map
-could identify a generated token during an editing session, but cannot
-reconstruct that distinction from canonical Markdown after reload: the same
-bytes can be either literal code or an identity token. Keeping spans
-authoritative would therefore require a durable discriminator, such as a
-format change, authoritative State metadata, or another sidecar. That would
-change the current text-authority or format constraints and needs an explicit
-durability and migration design, including what happens when Markdown is
-imported or State is missing.
+For line-local inline code, the trailing-token parser attempts to reject
+candidates inside the code span
+(`rewrite/crates/bloom-text/src/projection.rs`, `parse_trailing_id_token`).
+The multiline failures above show that this context check is incomplete. A
+parallel typed-span map could identify a generated token during an editing
+session, but cannot reconstruct that distinction from canonical Markdown after
+reload: the same bytes can be either literal code or an identity token.
+Keeping spans authoritative would therefore require a durable discriminator,
+such as a format change, authoritative State metadata, or another sidecar.
+That would change the current text-authority or format constraints and needs
+an explicit durability and migration design, including what happens when
+Markdown is imported or State is missing.
 
-A test-only typed-span micro-prototype now constructs literal and generated
-snapshots with identical Markdown bytes but different visible text, for both LF
-and CRLF with Unicode content. Reparsing the bytes produces the literal view
-for both snapshots, so it cannot restore the generated identity without more
-information. This is a counterexample, not a complete editing, persistence, or
-recovery implementation and not proof that fallback (c) is impossible. Until
-an alternative is approved, the prototype continues to reject splits whose IDs
-would be hidden by code-context rules rather than silently dropping identity.
+A test-only typed-span micro-prototype now constructs snapshots with identical
+Markdown bytes but different interpretations of the marker inside code, for
+both LF and CRLF with Unicode content. Reparsing the same bytes necessarily
+produces the same view for both snapshots, so it cannot restore both
+interpretations without more information. This counterexample does not depend
+on the current multiline parser bug. It is not a complete editing, persistence,
+or recovery implementation and not proof that fallback (c) is impossible.
+Until an alternative is approved, the prototype continues to reject splits
+whose IDs would be hidden by code-context rules rather than silently dropping
+identity.
 
 ## Acceptance gate
 
