@@ -75,6 +75,14 @@ observation, not a decision to preserve it. Cursor landing and the desired
 repeat behavior at that boundary remain open; the prototype does not replay
 the recorded no-op as an identity or cursor rule.
 
+A second versioned editor fixture may cover change-and-insert sessions followed
+by `.`. Infer a net replacement only when exactly one minimum-size contiguous
+character replacement explains the adjacent snapshots; reject ambiguous
+deletions, insertions, and replacements. Exclude line-ending changes from
+both the removed and inserted text. Mode changes and motions with no text
+change are observations, not rewrite cursor requirements. A compound replay's
+net replacement is not evidence that the legacy editor emitted one edit.
+
 The unchanged legacy CI baseline also has two reproducible e2e failures:
 `multiple_undo_redo` observes `onetwo three ` where its setup expects
 `one two three`, and `theme_persists_to_config_without_corrupting_views`
@@ -86,6 +94,15 @@ and reproduce locally. They are separate from rewrite acceptance. The oracle
 preservation constraints below do not authorize changing legacy tests, source,
 or CI gates to make this baseline green; resolve that conflict with the human
 before altering the oracle.
+
+The isolated editor oracle also exposes a separate legacy Unicode input bug:
+typing `Ωλ` before `ab` produces `Ωaλb`, both with and without a hidden ID.
+Legacy insert handling advances a character-indexed cursor by `c.len_utf8()`
+(`crates/bloom-vim/src/state.rs:308`). The corresponding contract test is
+explicitly ignored while the legacy workspace is frozen; its observed output
+is not rewrite UX policy. A change-and-repeat probe also produced an unexpected
+edit on the following line, so Unicode repeat behavior must not be inferred
+from this legacy path. The bug is separate from the existing CI failures.
 
 ## Scope and ownership
 
@@ -378,6 +395,14 @@ observations are replayed through the rewrite's visible-edit planner, which
 preserves the original token bytes after each edit. This does not capture
 legacy edit actions or run the rewrite as an editor; it is not full dot-repeat
 or cursor parity.
+
+The same bridge also records two `cw`/insert/`.` journeys, one with Unicode
+before the edited line. The inference is checked separately against an
+exhaustive replacement model over 225 small ASCII/Unicode snapshot pairs.
+Six uniquely minimal inferred edits replay through the rewrite planner while
+preserving the original ID-token bytes; mode and motion no-ops are not
+replayed. A compound `.` snapshot still does not expose its internal edit
+sequence or establish production repeat behavior.
 
 The kernel prototype now also plans canonical deletion of one uniquely
 identified block line and linewise paste of a one-line register. Delete and

@@ -1,0 +1,3 @@
+BLOOM_EDITOR_REPLACE_REPEAT_ORACLE_V1
+cw-repeat-ascii|aaa bbb ^edge1\nnext ^oth01\n|aaa bbb\nnext\n|-|cw,0,3,-, bbb\nnext\n;xxx,0,0,xxx,xxx bbb\nnext\n;<Esc>,-,-,-,xxx bbb\nnext\n;w,-,-,-,xxx bbb\nnext\n;.,4,7,xxx,xxx xxx\nnext\n
+cw-repeat-unicode-context|αβ ^edge2\naaa bbb ^oth02\n|αβ\naaa bbb\n|j0|cw,3,6,-,αβ\n bbb\n;xxx,3,3,xxx,αβ\nxxx bbb\n;<Esc>,-,-,-,αβ\nxxx bbb\n;w,-,-,-,αβ\nxxx bbb\n;.,7,10,xxx,αβ\nxxx xxx\n
