@@ -220,6 +220,21 @@ Record that divergence rather than changing the legacy oracle or claiming
 parser parity; the production parser and migration need an explicit
 compatibility review.
 
+### Identity-bearing version snapshots: spike constraints
+
+The spike may exercise State's existing schema, transaction, and snapshot-read
+functions with planner-produced canonical text in an in-memory SQLite database.
+Check exact UTF-8 bytes, token kinds and IDs, parent links for an original and
+two branches, and rollback and failed acknowledgements for a rejected batch.
+This keeps the spike's no-file-writes constraint intact.
+
+The test bypasses the State worker and its file-backed WAL configuration; it
+does not establish reopen, process-crash, or power-loss behavior for these
+identity-bearing snapshots. The existing file-backed State crash tests remain
+separate evidence. Neither test implements undo/redo selection, durable
+identity registry transitions, or an atomic transaction spanning registry,
+snapshots, and the vault.
+
 ### Multi-block structural plans: spike constraints
 
 Join and split must work in documents containing unrelated ordinary and legacy
@@ -295,6 +310,15 @@ text with the corresponding registry changes, so a failed text plan returns no
 commit-ready edit. Their tests exercise this path, including a rejected
 inline-code split, a candidate collision, a parser-context change, and injected
 registry failures that leave the source text and registry unchanged.
+
+State's real schema, batch-commit, and version-read functions have also been
+exercised in memory with snapshots from the split-text and visible-edit
+planners. A CRLF/Unicode original and two branches preserve their exact bytes,
+parent records, and ordered ordinary/mirror token kinds and IDs. A batch with
+a missing parent rolls back both planned snapshots and reports the failure to
+both acknowledgements. This is not a worker, reopen, undo, or durable-registry
+test; it does not connect the text plan and registry changes to one State
+transaction.
 
 The kernel prototype now also plans canonical deletion of one uniquely
 identified block line and linewise paste of a one-line register. Delete and

@@ -1012,6 +1012,10 @@ mod tests {
         time::{Duration, Instant},
     };
 
+    use bloom_kernel::identity::{
+        begin_visible_edit, commit_planned_visible_edit, plan_split_text, BlockId,
+    };
+    use bloom_text::{BlockIdMarker, Doc};
     use rusqlite::Connection;
 
     use super::*;
@@ -1063,6 +1067,67 @@ mod tests {
 
     fn open_test_store(path: &Path) -> StateStore {
         StateStore::open_with(path.to_path_buf(), policy()).unwrap()
+    }
+
+    fn planned_identity_snapshots() -> [String; 3] {
+        let original = "before ^other\r\nαβ ^split1\r\nref ^=split1\r\n".to_owned();
+        let projection = Doc::new(&original).visible_projection();
+        let split_at = projection.text()[..projection.text().find('β').unwrap()]
+            .chars()
+            .count();
+        let split = plan_split_text(
+            &original,
+            split_at,
+            &BlockId::new("split1").unwrap(),
+            &BlockId::new("split2").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            split,
+            "before ^other\r\nα ^split1\r\nβ ^split2\r\nref ^=split1\r\n"
+        );
+
+        let mut alternative = original.clone();
+        let context = begin_visible_edit(&mut alternative);
+        let visible = context.projection().text();
+        let start = visible[..visible.find('β').unwrap()].chars().count();
+        let range = context.projection().range(start, start + 1).unwrap();
+        let edit = context.plan(range, "γ").unwrap();
+        commit_planned_visible_edit(edit);
+        assert_eq!(
+            alternative,
+            "before ^other\r\nαγ ^split1\r\nref ^=split1\r\n"
+        );
+
+        [original, split, alternative]
+    }
+
+    fn in_memory_state() -> Connection {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "temp_store", "MEMORY")
+            .unwrap();
+        migrate(&mut connection).unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        connection
+    }
+
+    fn pending_batch(
+        records: &[VersionRecord],
+    ) -> (Vec<PendingRecord>, Vec<Receiver<Result<(), StateError>>>) {
+        let mut pending = Vec::new();
+        let mut acknowledgements = Vec::new();
+        for record in records {
+            let (sender, receiver) = mpsc::channel();
+            pending.push(PendingRecord {
+                record: record.clone(),
+                acknowledgement: sender,
+            });
+            acknowledgements.push(receiver);
+        }
+        (pending, acknowledgements)
     }
 
     #[test]
@@ -1236,6 +1301,63 @@ mod tests {
     }
 
     #[test]
+    fn identity_snapshot_branches_round_trip_through_in_memory_state() {
+        let [original, split, alternative] = planned_identity_snapshots();
+        let records = [
+            record(1, None, &original),
+            record(2, Some(1), &split),
+            record(3, Some(1), &alternative),
+        ];
+        let mut connection = in_memory_state();
+        let (mut pending, acknowledgements) = pending_batch(&records);
+        commit_pending(&mut connection, &mut pending).unwrap();
+        assert!(pending.is_empty());
+        for acknowledgement in acknowledgements {
+            assert_eq!(acknowledgement.recv().unwrap(), Ok(()));
+        }
+
+        let expected_tokens = [
+            vec![
+                (BlockIdMarker::Block, "other"),
+                (BlockIdMarker::Block, "split1"),
+                (BlockIdMarker::Mirror, "split1"),
+            ],
+            vec![
+                (BlockIdMarker::Block, "other"),
+                (BlockIdMarker::Block, "split1"),
+                (BlockIdMarker::Block, "split2"),
+                (BlockIdMarker::Mirror, "split1"),
+            ],
+            vec![
+                (BlockIdMarker::Block, "other"),
+                (BlockIdMarker::Block, "split1"),
+                (BlockIdMarker::Mirror, "split1"),
+            ],
+        ];
+        for index in [1, 0, 1, 2] {
+            let expected = &records[index];
+            let actual = get_version(&connection, expected.page_id(), expected.version())
+                .unwrap()
+                .unwrap();
+            assert_eq!(&actual, expected);
+            assert_eq!(actual.content().as_bytes(), expected.content().as_bytes());
+            let projection = Doc::new(actual.content()).visible_projection();
+            assert_eq!(
+                projection
+                    .tokens()
+                    .iter()
+                    .map(|token| (token.marker(), token.id()))
+                    .collect::<Vec<_>>(),
+                expected_tokens[index]
+            );
+        }
+        assert_eq!(
+            recovery_candidate(&connection, &PageId::new("page-a").unwrap()).unwrap(),
+            Some(records[2].clone())
+        );
+    }
+
+    #[test]
     fn idle_commit_acknowledges_after_the_debounce_window() {
         let db = TempDb::new();
         let store = open_test_store(db.path());
@@ -1341,6 +1463,42 @@ mod tests {
             assert_eq!(recovered.is_some(), should_exist);
             store.shutdown().unwrap();
         }
+    }
+
+    #[test]
+    fn rejected_identity_snapshot_batch_rolls_back_and_reports_every_failure() {
+        let [original, split, alternative] = planned_identity_snapshots();
+        let mut connection = in_memory_state();
+        let initial = record(1, None, &original);
+        let (mut pending, acknowledgements) = pending_batch(std::slice::from_ref(&initial));
+        commit_pending(&mut connection, &mut pending).unwrap();
+        for acknowledgement in acknowledgements {
+            assert_eq!(acknowledgement.recv().unwrap(), Ok(()));
+        }
+
+        let rejected = [record(2, Some(1), &split), record(4, Some(3), &alternative)];
+        let (mut pending, acknowledgements) = pending_batch(&rejected);
+        let error = commit_pending(&mut connection, &mut pending).unwrap_err();
+        assert!(matches!(error, StateError::Sqlite(_)));
+        assert!(pending.is_empty());
+        for acknowledgement in acknowledgements {
+            assert_eq!(acknowledgement.recv().unwrap(), Err(error.clone()));
+        }
+        let page = initial.page_id();
+        assert_eq!(
+            get_version(&connection, page, initial.version()).unwrap(),
+            Some(initial.clone())
+        );
+        for record in rejected {
+            assert_eq!(
+                get_version(&connection, page, record.version()).unwrap(),
+                None
+            );
+        }
+        assert_eq!(
+            recovery_candidate(&connection, page).unwrap(),
+            Some(initial)
+        );
     }
 
     #[test]
