@@ -524,6 +524,69 @@ mod tests {
     }
 
     #[test]
+    fn typed_span_fallback_cannot_recover_ambiguous_identity_from_markdown_alone() {
+        struct TypedSpanSnapshot<'a> {
+            canonical: &'a str,
+            token_spans: Vec<std::ops::Range<usize>>,
+        }
+
+        impl TypedSpanSnapshot<'_> {
+            fn visible(&self) -> String {
+                let mut visible = String::new();
+                let mut previous_end = 0;
+                for span in &self.token_spans {
+                    assert!(previous_end <= span.start && span.start <= span.end);
+                    assert!(span.end <= self.canonical.len());
+                    assert!(self.canonical.is_char_boundary(span.start));
+                    assert!(self.canonical.is_char_boundary(span.end));
+                    visible.push_str(&self.canonical[previous_end..span.start]);
+                    previous_end = span.end;
+                }
+                visible.push_str(&self.canonical[previous_end..]);
+                visible
+            }
+        }
+
+        for ending in ["\n", "\r\n"] {
+            let original = format!("α `βγ` ^split1{ending}");
+            let original_projection = Doc::new(&original).visible_projection();
+            assert_eq!(original_projection.text(), format!("α `βγ`{ending}"));
+            assert_eq!(original_projection.tokens().len(), 1);
+            assert_eq!(original_projection.tokens()[0].id(), "split1");
+
+            let generated_canonical =
+                original.replacen("βγ` ^split1", &format!("β ^split1{ending}γ` ^split2"), 1);
+            let literal_canonical = format!("α `β ^split1{ending}γ` ^split2{ending}");
+            let first = generated_canonical.find(" ^split1").unwrap();
+            let second = generated_canonical.find(" ^split2").unwrap();
+            let literal = TypedSpanSnapshot {
+                canonical: &literal_canonical,
+                token_spans: vec![],
+            };
+            let generated = TypedSpanSnapshot {
+                canonical: &generated_canonical,
+                token_spans: vec![
+                    first..first + " ^split1".len(),
+                    second..second + " ^split2".len(),
+                ],
+            };
+            let expected_generated = format!("α `β{ending}γ`{ending}");
+
+            assert_eq!(literal.canonical, generated.canonical);
+            assert_eq!(literal.visible(), literal_canonical);
+            assert_eq!(generated.visible(), expected_generated);
+            assert_ne!(literal.visible(), generated.visible());
+
+            let reloaded_literal = Doc::new(literal.canonical).visible_projection();
+            let reloaded_generated = Doc::new(generated.canonical).visible_projection();
+            assert_eq!(reloaded_literal.text(), literal.visible());
+            assert_eq!(reloaded_generated.text(), reloaded_literal.text());
+            assert_ne!(reloaded_generated.text(), generated.visible());
+            assert!(reloaded_generated.tokens().is_empty());
+        }
+    }
+
+    #[test]
     fn lowering_splits_visible_ranges_around_hidden_tokens() {
         let raw = "one ^first\ntwo ^=second\nthree\n";
         let projection = VisibleProjection::parse(raw);
