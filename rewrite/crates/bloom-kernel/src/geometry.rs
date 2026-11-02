@@ -727,7 +727,7 @@ fn shape_physical_line(
 
 #[cfg(test)]
 mod tests {
-    use bloom_text::Doc;
+    use bloom_text::{Doc, EditDelta};
 
     use super::{FontMetrics, Layout, LayoutCache, MonospaceFontMetrics, PositivePx, Px, Size};
 
@@ -1019,6 +1019,107 @@ mod tests {
                         "{text:?} backspace at {position}, width {width}"
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn underreported_crlf_invalidation_is_rejected_or_detected_by_differential() {
+        let mut doc = Doc::new("\rA");
+        let viewport = Size::new(Px::new(100.0).unwrap(), Px::new(100.0).unwrap());
+        let metrics = test_metrics(2.0, 10.0);
+        let mut correct_cache = LayoutCache::new(&doc.snapshot(), viewport, &metrics).unwrap();
+        let mut faulted_cache = correct_cache.clone();
+        let (cursor, delta) = doc
+            .insert_with_delta(doc.raw_char_idx(1).unwrap(), "\n")
+            .unwrap();
+        let snapshot = doc.snapshot();
+
+        correct_cache
+            .apply_edit(&snapshot, delta.unwrap(), &metrics)
+            .unwrap();
+        let full = Layout::compute(&snapshot, cursor, viewport, &metrics).unwrap();
+        assert_eq!(
+            correct_cache.frame(&snapshot, cursor, viewport),
+            Ok(full.clone())
+        );
+        match faulted_cache.apply_edit(
+            &snapshot,
+            EditDelta {
+                start_line: 1,
+                old_line_count: 1,
+                new_line_count: 1,
+            },
+            &metrics,
+        ) {
+            Ok(()) => assert_ne!(faulted_cache.frame(&snapshot, cursor, viewport), Ok(full)),
+            Err(error) => assert_eq!(error, super::LayoutError::CacheInconsistent),
+        }
+    }
+
+    #[test]
+    fn incremental_layout_matches_full_over_deterministic_edit_sequences() {
+        fn next_random(state: &mut u64) -> u64 {
+            *state ^= *state << 13;
+            *state ^= *state >> 7;
+            *state ^= *state << 17;
+            *state
+        }
+
+        fn byte_offset(text: &str, position: usize) -> usize {
+            text.char_indices()
+                .nth(position)
+                .map_or(text.len(), |(byte, _)| byte)
+        }
+
+        let insertions = [
+            "a",
+            "Ω",
+            "e\u{0301}",
+            "👩\u{200d}💻",
+            "\r",
+            "\n",
+            "\r\n",
+            "\u{0085}",
+            "\u{2028}",
+        ];
+        let metrics = test_metrics(2.0, 10.0);
+        for seed in [1, 0x1234_5678, 0xdead_beef, 0xcafe_f00d] {
+            let mut rng = seed;
+            let viewport = Size::new(Px::new(4.0).unwrap(), Px::new(2_000.0).unwrap());
+            let mut doc = Doc::new("left\rX\nright\n");
+            let mut reference = doc.text();
+            let mut cache = LayoutCache::new(&doc.snapshot(), viewport, &metrics).unwrap();
+            for step in 0..1_000 {
+                let length = reference.chars().count();
+                let position = (next_random(&mut rng) % (length as u64 + 1)) as usize;
+                let insert = length < 80 && (length == 0 || next_random(&mut rng) % 5 < 3);
+                let at = doc.raw_char_idx(position).unwrap();
+                let (cursor, delta) = if insert {
+                    let text =
+                        insertions[(next_random(&mut rng) % insertions.len() as u64) as usize];
+                    reference.insert_str(byte_offset(&reference, position), text);
+                    doc.insert_with_delta(at, text).unwrap()
+                } else {
+                    if position > 0 {
+                        reference.replace_range(
+                            byte_offset(&reference, position - 1)
+                                ..byte_offset(&reference, position),
+                            "",
+                        );
+                    }
+                    doc.delete_previous_char_with_delta(at).unwrap()
+                };
+                assert_eq!(doc.text(), reference, "seed {seed:#x}, step {step}");
+                let snapshot = doc.snapshot();
+                if let Some(delta) = delta {
+                    cache.apply_edit(&snapshot, delta, &metrics).unwrap();
+                }
+                assert_eq!(
+                    cache.frame(&snapshot, cursor, viewport).unwrap(),
+                    Layout::compute(&snapshot, cursor, viewport, &metrics).unwrap(),
+                    "seed {seed:#x}, step {step}, position {position}"
+                );
             }
         }
     }
