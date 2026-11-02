@@ -118,6 +118,38 @@ impl VisibleRange {
     }
 }
 
+/// A grapheme-boundary cursor position tied to the projection that created it.
+#[derive(Clone, Debug)]
+pub struct VisiblePosition {
+    offset: VisibleCharIdx,
+    projection_id: Arc<()>,
+}
+
+impl VisiblePosition {
+    pub(crate) fn new(offset: VisibleCharIdx, projection_id: Arc<()>) -> Self {
+        Self {
+            offset,
+            projection_id,
+        }
+    }
+
+    pub const fn offset(&self) -> VisibleCharIdx {
+        self.offset
+    }
+
+    pub(crate) fn belongs_to(&self, projection_id: &Arc<()>) -> bool {
+        Arc::ptr_eq(&self.projection_id, projection_id)
+    }
+}
+
+impl PartialEq for VisiblePosition {
+    fn eq(&self, other: &Self) -> bool {
+        self.offset == other.offset && Arc::ptr_eq(&self.projection_id, &other.projection_id)
+    }
+}
+
+impl Eq for VisiblePosition {}
+
 impl PartialEq for VisibleRange {
     fn eq(&self, other: &Self) -> bool {
         self.start == other.start

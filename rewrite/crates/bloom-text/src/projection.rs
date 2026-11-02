@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::coordinates::{RawCharIdx, RawCharRange, VisibleCharIdx, VisibleRange};
+use crate::coordinates::{RawCharIdx, RawCharRange, VisibleCharIdx, VisiblePosition, VisibleRange};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BlockIdMarker {
@@ -67,6 +67,7 @@ pub enum ProjectionError {
     SplitsGrapheme {
         offset: usize,
     },
+    ForeignVisiblePosition,
     InsertionAtLeadingToken {
         token_index: usize,
     },
@@ -195,6 +196,50 @@ impl VisibleProjection {
             self.grapheme_boundaries[start],
             self.grapheme_boundaries[end],
         )
+    }
+
+    pub fn position(&self, offset: usize) -> Result<VisiblePosition, ProjectionError> {
+        let length = self.text.chars().count();
+        if offset > length {
+            return Err(ProjectionError::InvalidVisibleRange {
+                start: offset,
+                end: offset,
+                length,
+            });
+        }
+        if self.grapheme_boundaries.binary_search(&offset).is_err() {
+            return Err(ProjectionError::SplitsGrapheme { offset });
+        }
+        Ok(VisiblePosition::new(
+            VisibleCharIdx::new(offset),
+            Arc::clone(&self.identity),
+        ))
+    }
+
+    pub fn grapheme_position(&self, offset: usize) -> Result<VisiblePosition, ProjectionError> {
+        let char_offset = self.grapheme_boundaries.get(offset).copied().ok_or(
+            ProjectionError::InvalidVisibleRange {
+                start: offset,
+                end: offset,
+                length: self.grapheme_count(),
+            },
+        )?;
+        self.position(char_offset)
+    }
+
+    pub fn lower_position(&self, position: VisiblePosition) -> Result<RawCharIdx, ProjectionError> {
+        if !position.belongs_to(&self.identity) {
+            return Err(ProjectionError::ForeignVisiblePosition);
+        }
+        let offset = position.offset().get();
+        let lowered = self.lower(self.range(offset, offset)?)?;
+        lowered
+            .insertion
+            .ok_or(ProjectionError::InvalidVisibleRange {
+                start: offset,
+                end: offset,
+                length: self.text.chars().count(),
+            })
     }
 
     /// Lowers visible text to non-overlapping raw spans. Hidden tokens are
@@ -1245,6 +1290,66 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn projected_positions_lower_only_to_raw_grapheme_and_token_boundaries() {
+        for ending in ["\n", "\r\n"] {
+            let raw = format!("e\u{301}👩\u{200d}💻 ^id{ending}^only{ending}");
+            let document = Doc::new(&raw);
+            let projection = document.visible_projection();
+            let snapshot = document.snapshot();
+            assert_eq!(
+                projection.text(),
+                format!("e\u{301}👩\u{200d}💻{ending}{ending}")
+            );
+
+            for grapheme_offset in 0..=projection.grapheme_count() {
+                let position = projection.grapheme_position(grapheme_offset).unwrap();
+                match projection.lower_position(position) {
+                    Ok(raw_position) => {
+                        assert!(
+                            snapshot.is_grapheme_boundary(raw_position).unwrap(),
+                            "raw offset {} is not a grapheme boundary ({ending:?})",
+                            raw_position.get()
+                        );
+                        assert!(projection.tokens().iter().all(|token| {
+                            let offset = raw_position.get();
+                            offset <= token.raw_range().start().get()
+                                || offset >= token.raw_range().end().get()
+                        }));
+                    }
+                    Err(ProjectionError::InsertionAtLeadingToken { token_index }) => {
+                        assert_eq!(token_index, 1);
+                        assert_eq!(grapheme_offset, 3);
+                    }
+                    Err(error) => panic!("unexpected position lowering error: {error:?}"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn projected_positions_reject_interior_graphemes_and_foreign_snapshots() {
+        let first = VisibleProjection::parse("e\u{301} ^id");
+        let second = VisibleProjection::parse("e\u{301} ^id");
+
+        assert_eq!(
+            first.position(1),
+            Err(ProjectionError::SplitsGrapheme { offset: 1 })
+        );
+        assert_eq!(
+            first.grapheme_position(2),
+            Err(ProjectionError::InvalidVisibleRange {
+                start: 2,
+                end: 2,
+                length: 1,
+            })
+        );
+        assert_eq!(
+            second.lower_position(first.position(0).unwrap()),
+            Err(ProjectionError::ForeignVisiblePosition)
+        );
     }
 
     #[test]

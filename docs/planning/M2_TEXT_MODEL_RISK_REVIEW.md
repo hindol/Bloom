@@ -2,7 +2,7 @@
 
 > Architect review for the ADR-3 acceptance spike.
 > Scope is the spike only; this does not approve full M2 implementation.
-> Status: projection lowering and fixture-backed append, join, split, boundary-edit, and multiline inline-code prototypes pass; ADR-3 remains unaccepted pending the identity-rule matrix and production parser/Vim integration.
+> Status: projection lowering and fixture-backed append, join, split, boundary-edit, multiline inline-code, and projected-cursor prototypes pass; ADR-3 remains unaccepted pending the identity-rule matrix and production parser/Vim integration.
 
 ## Decision under test
 
@@ -133,12 +133,16 @@ combining mark, insertion before a ZWJ sequence, and backspace that joins CRLF;
 the fault corpus injects interior offsets and proves the same checker rejects
 them.
 
-This is deliberately not the full M2 I6 contract. The M1 editor has one raw
-cursor and no projected IDs, selections, or motions. M2 must extend the
-position model and checker to visible/raw lowering, hidden-token boundaries,
-selections, and motion results; it must not treat M1's plain-cursor activation
-as evidence for those surfaces. CRLF and multi-scalar graphemes remain in the
-M2 corpus.
+This is deliberately not the full M2 I6 contract. `bloom-text` now exposes
+projection-bound visible positions that can only be created at grapheme
+boundaries and lower through the token-safe insertion mapping. Tests verify
+that each successful lowered position is a raw grapheme boundary outside
+hidden-token interiors; ID-only leading-token positions remain an explicit
+structural error. The M1 editor still has one raw cursor and no projected IDs,
+selections, or motions, so no kernel-level projected-position checker is
+active. M2 must extend the checker to selections and motion results and connect
+this API to editor state. CRLF and multi-scalar graphemes remain in the M2
+corpus.
 
 ## Scope and ownership
 
