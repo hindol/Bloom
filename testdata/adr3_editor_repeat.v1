@@ -1,0 +1,4 @@
+BLOOM_EDITOR_REPEAT_ORACLE_V1
+dot-x-start|abcdef ^edge1\nnext ^oth01\n|abcdef\nnext\n|-|x,0,1,bcdef\nnext\n;.,0,1,cdef\nnext\n;.,0,1,def\nnext\n
+dot-x-end|abcdef ^edge1\nnext ^oth01\n|abcdef\nnext\n|$|x,5,6,abcde\nnext\n;.,-,-,abcde\nnext\n;.,-,-,abcde\nnext\n
+dot-dw|alpha beta gamma ^edge1\nnext ^oth01\n|alpha beta gamma\nnext\n|-|dw,0,6,beta gamma\nnext\n;.,0,5,gamma\nnext\n

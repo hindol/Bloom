@@ -1590,6 +1590,8 @@ mod tests {
 
     const ADR3_IDENTITY_ORACLE: &str =
         include_str!("../../../../testdata/adr3_vim_identity_oracle.v1");
+    const ADR3_EDITOR_REPEAT_ORACLE: &str =
+        include_str!("../../../../testdata/adr3_editor_repeat.v1");
 
     #[derive(Clone, Debug, Default, Eq, PartialEq)]
     struct FakeRegistry {
@@ -1896,6 +1898,71 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn editor_observed_repeat_deletions_preserve_canonical_token_bytes() {
+        fn tokens(canonical: &str) -> Vec<(BlockIdMarker, String, String)> {
+            let doc = Doc::new(canonical);
+            let projection = doc.visible_projection();
+            let chars = canonical.chars().collect::<Vec<_>>();
+            projection
+                .tokens()
+                .iter()
+                .map(|token| {
+                    let start = doc.raw_char_offset(token.raw_range().start()).unwrap();
+                    let end = doc.raw_char_offset(token.raw_range().end()).unwrap();
+                    (
+                        token.marker(),
+                        token.id().to_owned(),
+                        chars[start..end].iter().collect(),
+                    )
+                })
+                .collect()
+        }
+
+        let mut lines = ADR3_EDITOR_REPEAT_ORACLE.lines();
+        assert_eq!(lines.next(), Some("BLOOM_EDITOR_REPEAT_ORACLE_V1"));
+        let mut cases = 0;
+        let mut edits = 0;
+        let mut no_ops = 0;
+        for line in lines.filter(|line| !line.is_empty()) {
+            let fields = line.split('|').collect::<Vec<_>>();
+            assert_eq!(fields.len(), 5);
+            let name = fields[0];
+            let mut canonical = decode_oracle_text(fields[1]);
+            assert_eq!(
+                Doc::new(&canonical).visible_projection().text(),
+                decode_oracle_text(fields[2]),
+                "{name}: initial projection"
+            );
+            let initial_tokens = tokens(&canonical);
+            assert_eq!(initial_tokens.len(), 2, "{name}");
+            for step in fields[4].split(';') {
+                let fields = step.splitn(4, ',').collect::<Vec<_>>();
+                assert_eq!(fields.len(), 4, "{name}: invalid step");
+                let expected_after = decode_oracle_text(fields[3]);
+                if fields[1] == "-" {
+                    assert_eq!(fields[2], "-", "{name}: invalid no-op");
+                    no_ops += 1;
+                } else {
+                    let start = fields[1].parse::<usize>().unwrap();
+                    let end = fields[2].parse::<usize>().unwrap();
+                    let plan = plan_test_visible_edit(&mut canonical, start..end, "").unwrap();
+                    commit_planned_visible_edit(plan);
+                    edits += 1;
+                }
+                assert_eq!(
+                    Doc::new(&canonical).visible_projection().text(),
+                    expected_after,
+                    "{name}: {}",
+                    fields[0]
+                );
+                assert_eq!(tokens(&canonical), initial_tokens, "{name}: {}", fields[0]);
+            }
+            cases += 1;
+        }
+        assert_eq!((cases, edits, no_ops), (3, 6, 2));
     }
 
     #[test]

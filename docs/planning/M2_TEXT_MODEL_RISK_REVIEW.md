@@ -47,6 +47,34 @@ prototype's join/split canonical-text transaction, not a production
 streams cannot serve as transaction oracles for the intended identity
 semantics; the bridge does not authorize ADR-3.
 
+### Editor-level repeat oracle: spike constraints
+
+The existing Vim-only fixture helper ignores `VimAction::Command`, so it
+cannot observe `.` replay. A separate, test-only workspace may depend on the
+unchanged legacy `bloom-test-harness` and drive its real `SimInput` scratch
+editor without a vault. It must not depend on `rewrite/`, and the rewrite
+must not depend on it. Both sides may read a versioned fixture containing
+canonical input, editor-observed visible snapshots after each key sequence,
+and visible deletion ranges or explicit observed no-ops. The legacy test must
+check that every recorded deletion range is uniquely determined by the two
+adjacent visible snapshots and that each recorded no-op leaves text unchanged.
+
+The rewrite may replay those ranges through a fresh projection for each step
+and check exact visible text and preserved token bytes. Snapshot differences
+are not captured `EditOp`s, do not prove which internal edits produced a
+snapshot, and do not exercise a production Vim-to-rewrite path. Restrict this
+fixture to unambiguous single-line deletions and observed no-ops; do not replay
+a no-op as a required rewrite cursor behavior. Structural repeats, register
+lifecycle, cursor policy, and full `.` parity remain open. The dedicated legacy
+oracle and the rewrite test must both run in CI without weakening existing
+gates or changing the frozen legacy workspace.
+
+The real editor currently produces no further text change for `.` after `x`
+deletes the last visible character on a line. The fixture records this
+observation, not a decision to preserve it. Cursor landing and the desired
+repeat behavior at that boundary remain open; the prototype does not replay
+the recorded no-op as an identity or cursor rule.
+
 The unchanged legacy CI baseline also has two reproducible e2e failures:
 `multiple_undo_redo` observes `onetwo three ` where its setup expects
 `one two three`, and `theme_persists_to_config_without_corrupting_views`
@@ -319,6 +347,13 @@ a missing parent rolls back both planned snapshots and reports the failure to
 both acknowledgements. This is not a worker, reopen, undo, or durable-registry
 test; it does not connect the text plan and registry changes to one State
 transaction.
+
+The isolated editor oracle exercises actual legacy `x` and `dw` followed by
+`.` on scratch documents with hidden IDs. Its unambiguous single-line deletion
+observations are replayed through the rewrite's visible-edit planner, which
+preserves the original token bytes after each edit. This does not capture
+legacy edit actions or run the rewrite as an editor; it is not full dot-repeat
+or cursor parity.
 
 The kernel prototype now also plans canonical deletion of one uniquely
 identified block line and linewise paste of a one-line register. Delete and
