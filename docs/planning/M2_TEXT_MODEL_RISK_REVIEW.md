@@ -44,8 +44,8 @@ split edit ranges, build canonical text plans, and atomically commit those
 plans alongside retirement/reservation changes. These tests cover the
 prototype's join/split canonical-text transaction, not a production
 `VimState`-to-document integration. The structural `dd`/`p` and `yy`/`p`
-streams still lack canonical-text transaction plans; the bridge does not
-authorize ADR-3.
+streams cannot serve as transaction oracles for the intended identity
+semantics; the bridge does not authorize ADR-3.
 
 ## Scope and ownership
 
@@ -133,6 +133,16 @@ and parsed identities before returning a plan. They currently support
 exactly two ordinary ID tokens in the whole document for join, and one for
 split; documents with additional tokens are explicitly rejected.
 
+The kernel prototype now also plans canonical deletion of one uniquely
+identified block line and linewise paste of a one-line register. Policy tests
+cover moving a detached ID to another page and copying a live ID with a newly
+reserved identity; target text and the registry remain
+unchanged when the paste commit fails. These are explicit policy/text-plan
+tests, not replays of the legacy `dd`/`p` or `yy`/`p` streams. The two-phase
+move can leave a detached identity in its register after a failed paste or
+process interruption; register cleanup and durable transaction recovery remain
+unimplemented.
+
 This remains prototype evidence, not acceptance. It does not execute the
 identity matrix through a production Vim-to-document path; fresh ID candidates
 are supplied by the caller, durable registry behavior and cleanup when a
@@ -160,10 +170,10 @@ ADR-3 can be accepted only when:
    `bloom_buffer::Buffer` and untyped `EditOp { range: Range<usize>, ... }`;
    the serialized test adapter must explicitly cover that seam without
    introducing a cross-workspace dependency. The serialized bridge covers
-   append, structural command streams, and
-   visible-only boundary deletions. Fixture-driven kernel tests now replay the
-   `J` and split edits as canonical-text transactions; move/copy paste still
-   lacks canonical-text replay.
+   append, structural command streams, and visible-only boundary deletions.
+   Fixture-driven kernel tests replay the `J` and split edit ranges as
+   canonical-text transactions, and policy/text-plan tests cover move/copy
+   identity preservation; neither is a production Vim-to-document replay.
 3. Every supported identity rule has a test or is explicitly recorded as
    uncovered; no rule is inferred from the current side-table implementation.
 4. The verdict and any remaining gaps are recorded. If the gate fails, prototype

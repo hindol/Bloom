@@ -92,6 +92,12 @@ pub struct BlockRegister {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BlockTextDeletion {
+    pub canonical_text: String,
+    pub visible_text: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IdentityDecision {
     Delete {
         detached_id: BlockId,
@@ -134,6 +140,10 @@ pub enum IdentityTextPlanError {
     IdentityMismatch,
     InvalidJoinEdit,
     InvalidSplitEdit,
+    InvalidPastePlan,
+    InvalidPasteLocation,
+    InvalidRegisterText,
+    DuplicateIdentity,
     InvalidResult,
     LineOutOfBounds(usize),
 }
@@ -394,6 +404,235 @@ pub fn plan_split_text(
     Ok(planned)
 }
 
+pub fn plan_delete_block_text(
+    canonical_text: &str,
+    id: &BlockId,
+) -> Result<BlockTextDeletion, IdentityTextPlanError> {
+    let projection = Doc::new(canonical_text).visible_projection();
+    let matching_tokens = projection
+        .tokens()
+        .iter()
+        .filter(|token| token.id() == id.as_str())
+        .collect::<Vec<_>>();
+    if matching_tokens.len() != 1 || matching_tokens[0].marker() != BlockIdMarker::Block {
+        return Err(IdentityTextPlanError::IdentityMismatch);
+    }
+
+    let token = matching_tokens[0];
+    let token_line = line_at(projection.text(), token.visible_boundary().get());
+    if projection.tokens().iter().any(|other| {
+        !std::ptr::eq(other, token)
+            && line_at(projection.text(), other.visible_boundary().get()) == token_line
+    }) {
+        return Err(IdentityTextPlanError::UnsupportedTokenSet);
+    }
+
+    let visible_chars = projection.text().chars().collect::<Vec<_>>();
+    let visible_line_start = visible_chars[..token.visible_boundary().get()]
+        .iter()
+        .rposition(|ch| *ch == '\n')
+        .map_or(0, |offset| offset + 1);
+    let visible_line_end = visible_chars[token.visible_boundary().get()..]
+        .iter()
+        .position(|ch| *ch == '\n')
+        .map_or(visible_chars.len(), |offset| {
+            token.visible_boundary().get() + offset
+        });
+    let visible_text = visible_chars[visible_line_start..visible_line_end]
+        .iter()
+        .collect::<String>();
+
+    let raw_chars = canonical_text.chars().collect::<Vec<_>>();
+    let doc = Doc::new(canonical_text);
+    let raw_token_start = doc
+        .raw_char_offset(token.raw_range().start())
+        .expect("token span belongs to canonical text");
+    let raw_line_start = raw_chars[..raw_token_start]
+        .iter()
+        .rposition(|ch| *ch == '\n')
+        .map_or(0, |offset| offset + 1);
+    let raw_line_end = raw_chars[raw_token_start..]
+        .iter()
+        .position(|ch| *ch == '\n')
+        .map_or(raw_chars.len(), |offset| raw_token_start + offset);
+    let delete_start = if raw_line_end == raw_chars.len() && raw_line_start > 0 {
+        previous_line_separator_start(&raw_chars, raw_line_start)
+    } else {
+        raw_line_start
+    };
+    let delete_end = if raw_line_end < raw_chars.len() {
+        raw_line_end + 1
+    } else {
+        raw_line_end
+    };
+    let mut remaining = raw_chars;
+    remaining.drain(delete_start..delete_end);
+    let canonical_text = remaining.into_iter().collect::<String>();
+    let remaining_projection = Doc::new(&canonical_text).visible_projection();
+    let mut expected_visible = visible_chars;
+    let visible_delete_start =
+        if visible_line_end == expected_visible.len() && visible_line_start > 0 {
+            previous_line_separator_start(&expected_visible, visible_line_start)
+        } else {
+            visible_line_start
+        };
+    let visible_delete_end = if visible_line_end < expected_visible.len() {
+        visible_line_end + 1
+    } else {
+        visible_line_end
+    };
+    expected_visible.drain(visible_delete_start..visible_delete_end);
+    let expected_ids = projection
+        .tokens()
+        .iter()
+        .filter(|other| !std::ptr::eq(*other, token))
+        .map(|other| (other.marker(), other.id().to_owned()))
+        .collect::<Vec<_>>();
+    let remaining_ids = remaining_projection
+        .tokens()
+        .iter()
+        .map(|other| (other.marker(), other.id().to_owned()))
+        .collect::<Vec<_>>();
+    if remaining_projection.text() != expected_visible.iter().collect::<String>()
+        || remaining_ids != expected_ids
+    {
+        return Err(IdentityTextPlanError::InvalidResult);
+    }
+
+    Ok(BlockTextDeletion {
+        canonical_text,
+        visible_text,
+    })
+}
+
+pub fn plan_paste_block_text(
+    canonical_text: &str,
+    insertion_at: usize,
+    register: &BlockRegister,
+    identity_plan: &IdentityPlan,
+) -> Result<String, IdentityTextPlanError> {
+    let IdentityDecision::Paste {
+        assigned_id: Some(assigned_id),
+        ..
+    } = &identity_plan.decision
+    else {
+        return Err(IdentityTextPlanError::InvalidPastePlan);
+    };
+    let Some(identity) = &register.identity else {
+        return Err(IdentityTextPlanError::InvalidPastePlan);
+    };
+    let valid_change = match (&identity_plan.decision, identity_plan.changes.as_slice()) {
+        (
+            IdentityDecision::Paste {
+                reused_source_id: true,
+                ..
+            },
+            [RegistryChange::MoveDetached {
+                id, source_page, ..
+            }],
+        ) => id == assigned_id && source_page == &identity.source_page && id == &identity.id,
+        (
+            IdentityDecision::Paste {
+                reused_source_id: false,
+                ..
+            },
+            [RegistryChange::Reserve { id, .. }],
+        ) => id == assigned_id && id != &identity.id,
+        _ => false,
+    };
+    if !valid_change {
+        return Err(IdentityTextPlanError::InvalidPastePlan);
+    }
+    if register
+        .visible_text
+        .chars()
+        .any(|character| character == '\n' || character == '\r')
+    {
+        return Err(IdentityTextPlanError::InvalidRegisterText);
+    }
+
+    let projection = Doc::new(canonical_text).visible_projection();
+    if projection
+        .tokens()
+        .iter()
+        .any(|token| token.id() == assigned_id.as_str())
+    {
+        return Err(IdentityTextPlanError::DuplicateIdentity);
+    }
+    let range = projection
+        .range(insertion_at, insertion_at)
+        .map_err(IdentityTextPlanError::Projection)?;
+    let lowered = projection
+        .lower(range)
+        .map_err(IdentityTextPlanError::Projection)?;
+    let previous_is_line_end = insertion_at == 0
+        || projection
+            .text()
+            .chars()
+            .nth(insertion_at.saturating_sub(1))
+            == Some('\n');
+    if !previous_is_line_end {
+        return Err(IdentityTextPlanError::InvalidPasteLocation);
+    }
+    let insertion = lowered
+        .insertion
+        .ok_or(IdentityTextPlanError::InvalidPasteLocation)?;
+    let insertion = Doc::new(canonical_text)
+        .raw_char_offset(insertion)
+        .expect("projection insertion belongs to canonical text");
+    let line_ending = line_ending_at(projection.text(), insertion_at);
+    let separator = if register.visible_text.is_empty() {
+        ""
+    } else {
+        " "
+    };
+    let inserted = format!(
+        "{}{}^{}{}",
+        register.visible_text,
+        separator,
+        assigned_id.as_str(),
+        line_ending
+    );
+    let mut raw_chars = canonical_text.chars().collect::<Vec<_>>();
+    raw_chars.splice(insertion..insertion, inserted.chars());
+    let planned = raw_chars.into_iter().collect::<String>();
+
+    let expected_visible = format!(
+        "{}{}{}{}",
+        &projection.text()
+            [..char_to_byte(projection.text(), insertion_at).expect("validated visible insertion")],
+        register.visible_text,
+        line_ending,
+        &projection.text()
+            [char_to_byte(projection.text(), insertion_at).expect("validated visible insertion")..]
+    );
+    let planned_projection = Doc::new(&planned).visible_projection();
+    let expected_ids = projection
+        .tokens()
+        .iter()
+        .map(|token| (token.marker(), token.id().to_owned()))
+        .collect::<Vec<_>>();
+    let planned_existing_ids = planned_projection
+        .tokens()
+        .iter()
+        .filter(|token| token.id() != assigned_id.as_str())
+        .map(|token| (token.marker(), token.id().to_owned()))
+        .collect::<Vec<_>>();
+    let added = planned_projection
+        .tokens()
+        .iter()
+        .filter(|token| token.id() == assigned_id.as_str())
+        .collect::<Vec<_>>();
+    if planned_projection.text() != expected_visible
+        || planned_existing_ids != expected_ids
+        || added.len() != 1
+        || added[0].marker() != BlockIdMarker::Block
+    {
+        return Err(IdentityTextPlanError::InvalidResult);
+    }
+    Ok(planned)
+}
+
 fn validate_planned_text(
     canonical_text: &str,
     visible_text: &str,
@@ -418,6 +657,14 @@ fn line_at(text: &str, char_offset: usize) -> usize {
         .take(char_offset)
         .filter(|ch| *ch == '\n')
         .count()
+}
+
+fn previous_line_separator_start(chars: &[char], line_start: usize) -> usize {
+    if line_start >= 2 && chars[line_start - 1] == '\n' && chars[line_start - 2] == '\r' {
+        line_start - 2
+    } else {
+        line_start - 1
+    }
 }
 
 fn replace_chars(text: &str, range: std::ops::Range<usize>, replacement: &str) -> String {
@@ -505,10 +752,11 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
     use super::{
-        append_block_id, block_ids_in_text, commit_identity_edit, plan_delete, plan_join,
-        plan_join_text, plan_paste, plan_split, plan_split_text, BlockId, BlockIdRegistry,
-        BlockRegister, IdentityDecision, IdentityPlanError, IdentityState, PageId,
-        RegisterIdentity, RegisterOperation, RegistryChange,
+        append_block_id, block_ids_in_text, commit_identity_edit, plan_delete,
+        plan_delete_block_text, plan_join, plan_join_text, plan_paste, plan_paste_block_text,
+        plan_split, plan_split_text, BlockId, BlockIdRegistry, BlockRegister, IdentityDecision,
+        IdentityPlanError, IdentityState, PageId, RegisterIdentity, RegisterOperation,
+        RegistryChange,
     };
     use bloom_text::Doc;
 
@@ -971,6 +1219,161 @@ mod tests {
             plan_split_text(canonical, 4, &id("split1"), &id("split2")),
             Err(super::IdentityTextPlanError::InvalidResult)
         );
+    }
+
+    #[test]
+    fn canonical_block_delete_and_paste_move_the_detached_identity() {
+        let source_page = page("source");
+        let target_page = page("target");
+        let moved_id = id("blk01");
+        let destination_id = id("dest01");
+        let mut registry = FakeRegistry::default();
+        registry.seed(moved_id.clone(), source_page.clone());
+        registry.seed(destination_id.clone(), target_page.clone());
+        let mut source_text = "one ^blk01\nnext ^blk02\n".to_owned();
+
+        let deletion = plan_delete_block_text(&source_text, &moved_id).unwrap();
+        assert_eq!(deletion.visible_text, "one");
+        let (register, detach_plan) = plan_delete(
+            &source_page,
+            &moved_id,
+            deletion.visible_text.clone(),
+            &registry,
+        )
+        .unwrap();
+        commit_identity_edit(
+            &mut registry,
+            &mut source_text,
+            deletion.canonical_text,
+            &detach_plan,
+        )
+        .unwrap();
+        assert_eq!(source_text, "next ^blk02\n");
+
+        let mut target_text = "target ^dest01\n".to_owned();
+        let target_projection = Doc::new(&target_text).visible_projection();
+        let paste_plan = plan_paste(&register, &target_page, None, &registry).unwrap();
+        let planned_target = plan_paste_block_text(
+            &target_text,
+            target_projection.text().chars().count(),
+            &register,
+            &paste_plan,
+        )
+        .unwrap();
+        commit_identity_edit(&mut registry, &mut target_text, planned_target, &paste_plan).unwrap();
+
+        assert_eq!(target_text, "target ^dest01\none ^blk01\n");
+        assert_eq!(
+            registry.state(&moved_id),
+            Ok(IdentityState::Live(target_page))
+        );
+        assert_eq!(Doc::new(&source_text).visible_projection().text(), "next\n");
+        assert_eq!(
+            Doc::new(&target_text).visible_projection().text(),
+            "target\none\n"
+        );
+    }
+
+    #[test]
+    fn canonical_yank_paste_adds_a_fresh_identity_without_changing_the_source() {
+        let source_page = page("page");
+        let original_id = id("blk01");
+        let fresh_id = id("blk02");
+        let mut registry = FakeRegistry::default();
+        registry.seed(original_id.clone(), source_page.clone());
+        let mut canonical_text = "one ^blk01\r\nnext\r\n".to_owned();
+        let register = BlockRegister {
+            visible_text: "one".to_owned(),
+            identity: Some(RegisterIdentity {
+                id: original_id.clone(),
+                source_page: source_page.clone(),
+                operation: RegisterOperation::Yank,
+                live_at_capture: true,
+            }),
+        };
+        let insertion_at = Doc::new(&canonical_text)
+            .visible_projection()
+            .text()
+            .chars()
+            .count();
+        let plan = plan_paste(&register, &source_page, Some(fresh_id.clone()), &registry).unwrap();
+        let planned_text =
+            plan_paste_block_text(&canonical_text, insertion_at, &register, &plan).unwrap();
+
+        commit_identity_edit(&mut registry, &mut canonical_text, planned_text, &plan).unwrap();
+
+        assert_eq!(canonical_text, "one ^blk01\r\nnext\r\none ^blk02\r\n");
+        assert_eq!(
+            block_ids_in_text(&canonical_text),
+            [original_id.clone(), fresh_id.clone()]
+        );
+        assert_eq!(
+            registry.state(&original_id),
+            Ok(IdentityState::Live(source_page.clone()))
+        );
+        assert_eq!(
+            registry.state(&fresh_id),
+            Ok(IdentityState::Live(source_page))
+        );
+    }
+
+    #[test]
+    fn failed_canonical_paste_keeps_destination_text_and_registry_unchanged() {
+        let target_page = page("target");
+        let original_id = id("blk01");
+        let fresh_id = id("blk02");
+        let register = BlockRegister {
+            visible_text: "one".to_owned(),
+            identity: Some(RegisterIdentity {
+                id: original_id.clone(),
+                source_page: page("source"),
+                operation: RegisterOperation::Yank,
+                live_at_capture: true,
+            }),
+        };
+        let mut registry = FakeRegistry::default();
+        registry.seed(original_id, page("source"));
+        let target_text = "target ^dest01\n".to_owned();
+        let insertion_at = Doc::new(&target_text)
+            .visible_projection()
+            .text()
+            .chars()
+            .count();
+        let plan = plan_paste(&register, &target_page, Some(fresh_id), &registry).unwrap();
+        let planned_text =
+            plan_paste_block_text(&target_text, insertion_at, &register, &plan).unwrap();
+        let mut actual_text = target_text.clone();
+        let before_registry = registry.clone();
+        registry.fail_next_apply = true;
+
+        assert_eq!(
+            commit_identity_edit(&mut registry, &mut actual_text, planned_text, &plan),
+            Err("registry transaction failed")
+        );
+        assert_eq!(actual_text, target_text);
+        assert_eq!(registry.live, before_registry.live);
+        assert_eq!(registry.detached, before_registry.detached);
+        assert_eq!(registry.retired, before_registry.retired);
+    }
+
+    #[test]
+    fn canonical_delete_rejects_missing_or_ambiguous_block_ids() {
+        assert_eq!(
+            plan_delete_block_text("plain text\n", &id("missing")),
+            Err(super::IdentityTextPlanError::IdentityMismatch)
+        );
+        assert_eq!(
+            plan_delete_block_text("one ^same1\ntwo ^same1\n", &id("same1")),
+            Err(super::IdentityTextPlanError::IdentityMismatch)
+        );
+    }
+
+    #[test]
+    fn canonical_block_delete_preserves_crlf_and_adjacent_line_bytes() {
+        let deletion =
+            plan_delete_block_text("first ^first1\r\nlast ^last01", &id("last01")).unwrap();
+        assert_eq!(deletion.visible_text, "last");
+        assert_eq!(deletion.canonical_text, "first ^first1");
     }
 
     #[test]
