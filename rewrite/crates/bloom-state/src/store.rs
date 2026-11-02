@@ -552,6 +552,15 @@ fn run_worker(
     receiver: Receiver<Command>,
     policy: GroupCommitPolicy,
 ) -> Result<(), StateError> {
+    run_worker_with_clock(connection, receiver, policy, Instant::now)
+}
+
+fn run_worker_with_clock(
+    connection: &mut Connection,
+    receiver: Receiver<Command>,
+    policy: GroupCommitPolicy,
+    mut now: impl FnMut() -> Instant,
+) -> Result<(), StateError> {
     let mut pending = Vec::new();
     let mut first_pending_at: Option<Instant> = None;
     let mut last_pending_at: Option<Instant> = None;
@@ -560,14 +569,14 @@ fn run_worker(
         let timeout = match (first_pending_at, last_pending_at) {
             (Some(first), Some(last)) => {
                 let deadline = (first + policy.maximum_delay).min(last + policy.idle_delay);
-                let now = Instant::now();
-                if now >= deadline {
+                let current = now();
+                if current >= deadline {
                     commit_pending(connection, &mut pending)?;
                     first_pending_at = None;
                     last_pending_at = None;
                     continue;
                 }
-                Some(deadline.duration_since(now))
+                Some(deadline.duration_since(current))
             }
             _ => None,
         };
@@ -1008,7 +1017,6 @@ mod tests {
         path::PathBuf,
         process::{Command, ExitStatus},
         sync::atomic::{AtomicU64, Ordering},
-        thread,
         time::{Duration, Instant},
     };
 
@@ -1384,25 +1392,97 @@ mod tests {
 
     #[test]
     fn maximum_commit_delay_bounds_continuous_submissions() {
-        let db = TempDb::new();
-        let store = open_test_store(db.path());
+        let mut connection = in_memory_state();
+        let (sender, receiver) = mpsc::channel();
         let start = Instant::now();
-        let first = store.try_submit(record(1, None, "v1")).unwrap();
-        let mut acknowledged_during_input = false;
-        for version in 2..=120 {
-            thread::sleep(Duration::from_millis(5));
-            store
-                .try_submit(record(version, Some(version - 1), &format!("v{version}")))
+        let mut acknowledgements = Vec::new();
+        for version in 1..=22 {
+            let (acknowledgement, response) = mpsc::channel();
+            sender
+                .send(super::Command::Append {
+                    record: record(
+                        version,
+                        (version > 1).then_some(version - 1),
+                        &format!("v{version}"),
+                    ),
+                    acknowledgement,
+                    submitted_at: start + Duration::from_millis((version - 1) * 5),
+                })
                 .unwrap();
-            if first.try_result().unwrap().is_some() {
-                acknowledged_during_input = true;
-                break;
-            }
+            acknowledgements.push(response);
         }
-        first.wait().unwrap();
-        assert!(acknowledged_during_input);
-        assert!(start.elapsed() < policy().maximum_delay + Duration::from_millis(300));
-        store.shutdown().unwrap();
+        let (reply, shutdown_response) = mpsc::channel();
+        sender.send(super::Command::Shutdown { reply }).unwrap();
+        drop(sender);
+
+        let mut ticks = 0;
+        let mut first_during_input = None;
+        let mut later_before_arrival = None;
+        run_worker_with_clock(&mut connection, receiver, policy(), || {
+            ticks += 1;
+            if ticks <= 20 {
+                assert_eq!(
+                    acknowledgements[0].try_recv(),
+                    Err(TryRecvError::Empty),
+                    "first commit happened before the maximum deadline"
+                );
+            }
+            if ticks == 21 {
+                first_during_input = Some(acknowledgements[0].try_recv());
+                later_before_arrival = Some(acknowledgements[21].try_recv());
+            }
+            start + Duration::from_millis(ticks * 5)
+        })
+        .unwrap();
+        assert_eq!(ticks, 22);
+        assert_eq!(first_during_input, Some(Ok(Ok(()))));
+        assert_eq!(later_before_arrival, Some(Err(TryRecvError::Empty)));
+        assert_eq!(shutdown_response.try_recv(), Ok(Ok(())));
+        for acknowledgement in acknowledgements.iter().skip(1) {
+            assert_eq!(acknowledgement.try_recv(), Ok(Ok(())));
+        }
+    }
+
+    #[test]
+    fn full_submission_queue_returns_the_exact_record_for_retry() {
+        let (sender, receiver) = mpsc::sync_channel(COMMAND_QUEUE_CAPACITY);
+        let store = StateStore {
+            sender: Some(sender),
+            worker: None,
+        };
+        let last_version = COMMAND_QUEUE_CAPACITY as u64;
+        let retry_version = last_version + 1;
+        for version in 1..=last_version {
+            store
+                .try_submit(record(version, None, &format!("v{version}")))
+                .unwrap();
+        }
+        let rejected_record = record(retry_version, None, "retry me");
+        let (error, returned) = store
+            .try_submit(rejected_record.clone())
+            .unwrap_err()
+            .into_parts();
+        assert_eq!(error, StateError::QueueFull);
+        assert_eq!(returned, rejected_record);
+
+        let super::Command::Append { record: first, .. } = receiver.try_recv().unwrap() else {
+            panic!("expected an append command");
+        };
+        assert_eq!(first, record(1, None, "v1"));
+        let receipt = store.try_submit(returned).unwrap();
+        assert_eq!(receipt.version(), Version::new(retry_version).unwrap());
+        for version in 2..=retry_version {
+            let super::Command::Append { record: queued, .. } = receiver.try_recv().unwrap() else {
+                panic!("expected an append command");
+            };
+            let expected = if version == retry_version {
+                rejected_record.clone()
+            } else {
+                record(version, None, &format!("v{version}"))
+            };
+            assert_eq!(queued, expected);
+        }
+        assert!(matches!(receiver.try_recv(), Err(TryRecvError::Empty)));
     }
 
     #[test]

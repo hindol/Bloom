@@ -132,6 +132,26 @@ key-press budget is measured against its accepted fixture; and platform
 filesystem checks pass. No result from the empty kernel alone counts as product
 parity or as a product performance measurement.
 
+### Group-commit deadline test stability
+
+The Windows rewrite job in
+[run 41378159319](https://github.com/hindol/Bloom/actions/runs/41378159319)
+failed when the continuous-submission test unconditionally unwrapped a
+`QueueFull` response. Queue saturation is an explicit, nonblocking outcome, and
+the documented durability bound assumes that the worker is scheduled and
+storage completes; the log does not establish why the queue filled.
+
+Exercise the actual worker's deadline decision with a test-supplied monotonic
+clock, an in-memory SQLite connection, and queued submissions spaced less than
+the idle delay. The first receipt must be acknowledged at the maximum deadline
+while later submissions remain, before shutdown or the batch-size cap can force
+a commit. Keep production on `Instant::now`; do not increase the maximum
+deadline, queue capacity, or timing tolerance to make the test pass. Separately
+check that saturation returns the exact unaccepted snapshot and that it can be
+retried. Existing real-filesystem commit, acknowledgement, and crash tests
+remain in place; a deterministic scheduling test is not a storage-latency
+guarantee.
+
 ### M1-03 filesystem contract
 
 - The Vault Store accepts only a relative path with normal components. It
