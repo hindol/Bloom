@@ -927,18 +927,6 @@ pub fn plan_delete_block_text(
         .map_or(visible_chars.len(), |offset| {
             token.visible_boundary().get() + offset
         });
-    let visible_content_end = if visible_line_end < visible_chars.len()
-        && visible_line_end > visible_line_start
-        && visible_chars[visible_line_end - 1] == '\r'
-    {
-        visible_line_end - 1
-    } else {
-        visible_line_end
-    };
-    let visible_text = visible_chars[visible_line_start..visible_content_end]
-        .iter()
-        .collect::<String>();
-
     let raw_chars = canonical_text.chars().collect::<Vec<_>>();
     let doc = Doc::new(canonical_text);
     let raw_token_start = doc
@@ -952,6 +940,22 @@ pub fn plan_delete_block_text(
         .iter()
         .position(|ch| *ch == '\n')
         .map_or(raw_chars.len(), |offset| raw_token_start + offset);
+    let raw_has_crlf = raw_line_end < raw_chars.len()
+        && raw_line_end > raw_line_start
+        && raw_chars[raw_line_end - 1] == '\r';
+    let visible_content_end = if raw_has_crlf
+        && visible_line_end > visible_line_start
+        && visible_chars[visible_line_end - 1] == '\r'
+    {
+        visible_line_end - 1
+    } else {
+        visible_line_end
+    };
+    let visible_text = visible_chars[visible_line_start..visible_content_end]
+        .iter()
+        .collect::<String>();
+    validate_register_text(&visible_text)?;
+
     let delete_start = if raw_line_end == raw_chars.len() && raw_line_start > 0 {
         previous_line_separator_start(&raw_chars, raw_line_start)
     } else {
@@ -1051,13 +1055,7 @@ pub fn plan_paste_block_text(
     if !valid_change {
         return Err(IdentityTextPlanError::InvalidPastePlan);
     }
-    if register
-        .visible_text
-        .chars()
-        .any(|character| character == '\n' || character == '\r')
-    {
-        return Err(IdentityTextPlanError::InvalidRegisterText);
-    }
+    validate_register_text(&register.visible_text)?;
 
     let projection = Doc::new(canonical_text).visible_projection();
     if projection
@@ -1234,6 +1232,16 @@ fn line_at(text: &str, char_offset: usize) -> usize {
         .take(char_offset)
         .filter(|ch| *ch == '\n')
         .count()
+}
+
+fn validate_register_text(text: &str) -> Result<(), IdentityTextPlanError> {
+    if text
+        .chars()
+        .any(|character| matches!(character, '\n' | '\r'))
+    {
+        return Err(IdentityTextPlanError::InvalidRegisterText);
+    }
+    Ok(())
 }
 
 fn previous_line_separator_start(chars: &[char], line_start: usize) -> usize {
@@ -3681,6 +3689,109 @@ mod tests {
 
         assert_eq!(target_text, "target ^dest01\r\none ^blk01\r\n");
         assert_eq!(registry.state(&moved_id), Ok(live(target_page, 1)));
+    }
+
+    #[test]
+    fn canonical_delete_rejects_unpasteable_carriage_returns_without_detaching() {
+        for original in [
+            "one ^block1\r",
+            "a\rb ^block1\n",
+            "a\r ^block1\n",
+            "a\r ^block1\r\n",
+        ] {
+            let source = page("source");
+            let block_id = id("block1");
+            let mut registry = FakeRegistry::default();
+            registry.seed(block_id.clone(), source.clone());
+            let before_registry = registry.clone();
+            let mut canonical = original.to_owned();
+
+            assert!(matches!(
+                plan_delete_edit(&source, &mut canonical, &block_id, &mut registry),
+                Err(IdentityEditPlanError::Text(
+                    super::IdentityTextPlanError::InvalidRegisterText
+                ))
+            ));
+            assert_eq!(canonical, original);
+            assert_eq!(registry, before_registry);
+            assert_eq!(registry.state(&block_id), Ok(live(source, 0)));
+        }
+    }
+
+    #[test]
+    fn captured_single_line_registers_can_move_to_an_empty_page() {
+        let mut cases = 0;
+        for ending in ["\n", "\r\n"] {
+            for content in ["", "α", "a ^literal", "🙂", "  "] {
+                for tail in ["", " \t"] {
+                    let source = page("source");
+                    let target = page("target");
+                    let block_id = id("block1");
+                    let mut registry = FakeRegistry::default();
+                    registry.seed(block_id.clone(), source.clone());
+                    let mut original = format!("{}{tail}{ending}", block_line(content, "block1"));
+                    let deletion =
+                        plan_delete_edit(&source, &mut original, &block_id, &mut registry).unwrap();
+                    let register = commit_planned_block_delete(deletion).unwrap();
+                    assert_eq!(register.visible_text(), format!("{content}{tail}"));
+                    let mut destination = String::new();
+                    let paste = plan_paste_edit(
+                        &target,
+                        &mut destination,
+                        0,
+                        &register,
+                        None,
+                        &mut registry,
+                    )
+                    .unwrap();
+                    commit_planned_identity_edit(paste).unwrap();
+
+                    assert_eq!(
+                        Doc::new(&destination).visible_projection().text(),
+                        format!("{content}{tail}\n")
+                    );
+                    assert_eq!(registry.state(&block_id), Ok(live(target, 1)));
+                    cases += 1;
+                }
+            }
+        }
+        assert_eq!(cases, 20);
+    }
+
+    #[test]
+    fn paste_rejects_multiline_registers_without_mutating_the_destination() {
+        for text in ["first\nsecond", "first\rsecond"] {
+            let source = page("source");
+            let target = page("target");
+            let original_id = id("block1");
+            let mut registry = FakeRegistry::default();
+            registry.seed(original_id.clone(), source.clone());
+            let before_registry = registry.clone();
+            let register = BlockRegister::yank(text.to_owned(), original_id, source);
+            let mut destination = "target ^dest01\n".to_owned();
+            let before = destination.clone();
+            let insertion_at = Doc::new(&destination)
+                .visible_projection()
+                .text()
+                .chars()
+                .count();
+
+            assert!(matches!(
+                plan_paste_edit(
+                    &target,
+                    &mut destination,
+                    insertion_at,
+                    &register,
+                    Some(id("fresh1")),
+                    &mut registry,
+                ),
+                Err(IdentityEditPlanError::Text(
+                    super::IdentityTextPlanError::InvalidRegisterText
+                ))
+            ));
+            assert_eq!(destination, before);
+            assert_eq!(registry, before_registry);
+        }
     }
 
     #[test]

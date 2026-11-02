@@ -173,6 +173,14 @@ intact, handle a same-slot request as a no-op, and report a missing source.
 These are synchronous ownership rules only: they do not make a prior delete,
 register replacement, or recovery after a crash one durable transaction.
 
+The prototype's linewise paste currently rejects register text containing CR
+or LF. Deletion must apply the same representability check before detaching an
+ID or changing canonical text. Exclude a CR from captured text only when it is
+part of an actual raw CRLF line separator; hiding an ID token can make an
+unrelated content CR appear adjacent to LF in the visible projection. Reject
+unsupported content explicitly rather than normalize or discard it. General
+multiline and standalone-CR register behavior is not yet a production design.
+
 ### Multi-block structural plans: spike constraints
 
 Join and split must work in documents containing unrelated ordinary and legacy
@@ -238,11 +246,13 @@ only after its text and registry changes succeed. Policy tests cover moving a
 detached ID to another page and copying a live ID with a newly reserved
 identity; target text and the registry remain unchanged when the paste commit
 fails. A CRLF delete/paste test verifies that the line separator does not enter
-the register text. These are explicit policy/text-plan tests, not replays of
-the legacy `dd`/`p` or `yy`/`p` streams. The two-phase
-move can leave a detached identity in its register after a failed paste or
-process interruption. The prototype now assigns per-ID detachment generations
-and rechecks them in delete, move, discard, join, and split batches. Its
+the register text. Delete also rejects an unpasteable content CR before
+detachment, including when a hidden token makes that CR appear to be part of a
+visible CRLF separator; text and registry stay unchanged. These are explicit
+policy/text-plan tests, not replays of the legacy `dd`/`p` or `yy`/`p` streams.
+The two-phase move can leave a detached identity in its register after a failed
+paste or process interruption. The prototype now assigns per-ID detachment
+generations and rechecks them in delete, move, discard, join, and split batches. Its
 register bank tracks aliases and retires a matching detachment only when its
 last owner is cleared or replaced. Replacement keeps the old slot and returns
 the incoming register if registry reads or retirement fail; alias replacement
