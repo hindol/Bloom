@@ -150,7 +150,10 @@ remains unimplemented.
 This remains prototype evidence, not acceptance. It does not execute the
 identity matrix through a production Vim-to-document path; fresh ID candidates
 are supplied by the caller, durable registry behavior and register lifecycle
-wiring are not implemented, and byte-identical undo/redo is not tested.
+wiring are not implemented. A legacy `UndoTree` regression test now verifies
+that persisted undo/redo restores canonical text containing IDs byte-for-byte;
+this is an oracle for the existing snapshot mechanism, not a test of rewrite's
+projected-edit or identity transaction path, which has no undo integration yet.
 `dd`/`p` and `yy`/`p` are recorded as real key streams but are not replayed
 through canonical-text transactions. ADR-3 remains unaccepted.
 

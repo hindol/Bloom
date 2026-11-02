@@ -624,6 +624,33 @@ mod tests {
     }
 
     #[test]
+    fn persisted_undo_redo_restores_canonical_block_id_bytes() {
+        let conn = setup_db();
+        let initial_text = "alpha ^block1\n";
+        let split_text = "alpha ^block1\n beta ^block2\n";
+        let initial = ropey::Rope::from_str(initial_text);
+        let split = ropey::Rope::from_str(split_text);
+        let cursor = Cursor::new(0);
+        let mut tree = UndoTree::new(initial.clone());
+        tree.push_with_delta(
+            split.clone(),
+            cursor,
+            cursor,
+            "split block".into(),
+            Some(compute_diff(&initial, &split)),
+        );
+        tree.save_to_db(&conn, "page1").unwrap();
+
+        let mut restored = UndoTree::load_from_db(&conn, "page1").unwrap().unwrap();
+        let (undone, _) = restored.undo().unwrap();
+        assert_eq!(undone.to_string(), initial_text);
+
+        let (redone, _) = restored.redo().unwrap();
+        assert_eq!(redone.to_string(), split_text);
+        assert_eq!(restored.current_snapshot_string(), split_text);
+    }
+
+    #[test]
     fn test_edit_group_delta() {
         let old = ropey::Rope::from_str("abcdef");
         let new = ropey::Rope::from_str("abXYZef");
