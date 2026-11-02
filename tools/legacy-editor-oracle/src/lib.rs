@@ -162,6 +162,26 @@ mod tests {
     }
 
     #[test]
+    fn legacy_editor_does_not_supply_these_visual_block_or_substitution_oracles() {
+        let mut sim = SimInput::with_content("alpha ^edge1\nbeta ^edge2\n");
+        let visible = "alpha\nbeta\n";
+        assert_eq!(sim.editor.active_buffer_text().unwrap(), visible);
+        assert_eq!(sim.screen(80, 24).mode(), "NORMAL");
+
+        sim.keys("C-v");
+        assert_eq!(sim.screen(80, 24).mode(), "NORMAL");
+        assert_eq!(sim.editor.active_buffer_text().unwrap(), visible);
+
+        sim.keys(":");
+        assert_eq!(sim.screen(80, 24).mode(), "COMMAND");
+        sim.type_text("s/alpha/z/");
+        assert_eq!(sim.screen(80, 24).mode(), "COMMAND");
+        sim.keys("<CR>");
+        assert_eq!(sim.screen(80, 24).mode(), "NORMAL");
+        assert_eq!(sim.editor.active_buffer_text().unwrap(), visible);
+    }
+
+    #[test]
     fn editor_repeat_snapshots_match_unambiguous_deletion_ranges() {
         let mut lines = ORACLE.lines();
         assert_eq!(lines.next(), Some("BLOOM_EDITOR_REPEAT_ORACLE_V1"));

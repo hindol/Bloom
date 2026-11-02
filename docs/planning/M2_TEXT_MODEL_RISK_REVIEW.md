@@ -83,6 +83,17 @@ both the removed and inserted text. Mode changes and motions with no text
 change are observations, not rewrite cursor requirements. A compound replay's
 net replacement is not evidence that the legacy editor emitted one edit.
 
+For visual-block and substitution coverage, first check whether the unchanged
+editor can supply those operations. A scratch-editor observation must check
+mode and text, not infer support from a lack of changes. Unsupported commands
+cannot be used as successful parity fixtures; the intended behavior needs an
+independent oracle or an explicit design instead. In the observed ID-bearing
+scratch page, `C-v` leaves the editor in Normal mode, and `:s/alpha/z/` enters
+Command mode but returns to Normal without changing text. The legacy Vim
+Normal-mode handler returns `Unhandled` for `C-v`, and the ex-command
+dispatcher treats that substitution as an unknown no-op. These observations
+do not establish rewrite behavior or cover every possible command spelling.
+
 The unchanged legacy CI baseline also has two reproducible e2e failures:
 `multiple_undo_redo` observes `onetwo three ` where its setup expects
 `one two three`, and `theme_persists_to_config_without_corrupting_views`
