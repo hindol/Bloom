@@ -163,6 +163,22 @@ rejects that result rather than silently losing identity, but the edit is
 still unsupported. Resolving this parser/projection interaction (or testing
 fallback (c)) is an acceptance blocker, not an approved change to editor UX.
 
+### Fallback (c) assessment: typed spans
+
+The trailing-token parser rejects candidates inside inline code
+(`rewrite/crates/bloom-text/src/projection.rs`, `parse_trailing_id_token`), so
+`^id` there is literal content and not an identity. A parallel typed-span map
+could identify a generated token during an editing session, but cannot
+reconstruct that distinction from canonical Markdown after reload: the same
+bytes can be either literal code or an identity token. Keeping spans
+authoritative would therefore require a durable discriminator (a format change
+or sidecar), which conflicts with this spike's no-format-change scope and the
+rejected sidecar alternative. This is an architectural constraint, not proof
+that fallback (c) is impossible; an accepted fallback needs an explicit
+durability and migration design. Until then, the prototype continues to reject
+splits whose IDs would be hidden by code-context rules rather than silently
+dropping identity.
+
 ## Acceptance gate
 
 ADR-3 can be accepted only when:
