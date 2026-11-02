@@ -310,7 +310,9 @@ fn parse_block_id_tokens(raw_text: &str) -> Vec<BlockIdToken> {
 
     let body_start = frontmatter_body_start(&lines);
     let mut in_code_fence: Option<CodeFenceDelimiter> = None;
+    let mut inline_code_context = InlineCodeContext::default();
     let mut raw_line_start = 0;
+    let mut code_spans = Vec::new();
     let mut tokens = Vec::new();
 
     for (line_index, line) in lines.iter().enumerate() {
@@ -321,6 +323,8 @@ fn parse_block_id_tokens(raw_text: &str) -> Vec<BlockIdToken> {
             let trimmed = line.trim_start();
             let delimiter = code_fence_delimiter(trimmed);
             if let Some(open) = in_code_fence {
+                inline_code_context.finish_block(&mut code_spans);
+                inline_code_context.reset();
                 if delimiter.is_some_and(|close| {
                     close.marker == open.marker
                         && close.length >= open.length
@@ -329,26 +333,44 @@ fn parse_block_id_tokens(raw_text: &str) -> Vec<BlockIdToken> {
                     in_code_fence = None;
                 }
             } else if let Some(open) = delimiter {
+                inline_code_context.finish_block(&mut code_spans);
+                inline_code_context.reset();
                 in_code_fence = Some(open);
-            } else if let Some((byte_start, byte_end, id, marker)) = parse_trailing_id_token(line) {
-                let char_start = raw_line_start + line[..byte_start].chars().count();
-                let char_end = raw_line_start + line[..byte_end].chars().count();
-                tokens.push(BlockIdToken {
-                    raw_range: RawCharRange::new(
-                        RawCharIdx::new(char_start),
-                        RawCharIdx::new(char_end),
-                    ),
-                    visible_boundary: VisibleCharIdx::new(0),
-                    starts_line: byte_start == 0,
-                    id,
-                    marker,
-                });
+            } else {
+                let end_inline_block = inline_code_context.prepare_line(line, &mut code_spans);
+                inline_code_context.scan(line, raw_line_start);
+                if let Some((byte_start, byte_end, id, marker)) = parse_trailing_id_token(line) {
+                    let char_start = raw_line_start + line[..byte_start].chars().count();
+                    let char_end = raw_line_start + line[..byte_end].chars().count();
+                    tokens.push(BlockIdToken {
+                        raw_range: RawCharRange::new(
+                            RawCharIdx::new(char_start),
+                            RawCharIdx::new(char_end),
+                        ),
+                        visible_boundary: VisibleCharIdx::new(0),
+                        starts_line: byte_start == 0,
+                        id,
+                        marker,
+                    });
+                }
+                if end_inline_block {
+                    inline_code_context.finish_block(&mut code_spans);
+                }
             }
+        } else {
+            inline_code_context.finish_block(&mut code_spans);
+            inline_code_context.reset();
         }
 
         raw_line_start += raw_line_len;
     }
 
+    inline_code_context.finish_block(&mut code_spans);
+    tokens.retain(|token| {
+        !code_spans.iter().any(|span| {
+            span.start() <= token.raw_range.start() && token.raw_range.start() < span.end()
+        })
+    });
     tokens
 }
 
@@ -356,6 +378,95 @@ fn parse_block_id_tokens(raw_text: &str) -> Vec<BlockIdToken> {
 struct CodeFenceDelimiter {
     marker: u8,
     length: usize,
+}
+
+#[derive(Default)]
+struct InlineCodeContext {
+    runs: Vec<BacktickRun>,
+    in_blockquote: bool,
+}
+
+struct BacktickRun {
+    length: usize,
+    raw_start: usize,
+    raw_end: usize,
+}
+
+impl InlineCodeContext {
+    fn reset(&mut self) {
+        self.runs.clear();
+        self.in_blockquote = false;
+    }
+
+    fn prepare_line(&mut self, line: &str, code_spans: &mut Vec<RawCharRange>) -> bool {
+        let trimmed = line.trim();
+        let is_blank = trimmed.is_empty();
+        let is_structural_boundary = is_blank
+            || is_atx_heading(line)
+            || is_thematic_break(trimmed)
+            || is_setext_underline(trimmed);
+        let is_blockquote_start = line.trim_start().starts_with('>') && !self.in_blockquote;
+        let is_list_item = list_item_content_indent(line).is_some();
+        if is_structural_boundary || is_blockquote_start || is_list_item {
+            self.finish_block(code_spans);
+        }
+        if is_structural_boundary {
+            self.in_blockquote = false;
+        }
+
+        if line.trim_start().starts_with('>') {
+            self.in_blockquote = true;
+        }
+        if is_list_item {
+            self.in_blockquote = false;
+        }
+        is_structural_boundary
+    }
+
+    fn scan(&mut self, line: &str, raw_line_start: usize) {
+        let bytes = line.as_bytes();
+        let mut cursor = 0;
+        while cursor < bytes.len() {
+            if bytes[cursor] != b'`' || is_escaped(bytes, cursor) {
+                cursor += 1;
+                continue;
+            }
+
+            let run_start = cursor;
+            while cursor < bytes.len() && bytes[cursor] == b'`' {
+                cursor += 1;
+            }
+            let run_length = cursor - run_start;
+            self.runs.push(BacktickRun {
+                length: run_length,
+                raw_start: raw_line_start + line[..run_start].chars().count(),
+                raw_end: raw_line_start + line[..cursor].chars().count(),
+            });
+        }
+    }
+
+    fn finish_block(&mut self, code_spans: &mut Vec<RawCharRange>) {
+        let mut next_by_length = std::collections::HashMap::new();
+        let mut next_matches = vec![None; self.runs.len()];
+        for run_index in (0..self.runs.len()).rev() {
+            next_matches[run_index] = next_by_length.insert(self.runs[run_index].length, run_index);
+        }
+
+        let mut run_index = 0;
+        while run_index < self.runs.len() {
+            let run = &self.runs[run_index];
+            if let Some(close_index) = next_matches[run_index] {
+                code_spans.push(RawCharRange::new(
+                    RawCharIdx::new(run.raw_start),
+                    RawCharIdx::new(self.runs[close_index].raw_end),
+                ));
+                run_index = close_index + 1;
+            } else {
+                run_index += 1;
+            }
+        }
+        self.runs.clear();
+    }
 }
 
 fn code_fence_delimiter(line: &str) -> Option<CodeFenceDelimiter> {
@@ -369,6 +480,68 @@ fn code_fence_delimiter(line: &str) -> Option<CodeFenceDelimiter> {
         .take_while(|character| **character == marker)
         .count();
     (length >= 3).then_some(CodeFenceDelimiter { marker, length })
+}
+
+fn is_atx_heading(line: &str) -> bool {
+    let indent = line.len() - line.trim_start_matches(' ').len();
+    if indent > 3 {
+        return false;
+    }
+    let heading = &line[indent..];
+    let marker_count = heading.bytes().take_while(|byte| *byte == b'#').count();
+    (1..=6).contains(&marker_count)
+        && (heading.len() == marker_count || heading.as_bytes()[marker_count].is_ascii_whitespace())
+}
+
+fn is_thematic_break(line: &str) -> bool {
+    let mut marker = None;
+    let mut count = 0;
+    for byte in line.bytes().filter(|byte| !byte.is_ascii_whitespace()) {
+        if !matches!(byte, b'*' | b'-' | b'_') || marker.is_some_and(|seen| seen != byte) {
+            return false;
+        }
+        marker = Some(byte);
+        count += 1;
+    }
+    count >= 3
+}
+
+fn is_setext_underline(line: &str) -> bool {
+    let mut found_marker = false;
+    for byte in line.bytes().filter(|byte| !byte.is_ascii_whitespace()) {
+        if byte != b'=' {
+            return false;
+        }
+        found_marker = true;
+    }
+    found_marker
+}
+
+fn list_item_content_indent(line: &str) -> Option<usize> {
+    let indent = line.len() - line.trim_start_matches(' ').len();
+    if indent > 3 {
+        return None;
+    }
+    let item = &line[indent..];
+    let bytes = item.as_bytes();
+    if bytes.len() >= 2 && matches!(bytes[0], b'-' | b'+' | b'*') && bytes[1].is_ascii_whitespace()
+    {
+        return Some(indent + 2);
+    }
+
+    let digits = bytes
+        .iter()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+    if digits > 0
+        && bytes
+            .get(digits)
+            .is_some_and(|byte| matches!(byte, b'.' | b')'))
+        && bytes.get(digits + 1).is_some_and(u8::is_ascii_whitespace)
+    {
+        return Some(indent + digits + 2);
+    }
+    None
 }
 
 fn frontmatter_body_start(lines: &[&str]) -> usize {
@@ -386,16 +559,14 @@ fn frontmatter_body_start(lines: &[&str]) -> usize {
 fn parse_trailing_id_token(line: &str) -> Option<(usize, usize, String, BlockIdMarker)> {
     let trimmed = line.trim_end();
     let caret = if let Some(space_pos) = trimmed.rfind(" ^") {
-        space_pos + 1
+        Some(space_pos + 1)
     } else if trimmed.starts_with('^') {
-        0
+        Some(0)
     } else {
-        return None;
+        None
     };
 
-    if is_inside_inline_code(line, caret) {
-        return None;
-    }
+    let caret = caret?;
 
     let (id, marker) = if let Some(id) = trimmed[caret + 1..].strip_prefix('=') {
         (id, BlockIdMarker::Mirror)
@@ -416,32 +587,6 @@ fn parse_trailing_id_token(line: &str) -> Option<(usize, usize, String, BlockIdM
         caret
     };
     Some((token_start, trimmed.len(), id.to_owned(), marker))
-}
-
-fn is_inside_inline_code(line: &str, byte_offset: usize) -> bool {
-    let bytes = line.as_bytes();
-    let mut open_run = None;
-    let mut cursor = 0;
-
-    while cursor < byte_offset {
-        if bytes[cursor] != b'`' || is_escaped(bytes, cursor) {
-            cursor += 1;
-            continue;
-        }
-
-        let run_start = cursor;
-        while cursor < byte_offset && bytes[cursor] == b'`' {
-            cursor += 1;
-        }
-        let run_length = cursor - run_start;
-        if open_run == Some(run_length) {
-            open_run = None;
-        } else if open_run.is_none() {
-            open_run = Some(run_length);
-        }
-    }
-
-    open_run.is_some()
 }
 
 fn is_escaped(bytes: &[u8], offset: usize) -> bool {
@@ -680,7 +825,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "known ADR-3 blocker: inline-code context is lost across lines"]
     fn multiline_inline_code_keeps_trailing_marker_literal() {
         let mut failures = Vec::new();
         for ending in ["\n", "\r\n"] {
@@ -706,7 +850,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "known ADR-3 blocker: a multiline code closer looks like an opener"]
     fn trailing_marker_after_multiline_inline_code_is_hidden() {
         let mut failures = Vec::new();
         for ending in ["\n", "\r\n"] {
@@ -728,6 +871,77 @@ mod tests {
             }
         }
         assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn unmatched_inline_code_and_structural_boundaries_do_not_hide_ids() {
+        for ending in ["\n", "\r\n"] {
+            let raw = format!(
+                "unmatched ` opener{ending}visible ^paragraph{ending}# Heading ^heading{ending}- item ^list"
+            );
+            let projection = Doc::new(&raw).visible_projection();
+            assert_eq!(
+                projection
+                    .tokens()
+                    .iter()
+                    .map(|token| token.id())
+                    .collect::<Vec<_>>(),
+                ["paragraph", "heading", "list"]
+            );
+        }
+    }
+
+    #[test]
+    fn multiline_inline_code_uses_exact_delimiter_runs_and_block_context() {
+        for ending in ["\n", "\r\n"] {
+            let raw = format!(
+                "> start ``{ending}> literal ` ^inside{ending}> end ``{ending}> visible ^outside{ending}{ending}new ` opener{ending}- new block ^list"
+            );
+            let projection = Doc::new(&raw).visible_projection();
+            assert_eq!(
+                projection
+                    .tokens()
+                    .iter()
+                    .map(|token| token.id())
+                    .collect::<Vec<_>>(),
+                ["outside", "list"]
+            );
+            assert!(projection.text().contains("^inside"));
+            assert!(!projection.text().contains("^outside"));
+        }
+    }
+
+    #[test]
+    fn escaped_backticks_and_fences_do_not_carry_inline_code_context() {
+        for ending in ["\n", "\r\n"] {
+            let escaped = format!(r"escaped \` ^escaped{ending}visible ^plain{ending}");
+            let projection = Doc::new(&escaped).visible_projection();
+            assert_eq!(
+                projection
+                    .tokens()
+                    .iter()
+                    .map(|token| token.id())
+                    .collect::<Vec<_>>(),
+                ["escaped", "plain"]
+            );
+            assert_eq!(
+                projection.text(),
+                format!("escaped \\`{ending}visible{ending}")
+            );
+
+            let across_fence = format!(
+                "` unmatched{ending}```{ending}literal ^fenced{ending}```{ending}outside ^id"
+            );
+            let projection = Doc::new(&across_fence).visible_projection();
+            assert_eq!(
+                projection
+                    .tokens()
+                    .iter()
+                    .map(|token| token.id())
+                    .collect::<Vec<_>>(),
+                ["id"]
+            );
+        }
     }
 
     #[test]

@@ -202,8 +202,8 @@ fn view(m: &Model) -> Frame;                                 // pure: no clock, 
 - **Removes:** the "update_layout before render" ordering contract (`event_loop.rs:50-55`, `lib.rs:1866-1870`).
 
 ### L10 — One incremental parser
-- One line-oriented block parser with a bounded re-parse window (up to the enclosing blank line or fence boundary) plus a per-line inline parser. Highlighting, the outline, links, tasks, and block IDs all read the **same** tree.
-- A differential property test checks `incremental(edit(doc)) == full_parse(edit(doc))` for random edits.
+- One block parser supplies enclosing-block context to a stateful inline parser. Inline delimiter state may cross physical lines inside one paragraph, but resets at blank or structural block boundaries and fences. Highlighting, the outline, links, tasks, and block IDs all read the **same** tree.
+- Incremental invalidation starts at the enclosing block and continues until parser state converges; it is not limited to the edited physical line. A differential property test checks `incremental(edit(doc)) == full_parse(edit(doc))` for random edits, including edits that open or close inline-code spans.
 - **Removes:** three-parser disagreement, F11.
 
 ### L11 — All mutations are transactions

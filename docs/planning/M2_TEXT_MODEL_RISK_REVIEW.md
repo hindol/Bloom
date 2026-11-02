@@ -304,19 +304,25 @@ compatibility review.
 ### Multiline inline-code context: open spike risk
 
 The format also promises that IDs inside inline code remain literal. A matched
-inline-code span can cross a line break within a Markdown paragraph, but the
-prototype currently scans backticks independently on each line. It can therefore
-hide a literal ID on an intermediate line and expose a real trailing ID after
-the closing backticks on another line. The unchanged legacy parser is not an
-oracle for this case: its block-ID parser does not consult inline-code context.
+inline-code span can cross a line break within a Markdown paragraph. The
+prototype now pairs exact-length backtick runs across its detected paragraph
+context before hiding IDs, but it does not yet share a complete Markdown parse
+tree with rendering. The unchanged legacy parser is not an oracle for this case:
+its block-ID parser does not consult inline-code context.
 
-Keep executable, explicitly ignored contract tests for these two known failures
-until the parser can pass them. Do not treat ignored tests as acceptance
-evidence. The L10 per-line inline parser must eventually obtain the enclosing
-block's context without disagreeing with rendering or incrementally parsed
-results. Blank and structural block boundaries, unmatched and escaped
-backticks, fences, line endings, and edit invalidation require a reviewed
-parser design; this spike does not approve a grammar or format change.
+The previously ignored contract tests are now active and pass for multiline
+spans, LF/CRLF, mismatched delimiter lengths, and the covered blank, heading,
+list, blockquote, and fence boundaries. This focused scanner is not an
+acceptance gate: it is not yet a shared Markdown parse tree used by rendering,
+and it has no incremental invalidation/differential property test. The accepted
+L10 shape is a block parser that supplies context to a stateful inline parser:
+exact-length backtick runs may span soft line breaks inside one paragraph, but
+context resets at blank or structural block boundaries and fences. Mismatched
+and escaped runs remain literal. An edit invalidates the enclosing block and
+continues until inline state converges; the same parsed code spans must drive
+token projection and rendering. Tests must compare incremental results with a
+full parse across LF/CRLF and block boundaries. This is a parser implementation
+constraint, not a format change.
 
 ### Identity-bearing version snapshots: spike constraints
 

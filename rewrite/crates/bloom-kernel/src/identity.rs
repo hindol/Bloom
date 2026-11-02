@@ -2128,12 +2128,6 @@ mod tests {
     fn visible_edits_reject_unsafe_results_without_mutating_the_document() {
         let cases = [
             (
-                "hello ^keep",
-                0..0,
-                "`",
-                IdentityTextPlanError::InvalidResult,
-            ),
-            (
                 "hello",
                 5..5,
                 " ^literal",
@@ -2208,6 +2202,19 @@ mod tests {
             assert_eq!(actual, expected_error, "{source:?}");
             assert_eq!(canonical, source);
         }
+    }
+
+    #[test]
+    fn unmatched_inline_backtick_is_a_safe_visible_edit() {
+        let mut canonical = "hello ^keep".to_owned();
+        let plan = plan_test_visible_edit(&mut canonical, 0..0, "`").unwrap();
+        commit_planned_visible_edit(plan);
+
+        assert_eq!(canonical, "`hello ^keep");
+        let projection = Doc::new(&canonical).visible_projection();
+        assert_eq!(projection.text(), "`hello");
+        assert_eq!(projection.tokens().len(), 1);
+        assert_eq!(projection.tokens()[0].id(), "keep");
     }
 
     #[test]
