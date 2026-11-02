@@ -123,33 +123,22 @@ rejects unsupported events and reports the screen as unavailable. This is plain
 rope input evidence only: it is not Vim, projected ID-token editing, grapheme
 cursor policy, or product parity.
 
-The M2 I6 gate must also cover an insertion that joins a newly typed scalar to
-an existing combining mark or emoji sequence. A character-counted cursor can
-then land inside the resulting grapheme even when its offset is in bounds.
-The plain M1 kernel currently does so: inserting `e` before a combining acute,
-or `👩` before an existing ZWJ-laptop suffix, leaves its cursor at scalar
-offset 1 inside the new grapheme. The explicit I6 contract test is ignored and
-fails when run; M1's update checks I7 and I10, not I6. A separate projection
-test checks every interior offset of combining and ZWJ graphemes beside a
-hidden ID, but the M1 cursor does not use that detector. Keep this contract
-distinct from ordinary Unicode typing order; cursor landing and deletion policy
-require an explicit grapheme-aware design.
+M1 now applies and checks a plain-cursor I6 contract after every kernel update.
+When an edit's nominal cursor offset becomes interior to a resulting grapheme,
+insertion snaps to that grapheme's trailing edge and deletion to its leading
+edge; existing boundaries are preserved. `Doc` performs the conversion within
+the affected physical line, and the I6 checker validates the resulting raw
+cursor before the update returns. Active tests cover insertion before a
+combining mark, insertion before a ZWJ sequence, and backspace that joins CRLF;
+the fault corpus injects interior offsets and proves the same checker rejects
+them.
 
-Backspacing between CR and LF can also form a CRLF around the raw cursor. M1
-now settles that edit without corrupting layout, but the cursor remains inside
-the resulting grapheme. A separate ignored I6 contract records this failure;
-the invalidation fix does not choose a cursor-landing policy.
-
-For detector sensitivity, the fault corpus may run an I6-attributed, test-only
-probe on a raw cursor in a plain snapshot whose prototype projection has no
-hidden tokens. It must reject snapshots with recognized tokens and
-out-of-bounds positions explicitly, check valid boundaries as well as injected
-interior offsets, and report failures through the invariant registry. It cannot
-recognize tokens missed by the prototype parser. CRLF and multi-scalar
-graphemes belong in the corpus. This probe does not define raw positions at
-token boundaries, validate selections or all positions, or activate I6 in
-`update`. Production activation needs a reviewed position model and
-failure-atomic transitions; a post-mutation failure alone is not enough.
+This is deliberately not the full M2 I6 contract. The M1 editor has one raw
+cursor and no projected IDs, selections, or motions. M2 must extend the
+position model and checker to visible/raw lowering, hidden-token boundaries,
+selections, and motion results; it must not treat M1's plain-cursor activation
+as evidence for those surfaces. CRLF and multi-scalar graphemes remain in the
+M2 corpus.
 
 ## Scope and ownership
 

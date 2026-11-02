@@ -6,6 +6,7 @@ use bloom_kernel::{
     invariants::{CheckerRegistry, InvariantId, RegistryError, Violation},
     simulation::{run_replay, ReplayCase, ReplayResult},
     timer::{check_no_due_armed_timers, TimerId, TimerWheel},
+    update::check_cursor_grapheme_boundary,
 };
 use bloom_text::{coordinates::RawCharIdx, Doc, DocError, DocSnapshot};
 
@@ -61,7 +62,7 @@ const FAULT_CORPUS: [FaultCase; 5] = [
     FaultCase {
         fault: Fault::PlaceCursorInsideGrapheme,
         detector: Detector::CheckPositionsAreValid,
-        status: FaultStatus::Staged("M2"),
+        status: FaultStatus::Active,
     },
     FaultCase {
         fault: Fault::LeaveDueTimerArmed,
@@ -125,7 +126,7 @@ fn future_product_faults_are_registered_as_staged_not_passing() {
         })
         .collect();
 
-    assert_eq!(staged.len(), 3);
+    assert_eq!(staged.len(), 2);
     assert!(staged.iter().all(|(case, milestone)| {
         !milestone.is_empty()
             && matches!(
@@ -136,9 +137,6 @@ fn future_product_faults_are_registered_as_staged_not_passing() {
                 ) | (
                     Fault::SkipBlockIdUniquenessCheck,
                     Detector::CheckUniqueLiveBlockIds
-                ) | (
-                    Fault::PlaceCursorInsideGrapheme,
-                    Detector::CheckPositionsAreValid
                 )
             )
     }));
@@ -159,16 +157,13 @@ fn probe_plain_cursor_grapheme_boundary(
     if !projection.tokens().is_empty() {
         return Err(PlainCursorProbeError::HiddenTokensUnsupported);
     }
-    let offset = snapshot
+    snapshot
         .raw_char_offset(cursor)
         .map_err(PlainCursorProbeError::InvalidRawPosition)?;
     let mut registry = CheckerRegistry::new();
     registry
         .register(InvariantId::I6, || {
-            projection
-                .range(offset, offset)
-                .map(|_| ())
-                .map_err(|error| format!("{error:?}"))
+            check_cursor_grapheme_boundary(snapshot, cursor)
         })
         .map_err(PlainCursorProbeError::Registry)?;
     registry
@@ -177,13 +172,13 @@ fn probe_plain_cursor_grapheme_boundary(
 }
 
 #[test]
-fn staged_grapheme_probe_catches_injected_cursor_faults() {
+fn active_grapheme_detector_catches_injected_cursor_faults() {
     let case = FAULT_CORPUS
         .iter()
         .find(|case| case.fault == Fault::PlaceCursorInsideGrapheme)
         .unwrap();
     assert_eq!(case.detector, Detector::CheckPositionsAreValid);
-    assert_eq!(case.status, FaultStatus::Staged("M2"));
+    assert_eq!(case.status, FaultStatus::Active);
 
     let cases: [(&str, &[usize], &[usize]); 5] = [
         ("", &[0], &[]),
@@ -218,7 +213,7 @@ fn staged_grapheme_probe_catches_injected_cursor_faults() {
 }
 
 #[test]
-fn staged_grapheme_probe_rejects_unsupported_inputs() {
+fn grapheme_detector_rejects_unsupported_probe_inputs() {
     let hidden = Doc::new("text ^id").snapshot();
     assert_eq!(
         probe_plain_cursor_grapheme_boundary(&hidden, hidden.raw_char_idx(0).unwrap()),
@@ -246,21 +241,21 @@ fn inject(fault: Fault, candidate: &mut ReplayResult) {
         Fault::LeaveDueTimerArmed => {
             panic!("timer fault must use the dedicated TimerWheel detector path")
         }
-        Fault::AcceptStaleIndexResult
-        | Fault::SkipBlockIdUniquenessCheck
-        | Fault::PlaceCursorInsideGrapheme => {
-            panic!("staged fault {fault:?} must not be injected before its milestone")
+        Fault::AcceptStaleIndexResult | Fault::SkipBlockIdUniquenessCheck => {
+            panic!("fault {fault:?} is not represented by the synthetic replay result")
         }
+        Fault::PlaceCursorInsideGrapheme => panic!("cursor fault uses the dedicated cursor probe"),
     }
 }
 
 fn detect(detector: Detector, expected: &ReplayResult, candidate: &ReplayResult) -> bool {
     match detector {
         Detector::ReplayDeterminismComparison => expected != candidate,
-        Detector::CheckIndexMatchesVersions
-        | Detector::CheckUniqueLiveBlockIds
-        | Detector::CheckPositionsAreValid => {
-            panic!("product detector {detector:?} must remain staged until its milestone")
+        Detector::CheckIndexMatchesVersions | Detector::CheckUniqueLiveBlockIds => {
+            panic!("product detector {detector:?} is not represented by the synthetic replay")
+        }
+        Detector::CheckPositionsAreValid => {
+            panic!("cursor detector uses the dedicated cursor probe")
         }
         Detector::CheckNoDueArmedTimers => {
             panic!("timer detector uses the dedicated TimerWheel fault path")

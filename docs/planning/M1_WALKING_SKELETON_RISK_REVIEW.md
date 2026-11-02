@@ -104,7 +104,7 @@ the table shows no dependency.
 
 | ID | Deliverable | Depends on | Status | Exit check |
 |---|---|---|---|---|
-| M1-01 | Kernel model with `update`/`settle`/`view`, editor-only focus, and consuming `TimerWheel`; plain rope boundary | M0 | Rewrite hosted gate passed; legacy root Clippy and two baseline e2e failures remain | Deterministic transition tests cover due timers on every event path, timer replacement/cancellation, exactly-one focus owner, and pure repeatable views |
+| M1-01 | Kernel model with `update`/`settle`/`view`, editor-only focus, and consuming `TimerWheel`; plain rope boundary | M0 | Rewrite hosted gate passed; legacy root Clippy and two baseline e2e failures remain | Deterministic transition tests cover raw-cursor grapheme validity on every update, insert-after/delete-before snapping, due timers on every event path, timer replacement/cancellation, exactly-one focus owner, and pure repeatable views |
 | M1-02 | Minimal `state.db` schema (`WAL`, `user_version`), version records, group-commit worker and startup recovery | M1-01 | Rewrite hosted gate passed; legacy root Clippy and two baseline e2e failures remain | Fresh and migrated schema tests; commit/ack ordering; crash injection demonstrates I2 and no corrupted database |
 | M1-03 | Minimal Vault Store load and single-page CAS save, with `PageSync` and typed conflict result | M1-02 | Rewrite hosted gate passed; legacy root Clippy and two baseline e2e failures remain | Simulated stale-writer and write-failure tests preserve disk bytes; real filesystem tests verify replace/readback behavior |
 | M1-04 | Synthetic open/edit/save/crash/recover/replay journey with the external watchdog | M1-01, M1-02, M1-03 | Rewrite hosted gate passed; legacy root Clippy and two root e2e tests failed | Crash matrix validates I2; each page observation checks I5, each save checks I9, and every update checks I10/I11; watchdog outcomes remain distinct |
@@ -126,11 +126,11 @@ the table shows no dependency.
 ## M1 exit gate
 
 M1 is complete only when the synthetic journey can open, edit, save, terminate,
-recover, and replay; I2, I5, I9, I10, and I11 checkers run at the relevant
-boundaries; the external progress watchdog detects a stalled journey; the
-key-press budget is measured against its accepted fixture; and platform
-filesystem checks pass. No result from the empty kernel alone counts as product
-parity or as a product performance measurement.
+recover, and replay; I2, I5, I6 (plain raw cursor only), I9, I10, and I11
+checkers run at the relevant boundaries; the external progress watchdog detects
+a stalled journey; the key-press budget is measured against its accepted
+fixture; and platform filesystem checks pass. No result from the empty kernel
+alone counts as product parity or as a product performance measurement.
 
 ### Group-commit deadline test stability
 
@@ -352,11 +352,12 @@ single-line edits must still reshape only one line.
 Full and cached layout must use the document's same physical-line boundaries.
 This fix preserves the current M1 `line_text` behavior and exact document bytes;
 it does not decide the eventual product treatment of standalone CR or other
-Unicode separators, mixed line endings, or grapheme-safe cursor landing.
-In particular, M1 currently strips LF and CRLF from line text but retains the
-other recognized separator characters there. Those limitations and the
-separate M2 I6 cursor blocker remain visible rather than being presented as
-an accepted text-format policy.
+Unicode separators or mixed line endings. In particular, M1 currently strips
+LF and CRLF from line text but retains the other recognized separator
+characters there. Those limitations remain visible rather than being presented
+as an accepted text-format policy. M1 now enforces I6 for its one plain raw
+cursor; M2 must extend that invariant to projected positions, selections, and
+motions.
 
 Exercise insertions and backspaces around CR, LF, CRLF, Unicode separators,
 empty lines, and EOF against an independent physical-line reference. Compare

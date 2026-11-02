@@ -170,6 +170,7 @@ enum Outcome { Consumed, Close(Option<Msg>), Pass }
 ### L6 — Units are types
 - `CharIdx`, `ByteIdx`, `LineIdx`, `GraphemeIdx`, `DisplayCol`, `Px`. Conversions go only through the `Doc` (which owns the rope) or `Layout` (which owns metrics). No `From<usize>` in public APIs.
 - Motions step by grapheme clusters (`unicode-segmentation`). Width uses `unicode-width` *or* injected font metrics (L8). Never `len()`.
+- If an edit's nominal cursor offset lands inside a resulting grapheme, insertion snaps to that grapheme's trailing edge and deletion snaps to its leading edge. `Doc` owns this conversion; already-valid boundaries are unchanged.
 - **Newline model:** a document is a sequence of lines. EOL style (`\n`/`\r\n`), BOM, and "has final newline" are **document properties** (like Vim's `fileformat`/`fixeol`), not characters a motion can land on.
 - **Removes:** C5, C7.
 
@@ -387,7 +388,7 @@ Every invariant has a **checker** (`fn check_*(model) -> Result<(), Violation>`)
 | I3 | At most one `Doc` per `PageId`; at most one `PageId` per `PathKey` | `HashMap<PageId, Doc>` + path index owned by Vault Store | type + checker |
 | I4 | Live block IDs are unique vault-wide | assignment-time check + `UNIQUE` constraint | proptest on paste/duplicate/merge |
 | I5 | `!dirty ⇒ hash(doc.text) == disk.base`, and `disk.base` was the last observed disk hash | `PageSync` (`saved_version`) | simulation |
-| I6 | Every `Pos` is on a grapheme boundary, outside ID token spans, within the doc | `Pos` constructor | proptest (random edits + motions) |
+| I6 | Every `Pos` is on a grapheme boundary, outside ID token spans, within the doc | `Pos` constructor; M1 checks the plain raw cursor, M2 extends the checker to projected positions | proptest (random edits + motions) |
 | I7 | Exactly one component owns input focus | `Ui { base, stack }` | type |
 | I8 | After quiescence, index == `project(latest versions)` | version-tagged rows | simulation + differential |
 | I9 | We never overwrite disk content we observed and did not merge | CAS write | simulation with external writer |

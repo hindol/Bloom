@@ -367,7 +367,7 @@ mod tests {
         for _ in 0..2 {
             sim.keys("<BS>").unwrap();
             assert_eq!(sim.buffer_text().unwrap(), "\r\nlast");
-            assert_eq!(cursor_offset(sim.backend()), 1);
+            assert_eq!(cursor_offset(sim.backend()), 0);
             assert_eq!(
                 view(&sim.backend().model)
                     .layout
@@ -378,8 +378,8 @@ mod tests {
                 ["", "last"]
             );
             sim.type_text("X").unwrap();
-            assert_eq!(sim.buffer_text().unwrap(), "\rX\nlast");
-            assert_eq!(cursor_offset(sim.backend()), 2);
+            assert_eq!(sim.buffer_text().unwrap(), "X\r\nlast");
+            assert_eq!(cursor_offset(sim.backend()), 1);
             assert_eq!(
                 view(&sim.backend().model)
                     .layout
@@ -387,7 +387,7 @@ mod tests {
                     .iter()
                     .map(|line| line.text.as_str())
                     .collect::<Vec<_>>(),
-                ["\r", "X", "last"]
+                ["X", "last"]
             );
         }
     }
@@ -412,12 +412,11 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "M2 I6 blocker: insertion can merge with the existing grapheme suffix"]
     fn insertion_before_a_combining_suffix_keeps_the_cursor_on_a_grapheme_boundary() {
         let mut failures = Vec::new();
-        for (initial, typed, expected) in [
-            ("\u{301}ab", "e", "e\u{301}ab"),
-            ("\u{200d}💻ab", "👩", "👩\u{200d}💻ab"),
+        for (initial, typed, expected, cursor) in [
+            ("\u{301}ab", "e", "e\u{301}ab", 2),
+            ("\u{200d}💻ab", "👩", "👩\u{200d}💻ab", 3),
         ] {
             let mut sim = SimInput::new(PlainTextBackend {
                 model: Model::new(initial),
@@ -426,6 +425,7 @@ mod tests {
             assert_eq!(sim.buffer_text().unwrap(), expected);
             let frame = view(&sim.backend().model);
             let offset = frame.document.raw_char_offset(frame.cursor).unwrap();
+            assert_eq!(offset, cursor, "{expected:?}");
             let projection = frame.document.visible_projection();
             assert!(projection.tokens().is_empty());
             if let Err(error) = projection.range(offset, offset) {
@@ -434,9 +434,7 @@ mod tests {
         }
         assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
-
     #[test]
-    #[ignore = "M2 I6 blocker: joining CRLF leaves the cursor inside its grapheme"]
     fn backspace_joining_crlf_keeps_the_cursor_on_a_grapheme_boundary() {
         let mut sim = SimInput::new(PlainTextBackend {
             model: Model::new("\n"),
@@ -445,6 +443,7 @@ mod tests {
         assert_eq!(sim.buffer_text().unwrap(), "\r\n");
         let frame = view(&sim.backend().model);
         let offset = frame.document.raw_char_offset(frame.cursor).unwrap();
+        assert_eq!(offset, 0);
         let projection = frame.document.visible_projection();
         assert!(projection.tokens().is_empty());
         assert!(

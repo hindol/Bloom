@@ -105,9 +105,9 @@ pub const INVARIANT_COVERAGE: [InvariantCoverage; 12] = [
         id: InvariantId::I6,
         invariant: "Positions are valid grapheme boundaries",
         owner: "bloom-text::Doc",
-        checker: "check_positions_are_valid",
-        test: "random_edit_motion_positions",
-        activation: "M2",
+        checker: "check_cursor_grapheme_boundary",
+        test: "active_grapheme_detector_catches_injected_cursor_faults",
+        activation: "M1 raw cursor; M2 projected positions",
     },
     InvariantCoverage {
         id: InvariantId::I7,

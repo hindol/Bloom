@@ -40,7 +40,7 @@ exists.
 | I3 | Page ID and path key are bijective | `bloom-vault::VaultStore` | `check_page_path_bijection` | `page_path_bijection` | M1 |
 | I4 | Live block IDs are vault-wide unique | `bloom-text::BlockId` | `check_unique_live_block_ids` | `unique_live_block_ids` | M2 |
 | I5 | Clean page matches observed disk base | `bloom-vault::PageSync` | `check_clean_page_matches_base` | `page_sync_external_write` | M1 |
-| I6 | Positions are valid grapheme boundaries | `bloom-text::Doc` | `check_positions_are_valid` | `random_edit_motion_positions` | M2 |
+| I6 | Positions are valid grapheme boundaries | `bloom-text::Doc` | `check_cursor_grapheme_boundary` | `active_grapheme_detector_catches_injected_cursor_faults` | M1 raw cursor; M2 projected positions |
 | I7 | Exactly one component owns input focus | `bloom-kernel::Ui` | `check_exactly_one_focus_owner` | `focus_stack_ownership` | M1 |
 | I8 | Quiescent index equals latest projection | `bloom-index::Projection` | `check_index_matches_versions` | `index_full_rebuild_differential` | M5 |
 | I9 | Writes preserve unmerged observed disk data | `bloom-vault::CasWrite` | `check_write_respects_observed_base` | `external_writer_cas` | M4 |

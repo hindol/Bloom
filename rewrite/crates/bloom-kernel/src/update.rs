@@ -1,6 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
-use bloom_text::{coordinates::RawCharIdx, Doc, DocError, DocSnapshot, EditDelta};
+use bloom_text::{
+    coordinates::RawCharIdx, Doc, DocError, DocSnapshot, EditDelta, GraphemeBoundaryBias,
+};
 
 use crate::{
     geometry::{FontMetrics, Layout, LayoutCache, LayoutError, MonospaceFontMetrics, Size},
@@ -168,7 +170,10 @@ pub fn update(model: &mut Model, event: Event, now: Duration) -> Result<Vec<Effe
                     .document
                     .insert_with_delta(model.cursor, &text)
                     .map_err(UpdateError::Document)?;
-                model.cursor = cursor;
+                model.cursor = model
+                    .document
+                    .snap_raw_char_to_grapheme(cursor, GraphemeBoundaryBias::After)
+                    .map_err(UpdateError::Document)?;
                 edit_delta = delta;
             }
         }
@@ -177,7 +182,10 @@ pub fn update(model: &mut Model, event: Event, now: Duration) -> Result<Vec<Effe
                 .document
                 .delete_previous_char_with_delta(model.cursor)
                 .map_err(UpdateError::Document)?;
-            model.cursor = cursor;
+            model.cursor = model
+                .document
+                .snap_raw_char_to_grapheme(cursor, GraphemeBoundaryBias::Before)
+                .map_err(UpdateError::Document)?;
             edit_delta = delta;
         }
         Event::Resize(size) => {
@@ -247,6 +255,23 @@ pub fn check_view_purity(model: &Model) -> Result<(), String> {
     }
 }
 
+pub fn check_cursor_grapheme_boundary(
+    document: &DocSnapshot,
+    cursor: RawCharIdx,
+) -> Result<(), String> {
+    if document
+        .is_grapheme_boundary(cursor)
+        .map_err(|error| format!("{error:?}"))?
+    {
+        Ok(())
+    } else {
+        let offset = document
+            .raw_char_offset(cursor)
+            .map_err(|error| format!("{error:?}"))?;
+        Err(format!("SplitsGrapheme {{ offset: {offset} }}"))
+    }
+}
+
 fn settle(model: &mut Model, edit_delta: Option<EditDelta>) -> Result<(), UpdateError> {
     model
         .document
@@ -272,6 +297,11 @@ fn settle(model: &mut Model, edit_delta: Option<EditDelta>) -> Result<(), Update
 fn check_update_invariants(model: &Model, now: Duration) -> Result<(), UpdateError> {
     let mut registry = CheckerRegistry::new();
     registry
+        .register(InvariantId::I6, || {
+            check_cursor_grapheme_boundary(&model.document.snapshot(), model.cursor)
+        })
+        .map_err(UpdateError::CheckerRegistry)?;
+    registry
         .register(InvariantId::I7, || check_exactly_one_focus_owner(&model.ui))
         .map_err(UpdateError::CheckerRegistry)?;
     registry
@@ -281,7 +311,7 @@ fn check_update_invariants(model: &Model, now: Duration) -> Result<(), UpdateErr
         .map_err(UpdateError::CheckerRegistry)?;
 
     let violations = registry
-        .run_applicable(&[InvariantId::I7, InvariantId::I10])
+        .run_applicable(&[InvariantId::I6, InvariantId::I7, InvariantId::I10])
         .map_err(UpdateError::CheckerRegistry)?;
     if violations.is_empty() {
         Ok(())
@@ -294,9 +324,11 @@ fn check_update_invariants(model: &Model, now: Duration) -> Result<(), UpdateErr
 mod tests {
     use std::time::Duration;
 
+    use bloom_text::Doc;
+
     use super::{
-        check_exactly_one_focus_owner, check_view_purity, update, view, Effect, Event, FocusOwner,
-        Model, UpdateError,
+        check_cursor_grapheme_boundary, check_exactly_one_focus_owner, check_view_purity, update,
+        view, Effect, Event, FocusOwner, Model, UpdateError,
     };
     use crate::timer::TimerId;
 
@@ -313,6 +345,17 @@ mod tests {
 
         assert_eq!(view(&model).document.text(), "note");
         assert_eq!(model.cursor, model.document.raw_start());
+    }
+
+    #[test]
+    fn cursor_boundary_checker_rejects_an_injected_interior_offset() {
+        let document = Doc::new("e\u{301}");
+        let snapshot = document.snapshot();
+        let interior = snapshot.raw_char_idx(1).unwrap();
+        assert_eq!(
+            check_cursor_grapheme_boundary(&snapshot, interior),
+            Err("SplitsGrapheme { offset: 1 }".to_owned())
+        );
     }
 
     #[test]

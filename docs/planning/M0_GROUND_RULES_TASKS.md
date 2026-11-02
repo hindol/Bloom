@@ -220,20 +220,21 @@ CI runs the independent comparison with the simulation feature enabled.
 ### M0-10 - Detector sensitivity corpus
 
 Deliver test-only faults mapped to named detectors, beginning with an applicable
-empty-kernel fault. Track stale-index acceptance, skipped ID uniqueness, and an
-unconsumed timer as staged faults for their owning milestones, not fake passes.
-Keep fault hooks unavailable to production builds.
+empty-kernel fault. Track stale-index acceptance and skipped ID uniqueness as
+staged faults for their owning milestones, not fake passes. Keep fault hooks
+unavailable to production builds.
 
 Acceptance: every active curated fault is caught by its named detector; a
 surviving fault fails the corpus runner. Plan small PR and broader nightly
 campaigns as section 8 requires, with minimized deterministic regressions.
 
-The active replay-output fault and staged product-fault mappings are documented
-in [M0_DETECTOR_FAULTS.md](M0_DETECTOR_FAULTS.md). The feature-gated test corpus
-injects one synthetic empty-kernel corruption and requires the named replay
-determinism detector to catch it. M1 activates the due-timer detector and its
-fault-sensitivity check. Stale-index acceptance and skipped block-ID uniqueness
-remain explicitly staged for M5 and M2; they are not reported as passing.
+The active and staged fault mappings are documented in
+[M0_DETECTOR_FAULTS.md](M0_DETECTOR_FAULTS.md). The feature-gated test corpus
+injects a synthetic empty-kernel corruption and requires the named replay
+determinism detector to catch it. M1 activates the due-timer and plain-cursor
+grapheme detectors with fault-sensitivity checks. Stale-index acceptance and
+skipped block-ID uniqueness remain explicitly staged for M5 and M2; they are
+not reported as passing.
 
 ### M0-11 - Performance harness
 

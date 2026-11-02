@@ -1,7 +1,14 @@
 use ropey::Rope;
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::coordinates::RawCharIdx;
 use crate::projection::VisibleProjection;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GraphemeBoundaryBias {
+    Before,
+    After,
+}
 
 #[derive(Clone, Debug)]
 /// Plain rope text whose positions count Unicode scalar values.
@@ -56,6 +63,15 @@ impl Doc {
 
     pub fn raw_char_offset(&self, position: RawCharIdx) -> Result<usize, DocError> {
         self.raw_char_idx(position.get()).map(RawCharIdx::get)
+    }
+
+    pub fn snap_raw_char_to_grapheme(
+        &self,
+        position: RawCharIdx,
+        bias: GraphemeBoundaryBias,
+    ) -> Result<RawCharIdx, DocError> {
+        let offset = self.raw_char_offset(position)?;
+        snap_char_offset_to_grapheme_boundary(&self.rope, offset, bias).map(RawCharIdx::new)
     }
 
     pub fn insert(&mut self, at: RawCharIdx, text: &str) -> Result<RawCharIdx, DocError> {
@@ -167,6 +183,12 @@ impl DocSnapshot {
         self.raw_char_idx(position.get()).map(RawCharIdx::get)
     }
 
+    pub fn is_grapheme_boundary(&self, position: RawCharIdx) -> Result<bool, DocError> {
+        let offset = self.raw_char_offset(position)?;
+        snap_char_offset_to_grapheme_boundary(&self.rope, offset, GraphemeBoundaryBias::Before)
+            .map(|snapped| snapped == offset)
+    }
+
     pub fn text(&self) -> String {
         self.rope.to_string()
     }
@@ -205,9 +227,45 @@ impl DocSnapshot {
     }
 }
 
+fn snap_char_offset_to_grapheme_boundary(
+    rope: &Rope,
+    position: usize,
+    bias: GraphemeBoundaryBias,
+) -> Result<usize, DocError> {
+    if position > rope.len_chars() {
+        return Err(DocError::PositionOutOfBounds {
+            position,
+            length: rope.len_chars(),
+        });
+    }
+
+    let line_index = rope.char_to_line(position);
+    let line_start = rope.line_to_char(line_index);
+    let line = rope.line(line_index).to_string();
+    let line_position = position - line_start;
+    let mut grapheme_start = 0;
+
+    for grapheme in line.graphemes(true) {
+        let grapheme_end = grapheme_start + grapheme.chars().count();
+        if line_position == grapheme_start || line_position == grapheme_end {
+            return Ok(position);
+        }
+        if grapheme_start < line_position && line_position < grapheme_end {
+            return Ok(line_start
+                + match bias {
+                    GraphemeBoundaryBias::Before => grapheme_start,
+                    GraphemeBoundaryBias::After => grapheme_end,
+                });
+        }
+        grapheme_start = grapheme_end;
+    }
+
+    Ok(position)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Doc, DocError, EditDelta};
+    use super::{Doc, DocError, EditDelta, GraphemeBoundaryBias};
 
     fn physical_lines(doc: &Doc) -> Vec<String> {
         let snapshot = doc.snapshot();
@@ -335,7 +393,6 @@ mod tests {
     #[test]
     fn snapshot_owns_character_offset_conversion() {
         let snapshot = Doc::new("é🙂").snapshot();
-
         assert_eq!(snapshot.len_chars(), 2);
         assert_eq!(
             snapshot.raw_char_offset(snapshot.raw_char_idx(2).unwrap()),
@@ -348,6 +405,45 @@ mod tests {
                 length: 2,
             })
         );
+    }
+
+    #[test]
+    fn grapheme_snapping_uses_edit_direction_and_preserves_boundaries() {
+        for (text, interior, before, after) in [
+            ("e\u{301}A", 1, 0, 2),
+            ("👩\u{200d}💻A", 1, 0, 3),
+            ("\r\nA", 1, 0, 2),
+        ] {
+            let doc = Doc::new(text);
+            assert_eq!(
+                doc.snap_raw_char_to_grapheme(
+                    doc.raw_char_idx(interior).unwrap(),
+                    GraphemeBoundaryBias::Before
+                )
+                .unwrap()
+                .get(),
+                before,
+                "{text:?}"
+            );
+            assert_eq!(
+                doc.snap_raw_char_to_grapheme(
+                    doc.raw_char_idx(interior).unwrap(),
+                    GraphemeBoundaryBias::After
+                )
+                .unwrap()
+                .get(),
+                after,
+                "{text:?}"
+            );
+            for boundary in [before, after] {
+                assert!(
+                    doc.snapshot()
+                        .is_grapheme_boundary(doc.raw_char_idx(boundary).unwrap())
+                        .unwrap(),
+                    "{text:?} at {boundary}"
+                );
+            }
+        }
     }
 
     #[test]
