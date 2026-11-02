@@ -1974,6 +1974,26 @@ mod tests {
     }
 
     #[test]
+    fn visible_edits_preserve_literal_markers_inside_longer_code_fences() {
+        let mut canonical = "````\n```\ninside ^literal\n````\noutside ^real\n".to_owned();
+        let context = begin_visible_edit(&mut canonical);
+        let visible = context.projection().text();
+        let start = visible[..visible.find("^literal").unwrap()].chars().count();
+        let range = context
+            .projection()
+            .range(start, start + "^literal".chars().count())
+            .unwrap();
+        let plan = context.plan(range, "^note").unwrap();
+        commit_planned_visible_edit(plan);
+
+        assert_eq!(canonical, "````\n```\ninside ^note\n````\noutside ^real\n");
+        let projection = Doc::new(&canonical).visible_projection();
+        assert!(projection.text().contains("inside ^note"));
+        assert_eq!(projection.tokens().len(), 1);
+        assert_eq!(projection.tokens()[0].id(), "real");
+    }
+
+    #[test]
     fn visible_edits_reject_unsafe_results_without_mutating_the_document() {
         let cases = [
             (
@@ -1996,6 +2016,12 @@ mod tests {
             ),
             (
                 "```rust\ntext ^fake\n```\nlast ^keep\n",
+                0..1,
+                "",
+                IdentityTextPlanError::InvalidResult,
+            ),
+            (
+                "````\n```\ninside ^literal\n````\noutside ^real\n",
                 0..1,
                 "",
                 IdentityTextPlanError::InvalidResult,

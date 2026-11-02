@@ -309,7 +309,7 @@ fn parse_block_id_tokens(raw_text: &str) -> Vec<BlockIdToken> {
     }
 
     let body_start = frontmatter_body_start(&lines);
-    let mut in_code_fence = false;
+    let mut in_code_fence: Option<CodeFenceDelimiter> = None;
     let mut raw_line_start = 0;
     let mut tokens = Vec::new();
 
@@ -319,23 +319,30 @@ fn parse_block_id_tokens(raw_text: &str) -> Vec<BlockIdToken> {
 
         if line_index >= body_start {
             let trimmed = line.trim_start();
-            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                in_code_fence = !in_code_fence;
-            } else if !in_code_fence {
-                if let Some((byte_start, byte_end, id, marker)) = parse_trailing_id_token(line) {
-                    let char_start = raw_line_start + line[..byte_start].chars().count();
-                    let char_end = raw_line_start + line[..byte_end].chars().count();
-                    tokens.push(BlockIdToken {
-                        raw_range: RawCharRange::new(
-                            RawCharIdx::new(char_start),
-                            RawCharIdx::new(char_end),
-                        ),
-                        visible_boundary: VisibleCharIdx::new(0),
-                        starts_line: byte_start == 0,
-                        id,
-                        marker,
-                    });
+            let delimiter = code_fence_delimiter(trimmed);
+            if let Some(open) = in_code_fence {
+                if delimiter.is_some_and(|close| {
+                    close.marker == open.marker
+                        && close.length >= open.length
+                        && trimmed[close.length..].trim().is_empty()
+                }) {
+                    in_code_fence = None;
                 }
+            } else if let Some(open) = delimiter {
+                in_code_fence = Some(open);
+            } else if let Some((byte_start, byte_end, id, marker)) = parse_trailing_id_token(line) {
+                let char_start = raw_line_start + line[..byte_start].chars().count();
+                let char_end = raw_line_start + line[..byte_end].chars().count();
+                tokens.push(BlockIdToken {
+                    raw_range: RawCharRange::new(
+                        RawCharIdx::new(char_start),
+                        RawCharIdx::new(char_end),
+                    ),
+                    visible_boundary: VisibleCharIdx::new(0),
+                    starts_line: byte_start == 0,
+                    id,
+                    marker,
+                });
             }
         }
 
@@ -343,6 +350,25 @@ fn parse_block_id_tokens(raw_text: &str) -> Vec<BlockIdToken> {
     }
 
     tokens
+}
+
+#[derive(Clone, Copy)]
+struct CodeFenceDelimiter {
+    marker: u8,
+    length: usize,
+}
+
+fn code_fence_delimiter(line: &str) -> Option<CodeFenceDelimiter> {
+    let marker = *line.as_bytes().first()?;
+    if marker != b'`' && marker != b'~' {
+        return None;
+    }
+    let length = line
+        .as_bytes()
+        .iter()
+        .take_while(|character| **character == marker)
+        .count();
+    (length >= 3).then_some(CodeFenceDelimiter { marker, length })
 }
 
 fn frontmatter_body_start(lines: &[&str]) -> usize {
@@ -512,6 +538,136 @@ mod tests {
                 "Real block\n",
             )
         );
+    }
+
+    #[test]
+    fn fenced_code_requires_a_matching_marker_and_sufficient_closing_length() {
+        let raw_lines = [
+            "prologue ^before",
+            "````rust",
+            "sample ^literal1",
+            "```",
+            "another ^literal2",
+            "~~~~~~",
+            "mirror ^=literal3",
+            "````text",
+            "next ^literal4",
+            "`````",
+            "normal ^block",
+            "~~~lang",
+            "```",
+            "mixed ^literal5",
+            "~~~not-close",
+            "same ^literal6",
+            "~~~~",
+            "after ^last",
+        ];
+        let visible_lines = [
+            "prologue",
+            "````rust",
+            "sample ^literal1",
+            "```",
+            "another ^literal2",
+            "~~~~~~",
+            "mirror ^=literal3",
+            "````text",
+            "next ^literal4",
+            "`````",
+            "normal",
+            "~~~lang",
+            "```",
+            "mixed ^literal5",
+            "~~~not-close",
+            "same ^literal6",
+            "~~~~",
+            "after",
+        ];
+
+        for ending in ["\n", "\r\n"] {
+            for trailing in ["", ending] {
+                let raw = format!("{}{trailing}", raw_lines.join(ending));
+                let expected = format!("{}{trailing}", visible_lines.join(ending));
+                let projection = Doc::new(&raw).visible_projection();
+                assert_eq!(
+                    projection
+                        .tokens()
+                        .iter()
+                        .map(|token| token.id())
+                        .collect::<Vec<_>>(),
+                    ["before", "block", "last"]
+                );
+                assert_eq!(projection.text(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn unmatched_fence_keeps_ids_literal_through_end_of_file() {
+        for ending in ["\n", "\r\n"] {
+            for (open, lookalike) in [("````", "```"), ("~~~~", "~~~"), ("~~~", "```")] {
+                let raw = format!("keep ^id{ending}{open}{ending}{lookalike}{ending}literal ^code");
+                let projection = Doc::new(&raw).visible_projection();
+                assert_eq!(projection.tokens().len(), 1);
+                assert_eq!(projection.tokens()[0].id(), "id");
+                assert_eq!(
+                    projection.text(),
+                    format!("keep{ending}{open}{ending}{lookalike}{ending}literal ^code")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn matching_fence_closes_with_leading_and_trailing_whitespace() {
+        let raw = "  ```rust\r\nliteral ^code\r\n \t``` \t\r\noutside ^id\r\n";
+        let projection = Doc::new(raw).visible_projection();
+
+        assert_eq!(projection.tokens().len(), 1);
+        assert_eq!(projection.tokens()[0].id(), "id");
+        assert_eq!(
+            projection.text(),
+            "  ```rust\r\nliteral ^code\r\n \t``` \t\r\noutside\r\n"
+        );
+    }
+
+    #[test]
+    fn fenced_code_boundary_model_covers_marker_lengths_and_suffixes() {
+        let mut cases = 0;
+        for ending in ["\n", "\r\n"] {
+            for opening_marker in ["`", "~"] {
+                for opening_length in 3..=5 {
+                    for closing_marker in ["`", "~"] {
+                        for closing_length in 2..=6 {
+                            for suffix in ["", " \t", "lang"] {
+                                let opening = opening_marker.repeat(opening_length);
+                                let candidate =
+                                    format!("{}{suffix}", closing_marker.repeat(closing_length));
+                                let closes = opening_marker == closing_marker
+                                    && closing_length >= opening_length
+                                    && suffix.trim().is_empty();
+                                let raw = format!(
+                                    "{opening}{ending}{candidate}{ending}middle ^inside{ending}{opening}{ending}outside ^outside"
+                                );
+                                let (middle, outside, expected_id) = if closes {
+                                    ("middle", "outside ^outside", "inside")
+                                } else {
+                                    ("middle ^inside", "outside", "outside")
+                                };
+                                let expected = format!(
+                                    "{opening}{ending}{candidate}{ending}{middle}{ending}{opening}{ending}{outside}"
+                                );
+                                let projection = Doc::new(&raw).visible_projection();
+                                assert_eq!(projection.tokens().len(), 1, "{raw:?}");
+                                assert_eq!(projection.tokens()[0].id(), expected_id, "{raw:?}");
+                                assert_eq!(projection.text(), expected, "{raw:?}");
+                                cases += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(cases, 360);
     }
 
     #[test]

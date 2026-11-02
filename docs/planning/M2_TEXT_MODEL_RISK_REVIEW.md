@@ -201,6 +201,25 @@ is committed or dropped. These are in-memory, correctness-first checks, not a
 production editor path: they do not supply cursor policy, undo, registry/page
 version fencing, durable transactions, or incremental performance.
 
+### Fenced code context: spike constraints
+
+The user-facing format promises that IDs inside fenced code remain literal.
+The prototype must track the opening fence character and run length, and close
+only on the same character with at least that many markers and no trailing
+non-whitespace content. Shorter or different fences and fence-like lines with
+trailing content remain literal until a valid close or end of file. Preserve
+LF/CRLF bytes and existing opening-fence indentation recognition in this
+bounded spike. This does not claim complete CommonMark parsing or approve a
+production format change.
+
+The frozen legacy parser currently toggles its fence state on every line
+starting with three backticks or tildes, regardless of type or length. The
+prototype's safer treatment therefore differs for those fence-like cases,
+including valid Markdown containing shorter or different markers as code.
+Record that divergence rather than changing the legacy oracle or claiming
+parser parity; the production parser and migration need an explicit
+compatibility review.
+
 ### Multi-block structural plans: spike constraints
 
 Join and split must work in documents containing unrelated ordinary and legacy
@@ -246,6 +265,14 @@ changes are rejected even when visible text is unchanged. Ranges from another
 or an older projection are rejected, and an exclusive-borrow compile check
 prevents intervening text mutation. This does not interpret Vim keys or
 implement multiline editing, cursor policy, or undo.
+
+The projection also tracks fence marker type and opening length. Shorter or
+different markers and fence-like lines with trailing content no longer end a
+fence, including in an unclosed block. LF/CRLF and missing-final-newline cases
+keep code IDs visible and recognize IDs after a matching close; a 360-case
+boundary model exercises both marker types, run lengths, and closing suffixes.
+A visible replacement can edit such literal code without changing an outside
+ID; a fence edit that would reclassify IDs is rejected.
 
 Fixture-driven canonical-text planners replay the observed `J` and split
 ranges, then commit the resulting text with the join retirement or split
