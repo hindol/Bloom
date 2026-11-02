@@ -316,6 +316,20 @@ mod tests {
     }
 
     #[test]
+    fn backspace_between_cr_and_lf_settles_without_panicking() {
+        let mut model = Model::new("\n");
+        update(
+            &mut model,
+            Event::InsertText("\rX".to_owned()),
+            Duration::ZERO,
+        )
+        .unwrap();
+        assert_eq!(model.text(), "\rX\n");
+        update(&mut model, Event::Backspace, Duration::ZERO).unwrap();
+        assert_eq!(model.text(), "\r\n");
+    }
+
+    #[test]
     fn due_timer_is_consumed_before_each_event_path() {
         let event_paths = [
             Event::InsertText("x".to_owned()),

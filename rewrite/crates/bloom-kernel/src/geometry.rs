@@ -174,7 +174,6 @@ impl Layout {
         viewport: Size,
         metrics: &dyn FontMetrics,
     ) -> Result<Self, LayoutError> {
-        let text = document.text();
         document
             .raw_char_offset(cursor)
             .map_err(LayoutError::Document)?;
@@ -191,22 +190,15 @@ impl Layout {
             width: Px::ZERO,
             graphemes: Vec::new(),
         }];
-        let mut raw_char_offset = 0;
-
-        for grapheme in text.graphemes(true) {
-            let char_count = grapheme.chars().count();
-            if grapheme == "\n" || grapheme == "\r\n" {
-                let end = document
-                    .raw_char_idx(raw_char_offset)
-                    .map_err(LayoutError::Document)?;
-                let next_offset = raw_char_offset + char_count;
-                let start = document
-                    .raw_char_idx(next_offset)
-                    .map_err(LayoutError::Document)?;
+        for physical_line in 0..document.line_count() {
+            let start = document
+                .line_start(physical_line)
+                .ok_or(LayoutError::CacheInconsistent)?;
+            let mut raw_char_offset = document
+                .raw_char_offset(start)
+                .map_err(LayoutError::Document)?;
+            if physical_line > 0 {
                 let line_index = lines.len();
-                let current = lines.last_mut().expect("layout always has one line");
-                current.end = end;
-                raw_char_offset = next_offset;
                 lines.push(LayoutLine {
                     text: String::new(),
                     start,
@@ -218,54 +210,58 @@ impl Layout {
                     width: Px::ZERO,
                     graphemes: Vec::new(),
                 });
-                continue;
             }
+            let text = document
+                .line_text(physical_line)
+                .ok_or(LayoutError::CacheInconsistent)?;
+            for grapheme in text.graphemes(true) {
+                let char_count = grapheme.chars().count();
+                let advance = metrics.grapheme_advance(grapheme);
+                let current = lines.last_mut().expect("layout always has one line");
+                let next_width = current.width.saturating_add(advance);
+                if !current.graphemes.is_empty() && next_width > viewport.width {
+                    let wrap_start = document
+                        .raw_char_idx(raw_char_offset)
+                        .map_err(LayoutError::Document)?;
+                    current.end = wrap_start;
+                    let line_index = lines.len();
+                    lines.push(LayoutLine {
+                        text: String::new(),
+                        start: wrap_start,
+                        end: wrap_start,
+                        origin: Point {
+                            x: Px::ZERO,
+                            y: line_height.as_px().scaled_by(line_index),
+                        },
+                        width: Px::ZERO,
+                        graphemes: Vec::new(),
+                    });
+                }
 
-            let advance = metrics.grapheme_advance(grapheme);
-            let current = lines.last_mut().expect("layout always has one line");
-            let next_width = current.width.saturating_add(advance);
-            if !current.graphemes.is_empty() && next_width > viewport.width {
-                let wrap_start = document
+                let current = lines.last_mut().expect("layout always has one line");
+                let start_offset = document
                     .raw_char_idx(raw_char_offset)
                     .map_err(LayoutError::Document)?;
-                current.end = wrap_start;
-                let line_index = lines.len();
-                lines.push(LayoutLine {
-                    text: String::new(),
-                    start: wrap_start,
-                    end: wrap_start,
-                    origin: Point {
-                        x: Px::ZERO,
-                        y: line_height.as_px().scaled_by(line_index),
-                    },
-                    width: Px::ZERO,
-                    graphemes: Vec::new(),
+                let end_offset = document
+                    .raw_char_idx(raw_char_offset + char_count)
+                    .map_err(LayoutError::Document)?;
+                let origin = Point {
+                    x: current.width,
+                    y: current.origin.y,
+                };
+                let byte_start = current.text.len();
+                current.text.push_str(grapheme);
+                current.graphemes.push(PositionedGrapheme {
+                    byte_range: byte_start..current.text.len(),
+                    start: start_offset,
+                    end: end_offset,
+                    origin,
+                    advance,
                 });
+                current.width = current.width.saturating_add(advance);
+                current.end = end_offset;
+                raw_char_offset += char_count;
             }
-
-            let current = lines.last_mut().expect("layout always has one line");
-            let start_offset = document
-                .raw_char_idx(raw_char_offset)
-                .map_err(LayoutError::Document)?;
-            let end_offset = document
-                .raw_char_idx(raw_char_offset + char_count)
-                .map_err(LayoutError::Document)?;
-            let origin = Point {
-                x: current.width,
-                y: current.origin.y,
-            };
-            let byte_start = current.text.len();
-            current.text.push_str(grapheme);
-            current.graphemes.push(PositionedGrapheme {
-                byte_range: byte_start..current.text.len(),
-                start: start_offset,
-                end: end_offset,
-                origin,
-                advance,
-            });
-            current.width = current.width.saturating_add(advance);
-            current.end = end_offset;
-            raw_char_offset += char_count;
         }
 
         let cursor = lines
@@ -891,6 +887,30 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_edits_after_a_standalone_cr_reshape_only_the_changed_line() {
+        let mut doc = Doc::new("one\rtwo\nthree");
+        let viewport = Size::new(Px::new(100.0).unwrap(), Px::new(100.0).unwrap());
+        let metrics = test_metrics(2.0, 10.0);
+        let mut cache = LayoutCache::new(&doc.snapshot(), viewport, &metrics).unwrap();
+        let cursor = doc.snapshot().line_start(1).unwrap();
+        cache.reset_reshaped_lines();
+
+        let (cursor, delta) = doc.insert_with_delta(cursor, "x").unwrap();
+        cache
+            .apply_edit(&doc.snapshot(), delta.unwrap(), &metrics)
+            .unwrap();
+        assert_eq!(cache.reshaped_lines(), 1);
+
+        cache.reset_reshaped_lines();
+        let (_, delta) = doc.delete_previous_char_with_delta(cursor).unwrap();
+        cache
+            .apply_edit(&doc.snapshot(), delta.unwrap(), &metrics)
+            .unwrap();
+        assert_eq!(cache.reshaped_lines(), 1);
+        assert_eq!(doc.text(), "one\rtwo\nthree");
+    }
+
+    #[test]
     fn cursor_inside_crlf_is_placed_at_the_physical_line_end() {
         let doc = Doc::new("a\r\nb");
         let snapshot = doc.snapshot();
@@ -903,6 +923,104 @@ mod tests {
             cache.frame(&snapshot, cursor, viewport).unwrap(),
             Layout::compute(&snapshot, cursor, viewport, &metrics).unwrap()
         );
+    }
+
+    #[test]
+    fn full_and_cached_layout_follow_all_rope_physical_line_boundaries() {
+        let separators = [
+            ("\n", ""),
+            ("\r\n", ""),
+            ("\r", "\r"),
+            ("\u{000b}", "\u{000b}"),
+            ("\u{000c}", "\u{000c}"),
+            ("\u{0085}", "\u{0085}"),
+            ("\u{2028}", "\u{2028}"),
+            ("\u{2029}", "\u{2029}"),
+        ];
+        let viewport = Size::new(Px::new(100.0).unwrap(), Px::new(100.0).unwrap());
+        let metrics = test_metrics(2.0, 10.0);
+        for (separator, retained) in separators {
+            let doc = Doc::new(&format!("before{separator}after"));
+            let snapshot = doc.snapshot();
+            let mut cache = LayoutCache::new(&snapshot, viewport, &metrics).unwrap();
+            for position in 0..=doc.len_chars() {
+                let cursor = doc.raw_char_idx(position).unwrap();
+                let full = Layout::compute(&snapshot, cursor, viewport, &metrics).unwrap();
+                assert_eq!(
+                    full.lines
+                        .iter()
+                        .map(|line| line.text.as_str())
+                        .collect::<Vec<_>>(),
+                    [format!("before{retained}").as_str(), "after"],
+                    "separator {separator:?} at {position}"
+                );
+                assert_eq!(
+                    cache.frame(&snapshot, cursor, viewport).unwrap(),
+                    full,
+                    "separator {separator:?} at {position}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn incremental_layout_matches_full_after_short_newline_and_unicode_edits() {
+        let alphabet = ["a", "\r", "\n", "\u{2028}", "e\u{0301}"];
+        let mut documents = vec![String::new()];
+        for first in alphabet {
+            documents.push(first.to_owned());
+            for second in alphabet {
+                documents.push(format!("{first}{second}"));
+            }
+        }
+        documents.extend(
+            ["\rX\n", "a\rX\nb", "👩\u{200d}💻\rX\n\u{0085}"]
+                .into_iter()
+                .map(str::to_owned),
+        );
+        let insertions = ["x", "\r", "\n", "\r\n", "👩\u{200d}💻"];
+        let metrics = test_metrics(2.0, 10.0);
+
+        for width in [2.0, 6.0] {
+            let viewport = Size::new(Px::new(width).unwrap(), Px::new(1_000.0).unwrap());
+            for text in &documents {
+                let before = Doc::new(text);
+                for position in 0..=before.len_chars() {
+                    for inserted in insertions {
+                        let mut doc = before.clone();
+                        let mut cache =
+                            LayoutCache::new(&doc.snapshot(), viewport, &metrics).unwrap();
+                        let (cursor, delta) = doc
+                            .insert_with_delta(doc.raw_char_idx(position).unwrap(), inserted)
+                            .unwrap();
+                        let snapshot = doc.snapshot();
+                        if let Some(delta) = delta {
+                            cache.apply_edit(&snapshot, delta, &metrics).unwrap();
+                        }
+                        assert_eq!(
+                            cache.frame(&snapshot, cursor, viewport).unwrap(),
+                            Layout::compute(&snapshot, cursor, viewport, &metrics).unwrap(),
+                            "{text:?} at {position} + {inserted:?}, width {width}"
+                        );
+                    }
+
+                    let mut doc = before.clone();
+                    let mut cache = LayoutCache::new(&doc.snapshot(), viewport, &metrics).unwrap();
+                    let (cursor, delta) = doc
+                        .delete_previous_char_with_delta(doc.raw_char_idx(position).unwrap())
+                        .unwrap();
+                    let snapshot = doc.snapshot();
+                    if let Some(delta) = delta {
+                        cache.apply_edit(&snapshot, delta, &metrics).unwrap();
+                    }
+                    assert_eq!(
+                        cache.frame(&snapshot, cursor, viewport).unwrap(),
+                        Layout::compute(&snapshot, cursor, viewport, &metrics).unwrap(),
+                        "{text:?} backspace at {position}, width {width}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

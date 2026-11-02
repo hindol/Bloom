@@ -306,10 +306,12 @@ mod tests {
         type Error = String;
 
         fn apply(&mut self, event: SimInputEvent) -> Result<(), Self::Error> {
-            let SimInputEvent::Text(text) = event else {
-                return Err(format!("unsupported plain-text event: {event:?}"));
+            let event = match event {
+                SimInputEvent::Text(text) => Event::InsertText(text),
+                SimInputEvent::Keys(keys) if keys == "<BS>" => Event::Backspace,
+                event => return Err(format!("unsupported plain-text event: {event:?}")),
             };
-            update(&mut self.model, Event::InsertText(text), Duration::ZERO)
+            update(&mut self.model, event, Duration::ZERO)
                 .map(|_| ())
                 .map_err(|error| format!("{error:?}"))
         }
@@ -352,6 +354,61 @@ mod tests {
             assert_eq!(whole.buffer_text().unwrap(), sim.buffer_text().unwrap());
             assert_eq!(cursor_offset(whole.backend()), typed.chars().count());
         }
+    }
+
+    #[test]
+    fn plain_text_backspace_merges_and_resplits_crlf_without_losing_text() {
+        let mut sim = SimInput::new(PlainTextBackend {
+            model: Model::new("\nlast"),
+        });
+        sim.type_text("\rX").unwrap();
+        assert_eq!(sim.buffer_text().unwrap(), "\rX\nlast");
+
+        for _ in 0..2 {
+            sim.keys("<BS>").unwrap();
+            assert_eq!(sim.buffer_text().unwrap(), "\r\nlast");
+            assert_eq!(cursor_offset(sim.backend()), 1);
+            assert_eq!(
+                view(&sim.backend().model)
+                    .layout
+                    .lines
+                    .iter()
+                    .map(|line| line.text.as_str())
+                    .collect::<Vec<_>>(),
+                ["", "last"]
+            );
+            sim.type_text("X").unwrap();
+            assert_eq!(sim.buffer_text().unwrap(), "\rX\nlast");
+            assert_eq!(cursor_offset(sim.backend()), 2);
+            assert_eq!(
+                view(&sim.backend().model)
+                    .layout
+                    .lines
+                    .iter()
+                    .map(|line| line.text.as_str())
+                    .collect::<Vec<_>>(),
+                ["\r", "X", "last"]
+            );
+        }
+    }
+
+    #[test]
+    fn plain_text_newline_after_cr_updates_the_previous_layout_line() {
+        let mut sim = SimInput::new(PlainTextBackend {
+            model: Model::new(""),
+        });
+        sim.type_text("\r").unwrap().type_text("\n").unwrap();
+        assert_eq!(sim.buffer_text().unwrap(), "\r\n");
+        assert_eq!(cursor_offset(sim.backend()), 2);
+        assert_eq!(
+            view(&sim.backend().model)
+                .layout
+                .lines
+                .iter()
+                .map(|line| line.text.as_str())
+                .collect::<Vec<_>>(),
+            ["", ""]
+        );
     }
 
     #[test]

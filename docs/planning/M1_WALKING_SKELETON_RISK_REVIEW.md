@@ -276,3 +276,29 @@ guarantee.
   skeleton from deferred three-pane geometry, parser/index/search, and full
   oracle parity. It must keep M1 acceptance and the remaining M2-M7 scope in
   agreement with the code and the redesign proposal.
+
+### Physical-line edit invalidation
+
+The M1 rope currently uses Ropey's default physical-line boundaries, including
+standalone CR and Unicode line separators in addition to LF and CRLF. Deleting
+the character between a CR and LF can merge two old lines into one, so the
+new cursor's line can be earlier than the deleted character's old line.
+Inserting after a CR can likewise change the preceding line. An edit delta
+must account for that left context in the old rope before mutation, then
+measure the replacement range against the new rope. The unchanged physical
+lines before and after the range must retain their exact bytes. Ordinary
+single-line edits must still reshape only one line.
+
+Full and cached layout must use the document's same physical-line boundaries.
+This fix preserves the current M1 `line_text` behavior and exact document bytes;
+it does not decide the eventual product treatment of standalone CR or other
+Unicode separators, mixed line endings, or grapheme-safe cursor landing.
+In particular, M1 currently strips LF and CRLF from line text but retains the
+other recognized separator characters there. Those limitations and the
+separate M2 I6 cursor blocker remain visible rather than being presented as
+an accepted text-format policy.
+
+Exercise insertions and backspaces around CR, LF, CRLF, Unicode separators,
+empty lines, and EOF against an independent physical-line reference. Compare
+incremental frames with full layout, include the kernel-level CRLF regression,
+and retain the 10k-line single-invalidation check.
