@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use bloom_text::coordinates::VisibleRange;
 use bloom_text::{BlockIdMarker, BlockIdToken, Doc, ProjectionError, VisibleProjection};
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -250,6 +251,7 @@ pub enum IdentityTextPlanError {
     InvalidPasteLocation,
     InvalidRegisterText,
     DuplicateIdentity,
+    RequiresStructuralEdit,
     InvalidResult,
     LineOutOfBounds(usize),
 }
@@ -435,6 +437,31 @@ pub struct CanonicalIdentityEditPlan<'a, R: BlockIdRegistry> {
 pub struct CanonicalBlockDeletePlan<'a, R: BlockIdRegistry> {
     edit: CanonicalIdentityEditPlan<'a, R>,
     register: BlockRegister,
+}
+
+/// A projection and its exclusively borrowed source document.
+///
+/// ```compile_fail,E0499
+/// use bloom_kernel::identity::{begin_visible_edit, commit_planned_visible_edit};
+/// fn stale_edit(text: &mut String) {
+///     let context = begin_visible_edit(text);
+///     let Ok(range) = context.projection().range(0, 0) else { return };
+///     let Ok(plan) = context.plan(range, "x") else { return };
+///     text.push_str("another edit");
+///     commit_planned_visible_edit(plan);
+/// }
+/// ```
+#[must_use]
+pub struct VisibleEditContext<'a> {
+    canonical_text: &'a mut String,
+    projection: VisibleProjection,
+}
+
+/// An identity-preserving text edit bound to the exact source document.
+#[must_use]
+pub struct CanonicalVisibleEditPlan<'a> {
+    canonical_text: &'a mut String,
+    planned_text: String,
 }
 
 fn live_generation_on_page<R: BlockIdRegistry>(
@@ -716,6 +743,200 @@ fn commit_identity_edit<R: BlockIdRegistry>(
 ) -> Result<(), R::Error> {
     registry.apply(&plan.changes)?;
     *canonical_text = planned_text;
+    Ok(())
+}
+
+/// Creates a projection while exclusively borrowing its canonical source.
+pub fn begin_visible_edit(canonical_text: &mut String) -> VisibleEditContext<'_> {
+    let projection = Doc::new(canonical_text.as_str()).visible_projection();
+    VisibleEditContext {
+        canonical_text,
+        projection,
+    }
+}
+
+impl<'a> VisibleEditContext<'a> {
+    pub fn projection(&self) -> &VisibleProjection {
+        &self.projection
+    }
+
+    /// Plans a single-line visible replacement that preserves every token.
+    pub fn plan(
+        self,
+        visible_range: VisibleRange,
+        replacement: &str,
+    ) -> Result<CanonicalVisibleEditPlan<'a>, IdentityTextPlanError> {
+        let planned_text = plan_visible_text(
+            self.canonical_text.as_str(),
+            &self.projection,
+            visible_range,
+            replacement,
+        )?;
+        Ok(CanonicalVisibleEditPlan {
+            canonical_text: self.canonical_text,
+            planned_text,
+        })
+    }
+}
+
+/// Commits a previously validated visible edit.
+pub fn commit_planned_visible_edit(plan: CanonicalVisibleEditPlan<'_>) {
+    *plan.canonical_text = plan.planned_text;
+}
+
+fn plan_visible_text(
+    canonical_text: &str,
+    projection: &VisibleProjection,
+    range: VisibleRange,
+    replacement: &str,
+) -> Result<String, IdentityTextPlanError> {
+    let doc = Doc::new(canonical_text);
+    let visible_range = range.start().get()..range.end().get();
+    let lowered = match projection.lower(range) {
+        Ok(lowered) => lowered,
+        Err(ProjectionError::InsertionAtLeadingToken { .. })
+            if visible_range.is_empty() && replacement.is_empty() =>
+        {
+            return Ok(canonical_text.to_owned());
+        }
+        Err(error) => return Err(IdentityTextPlanError::Projection(error)),
+    };
+    let visible = projection.text();
+    let start_byte = char_to_byte(visible, visible_range.start).expect("validated visible start");
+    let end_byte = char_to_byte(visible, visible_range.end).expect("validated visible end");
+    if visible[start_byte..end_byte]
+        .chars()
+        .chain(replacement.chars())
+        .any(|character| matches!(character, '\r' | '\n'))
+    {
+        return Err(IdentityTextPlanError::RequiresStructuralEdit);
+    }
+    if visible_range.is_empty() && replacement.is_empty() {
+        return Ok(canonical_text.to_owned());
+    }
+
+    let raw_segments = lowered
+        .raw_segments
+        .iter()
+        .map(|segment| {
+            let start = doc
+                .raw_char_offset(segment.start())
+                .expect("lowered segment belongs to canonical text");
+            let end = doc
+                .raw_char_offset(segment.end())
+                .expect("lowered segment belongs to canonical text");
+            start..end
+        })
+        .collect::<Vec<_>>();
+    let insertion = if replacement.is_empty() {
+        None
+    } else {
+        let insertion = if visible_range.is_empty() {
+            lowered.insertion
+        } else {
+            let start = projection
+                .range(visible_range.start, visible_range.start)
+                .map_err(IdentityTextPlanError::Projection)?;
+            projection
+                .lower(start)
+                .map_err(IdentityTextPlanError::Projection)?
+                .insertion
+        }
+        .ok_or(IdentityTextPlanError::InvalidResult)?;
+        Some(
+            doc.raw_char_offset(insertion)
+                .expect("lowered insertion belongs to canonical text"),
+        )
+    };
+
+    let mut raw_chars = canonical_text.chars().collect::<Vec<_>>();
+    for segment in raw_segments.iter().rev() {
+        raw_chars.drain(segment.clone());
+    }
+    if let Some(insertion) = insertion {
+        if raw_segments
+            .iter()
+            .any(|segment| segment.start < insertion && insertion < segment.end)
+        {
+            return Err(IdentityTextPlanError::InvalidResult);
+        }
+        let removed_before = raw_segments
+            .iter()
+            .filter(|segment| segment.end <= insertion)
+            .map(|segment| segment.end - segment.start)
+            .sum::<usize>();
+        let at = insertion - removed_before;
+        raw_chars.splice(at..at, replacement.chars());
+    }
+    let planned_text = raw_chars.into_iter().collect::<String>();
+    let expected_visible = replace_chars(visible, visible_range, replacement);
+    validate_visible_edit_result(
+        &doc,
+        projection,
+        &planned_text,
+        &expected_visible,
+        &raw_segments,
+        insertion,
+        replacement.chars().count(),
+    )?;
+    Ok(planned_text)
+}
+
+fn validate_visible_edit_result(
+    doc: &Doc,
+    projection: &VisibleProjection,
+    planned_text: &str,
+    expected_visible: &str,
+    raw_segments: &[std::ops::Range<usize>],
+    insertion: Option<usize>,
+    inserted_len: usize,
+) -> Result<(), IdentityTextPlanError> {
+    let planned_doc = Doc::new(planned_text);
+    let planned_projection = planned_doc.visible_projection();
+    if planned_projection.text() != expected_visible
+        || planned_projection.tokens().len() != projection.tokens().len()
+    {
+        return Err(IdentityTextPlanError::InvalidResult);
+    }
+
+    for (original, planned) in projection.tokens().iter().zip(planned_projection.tokens()) {
+        let start = doc
+            .raw_char_offset(original.raw_range().start())
+            .expect("token belongs to canonical text");
+        let end = doc
+            .raw_char_offset(original.raw_range().end())
+            .expect("token belongs to canonical text");
+        if raw_segments
+            .iter()
+            .any(|segment| segment.start < end && start < segment.end)
+            || insertion.is_some_and(|at| start < at && at < end)
+        {
+            return Err(IdentityTextPlanError::InvalidResult);
+        }
+        let removed_before = raw_segments
+            .iter()
+            .filter(|segment| segment.end <= start)
+            .map(|segment| segment.end - segment.start)
+            .sum::<usize>();
+        let inserted_before = insertion
+            .filter(|at| *at <= start)
+            .map_or(0, |_| inserted_len);
+        let expected_start = start - removed_before + inserted_before;
+        let expected_end = end - removed_before + inserted_before;
+        if planned.marker() != original.marker()
+            || planned.id() != original.id()
+            || planned_doc
+                .raw_char_offset(planned.raw_range().start())
+                .expect("token belongs to planned text")
+                != expected_start
+            || planned_doc
+                .raw_char_offset(planned.raw_range().end())
+                .expect("token belongs to planned text")
+                != expected_end
+        {
+            return Err(IdentityTextPlanError::InvalidResult);
+        }
+    }
     Ok(())
 }
 
@@ -1355,14 +1576,15 @@ mod tests {
     use std::rc::Rc;
 
     use super::{
-        append_block_id, block_ids_in_text, commit_planned_block_delete,
-        commit_planned_identity_edit, plan_delete, plan_delete_block_text, plan_delete_edit,
-        plan_discard_register, plan_join, plan_join_edit, plan_join_text, plan_paste,
-        plan_paste_edit, plan_split, plan_split_edit, plan_split_text, BlockId, BlockIdRegistry,
-        BlockRegister, DetachGeneration, IdentityDecision, IdentityEditPlanError,
-        IdentityPlanError, IdentityState, PageId, RegisterAliasReplaceError, RegisterBank,
-        RegisterCleanupError, RegisterClearError, RegisterIdentity, RegisterOperation,
-        RegisterSlotError, RegistryChange,
+        append_block_id, begin_visible_edit, block_ids_in_text, commit_planned_block_delete,
+        commit_planned_identity_edit, commit_planned_visible_edit, plan_delete,
+        plan_delete_block_text, plan_delete_edit, plan_discard_register, plan_join, plan_join_edit,
+        plan_join_text, plan_paste, plan_paste_edit, plan_split, plan_split_edit, plan_split_text,
+        validate_visible_edit_result, BlockId, BlockIdRegistry, BlockRegister,
+        CanonicalVisibleEditPlan, DetachGeneration, IdentityDecision, IdentityEditPlanError,
+        IdentityPlanError, IdentityState, IdentityTextPlanError, PageId, RegisterAliasReplaceError,
+        RegisterBank, RegisterCleanupError, RegisterClearError, RegisterIdentity,
+        RegisterOperation, RegisterSlotError, RegistryChange,
     };
     use bloom_text::{BlockIdMarker, Doc, ProjectionError};
 
@@ -1639,6 +1861,270 @@ mod tests {
             fields[1].parse().unwrap(),
             decode_oracle_text(fields[2]),
         )
+    }
+
+    fn plan_test_visible_edit<'a>(
+        canonical: &'a mut String,
+        range: std::ops::Range<usize>,
+        replacement: &str,
+    ) -> Result<CanonicalVisibleEditPlan<'a>, IdentityTextPlanError> {
+        let context = begin_visible_edit(canonical);
+        let range = context
+            .projection()
+            .range(range.start, range.end)
+            .map_err(IdentityTextPlanError::Projection)?;
+        context.plan(range, replacement)
+    }
+
+    #[test]
+    fn recorded_vim_boundary_edits_commit_without_changing_token_bytes() {
+        for (name, expected_raw) in [
+            ("x", "hell ^edge01"),
+            ("X", "hell ^edge01"),
+            ("D", "h ^edge01"),
+        ] {
+            let fields = oracle_case(name);
+            let mut canonical = decode_oracle_text(fields[1]);
+            let (start, end, replacement) = oracle_edit(fields[6]);
+            let plan = plan_test_visible_edit(&mut canonical, start..end, &replacement).unwrap();
+            commit_planned_visible_edit(plan);
+
+            assert_eq!(canonical, expected_raw, "{name}");
+            assert_eq!(
+                Doc::new(&canonical).visible_projection().text(),
+                decode_oracle_text(fields[5]),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn visible_edits_match_a_line_local_reference_model() {
+        let payload = "aβe\u{301}👩\u{200d}💻z";
+        let chars = payload.chars().collect::<Vec<_>>();
+        let local = Doc::new(payload).visible_projection();
+        let mut cases = 0;
+        for ending in ["\n", "\r\n"] {
+            for tail in ["", ending] {
+                let raw_prefix = format!("other ^anchor{ending}");
+                let visible_prefix_len = format!("other{ending}").chars().count();
+                for start in 0..=chars.len() {
+                    for end in start..=chars.len() {
+                        if local.range(start, end).is_err() {
+                            continue;
+                        }
+                        for replacement in ["", "X", "λ", "e\u{301}"] {
+                            let edited_line = chars[..start]
+                                .iter()
+                                .copied()
+                                .chain(replacement.chars())
+                                .chain(chars[end..].iter().copied())
+                                .collect::<String>();
+                            let suffix = format!(
+                                " ^current \t{ending}mirror ^=current{ending}after ^other2{tail}"
+                            );
+                            let mut canonical = format!("{raw_prefix}{payload}{suffix}");
+                            let expected = format!("{raw_prefix}{edited_line}{suffix}");
+                            let plan = plan_test_visible_edit(
+                                &mut canonical,
+                                visible_prefix_len + start..visible_prefix_len + end,
+                                replacement,
+                            )
+                            .unwrap();
+                            commit_planned_visible_edit(plan);
+                            assert_eq!(
+                                canonical, expected,
+                                "ending={ending:?}, tail={tail:?}, range={start}..{end}, replacement={replacement:?}"
+                            );
+                            cases += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(cases, 336);
+    }
+
+    #[test]
+    fn visible_replacement_can_span_multiple_raw_segments_around_a_token() {
+        let mut canonical = "abc ^id \t\r\nnext ^=id\r\n".to_owned();
+        let projection = Doc::new(&canonical).visible_projection();
+        let lowered = projection.lower(projection.range(2, 5).unwrap()).unwrap();
+        assert_eq!(lowered.raw_segments.len(), 2);
+
+        let plan = plan_test_visible_edit(&mut canonical, 2..5, "X").unwrap();
+        commit_planned_visible_edit(plan);
+        assert_eq!(canonical, "abX ^id\r\nnext ^=id\r\n");
+    }
+
+    #[test]
+    fn successive_visible_edits_reproject_each_document_version() {
+        let mut canonical = "one ^first\nβe\u{301} ^second\r\n".to_owned();
+        let steps = [
+            (0..3, "ONE", "ONE ^first\nβe\u{301} ^second\r\n"),
+            (7..7, "!", "ONE ^first\nβe\u{301}! ^second\r\n"),
+            (4..5, "", "ONE ^first\ne\u{301}! ^second\r\n"),
+            (0..3, "hi", "hi ^first\ne\u{301}! ^second\r\n"),
+        ];
+        for (range, replacement, expected) in steps {
+            let plan = plan_test_visible_edit(&mut canonical, range, replacement).unwrap();
+            commit_planned_visible_edit(plan);
+            assert_eq!(canonical, expected);
+        }
+    }
+
+    #[test]
+    fn visible_edits_reject_unsafe_results_without_mutating_the_document() {
+        let cases = [
+            (
+                "hello ^keep",
+                0..0,
+                "`",
+                IdentityTextPlanError::InvalidResult,
+            ),
+            (
+                "hello",
+                5..5,
+                " ^literal",
+                IdentityTextPlanError::InvalidResult,
+            ),
+            (
+                "safe\nline ^id\n",
+                0..4,
+                "```",
+                IdentityTextPlanError::InvalidResult,
+            ),
+            (
+                "```rust\ntext ^fake\n```\nlast ^keep\n",
+                0..1,
+                "",
+                IdentityTextPlanError::InvalidResult,
+            ),
+            (
+                "left ^one\nright ^two",
+                4..5,
+                "",
+                IdentityTextPlanError::RequiresStructuralEdit,
+            ),
+            (
+                "a ^one\r\n",
+                1..3,
+                "",
+                IdentityTextPlanError::RequiresStructuralEdit,
+            ),
+            (
+                "a ^one",
+                0..0,
+                "\r",
+                IdentityTextPlanError::RequiresStructuralEdit,
+            ),
+            (
+                "e\u{301} ^id",
+                1..1,
+                "x",
+                IdentityTextPlanError::Projection(ProjectionError::SplitsGrapheme { offset: 1 }),
+            ),
+            (
+                "^id\n",
+                0..0,
+                "x",
+                IdentityTextPlanError::Projection(ProjectionError::InsertionAtLeadingToken {
+                    token_index: 0,
+                }),
+            ),
+            (
+                "x",
+                0..2,
+                "",
+                IdentityTextPlanError::Projection(ProjectionError::InvalidVisibleRange {
+                    start: 0,
+                    end: 2,
+                    length: 1,
+                }),
+            ),
+        ];
+        for (source, range, replacement, expected_error) in cases {
+            let mut canonical = source.to_owned();
+            let actual = plan_test_visible_edit(&mut canonical, range, replacement)
+                .err()
+                .expect("unsafe edit must fail");
+            assert_eq!(actual, expected_error, "{source:?}");
+            assert_eq!(canonical, source);
+        }
+    }
+
+    #[test]
+    fn discarded_and_empty_visible_plans_leave_canonical_bytes_unchanged() {
+        let mut canonical = "hello ^id\n".to_owned();
+        let plan = plan_test_visible_edit(&mut canonical, 0..5, "world").unwrap();
+        drop(plan);
+        assert_eq!(canonical, "hello ^id\n");
+
+        let mut id_only = "^id\n".to_owned();
+        let plan = plan_test_visible_edit(&mut id_only, 0..0, "").unwrap();
+        commit_planned_visible_edit(plan);
+        assert_eq!(id_only, "^id\n");
+    }
+
+    #[test]
+    fn visible_edits_reject_ranges_from_another_or_stale_projection() {
+        for change_text in [false, true] {
+            let mut canonical = "hello ^id\n".to_owned();
+            let old_projection = Doc::new(&canonical).visible_projection();
+            let old_range = old_projection.range(1, 2).unwrap();
+            if change_text {
+                canonical.insert(0, 'X');
+            }
+            let before = canonical.clone();
+            let context = begin_visible_edit(&mut canonical);
+            let actual = context
+                .plan(old_range, "y")
+                .err()
+                .expect("foreign projection range must fail");
+
+            assert_eq!(
+                actual,
+                IdentityTextPlanError::Projection(ProjectionError::ForeignVisibleRange)
+            );
+            assert_eq!(canonical, before);
+        }
+
+        let mut id_only = "^id\n".to_owned();
+        let foreign = Doc::new(&id_only).visible_projection();
+        let range = foreign.range(0, 0).unwrap();
+        let context = begin_visible_edit(&mut id_only);
+        assert_eq!(
+            context.plan(range, "").err(),
+            Some(IdentityTextPlanError::Projection(
+                ProjectionError::ForeignVisibleRange
+            ))
+        );
+        assert_eq!(id_only, "^id\n");
+    }
+
+    #[test]
+    fn visible_edit_validation_detects_token_reattachment_and_marker_changes() {
+        let original = Doc::new("a ^same\n\n");
+        let projection = original.visible_projection();
+        let reattached = "a\n^same\n";
+        let altered_marker = "a ^=same\n\n";
+        for candidate in [reattached, altered_marker] {
+            let candidate_projection = Doc::new(candidate).visible_projection();
+            assert_eq!(candidate_projection.text(), projection.text());
+            assert_eq!(candidate_projection.tokens()[0].id(), "same");
+            assert_eq!(
+                validate_visible_edit_result(
+                    &original,
+                    &projection,
+                    candidate,
+                    projection.text(),
+                    &[],
+                    None,
+                    0,
+                ),
+                Err(IdentityTextPlanError::InvalidResult)
+            );
+        }
     }
 
     #[test]

@@ -181,6 +181,26 @@ unrelated content CR appear adjacent to LF in the visible projection. Reject
 unsupported content explicitly rather than normalize or discard it. General
 multiline and standalone-CR register behavior is not yet a production design.
 
+### Identity-preserving visible edits: spike constraints
+
+The spike may plan an ordinary visible replacement without changing registry
+state only when neither the selected text nor the replacement contains CR or
+LF. Multiline and CR-containing edits require a separate structural policy;
+this restriction is not an approved product UX. Create the projection while
+holding an exclusive borrow of the canonical text, accept only a range tied
+to that projection, and lower it through the existing grapheme-checked API.
+Reject foreign ranges even if their offsets still fit the document. Keep every
+hidden-token byte outside the replacement, then reparse the complete candidate
+and require the expected visible text, the same ordered token kinds and IDs,
+and the same original token spans shifted only by the edit. Reject
+parser-context changes, newly recognized tokens, and ambiguous leading-token
+insertions before committing any text.
+
+The plan must retain an exclusive borrow of the exact canonical text until it
+is committed or dropped. These are in-memory, correctness-first checks, not a
+production editor path: they do not supply cursor policy, undo, registry/page
+version fencing, durable transactions, or incremental performance.
+
 ### Multi-block structural plans: spike constraints
 
 Join and split must work in documents containing unrelated ordinary and legacy
@@ -217,12 +237,22 @@ underlying state after planning. Injected failures leave the original text
 unchanged. This is a synchronous in-memory boundary, not a substitute for
 page/version preconditions or atomic persistence across effect boundaries.
 Projection tests also exercise `x`/`X`/`D`-shaped ranges at a trailing token
-boundary and verify that the hidden token is preserved. Fixture-driven
-canonical-text planners replay the observed `J` and split ranges, then commit
-the resulting text with the join retirement or split reservation. The split
-planner preserves the current line's LF/CRLF style in this prototype. The
-planners reject edits on unrelated lines, rewrite only the participating
-canonical lines, and reparse the complete result before returning a plan.
+boundary and verify that the hidden token is preserved. A separate borrow-bound
+visible-edit plan now consumes those recorded ranges and checks the resulting
+canonical token spans as well as the visible text. A 336-case line-local
+reference model covers Unicode graphemes, LF/CRLF, trailing whitespace,
+mirrors, and missing final newlines. Injected token reattachment and marker
+changes are rejected even when visible text is unchanged. Ranges from another
+or an older projection are rejected, and an exclusive-borrow compile check
+prevents intervening text mutation. This does not interpret Vim keys or
+implement multiline editing, cursor policy, or undo.
+
+Fixture-driven canonical-text planners replay the observed `J` and split
+ranges, then commit the resulting text with the join retirement or split
+reservation. The split planner preserves the current line's LF/CRLF style in
+this prototype. The planners reject edits on unrelated lines, rewrite only the
+participating canonical lines, and reparse the complete result before returning
+a plan.
 Additional ordinary IDs and legacy mirror tokens are preserved, including
 mirrors referencing a participating ID; duplicated participating ordinary IDs
 and fresh-ID collisions are rejected. The checks compare both the visible text
@@ -250,6 +280,10 @@ the register text. Delete also rejects an unpasteable content CR before
 detachment, including when a hidden token makes that CR appear to be part of a
 visible CRLF separator; text and registry stay unchanged. These are explicit
 policy/text-plan tests, not replays of the legacy `dd`/`p` or `yy`/`p` streams.
+Unlike join/split's preservation of unrelated mirrors, block deletion rejects
+any same-ID mirror in the source document, and paste rejects one in the
+destination. Whether those mirror cases should be supported requires an
+explicit legacy-mirror and migration decision; the spike does not infer one.
 The two-phase move can leave a detached identity in its register after a failed
 paste or process interruption. The prototype now assigns per-ID detachment
 generations and rechecks them in delete, move, discard, join, and split batches. Its
@@ -327,8 +361,9 @@ ADR-3 can be accepted only when:
    append, structural command streams, and visible-only boundary deletions.
    Fixture-driven kernel tests replay the `J` and split edit ranges as
    canonical-text transactions, including with surrounding token-bearing
-   lines, and policy/text-plan tests cover move/copy identity preservation;
-   neither is a production Vim-to-document replay.
+   lines; single-line `x`/`X`/`D` ranges use the identity-preserving text plan;
+   and policy/text-plan tests cover move/copy identity preservation. None is a
+   production Vim-to-document replay.
 3. Every supported identity rule has a test or is explicitly recorded as
    uncovered; no rule is inferred from the current side-table implementation.
 4. The verdict and any remaining gaps are recorded. If the gate fails, prototype
