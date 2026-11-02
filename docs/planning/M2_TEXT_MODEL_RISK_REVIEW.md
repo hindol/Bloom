@@ -2,7 +2,7 @@
 
 > Architect review for the ADR-3 acceptance spike.
 > Scope is the spike only; this does not approve full M2 implementation.
-> Status: projection lowering and fixture-backed append, join, split, and boundary-edit prototypes pass; ADR-3 remains unaccepted pending the identity-rule matrix.
+> Status: projection lowering and fixture-backed append, join, split, boundary-edit, and multiline inline-code prototypes pass; ADR-3 remains unaccepted pending the identity-rule matrix and production parser/Vim integration.
 
 ## Decision under test
 
@@ -393,12 +393,14 @@ boundary model exercises both marker types, run lengths, and closing suffixes.
 A visible replacement can edit such literal code without changing an outside
 ID; a fence edit that would reclassify IDs is rejected.
 
-Two ignored contract tests expose the multiline inline-code gap. When run
-explicitly, all four LF/CRLF and one-/two-backtick combinations in each test
-fail: the intermediate literal `^inside` is hidden, and the real `^outside`
-after a closing delimiter stays visible. Canonical bytes are not changed by
-projection, but users could not edit the hidden literal through the visible
-view. These are acceptance blockers, not passing parity tests.
+The two multiline inline-code contract tests are now active. They cover LF/CRLF
+and one-/two-backtick delimiters, and pass for both the literal ID inside a
+matched span and the structural ID after its closing delimiter. Additional
+focused tests cover mismatched delimiter lengths and the currently modeled
+blank, heading, list, blockquote, and fence boundaries. This closes that
+specific projection regression, not parser parity: the scanner is still
+projection-local, does not produce a shared rendering tree, and does not have
+incremental invalidation or full-parse differential coverage.
 
 Fixture-driven canonical-text planners replay the observed `J` and split
 ranges, then commit the resulting text with the join retirement or split
