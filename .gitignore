@@ -1,5 +1,6 @@
 /target
 /rewrite/target/
+/tools/legacy-editor-oracle/target/
 *.lock
 .DS_Store
 screenshots/*.txt
