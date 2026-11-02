@@ -21,10 +21,19 @@ library or exposed by the simulation feature.
 |---|---|---|
 | Accept a stale index result | `check_index_matches_versions` / I8 | Pending M5 |
 | Skip vault-wide block-ID uniqueness validation | `check_unique_live_block_ids` / I4 | Pending M2 |
+| Place a cursor inside a grapheme | `check_positions_are_valid` / I6 | Pending M2 |
+
 These entries are registration of future sensitivity obligations, not passing
 tests. They become active only when their owning model and executable detector
 exist. A corpus runner must fail if an active fault survives; it must not
 silently convert missing detectors into success.
+
+An experimental, test-only I6 probe detects injected interior cursor offsets
+on plain snapshots and checks valid boundary controls. It explicitly rejects
+snapshots with tokens recognized by the prototype parser and out-of-bounds
+offsets; it cannot detect tokens the parser misses. This restricted probe does
+not activate the product detector; see the
+[M2 risk review](M2_TEXT_MODEL_RISK_REVIEW.md).
 
 The broader mutation campaign remains a future nightly concern. PR CI runs the
 small deterministic sensitivity checks for the active milestones.

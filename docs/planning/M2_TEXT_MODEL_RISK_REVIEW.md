@@ -124,6 +124,17 @@ hidden ID, but the M1 cursor does not use that detector. Keep this contract
 distinct from ordinary Unicode typing order; cursor landing and deletion policy
 require an explicit grapheme-aware design.
 
+For detector sensitivity, the fault corpus may run an I6-attributed, test-only
+probe on a raw cursor in a plain snapshot whose prototype projection has no
+hidden tokens. It must reject snapshots with recognized tokens and
+out-of-bounds positions explicitly, check valid boundaries as well as injected
+interior offsets, and report failures through the invariant registry. It cannot
+recognize tokens missed by the prototype parser. CRLF and multi-scalar
+graphemes belong in the corpus. This probe does not define raw positions at
+token boundaries, validate selections or all positions, or activate I6 in
+`update`. Production activation needs a reviewed position model and
+failure-atomic transitions; a post-mutation failure alone is not enough.
+
 ## Scope and ownership
 
 - `bloom-text` owns canonical text, parsed ID-token spans, and projection
