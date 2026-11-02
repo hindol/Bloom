@@ -302,3 +302,20 @@ Exercise insertions and backspaces around CR, LF, CRLF, Unicode separators,
 empty lines, and EOF against an independent physical-line reference. Compare
 incremental frames with full layout, include the kernel-level CRLF regression,
 and retain the 10k-line single-invalidation check.
+
+### Synthetic journey submission rejection
+
+The test-only `JourneyBackend` must not advance its model or version before a
+State submission is accepted. Prepare the candidate model and version
+separately, submit its immutable snapshot, and publish the candidate only after
+receiving a receipt. A rejected input remains absent from the accepted replay
+trace and can be retried by the `SimInput` caller; no State durability or vault
+write is implied by queue acceptance.
+
+Use a deterministic injected queue-full response in the synthetic backend to
+check unchanged text, cursor, timers, layout, version, trace, and disk, followed
+by an identical retry, commit, and save. This is a simulated submission
+rejection, not evidence that the worker's real queue saturated. The separate
+State test exercises the actual bounded queue and verifies that it returns the
+unaccepted record. The candidate clone and injection are test infrastructure,
+not a production backpressure or UI policy.

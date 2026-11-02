@@ -854,9 +854,38 @@ mod journey_tests {
         }
     }
 
+    #[derive(Default)]
+    struct SubmissionControl {
+        reject_next: bool,
+        rejected: Option<VersionRecord>,
+    }
+
+    impl SubmissionControl {
+        fn try_submit(
+            &mut self,
+            state: &StateStore,
+            record: VersionRecord,
+        ) -> Result<CommitReceipt, JourneyError> {
+            let result = if self.reject_next {
+                self.reject_next = false;
+                Err((StateError::QueueFull, record))
+            } else {
+                state.try_submit(record).map_err(|error| error.into_parts())
+            };
+            match result {
+                Ok(receipt) => Ok(receipt),
+                Err((error, record)) => {
+                    self.rejected = Some(record);
+                    Err(JourneyError::from_display(error))
+                }
+            }
+        }
+    }
+
     struct JourneyBackend {
         model: Model,
         state: StateStore,
+        submission: SubmissionControl,
         vault: VaultStore,
         loaded: LoadedPage,
         page_id: PageId,
@@ -879,6 +908,7 @@ mod journey_tests {
             Ok(Self {
                 model,
                 state,
+                submission: SubmissionControl::default(),
                 vault,
                 loaded,
                 page_id,
@@ -971,34 +1001,34 @@ mod journey_tests {
         type Error = JourneyError;
 
         fn apply(&mut self, event: SimInputEvent) -> Result<(), Self::Error> {
-            self.events.push(event.clone());
+            let recorded = event.clone();
             match event {
                 SimInputEvent::Text(text) => {
+                    let mut candidate = self.model.clone();
                     update(
-                        &mut self.model,
+                        &mut candidate,
                         Event::InsertText(text),
                         Duration::from_millis(self.clock_ms),
                     )
                     .map_err(|error| JourneyError(format!("{error:?}")))?;
                     let parent = self.version;
-                    self.version =
+                    let version =
                         Version::new(parent.get() + 1).map_err(JourneyError::from_display)?;
                     let record = VersionRecord::new(
                         self.page_id.clone(),
-                        self.version,
+                        version,
                         Some(parent),
                         i64::try_from(self.clock_ms).map_err(JourneyError::from_display)?,
-                        TransactionId::new(format!("journey-{}", self.version.get()))
+                        TransactionId::new(format!("journey-{}", version.get()))
                             .map_err(JourneyError::from_display)?,
                         Origin::User,
-                        self.model.text(),
+                        candidate.text(),
                         None,
                     )
                     .map_err(JourneyError::from_display)?;
-                    let receipt = self
-                        .state
-                        .try_submit(record)
-                        .map_err(JourneyError::from_display)?;
+                    let receipt = self.submission.try_submit(&self.state, record)?;
+                    self.model = candidate;
+                    self.version = version;
                     self.receipts.push(receipt);
                 }
                 SimInputEvent::AdvanceTime(millis) => {
@@ -1028,6 +1058,7 @@ mod journey_tests {
                 }
             }
 
+            self.events.push(recorded);
             self.check_kernel_invariants()?;
             self.check_page_sync()?;
             emit_progress_if_watched();
@@ -1106,6 +1137,79 @@ mod journey_tests {
         state.mark_saved(page_id, first).unwrap();
         state.shutdown().unwrap();
         (root, database)
+    }
+
+    #[test]
+    fn rejected_journey_submission_is_unchanged_and_can_be_retried() {
+        let directory = tempdir().unwrap();
+        let (root, database) = initialize_fixture(&directory);
+        let mut backend = JourneyBackend::open(&root, &database).unwrap();
+        let prefix = "draft ";
+        backend
+            .apply(SimInputEvent::Text(prefix.to_owned()))
+            .unwrap();
+        backend.apply(SimInputEvent::AdvanceTime(25)).unwrap();
+        backend.submission.reject_next = true;
+        let initial_layout = backend.model.layout().clone();
+        let initial_cursor = backend.model.cursor();
+        let initial_deadline = backend.model.next_deadline();
+        let initial_events = backend.events.clone();
+        assert_eq!(initial_deadline, Some(Duration::from_millis(300)));
+        let mut sim = SimInput::new(backend);
+        let input = "Ω\r\nnote";
+        let expected = format!("{prefix}{input}");
+
+        assert!(matches!(
+            sim.type_text(input),
+            Err(SimInputError::Backend(JourneyError(message)))
+                if message == StateError::QueueFull.to_string()
+        ));
+        assert_eq!(sim.buffer_text().unwrap(), prefix);
+        assert_eq!(sim.backend().model.cursor(), initial_cursor);
+        assert_eq!(sim.backend().model.layout(), &initial_layout);
+        assert_eq!(sim.backend().model.next_deadline(), initial_deadline);
+        assert_eq!(sim.backend().version, Version::new(2).unwrap());
+        assert_eq!(sim.backend().receipts.len(), 1);
+        assert_eq!(sim.backend().events, initial_events);
+        assert_eq!(
+            fs::read(root.join("note.md")).unwrap(),
+            INITIAL_TEXT.as_bytes()
+        );
+        let rejected = sim.backend().submission.rejected.as_ref().unwrap().clone();
+        assert_eq!(rejected.version(), Version::new(3).unwrap());
+        assert_eq!(rejected.parent(), Some(Version::new(2).unwrap()));
+        assert_eq!(rejected.timestamp_ms(), 25);
+        assert_eq!(rejected.content(), expected);
+        assert_eq!(
+            sim.backend()
+                .state
+                .get_version(sim.backend().page_id.clone(), rejected.version())
+                .unwrap(),
+            None
+        );
+
+        sim.type_text(input).unwrap().flush_background().unwrap();
+        assert_eq!(sim.buffer_text().unwrap(), expected);
+        assert_eq!(sim.backend().version, rejected.version());
+        assert_eq!(
+            sim.backend()
+                .state
+                .get_version(sim.backend().page_id.clone(), rejected.version())
+                .unwrap(),
+            Some(rejected)
+        );
+        sim.keys(":w").unwrap();
+        assert_eq!(fs::read(root.join("note.md")).unwrap(), expected.as_bytes());
+        assert_eq!(
+            sim.backend().events,
+            [
+                SimInputEvent::Text(prefix.to_owned()),
+                SimInputEvent::AdvanceTime(25),
+                SimInputEvent::Text(input.to_owned()),
+                SimInputEvent::FlushBackground,
+                SimInputEvent::Keys(":w".to_owned())
+            ]
+        );
     }
 
     fn run_trace(
