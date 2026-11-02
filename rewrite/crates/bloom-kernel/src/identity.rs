@@ -283,11 +283,24 @@ pub struct RegisterDiscardFailure<E> {
     pub register: BlockRegister,
 }
 
+#[must_use = "retry replacement or explicitly discard the returned register"]
+#[derive(Debug)]
+pub struct RegisterReplaceFailure<E> {
+    pub error: RegisterCleanupError<E>,
+    pub register: BlockRegister,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RegisterClearError<E> {
     Empty(char),
     Identity(IdentityPlanError<E>),
     Registry(E),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RegisterAliasReplaceError<E> {
+    EmptySource(char),
+    Cleanup(RegisterCleanupError<E>),
 }
 
 impl RegisterBank {
@@ -318,6 +331,44 @@ impl RegisterBank {
         Ok(())
     }
 
+    /// Replaces a slot only after final-owner cleanup succeeds. On failure,
+    /// the old slot is unchanged and the incoming register is returned.
+    pub fn replace<R: BlockIdRegistry>(
+        &mut self,
+        slot: char,
+        register: BlockRegister,
+        registry: &mut R,
+    ) -> Result<(), RegisterReplaceFailure<R::Error>> {
+        if let Some(old) = self.slots.get(&slot) {
+            if !self.has_other_owner(slot, Some(&register)) {
+                if let Err(error) = discard_identity(old, registry) {
+                    return Err(RegisterReplaceFailure { error, register });
+                }
+            }
+        }
+        self.slots.insert(slot, register);
+        Ok(())
+    }
+
+    /// Replaces a slot with a tracked alias without removing its source.
+    pub fn replace_with_alias<R: BlockIdRegistry>(
+        &mut self,
+        source: char,
+        target: char,
+        registry: &mut R,
+    ) -> Result<(), RegisterAliasReplaceError<R::Error>> {
+        let register = self
+            .slots
+            .get(&source)
+            .ok_or(RegisterAliasReplaceError::EmptySource(source))?;
+        if source == target {
+            return Ok(());
+        }
+        let alias = register.tracked_alias();
+        self.replace(target, alias, registry)
+            .map_err(|failure| RegisterAliasReplaceError::Cleanup(failure.error))
+    }
+
     pub fn clear<R: BlockIdRegistry>(
         &mut self,
         slot: char,
@@ -327,13 +378,7 @@ impl RegisterBank {
             .slots
             .get(&slot)
             .ok_or(RegisterClearError::Empty(slot))?;
-        let has_other_owner = register.identity.as_ref().is_some_and(|identity| {
-            matches!(identity.operation, RegisterOperation::Delete { .. })
-                && self.slots.iter().any(|(other_slot, other)| {
-                    *other_slot != slot && other.identity.as_ref() == Some(identity)
-                })
-        });
-        if !has_other_owner {
+        if !self.has_other_owner(slot, None) {
             discard_identity(register, registry).map_err(|error| match error {
                 RegisterCleanupError::Identity(error) => RegisterClearError::Identity(error),
                 RegisterCleanupError::Registry(error) => RegisterClearError::Registry(error),
@@ -342,6 +387,24 @@ impl RegisterBank {
         self.slots.remove(&slot);
         Ok(())
     }
+
+    fn has_other_owner(&self, slot: char, incoming: Option<&BlockRegister>) -> bool {
+        let Some(register) = self.slots.get(&slot) else {
+            return false;
+        };
+        incoming.is_some_and(|other| same_detachment(register, other))
+            || self
+                .slots
+                .iter()
+                .any(|(other_slot, other)| *other_slot != slot && same_detachment(register, other))
+    }
+}
+
+fn same_detachment(first: &BlockRegister, second: &BlockRegister) -> bool {
+    first.identity.as_ref().is_some_and(|identity| {
+        matches!(identity.operation, RegisterOperation::Delete { .. })
+            && second.identity.as_ref() == Some(identity)
+    })
 }
 
 /// A complete in-memory edit bound to the text and registry it was planned for.
@@ -1289,8 +1352,9 @@ mod tests {
         plan_discard_register, plan_join, plan_join_edit, plan_join_text, plan_paste,
         plan_paste_edit, plan_split, plan_split_edit, plan_split_text, BlockId, BlockIdRegistry,
         BlockRegister, DetachGeneration, IdentityDecision, IdentityEditPlanError,
-        IdentityPlanError, IdentityState, PageId, RegisterBank, RegisterCleanupError,
-        RegisterClearError, RegisterIdentity, RegisterOperation, RegisterSlotError, RegistryChange,
+        IdentityPlanError, IdentityState, PageId, RegisterAliasReplaceError, RegisterBank,
+        RegisterCleanupError, RegisterClearError, RegisterIdentity, RegisterOperation,
+        RegisterSlotError, RegistryChange,
     };
     use bloom_text::{BlockIdMarker, Doc, ProjectionError};
 
@@ -1303,6 +1367,7 @@ mod tests {
         detached: BTreeMap<BlockId, (PageId, DetachGeneration)>,
         retired: BTreeSet<BlockId>,
         fail_next_apply: bool,
+        fail_state_reads: bool,
     }
 
     impl FakeRegistry {
@@ -1315,6 +1380,9 @@ mod tests {
         type Error = &'static str;
 
         fn state(&self, id: &BlockId) -> Result<IdentityState, Self::Error> {
+            if self.fail_state_reads {
+                return Err("registry state read failed");
+            }
             Ok(if let Some((page, generation)) = self.live.get(id) {
                 IdentityState::Live {
                     page: page.clone(),
@@ -1848,7 +1916,7 @@ mod tests {
     }
 
     #[test]
-    fn register_clear_revalidates_ownership_when_the_registry_changes_during_apply() {
+    fn register_cleanup_revalidates_ownership_when_the_registry_changes_during_apply() {
         struct RacingRegistry {
             inner: FakeRegistry,
             moved_id: BlockId,
@@ -1914,6 +1982,36 @@ mod tests {
         );
         bank.clear('a', &mut registry).unwrap();
         assert_eq!(registry.state(&moved_id), Ok(detached(source_page, 2)));
+
+        let source_page = page("source");
+        let mut inner = FakeRegistry::default();
+        let register = detached_register(&mut inner, &moved_id, &source_page, "old");
+        let mut registry = RacingRegistry {
+            inner,
+            moved_id: moved_id.clone(),
+            source_page: source_page.clone(),
+            interfere: true,
+        };
+        let mut bank = RegisterBank::default();
+        bank.insert('a', register).unwrap();
+        let incoming = BlockRegister::without_identity("new".to_owned());
+
+        let failure = bank.replace('a', incoming, &mut registry).unwrap_err();
+        assert_eq!(
+            failure.error,
+            RegisterCleanupError::Registry(
+                "identity is not detached at the expected page and generation"
+            )
+        );
+        assert_eq!(bank.get('a').unwrap().visible_text(), "old");
+        assert_eq!(failure.register.visible_text(), "new");
+        assert_eq!(
+            registry.state(&moved_id),
+            Ok(detached(source_page.clone(), 2))
+        );
+        bank.replace('a', failure.register, &mut registry).unwrap();
+        assert_eq!(bank.get('a').unwrap().visible_text(), "new");
+        assert_eq!(registry.state(&moved_id), Ok(detached(source_page, 2)));
     }
 
     #[test]
@@ -1941,10 +2039,24 @@ mod tests {
         assert_eq!(
             bank.clear('a', &mut registry),
             Err(RegisterClearError::Identity(
-                IdentityPlanError::DeleteIdentityMissing(moved_id)
+                IdentityPlanError::DeleteIdentityMissing(moved_id.clone())
             ))
         );
         assert!(bank.get('a').is_some());
+
+        let failure = bank
+            .replace(
+                'a',
+                BlockRegister::without_identity("new".to_owned()),
+                &mut registry,
+            )
+            .unwrap_err();
+        assert_eq!(
+            failure.error,
+            RegisterCleanupError::Identity(IdentityPlanError::DeleteIdentityMissing(moved_id))
+        );
+        assert_eq!(failure.register.visible_text(), "new");
+        assert_eq!(bank.get('a').unwrap().visible_text(), "one");
     }
 
     #[test]
@@ -2000,6 +2112,266 @@ mod tests {
         assert_eq!(registry.state(&second_id), Ok(IdentityState::Retired));
     }
 
+    fn detached_register(
+        registry: &mut FakeRegistry,
+        block_id: &BlockId,
+        source_page: &PageId,
+        text: &str,
+    ) -> BlockRegister {
+        registry.seed(block_id.clone(), source_page.clone());
+        let (register, plan) =
+            plan_delete(source_page, block_id, text.to_owned(), registry).unwrap();
+        registry.apply(&plan.changes).unwrap();
+        register
+    }
+
+    #[test]
+    fn replacing_a_register_retires_only_the_last_old_owner() {
+        for keep_alias in [false, true] {
+            let source = page("source");
+            let old_id = id("old001");
+            let new_id = id("new001");
+            let mut registry = FakeRegistry::default();
+            let old = detached_register(&mut registry, &old_id, &source, "old");
+            let new = detached_register(&mut registry, &new_id, &source, "new");
+            let mut bank = RegisterBank::default();
+            bank.insert('a', old).unwrap();
+            if keep_alias {
+                bank.alias('a', 'b').unwrap();
+            }
+
+            bank.replace('a', new, &mut registry).unwrap();
+
+            assert_eq!(bank.get('a').unwrap().visible_text(), "new");
+            assert_eq!(registry.state(&new_id), Ok(detached(source.clone(), 1)));
+            if keep_alias {
+                assert_eq!(registry.state(&old_id), Ok(detached(source.clone(), 1)));
+                bank.clear('b', &mut registry).unwrap();
+            }
+            assert_eq!(registry.state(&old_id), Ok(IdentityState::Retired));
+            let paste =
+                plan_paste(bank.get('a').unwrap(), &page("target"), None, &registry).unwrap();
+            assert_eq!(
+                paste.decision,
+                IdentityDecision::Paste {
+                    assigned_id: Some(new_id.clone()),
+                    reused_source_id: true,
+                }
+            );
+            registry.apply(&paste.changes).unwrap();
+            bank.clear('a', &mut registry).unwrap();
+            assert_eq!(registry.state(&new_id), Ok(live(page("target"), 1)));
+        }
+    }
+
+    #[test]
+    fn failed_replacement_preserves_old_slot_and_returns_new_register() {
+        for fail_read in [false, true] {
+            let source = page("source");
+            let old_id = id("old001");
+            let new_id = id("new001");
+            let mut registry = FakeRegistry::default();
+            let old = detached_register(&mut registry, &old_id, &source, "old");
+            let new = detached_register(&mut registry, &new_id, &source, "new");
+            let mut bank = RegisterBank::default();
+            bank.insert('a', old).unwrap();
+            registry.fail_state_reads = fail_read;
+            registry.fail_next_apply = !fail_read;
+            let before = registry.clone();
+
+            let failure = bank.replace('a', new, &mut registry).unwrap_err();
+
+            let expected = if fail_read {
+                RegisterCleanupError::Identity(IdentityPlanError::Registry(
+                    "registry state read failed",
+                ))
+            } else {
+                RegisterCleanupError::Registry("registry transaction failed")
+            };
+            assert_eq!(failure.error, expected);
+            assert_eq!(bank.get('a').unwrap().visible_text(), "old");
+            assert_eq!(failure.register.visible_text(), "new");
+            assert_eq!(failure.register.identity().unwrap().id, new_id);
+            assert_eq!(registry, before);
+
+            registry.fail_state_reads = false;
+            registry.fail_next_apply = false;
+            bank.replace('a', failure.register, &mut registry).unwrap();
+            assert_eq!(registry.state(&old_id), Ok(IdentityState::Retired));
+            assert_eq!(registry.state(&new_id), Ok(detached(source, 1)));
+        }
+    }
+
+    #[test]
+    fn replacement_reports_wrong_source_page_without_losing_either_register() {
+        let source = page("source");
+        let block_id = id("move01");
+        let mut registry = FakeRegistry::default();
+        let register = detached_register(&mut registry, &block_id, &source, "old");
+        registry
+            .detached
+            .insert(block_id.clone(), (page("other"), DetachGeneration::new(1)));
+        let before = registry.clone();
+        let mut bank = RegisterBank::default();
+        bank.insert('a', register).unwrap();
+        let incoming = BlockRegister::without_identity("new".to_owned());
+
+        let failure = bank.replace('a', incoming, &mut registry).unwrap_err();
+
+        assert_eq!(
+            failure.error,
+            RegisterCleanupError::Identity(IdentityPlanError::DetachedRegisterPageMismatch(
+                block_id
+            ))
+        );
+        assert_eq!(bank.get('a').unwrap().visible_text(), "old");
+        assert_eq!(failure.register.visible_text(), "new");
+        assert_eq!(registry, before);
+    }
+
+    #[test]
+    fn incoming_alias_prevents_retiring_the_detachment_it_replaces() {
+        let source = page("source");
+        let block_id = id("move01");
+        let mut registry = FakeRegistry::default();
+        let register = detached_register(&mut registry, &block_id, &source, "old");
+        let mut bank = RegisterBank::default();
+        bank.insert('a', register).unwrap();
+        let incoming = bank.get('a').unwrap().tracked_alias();
+
+        bank.replace('a', incoming, &mut registry).unwrap();
+
+        assert_eq!(registry.state(&block_id), Ok(detached(source, 1)));
+        bank.clear('a', &mut registry).unwrap();
+        assert_eq!(registry.state(&block_id), Ok(IdentityState::Retired));
+    }
+
+    #[test]
+    fn replacing_with_an_alias_is_retryable_and_keeps_source_ownership() {
+        let source = page("source");
+        let source_id = id("source1");
+        let target_id = id("target1");
+        let mut registry = FakeRegistry::default();
+        let source_register = detached_register(&mut registry, &source_id, &source, "source");
+        let target_register = detached_register(&mut registry, &target_id, &source, "target");
+        let mut bank = RegisterBank::default();
+        bank.insert('a', source_register).unwrap();
+        bank.insert('b', target_register).unwrap();
+        registry.fail_next_apply = true;
+        let before = registry.clone();
+
+        assert_eq!(
+            bank.replace_with_alias('a', 'b', &mut registry),
+            Err(RegisterAliasReplaceError::Cleanup(
+                RegisterCleanupError::Registry("registry transaction failed")
+            ))
+        );
+        assert_eq!(bank.get('a').unwrap().visible_text(), "source");
+        assert_eq!(bank.get('b').unwrap().visible_text(), "target");
+        assert_eq!(registry, before);
+
+        registry.fail_next_apply = false;
+        bank.replace_with_alias('a', 'b', &mut registry).unwrap();
+        assert_eq!(bank.get('a').unwrap().visible_text(), "source");
+        assert_eq!(bank.get('b').unwrap().visible_text(), "source");
+        assert_eq!(registry.state(&target_id), Ok(IdentityState::Retired));
+        bank.clear('a', &mut registry).unwrap();
+        assert_eq!(registry.state(&source_id), Ok(detached(source, 1)));
+        bank.clear('b', &mut registry).unwrap();
+        assert_eq!(registry.state(&source_id), Ok(IdentityState::Retired));
+    }
+
+    #[test]
+    fn alias_replacement_handles_missing_source_and_same_slot_without_cleanup() {
+        let mut bank = RegisterBank::default();
+        let mut registry = FakeRegistry::default();
+        assert_eq!(
+            bank.replace_with_alias('a', 'b', &mut registry),
+            Err(RegisterAliasReplaceError::EmptySource('a'))
+        );
+        let source = page("source");
+        let block_id = id("move01");
+        let register = detached_register(&mut registry, &block_id, &source, "one");
+        bank.insert('a', register).unwrap();
+        registry.fail_state_reads = true;
+        registry.fail_next_apply = true;
+        let before = registry.clone();
+
+        bank.replace_with_alias('a', 'a', &mut registry).unwrap();
+
+        assert_eq!(bank.get('a').unwrap().visible_text(), "one");
+        assert_eq!(registry, before);
+    }
+
+    #[test]
+    fn alias_replacement_distinguishes_stale_and_current_generations() {
+        for replace_current in [false, true] {
+            let source = page("source");
+            let block_id = id("move01");
+            let mut registry = FakeRegistry::default();
+            let register = detached_register(&mut registry, &block_id, &source, "first");
+            let mut bank = RegisterBank::default();
+            bank.insert('a', register).unwrap();
+            bank.alias('a', 'b').unwrap();
+            let paste = plan_paste(bank.get('a').unwrap(), &source, None, &registry).unwrap();
+            registry.apply(&paste.changes).unwrap();
+            bank.clear('a', &mut registry).unwrap();
+            let (current, delete) =
+                plan_delete(&source, &block_id, "second".to_owned(), &registry).unwrap();
+            registry.apply(&delete.changes).unwrap();
+            bank.insert('a', current).unwrap();
+
+            if replace_current {
+                bank.replace_with_alias('b', 'a', &mut registry).unwrap();
+                assert_eq!(registry.state(&block_id), Ok(IdentityState::Retired));
+            } else {
+                bank.replace_with_alias('a', 'b', &mut registry).unwrap();
+                assert_eq!(registry.state(&block_id), Ok(detached(source.clone(), 2)));
+                bank.clear('a', &mut registry).unwrap();
+                assert_eq!(registry.state(&block_id), Ok(detached(source, 2)));
+                bank.clear('b', &mut registry).unwrap();
+                assert_eq!(registry.state(&block_id), Ok(IdentityState::Retired));
+            }
+        }
+    }
+
+    #[test]
+    fn replacement_supports_empty_slots_and_registers_without_identity() {
+        let source = page("source");
+        let block_id = id("move01");
+        let mut registry = FakeRegistry::default();
+        let register = detached_register(&mut registry, &block_id, &source, "move");
+        let mut bank = RegisterBank::default();
+        bank.replace('a', register, &mut registry).unwrap();
+        bank.replace(
+            'a',
+            BlockRegister::without_identity("plain".to_owned()),
+            &mut registry,
+        )
+        .unwrap();
+
+        assert_eq!(bank.get('a').unwrap().visible_text(), "plain");
+        assert_eq!(registry.state(&block_id), Ok(IdentityState::Retired));
+        bank.clear('a', &mut registry).unwrap();
+
+        let yanked_id = id("yank01");
+        registry.seed(yanked_id.clone(), source.clone());
+        bank.insert(
+            'b',
+            BlockRegister::yank("yanked".to_owned(), yanked_id.clone(), source.clone()),
+        )
+        .unwrap();
+        registry.fail_state_reads = true;
+        bank.replace(
+            'b',
+            BlockRegister::without_identity("plain".to_owned()),
+            &mut registry,
+        )
+        .unwrap();
+        registry.fail_state_reads = false;
+        assert_eq!(registry.state(&yanked_id), Ok(live(source, 0)));
+    }
+
     #[test]
     fn discarding_an_uninstalled_register_returns_it_if_retirement_fails() {
         let source_page = page("source");
@@ -2027,7 +2399,7 @@ mod tests {
     #[test]
     fn bounded_register_histories_match_an_independent_ownership_model() {
         const SLOTS: [char; 2] = ['a', 'b'];
-        const ACTIONS: usize = 8;
+        const ACTIONS: usize = 10;
         const DEPTH: u32 = 5;
         for encoded in 0..ACTIONS.pow(DEPTH) {
             let mut registry = FakeRegistry::default();
@@ -2093,6 +2465,23 @@ mod tests {
                                 && !slots.contains(&Some(captured))
                             {
                                 state = OwnershipModelState::Retired;
+                            }
+                        }
+                    }
+                    8 | 9 => {
+                        let source = action - 8;
+                        let target = 1 - source;
+                        if let Some(captured) = slots[source] {
+                            let replaced = slots[target];
+                            bank.replace_with_alias(SLOTS[source], SLOTS[target], &mut registry)
+                                .unwrap();
+                            slots[target] = Some(captured);
+                            if let Some(replaced) = replaced {
+                                if state == OwnershipModelState::Detached(replaced)
+                                    && !slots.contains(&Some(replaced))
+                                {
+                                    state = OwnershipModelState::Retired;
+                                }
                             }
                         }
                     }

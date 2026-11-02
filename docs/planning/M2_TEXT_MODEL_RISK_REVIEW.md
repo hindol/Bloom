@@ -156,11 +156,22 @@ live, detached, or retired, paste and final clear report the missing registry
 entry instead of silently abandoning the register. An uninstalled register can
 also be explicitly discarded; if cleanup fails, the caller gets the register
 back for retry.
-The prototype does not define Vim register names or replacement semantics:
-atomic replacement, integration with the real register lifecycle, shutdown,
-undo, and crash recovery remain required before this control is production
-ready. Dropping an uninstalled register or its owner cannot perform fallible
-registry cleanup automatically.
+The prototype does not define Vim register names or production replacement
+semantics. Integration with the real register lifecycle, shutdown, undo, and
+crash recovery remain required before this control is production ready.
+Dropping an uninstalled register or its owner cannot perform fallible registry
+cleanup automatically.
+
+For the in-memory spike, replacing a slot must first determine whether the
+old detachment still has another tracked owner, including the incoming
+register if it carries the same ID, source page, and generation. Retire only
+an unowned detachment whose registry state still matches that exact owner.
+If registry lookup or retirement fails, retain the old slot and return the
+incoming register to the caller for retry; neither register may be silently
+discarded. Replacing a slot with an alias of another slot must leave the source
+intact, handle a same-slot request as a no-op, and report a missing source.
+These are synchronous ownership rules only: they do not make a prior delete,
+register replacement, or recovery after a crash one durable transaction.
 
 ### Multi-block structural plans: spike constraints
 
@@ -232,13 +243,16 @@ the legacy `dd`/`p` or `yy`/`p` streams. The two-phase
 move can leave a detached identity in its register after a failed paste or
 process interruption. The prototype now assigns per-ID detachment generations
 and rechecks them in delete, move, discard, join, and split batches. Its
-register bank tracks aliases and retires a matching detachment only on the last
-clear; failed retirement leaves the slot intact. A bounded independent model
-checks all 32,768 five-action schedules of delete, move, alias, and clear
-across two slots, including stale aliases; inapplicable actions are skipped.
-The same model comparisons reject injected premature-retirement and
-stale-reuse outcomes. These are in-memory prototype controls only. The actual
-editor register lifecycle does not invoke this bank
+register bank tracks aliases and retires a matching detachment only when its
+last owner is cleared or replaced. Replacement keeps the old slot and returns
+the incoming register if registry reads or retirement fail; alias replacement
+retains its source. Tests cover ownership across matching and stale
+generations, same-slot replacement, and an intervening registry change. A
+bounded independent model checks all 100,000 five-action schedules of delete,
+move, alias, clear, and alias replacement across two slots; inapplicable
+actions are skipped. The same model comparisons reject injected
+premature-retirement and stale-reuse outcomes. These are in-memory prototype
+controls only. The actual editor register lifecycle does not invoke this bank
 on replacement or clear; durable generation storage and transaction recovery
 also remain unimplemented.
 
