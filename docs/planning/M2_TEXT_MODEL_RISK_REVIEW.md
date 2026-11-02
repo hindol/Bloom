@@ -47,6 +47,18 @@ prototype's join/split canonical-text transaction, not a production
 streams cannot serve as transaction oracles for the intended identity
 semantics; the bridge does not authorize ADR-3.
 
+The unchanged legacy CI baseline also has two reproducible e2e failures:
+`multiple_undo_redo` observes `onetwo three ` where its setup expects
+`one two three`, and `theme_persists_to_config_without_corrupting_views`
+expects the literal name of a default view that is omitted from the migrated
+default configuration. Root Clippy also reports three warnings in the legacy
+undo implementation. These failures are visible in
+[run 41370494835](https://github.com/hindol/Bloom/actions/runs/41370494835)
+and reproduce locally. They are separate from rewrite acceptance. The oracle
+preservation constraints below do not authorize changing legacy tests, source,
+or CI gates to make this baseline green; resolve that conflict with the human
+before altering the oracle.
+
 ## Scope and ownership
 
 - `bloom-text` owns canonical text, parsed ID-token spans, and projection
@@ -150,6 +162,26 @@ undo, and crash recovery remain required before this control is production
 ready. Dropping an uninstalled register or its owner cannot perform fallible
 registry cleanup automatically.
 
+### Multi-block structural plans: spike constraints
+
+Join and split must work in documents containing unrelated ordinary and legacy
+mirror tokens without reconstructing the whole document from visible text.
+Resolve each participating ordinary ID uniquely, reject duplicate participating
+IDs and a split ID that collides with any parsed token, and require the checked
+visible edit to address the participating lines. An unrelated mirror may
+reference the same ID; it is not another live identity and must not be changed.
+
+Rewrite only the participating canonical line content; preserve all other raw
+bytes, including token spelling, whitespace, and original line endings. Join
+retires only the second block's ID; split retains the original on the left and
+adds the fresh ID on the right. Reparse the complete candidate and require both
+the expected visible result and the exact ordered sequence of preserved,
+retired, and added token kinds and IDs. This full check must reject changes in
+Markdown context that would hide, expose, or reinterpret unrelated tokens.
+Keep grapheme, CRLF, inline-code, and failure-atomicity checks. The prototype
+still reparses the whole document; it does not claim an incremental production
+path, durable state, undo support, or complete Vim integration.
+
 ### Current prototype evidence (not acceptance)
 
 `rewrite/crates/bloom-kernel/src/identity.rs` now contains a policy prototype
@@ -170,14 +202,23 @@ boundary and verify that the hidden token is preserved. Fixture-driven
 canonical-text planners replay the observed `J` and split ranges, then commit
 the resulting text with the join retirement or split reservation. The split
 planner preserves the current line's LF/CRLF style in this prototype. The
-planners reject edits on unrelated lines and verify the resulting visible text
-and parsed identities before returning a plan. They currently support
-exactly two ordinary ID tokens in the whole document for join, and one for
-split; documents with additional tokens are explicitly rejected.
+planners reject edits on unrelated lines, rewrite only the participating
+canonical lines, and reparse the complete result before returning a plan.
+Additional ordinary IDs and legacy mirror tokens are preserved, including
+mirrors referencing a participating ID; duplicated participating ordinary IDs
+and fresh-ID collisions are rejected. The checks compare both the visible text
+and the full ordered token kinds and IDs. Reference cases cover multi-block
+LF/CRLF documents, Unicode graphemes, trailing whitespace, and missing final
+newlines; injected missing, changed, and reordered tokens are detected even
+when the visible text is unchanged. The recorded legacy `J` and split ranges
+also run with surrounding ordinary and mirror tokens. Parser-context changes
+that would reinterpret tokens are rejected, and an insertion at an ID-only
+leading token still requires a structural decision.
 The structural `plan_join_edit` and `plan_split_edit` facades bundle canonical
 text with the corresponding registry changes, so a failed text plan returns no
 commit-ready edit. Their tests exercise this path, including a rejected
-inline-code split that leaves the source text and registry unchanged.
+inline-code split, a candidate collision, a parser-context change, and injected
+registry failures that leave the source text and registry unchanged.
 
 The kernel prototype now also plans canonical deletion of one uniquely
 identified block line and linewise paste of a one-line register. Delete and
@@ -248,8 +289,9 @@ ADR-3 can be accepted only when:
    introducing a cross-workspace dependency. The serialized bridge covers
    append, structural command streams, and visible-only boundary deletions.
    Fixture-driven kernel tests replay the `J` and split edit ranges as
-   canonical-text transactions, and policy/text-plan tests cover move/copy
-   identity preservation; neither is a production Vim-to-document replay.
+   canonical-text transactions, including with surrounding token-bearing
+   lines, and policy/text-plan tests cover move/copy identity preservation;
+   neither is a production Vim-to-document replay.
 3. Every supported identity rule has a test or is explicitly recorded as
    uncovered; no rule is inferred from the current side-table implementation.
 4. The verdict and any remaining gaps are recorded. If the gate fails, prototype

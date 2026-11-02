@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use bloom_text::{BlockIdMarker, Doc, ProjectionError};
+use bloom_text::{BlockIdMarker, BlockIdToken, Doc, ProjectionError, VisibleProjection};
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PageId(String);
@@ -664,18 +664,11 @@ pub fn plan_join_text(
     retired_id: &BlockId,
 ) -> Result<String, IdentityTextPlanError> {
     let projection = Doc::new(canonical_text).visible_projection();
-    if projection.tokens().len() != 2
-        || projection.tokens()[0].marker() != BlockIdMarker::Block
-        || projection.tokens()[1].marker() != BlockIdMarker::Block
-    {
-        return Err(IdentityTextPlanError::UnsupportedTokenSet);
-    }
-    if projection.tokens()[0].id() != retained_id.as_str()
-        || projection.tokens()[1].id() != retired_id.as_str()
-        || retained_id == retired_id
-    {
+    if retained_id == retired_id {
         return Err(IdentityTextPlanError::IdentityMismatch);
     }
+    let (_, retained_token) = unique_block_token(&projection, retained_id)?;
+    let (retired_index, retired_token) = unique_block_token(&projection, retired_id)?;
 
     projection
         .lower(
@@ -691,14 +684,28 @@ pub fn plan_join_text(
         return Err(IdentityTextPlanError::InvalidJoinEdit);
     }
     let joined_line = visible[..start].chars().filter(|ch| *ch == '\n').count();
-    if line_at(visible, projection.tokens()[0].visible_boundary().get()) != joined_line
-        || line_at(visible, projection.tokens()[1].visible_boundary().get()) != joined_line + 1
+    if line_at(visible, retained_token.visible_boundary().get()) != joined_line
+        || line_at(visible, retired_token.visible_boundary().get()) != joined_line + 1
     {
         return Err(IdentityTextPlanError::InvalidJoinEdit);
     }
+    let left = line_content_range(visible, joined_line)?;
+    let right = line_content_range(visible, joined_line + 1)?;
+    let joined = format!("{}{}{}", &visible[left], replacement, &visible[right]);
+    let joined = append_block_id(&joined, 0, retained_id)?;
+    let raw_left = line_content_range(canonical_text, joined_line)?;
+    let raw_right = line_content_range(canonical_text, joined_line + 1)?;
+    let mut planned = canonical_text.to_owned();
+    planned.replace_range(raw_left.start..raw_right.end, &joined);
+
     let edited = replace_chars(visible, visible_range, replacement);
-    let planned = append_block_id(&edited, joined_line, retained_id)?;
-    validate_planned_text(&planned, &edited, &[retained_id])?;
+    let mut expected_tokens = projection
+        .tokens()
+        .iter()
+        .map(|token| (token.marker(), token.id()))
+        .collect::<Vec<_>>();
+    expected_tokens.remove(retired_index);
+    validate_planned_text(&planned, &edited, &expected_tokens)?;
     Ok(planned)
 }
 
@@ -709,11 +716,16 @@ pub fn plan_split_text(
     right_id: &BlockId,
 ) -> Result<String, IdentityTextPlanError> {
     let projection = Doc::new(canonical_text).visible_projection();
-    if projection.tokens().len() != 1 || projection.tokens()[0].marker() != BlockIdMarker::Block {
-        return Err(IdentityTextPlanError::UnsupportedTokenSet);
-    }
-    if projection.tokens()[0].id() != left_id.as_str() || left_id == right_id {
+    if left_id == right_id {
         return Err(IdentityTextPlanError::IdentityMismatch);
+    }
+    let (left_index, left_token) = unique_block_token(&projection, left_id)?;
+    if projection
+        .tokens()
+        .iter()
+        .any(|token| token.id() == right_id.as_str())
+    {
+        return Err(IdentityTextPlanError::DuplicateIdentity);
     }
 
     projection
@@ -729,14 +741,31 @@ pub fn plan_split_text(
         .chars()
         .filter(|ch| *ch == '\n')
         .count();
-    if line_at(visible, projection.tokens()[0].visible_boundary().get()) != left_line {
+    if line_at(visible, left_token.visible_boundary().get()) != left_line {
         return Err(IdentityTextPlanError::InvalidSplitEdit);
     }
     let line_ending = line_ending_at(visible, split_at);
+    let line = line_content_range(visible, left_line)?;
+    let split = format!(
+        "{}{}{}",
+        &visible[line.start..split_byte],
+        line_ending,
+        &visible[split_byte..line.end]
+    );
+    let split = append_block_id(&split, 0, left_id)?;
+    let split = append_block_id(&split, 1, right_id)?;
+    let raw_line = line_content_range(canonical_text, left_line)?;
+    let mut planned = canonical_text.to_owned();
+    planned.replace_range(raw_line, &split);
+
     let edited = replace_chars(visible, split_at..split_at, line_ending);
-    let with_left_id = append_block_id(&edited, left_line, left_id)?;
-    let planned = append_block_id(&with_left_id, left_line + 1, right_id)?;
-    validate_planned_text(&planned, &edited, &[left_id, right_id])?;
+    let mut expected_tokens = projection
+        .tokens()
+        .iter()
+        .map(|token| (token.marker(), token.id()))
+        .collect::<Vec<_>>();
+    expected_tokens.insert(left_index + 1, (BlockIdMarker::Block, right_id.as_str()));
+    validate_planned_text(&planned, &edited, &expected_tokens)?;
     Ok(planned)
 }
 
@@ -1104,20 +1133,37 @@ pub fn plan_paste_edit<'a, R: BlockIdRegistry>(
 fn validate_planned_text(
     canonical_text: &str,
     visible_text: &str,
-    ids: &[&BlockId],
+    expected_tokens: &[(BlockIdMarker, &str)],
 ) -> Result<(), IdentityTextPlanError> {
     let projection = Doc::new(canonical_text).visible_projection();
     if projection.text() != visible_text
-        || projection.tokens().len() != ids.len()
+        || projection.tokens().len() != expected_tokens.len()
         || projection
             .tokens()
             .iter()
-            .zip(ids)
-            .any(|(token, id)| token.marker() != BlockIdMarker::Block || token.id() != id.as_str())
+            .zip(expected_tokens)
+            .any(|(token, (marker, id))| token.marker() != *marker || token.id() != *id)
     {
         return Err(IdentityTextPlanError::InvalidResult);
     }
     Ok(())
+}
+
+fn unique_block_token<'a>(
+    projection: &'a VisibleProjection,
+    id: &BlockId,
+) -> Result<(usize, &'a BlockIdToken), IdentityTextPlanError> {
+    let mut matches =
+        projection.tokens().iter().enumerate().filter(|(_, token)| {
+            token.marker() == BlockIdMarker::Block && token.id() == id.as_str()
+        });
+    let found = matches
+        .next()
+        .ok_or(IdentityTextPlanError::IdentityMismatch)?;
+    if matches.next().is_some() {
+        return Err(IdentityTextPlanError::IdentityMismatch);
+    }
+    Ok(found)
 }
 
 fn line_at(text: &str, char_offset: usize) -> usize {
@@ -1148,30 +1194,46 @@ fn append_block_id(
     line_index: usize,
     id: &BlockId,
 ) -> Result<String, IdentityTextPlanError> {
-    let line_start = if line_index == 0 {
-        0
+    let line = line_content_range(text, line_index)?;
+    let content_end = if line.end == text.len()
+        && line.end > line.start
+        && text.as_bytes()[line.end - 1] == b'\r'
+    {
+        line.end - 1
     } else {
-        text.char_indices()
-            .filter(|(_, ch)| *ch == '\n')
-            .nth(line_index - 1)
-            .map_or(text.len(), |(byte, _)| byte + 1)
+        line.end
     };
-    let line_end = text[line_start..]
-        .find('\n')
-        .map_or(text.len(), |offset| line_start + offset);
-    if line_index > text.chars().filter(|ch| *ch == '\n').count() {
-        return Err(IdentityTextPlanError::LineOutOfBounds(line_index));
-    }
-    let content_end = if line_end > line_start && text.as_bytes()[line_end - 1] == b'\r' {
-        line_end - 1
-    } else {
-        line_end
-    };
-    let prefix = if content_end == line_start { "" } else { " " };
+    let prefix = if content_end == line.start { "" } else { " " };
     let insertion = format!("{prefix}^{}", id.as_str());
     let mut result = text.to_owned();
     result.insert_str(content_end, &insertion);
     Ok(result)
+}
+
+fn line_content_range(
+    text: &str,
+    line_index: usize,
+) -> Result<std::ops::Range<usize>, IdentityTextPlanError> {
+    let start = if line_index == 0 {
+        0
+    } else {
+        text.match_indices('\n')
+            .nth(line_index - 1)
+            .map(|(byte, _)| byte + 1)
+            .ok_or(IdentityTextPlanError::LineOutOfBounds(line_index))?
+    };
+    let end = match text[start..].find('\n') {
+        Some(offset) => {
+            let end = start + offset;
+            if end > start && text.as_bytes()[end - 1] == b'\r' {
+                end - 1
+            } else {
+                end
+            }
+        }
+        None => text.len(),
+    };
+    Ok(start..end)
 }
 
 fn char_to_byte(text: &str, char_offset: usize) -> Option<usize> {
@@ -1230,7 +1292,7 @@ mod tests {
         IdentityPlanError, IdentityState, PageId, RegisterBank, RegisterCleanupError,
         RegisterClearError, RegisterIdentity, RegisterOperation, RegisterSlotError, RegistryChange,
     };
-    use bloom_text::Doc;
+    use bloom_text::{BlockIdMarker, Doc, ProjectionError};
 
     const ADR3_IDENTITY_ORACLE: &str =
         include_str!("../../../../testdata/adr3_vim_identity_oracle.v1");
@@ -2576,6 +2638,67 @@ mod tests {
     }
 
     #[test]
+    fn recorded_vim_structural_edits_preserve_surrounding_token_blocks() {
+        for case in ["join", "split"] {
+            let fields = oracle_case(case);
+            let source_id = if case == "join" { "left01" } else { "split1" };
+            let prefix = format!("before ^other1\nref ^={source_id}\n");
+            let suffix = "after ^other2\n";
+            let mut canonical = format!("{prefix}{}{suffix}", decode_oracle_text(fields[1]));
+            let prefix_projection = Doc::new(&prefix).visible_projection();
+            let suffix_projection = Doc::new(suffix).visible_projection();
+            let offset = prefix_projection.text().chars().count();
+            let (start, end, replacement) = oracle_edit(fields[6]);
+            let mut registry = FakeRegistry::default();
+            registry.seed(id(source_id), page("page"));
+
+            let expected_changed = if case == "join" {
+                registry.seed(id("right1"), page("page"));
+                let plan = plan_join_edit(
+                    &page("page"),
+                    &mut canonical,
+                    start + offset..end + offset,
+                    &replacement,
+                    &id("left01"),
+                    &id("right1"),
+                    &mut registry,
+                )
+                .unwrap();
+                commit_planned_identity_edit(plan).unwrap();
+                assert_eq!(registry.state(&id("right1")), Ok(IdentityState::Retired));
+                "left right ^left01\n"
+            } else {
+                assert_eq!(start, end);
+                assert_eq!(replacement, "\n");
+                let plan = plan_split_edit(
+                    &page("page"),
+                    &mut canonical,
+                    start + offset,
+                    &id("split1"),
+                    id("split2"),
+                    &mut registry,
+                )
+                .unwrap();
+                commit_planned_identity_edit(plan).unwrap();
+                assert_eq!(registry.state(&id("split2")), Ok(live(page("page"), 0)));
+                "alpha ^split1\n beta ^split2\n"
+            };
+
+            assert_eq!(canonical, format!("{prefix}{expected_changed}{suffix}"));
+            assert_eq!(
+                Doc::new(&canonical).visible_projection().text(),
+                format!(
+                    "{}{}{}",
+                    prefix_projection.text(),
+                    decode_oracle_text(fields[5]),
+                    suffix_projection.text(),
+                )
+            );
+            assert_eq!(registry.state(&id(source_id)), Ok(live(page("page"), 0)));
+        }
+    }
+
+    #[test]
     fn structural_text_plans_preserve_crlf_and_validate_line_bounds() {
         let retained = id("left01");
         let retired = id("right1");
@@ -2640,25 +2763,417 @@ mod tests {
     }
 
     #[test]
-    fn structural_text_plans_reject_additional_tokens() {
+    fn join_preserves_unrelated_tokens_and_exact_canonical_bytes() {
+        let prefix = concat!(
+            "---\r\n",
+            "title: ^frontmatter\r\n",
+            "---\r\n",
+            "π ^head01 \r\n",
+            "ref ^=left01\t\r\n",
+        );
+        let suffix = concat!(
+            "extra ^third_1\t\r\n",
+            "ref ^=right1 \r\n",
+            "```rust\r\n",
+            "literal ^fenced\r\n",
+            "```\r\n",
+            "tail ^last01",
+        );
+        let mut canonical = format!("{prefix}left ^left01\r\nright ^right1  \r\n{suffix}");
+        let projection = Doc::new(&canonical).visible_projection();
+        let boundary = projection.text().find("left\r\nright").unwrap() + "left".len();
+        let start = projection.text()[..boundary].chars().count();
+        let mut registry = FakeRegistry::default();
+        registry.seed(id("left01"), page("page"));
+        registry.seed(id("right1"), page("page"));
+
+        let plan = plan_join_edit(
+            &page("page"),
+            &mut canonical,
+            start..start + 2,
+            " ",
+            &id("left01"),
+            &id("right1"),
+            &mut registry,
+        )
+        .unwrap();
+        commit_planned_identity_edit(plan).unwrap();
+
+        assert_eq!(
+            canonical,
+            format!("{prefix}left right   ^left01\r\n{suffix}")
+        );
+        assert_eq!(registry.state(&id("left01")), Ok(live(page("page"), 0)));
+        assert_eq!(registry.state(&id("right1")), Ok(IdentityState::Retired));
+    }
+
+    #[test]
+    fn split_preserves_unrelated_tokens_and_exact_canonical_bytes() {
+        let prefix = "π ^head01 \nref ^=split1\t\n";
+        let suffix = "extra ^third_1\t\r\nref ^=split1 \r\ntail ^last01";
+        let mut canonical = format!("{prefix}alpha βeta ^split1  \r\n{suffix}");
+        let projection = Doc::new(&canonical).visible_projection();
+        let boundary = projection.text().find("alpha βeta").unwrap() + "alpha".len();
+        let split_at = projection.text()[..boundary].chars().count();
+        let mut registry = FakeRegistry::default();
+        registry.seed(id("split1"), page("page"));
+
+        let plan = plan_split_edit(
+            &page("page"),
+            &mut canonical,
+            split_at,
+            &id("split1"),
+            id("split2"),
+            &mut registry,
+        )
+        .unwrap();
+        commit_planned_identity_edit(plan).unwrap();
+
+        assert_eq!(
+            canonical,
+            format!("{prefix}alpha ^split1\r\n βeta   ^split2\r\n{suffix}")
+        );
+        assert_eq!(registry.state(&id("split1")), Ok(live(page("page"), 0)));
+        assert_eq!(registry.state(&id("split2")), Ok(live(page("page"), 0)));
+    }
+
+    fn block_line(content: &str, id: &str) -> String {
+        let separator = if content.is_empty() { "" } else { " " };
+        format!("{content}{separator}^{id}")
+    }
+
+    #[test]
+    fn multi_block_join_matches_line_local_reference_model() {
+        let mut cases = 0;
+        for ending in ["\n", "\r\n"] {
+            let prefix = format!("before ^other1 \t{ending}mirror ^=left01\t{ending}");
+            let prefix_len = Doc::new(&prefix)
+                .visible_projection()
+                .text()
+                .chars()
+                .count();
+            for suffix in [
+                String::new(),
+                format!("{ending}mirror ^=right1 \t{ending}after ^other2"),
+            ] {
+                for left in ["", "α", "🙂 x", "e\u{301}"] {
+                    for right in ["", "β", "q  "] {
+                        for tail in ["", " \t"] {
+                            let canonical = format!(
+                                "{prefix}{}{tail}{ending}{}{tail}{suffix}",
+                                block_line(left, "left01"),
+                                block_line(right, "right1"),
+                            );
+                            let start = prefix_len + left.chars().count() + tail.chars().count();
+                            let expected_visible = format!("{left}{tail} {right}{tail}");
+                            let expected = format!(
+                                "{prefix}{}{suffix}",
+                                block_line(&expected_visible, "left01")
+                            );
+
+                            assert_eq!(
+                                plan_join_text(
+                                    &canonical,
+                                    start..start + ending.chars().count(),
+                                    " ",
+                                    &id("left01"),
+                                    &id("right1"),
+                                ),
+                                Ok(expected),
+                                "input: {canonical:?}",
+                            );
+                            cases += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(cases, 96);
+    }
+
+    #[test]
+    fn multi_block_split_matches_line_local_reference_model() {
+        let mut cases = 0;
+        for ending in ["\n", "\r\n"] {
+            let prefix = format!("before ^other1 \t{ending}mirror ^=split1\t{ending}");
+            let prefix_len = Doc::new(&prefix)
+                .visible_projection()
+                .text()
+                .chars()
+                .count();
+            for suffix in [
+                String::new(),
+                format!("{ending}mirror ^=split1 \t{ending}after ^other2"),
+            ] {
+                for content in ["", "alpha beta", "é e\u{301}🙂", "  ", "🧑‍💻"] {
+                    for tail in ["", " \t"] {
+                        let canonical =
+                            format!("{prefix}{}{tail}{suffix}", block_line(content, "split1"));
+                        let visible = format!("{content}{tail}").chars().collect::<Vec<_>>();
+                        let projection = Doc::new(&canonical).visible_projection();
+                        for offset in 0..=visible.len() {
+                            let split_at = prefix_len + offset;
+                            if projection
+                                .range(split_at, split_at)
+                                .and_then(|range| projection.lower(range))
+                                .is_err()
+                            {
+                                continue;
+                            }
+                            let left = visible[..offset].iter().collect::<String>();
+                            let right = visible[offset..].iter().collect::<String>();
+                            let expected = format!(
+                                "{prefix}{}{ending}{}{suffix}",
+                                block_line(&left, "split1"),
+                                block_line(&right, "split2"),
+                            );
+
+                            assert_eq!(
+                                plan_split_text(&canonical, split_at, &id("split1"), &id("split2")),
+                                Ok(expected),
+                                "input: {canonical:?}, split offset: {offset}",
+                            );
+                            cases += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(cases >= 200, "only exercised {cases} valid split positions");
+    }
+
+    #[test]
+    fn structural_plans_reject_ambiguous_or_colliding_ids_without_mutation() {
         assert_eq!(
             plan_join_text(
-                "left ^left01\nright ^right1\nother ^third\n",
-                4..5,
+                "one ^left01\ntwo ^right1\nagain ^left01\n",
+                3..4,
                 " ",
                 &id("left01"),
-                &id("right1")
+                &id("right1"),
             ),
-            Err(super::IdentityTextPlanError::UnsupportedTokenSet)
+            Err(super::IdentityTextPlanError::IdentityMismatch)
+        );
+        assert_eq!(
+            plan_join_text(
+                "one ^left01\ntwo ^right1\nagain ^right1\n",
+                3..4,
+                " ",
+                &id("left01"),
+                &id("right1"),
+            ),
+            Err(super::IdentityTextPlanError::IdentityMismatch)
         );
         assert_eq!(
             plan_split_text(
-                "alpha beta ^split1\nother ^third\n",
-                5,
+                "one ^split1\ntwo ^split1\n",
+                1,
                 &id("split1"),
-                &id("split2")
+                &id("split2"),
             ),
-            Err(super::IdentityTextPlanError::UnsupportedTokenSet)
+            Err(super::IdentityTextPlanError::IdentityMismatch)
+        );
+        for other in ["other ^split2", "mirror ^=split2"] {
+            let mut canonical = format!("alpha ^split1\n{other}\n");
+            let before = canonical.clone();
+            let mut registry = FakeRegistry::default();
+            registry.seed(id("split1"), page("page"));
+            let before_registry = registry.clone();
+
+            assert!(matches!(
+                plan_split_edit(
+                    &page("page"),
+                    &mut canonical,
+                    2,
+                    &id("split1"),
+                    id("split2"),
+                    &mut registry,
+                ),
+                Err(IdentityEditPlanError::Text(
+                    super::IdentityTextPlanError::DuplicateIdentity
+                ))
+            ));
+            assert_eq!(canonical, before);
+            assert_eq!(registry, before_registry);
+        }
+    }
+
+    #[test]
+    fn structural_plans_preserve_unrelated_duplicate_legacy_ids() {
+        let join_input = "before ^other1\nleft ^left01\nright ^right1\nafter ^other1";
+        assert_eq!(
+            plan_join_text(join_input, 11..12, " ", &id("left01"), &id("right1")),
+            Ok("before ^other1\nleft right ^left01\nafter ^other1".to_owned())
+        );
+
+        let split_input = "before ^other1\nalpha ^split1\nafter ^other1";
+        assert_eq!(
+            plan_split_text(split_input, 9, &id("split1"), &id("split2")),
+            Ok("before ^other1\nal ^split1\npha ^split2\nafter ^other1".to_owned())
+        );
+    }
+
+    #[test]
+    fn multi_block_registry_failures_leave_canonical_bytes_unchanged() {
+        let mut join_text =
+            "other ^other1\nleft ^left01\nright ^right1\nmirror ^=right1\n".to_owned();
+        let join_before = join_text.clone();
+        let projection = Doc::new(&join_text).visible_projection();
+        let boundary = projection.text().find("left\nright").unwrap() + "left".len();
+        let start = projection.text()[..boundary].chars().count();
+        let mut join_registry = FakeRegistry::default();
+        join_registry.seed(id("left01"), page("page"));
+        join_registry.seed(id("right1"), page("page"));
+        join_registry.fail_next_apply = true;
+        let join_registry_before = join_registry.clone();
+        let join = plan_join_edit(
+            &page("page"),
+            &mut join_text,
+            start..start + 1,
+            " ",
+            &id("left01"),
+            &id("right1"),
+            &mut join_registry,
+        )
+        .unwrap();
+
+        assert_eq!(
+            commit_planned_identity_edit(join),
+            Err("registry transaction failed")
+        );
+        assert_eq!(join_text, join_before);
+        assert_eq!(join_registry, join_registry_before);
+
+        let mut split_text = "other ^other1\nalpha ^split1\nmirror ^=split1\n".to_owned();
+        let split_before = split_text.clone();
+        let projection = Doc::new(&split_text).visible_projection();
+        let boundary = projection.text().find("alpha").unwrap() + "alp".len();
+        let split_at = projection.text()[..boundary].chars().count();
+        let mut split_registry = FakeRegistry::default();
+        split_registry.seed(id("split1"), page("page"));
+        split_registry.fail_next_apply = true;
+        let split_registry_before = split_registry.clone();
+        let split = plan_split_edit(
+            &page("page"),
+            &mut split_text,
+            split_at,
+            &id("split1"),
+            id("split2"),
+            &mut split_registry,
+        )
+        .unwrap();
+
+        assert_eq!(
+            commit_planned_identity_edit(split),
+            Err("registry transaction failed")
+        );
+        assert_eq!(split_text, split_before);
+        assert_eq!(split_registry, split_registry_before);
+    }
+
+    #[test]
+    fn structural_result_validation_detects_injected_token_faults() {
+        let visible = "left right\nmirror\nother\n";
+        let expected = [
+            (BlockIdMarker::Block, "left01"),
+            (BlockIdMarker::Mirror, "right1"),
+            (BlockIdMarker::Block, "other1"),
+        ];
+        let correct = "left right ^left01\nmirror ^=right1\nother ^other1\n";
+        assert_eq!(
+            super::validate_planned_text(correct, visible, &expected),
+            Ok(())
+        );
+
+        for faulty in [
+            "left right ^left01\nmirror\nother ^other1\n",
+            "left right ^left01\nmirror ^right1\nother ^other1\n",
+            "left right ^left01\nmirror ^=other1\nother ^right1\n",
+        ] {
+            assert_eq!(Doc::new(faulty).visible_projection().text(), visible);
+            assert_eq!(
+                super::validate_planned_text(faulty, visible, &expected),
+                Err(super::IdentityTextPlanError::InvalidResult),
+                "fault was not detected: {faulty:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn multi_block_split_rejects_non_grapheme_and_leading_token_positions() {
+        let canonical = "other ^other1\na e\u{301} ^split1\n";
+        let projection = Doc::new(canonical).visible_projection();
+        let boundary = projection.text().find("e\u{301}").unwrap() + "e".len();
+        let offset = projection.text()[..boundary].chars().count();
+        assert_eq!(
+            plan_split_text(canonical, offset, &id("split1"), &id("split2")),
+            Err(super::IdentityTextPlanError::Projection(
+                ProjectionError::SplitsGrapheme { offset }
+            ))
+        );
+
+        let canonical = "other ^other1\n^split1\n";
+        let projection = Doc::new(canonical).visible_projection();
+        let offset = "other\n".chars().count();
+        assert_eq!(projection.tokens().len(), 2);
+        assert_eq!(
+            plan_split_text(canonical, offset, &id("split1"), &id("split2")),
+            Err(super::IdentityTextPlanError::Projection(
+                ProjectionError::InsertionAtLeadingToken { token_index: 1 }
+            ))
+        );
+    }
+
+    #[test]
+    fn split_rejects_parser_context_changes_to_unrelated_tokens() {
+        let mut canonical = "mirror ^=split1\nprefix ```a``` ^split1\noutside ^other1\n".to_owned();
+        let before = canonical.clone();
+        let projection = Doc::new(&canonical).visible_projection();
+        let boundary = projection.text().find("```a```").unwrap();
+        let split_at = projection.text()[..boundary].chars().count();
+        let mut registry = FakeRegistry::default();
+        registry.seed(id("split1"), page("page"));
+        let before_registry = registry.clone();
+
+        assert!(matches!(
+            plan_split_edit(
+                &page("page"),
+                &mut canonical,
+                split_at,
+                &id("split1"),
+                id("split2"),
+                &mut registry,
+            ),
+            Err(IdentityEditPlanError::Text(
+                super::IdentityTextPlanError::InvalidResult
+            ))
+        ));
+        assert_eq!(canonical, before);
+        assert_eq!(registry, before_registry);
+    }
+
+    #[test]
+    fn split_preserves_a_terminal_standalone_carriage_return() {
+        let canonical = "other ^other1\nhi ^split1\r";
+        let projection = Doc::new(canonical).visible_projection();
+        let end = projection.text().chars().count();
+
+        assert_eq!(
+            plan_split_text(canonical, end, &id("split1"), &id("split2")),
+            Ok("other ^other1\nhi ^split1\r\n^split2".to_owned()),
+        );
+    }
+
+    #[test]
+    fn split_preserves_a_carriage_return_before_a_crlf_separator() {
+        let canonical = "before ^other1\na\r ^split1\r\n";
+        assert_eq!(
+            append_block_id("a\r\r\n", 0, &id("split1")),
+            Ok("a\r ^split1\r\n".to_owned())
+        );
+        assert_eq!(
+            plan_split_text(canonical, 9, &id("split1"), &id("split2")),
+            Ok("before ^other1\na\r ^split1\r\n^split2\r\n".to_owned())
         );
     }
 
