@@ -127,7 +127,11 @@ Projection tests also exercise `x`/`X`/`D`-shaped ranges at a trailing token
 boundary and verify that the hidden token is preserved. Fixture-driven
 canonical-text planners replay the observed `J` and split ranges, then commit
 the resulting text with the join retirement or split reservation. The split
-planner preserves the current line's LF/CRLF style in this prototype.
+planner preserves the current line's LF/CRLF style in this prototype. The
+planners reject edits on unrelated lines and verify the resulting visible text
+and parsed identities before returning a plan. They currently support
+exactly two ordinary ID tokens in the whole document for join, and one for
+split; documents with additional tokens are explicitly rejected.
 
 This remains prototype evidence, not acceptance. It does not execute the
 identity matrix through a production Vim-to-document path; fresh ID candidates
@@ -136,6 +140,12 @@ detached register is overwritten are not implemented, and byte-identical
 undo/redo is not tested. `dd`/`p` and `yy`/`p` are recorded as real key streams
 but are not replayed through canonical-text transactions. ADR-3 remains
 unaccepted.
+
+An ordinary split inside an inline-code span can make the generated ID tokens
+unrecognizable to the current line-oriented token parser. The planner now
+rejects that result rather than silently losing identity, but the edit is
+still unsupported. Resolving this parser/projection interaction (or testing
+fallback (c)) is an acceptance blocker, not an approved change to editor UX.
 
 ## Acceptance gate
 

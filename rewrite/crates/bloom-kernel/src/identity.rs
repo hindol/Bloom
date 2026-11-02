@@ -133,6 +133,8 @@ pub enum IdentityTextPlanError {
     UnsupportedTokenSet,
     IdentityMismatch,
     InvalidJoinEdit,
+    InvalidSplitEdit,
+    InvalidResult,
     LineOutOfBounds(usize),
 }
 
@@ -343,8 +345,15 @@ pub fn plan_join_text(
         return Err(IdentityTextPlanError::InvalidJoinEdit);
     }
     let joined_line = visible[..start].chars().filter(|ch| *ch == '\n').count();
+    if line_at(visible, projection.tokens()[0].visible_boundary().get()) != joined_line
+        || line_at(visible, projection.tokens()[1].visible_boundary().get()) != joined_line + 1
+    {
+        return Err(IdentityTextPlanError::InvalidJoinEdit);
+    }
     let edited = replace_chars(visible, visible_range, replacement);
-    append_block_id(&edited, joined_line, retained_id)
+    let planned = append_block_id(&edited, joined_line, retained_id)?;
+    validate_planned_text(&planned, &edited, &[retained_id])?;
+    Ok(planned)
 }
 
 pub fn plan_split_text(
@@ -374,10 +383,41 @@ pub fn plan_split_text(
         .chars()
         .filter(|ch| *ch == '\n')
         .count();
+    if line_at(visible, projection.tokens()[0].visible_boundary().get()) != left_line {
+        return Err(IdentityTextPlanError::InvalidSplitEdit);
+    }
     let line_ending = line_ending_at(visible, split_at);
     let edited = replace_chars(visible, split_at..split_at, line_ending);
     let with_left_id = append_block_id(&edited, left_line, left_id)?;
-    append_block_id(&with_left_id, left_line + 1, right_id)
+    let planned = append_block_id(&with_left_id, left_line + 1, right_id)?;
+    validate_planned_text(&planned, &edited, &[left_id, right_id])?;
+    Ok(planned)
+}
+
+fn validate_planned_text(
+    canonical_text: &str,
+    visible_text: &str,
+    ids: &[&BlockId],
+) -> Result<(), IdentityTextPlanError> {
+    let projection = Doc::new(canonical_text).visible_projection();
+    if projection.text() != visible_text
+        || projection.tokens().len() != ids.len()
+        || projection
+            .tokens()
+            .iter()
+            .zip(ids)
+            .any(|(token, id)| token.marker() != BlockIdMarker::Block || token.id() != id.as_str())
+    {
+        return Err(IdentityTextPlanError::InvalidResult);
+    }
+    Ok(())
+}
+
+fn line_at(text: &str, char_offset: usize) -> usize {
+    text.chars()
+        .take(char_offset)
+        .filter(|ch| *ch == '\n')
+        .count()
 }
 
 fn replace_chars(text: &str, range: std::ops::Range<usize>, replacement: &str) -> String {
@@ -765,7 +805,9 @@ mod tests {
         let canonical = decode_oracle_text(fields[1]);
         let projection = Doc::new(&canonical).visible_projection();
         assert_eq!(projection.text(), decode_oracle_text(fields[2]));
-        let (start, end, replacement) = oracle_edit(fields[6].split(';').next().unwrap());
+        let edits = fields[6].split(';').collect::<Vec<_>>();
+        assert_eq!(edits.len(), 1);
+        let (start, end, replacement) = oracle_edit(edits[0]);
         let retained = id("left01");
         let retired = id("right1");
         let mut registry = FakeRegistry::default();
@@ -783,7 +825,10 @@ mod tests {
             Doc::new(&actual_text).visible_projection().text(),
             decode_oracle_text(fields[5])
         );
-        assert_eq!(block_ids_in_text(&actual_text), [retained.clone()]);
+        assert_eq!(
+            block_ids_in_text(&actual_text).as_slice(),
+            std::slice::from_ref(&retained)
+        );
         assert_eq!(
             registry.state(&retained),
             Ok(IdentityState::Live(page("page")))
@@ -798,7 +843,9 @@ mod tests {
         let canonical = decode_oracle_text(fields[1]);
         let projection = Doc::new(&canonical).visible_projection();
         assert_eq!(projection.text(), decode_oracle_text(fields[2]));
-        let (start, end, replacement) = oracle_edit(fields[6].split(';').next().unwrap());
+        let edits = fields[6].split(';').collect::<Vec<_>>();
+        assert_eq!(edits.len(), 1);
+        let (start, end, replacement) = oracle_edit(edits[0]);
         assert_eq!(replacement, "\n");
         assert_eq!(start, end);
         let original = id("split1");
@@ -854,6 +901,75 @@ mod tests {
         assert_eq!(
             append_block_id("", 1, &original),
             Err(super::IdentityTextPlanError::LineOutOfBounds(1))
+        );
+    }
+
+    #[test]
+    fn structural_text_plans_reject_edits_on_unrelated_lines() {
+        let join_input = "intro\nleft ^left01\nright ^right1\noutro\n";
+        assert_eq!(
+            plan_join_text(join_input, 5..6, " ", &id("left01"), &id("right1")),
+            Err(super::IdentityTextPlanError::InvalidJoinEdit)
+        );
+        assert_eq!(
+            plan_join_text(join_input, 10..11, " ", &id("left01"), &id("right1")).unwrap(),
+            "intro\nleft right ^left01\noutro\n"
+        );
+        assert_eq!(
+            plan_join_text(
+                "left ^left01\nmiddle\nright ^right1\n",
+                4..5,
+                " ",
+                &id("left01"),
+                &id("right1")
+            ),
+            Err(super::IdentityTextPlanError::InvalidJoinEdit)
+        );
+
+        let split_input = "before\nalpha beta ^split1\nafter\n";
+        assert_eq!(
+            plan_split_text(split_input, 3, &id("split1"), &id("split2")),
+            Err(super::IdentityTextPlanError::InvalidSplitEdit)
+        );
+        assert_eq!(
+            plan_split_text(split_input, 20, &id("split1"), &id("split2")),
+            Err(super::IdentityTextPlanError::InvalidSplitEdit)
+        );
+        assert_eq!(
+            plan_split_text(split_input, 12, &id("split1"), &id("split2")).unwrap(),
+            "before\nalpha ^split1\n beta ^split2\nafter\n"
+        );
+    }
+
+    #[test]
+    fn structural_text_plans_reject_additional_tokens() {
+        assert_eq!(
+            plan_join_text(
+                "left ^left01\nright ^right1\nother ^third\n",
+                4..5,
+                " ",
+                &id("left01"),
+                &id("right1")
+            ),
+            Err(super::IdentityTextPlanError::UnsupportedTokenSet)
+        );
+        assert_eq!(
+            plan_split_text(
+                "alpha beta ^split1\nother ^third\n",
+                5,
+                &id("split1"),
+                &id("split2")
+            ),
+            Err(super::IdentityTextPlanError::UnsupportedTokenSet)
+        );
+    }
+
+    #[test]
+    fn split_rejects_a_result_whose_tokens_are_no_longer_recognized() {
+        let canonical = "a `bc` ^split1\n";
+        assert_eq!(
+            plan_split_text(canonical, 4, &id("split1"), &id("split2")),
+            Err(super::IdentityTextPlanError::InvalidResult)
         );
     }
 
